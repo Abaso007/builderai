@@ -1,21 +1,19 @@
 "use client"
-import { toDecimal } from "dinero.js"
 import Link from "next/link"
 
-import type { PurchaseOrg } from "@builderai/db/validators"
-import { purchaseWorkspaceSchema } from "@builderai/db/validators"
-import { currencySymbol } from "@builderai/db/validators"
-import { Button } from "@builderai/ui/button"
+import type { PurchaseOrg } from "@unprice/db/validators"
+import { purchaseWorkspaceSchema } from "@unprice/db/validators"
+import { Button } from "@unprice/ui/button"
 import {
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@builderai/ui/dialog"
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@builderai/ui/form"
-import { Input } from "@builderai/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@builderai/ui/select"
+} from "@unprice/ui/dialog"
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
+import { Input } from "@unprice/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 
 import { useZodForm } from "~/lib/zod-form"
 import { api } from "~/trpc/client"
@@ -30,16 +28,12 @@ export default function NewTeamDialog(props: { closeDialog: () => void; isOpen: 
   const form = useZodForm({
     schema: purchaseWorkspaceSchema,
     defaultValues: {
-      planId: plans?.data?.[0]?.priceId,
+      planId: "",
       name: "",
     },
   })
 
-  const stripePurchase = api.stripe.purchaseOrg.useMutation({
-    onSettled: (data) => {
-      if (window && data?.success) window.location.href = data.url
-    },
-  })
+  const stripePurchase = api.stripe.purchaseOrg.useMutation({})
 
   return (
     <DialogContent>
@@ -56,13 +50,6 @@ export default function NewTeamDialog(props: { closeDialog: () => void; isOpen: 
           })}
           className="space-y-4"
         >
-          <DialogHeader>
-            <DialogTitle>Create new team</DialogTitle>
-            <DialogDescription>
-              Add a new workspace to invite other people to collaborate.
-            </DialogDescription>
-          </DialogHeader>
-
           <FormField
             control={form.control}
             name="name"
@@ -96,14 +83,10 @@ export default function NewTeamDialog(props: { closeDialog: () => void; isOpen: 
                   </FormControl>
                   <SelectContent>
                     {plans?.data?.map((plan) => (
-                      <SelectItem key={plan.priceId} value={plan.priceId}>
-                        <span className="font-medium">{plan.name}</span> -{" "}
+                      <SelectItem key={plan.planId} value={plan.planId}>
+                        <span className="font-medium">{plan.planName}</span> -{" "}
                         <span className="text-muted-foreground">
-                          {toDecimal(
-                            plan.price,
-                            ({ value, currency }) => `${currencySymbol(currency.code)}${value}`
-                          )}{" "}
-                          per month
+                          {plan.displayAmount} per month
                         </span>
                       </SelectItem>
                     ))}

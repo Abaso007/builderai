@@ -1,19 +1,18 @@
 import { NextResponse } from "next/server"
 
-import { auth } from "@builderai/auth/server"
+import { auth } from "@unprice/auth/server"
 
-import { newId } from "@builderai/db/utils"
+import { API_HOSTNAMES, APP_HOSTNAMES } from "@unprice/config"
 import { getValidSubdomain, parse } from "~/lib/domains"
 import ApiMiddleware from "~/middleware/api"
 import AppMiddleware from "~/middleware/app"
 import SitesMiddleware from "~/middleware/sites"
-import { API_HOSTNAMES, APP_HOSTNAMES } from "./constants"
 
 export default auth((req) => {
   const { domain } = parse(req)
 
-  // set request id if not present
-  req.headers.get("x-request-id") || req.headers.set("x-request-id", newId("request"))
+  // TODO: how to create a new request id per request?
+  // req.headers.get("x-request-id") || req.headers.set("x-request-id", newId("request"))
 
   // 1. we validate api routes
   if (API_HOSTNAMES.has(domain)) {
@@ -25,12 +24,16 @@ export default auth((req) => {
     return AppMiddleware(req)
   }
 
-  if (getValidSubdomain(domain)) {
-    // 3. validate site routes
-    return SitesMiddleware(req)
+  const subdomain = getValidSubdomain(domain) ?? ""
+
+  // 3. validate subdomains www and empty
+  if (subdomain === "" || subdomain === "www") {
+    // public routes under the base domain or www subdomain
+    return NextResponse.next()
   }
 
-  return NextResponse.next()
+  // rest of the routes are site routes
+  return SitesMiddleware(req)
 })
 
 export const config = {

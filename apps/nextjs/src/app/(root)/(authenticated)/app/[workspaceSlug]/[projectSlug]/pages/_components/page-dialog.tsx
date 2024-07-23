@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 
-import type { InsertPage } from "@builderai/db/validators"
+import type { InsertPage } from "@unprice/db/validators"
 import {
   Dialog,
   DialogContent,
@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@builderai/ui/dialog"
+} from "@unprice/ui/dialog"
 
 import { PageForm } from "./page-form"
 
@@ -29,7 +29,7 @@ export function PageDialog({
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent className="max-h-screen overflow-y-scroll">
         <DialogHeader>
-          <DialogTitle>Plan Form</DialogTitle>
+          <DialogTitle>Page Form</DialogTitle>
 
           <DialogDescription>Modify the plan details below.</DialogDescription>
         </DialogHeader>

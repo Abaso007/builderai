@@ -4,14 +4,10 @@ import * as z from "zod"
 export const env = createEnv({
   shared: {
     NODE_ENV: z.enum(["development", "production"]).default("development"),
-    VERCEL_ENV: z.enum(["development", "preview", "production"]).optional(),
+    VERCEL_ENV: z.enum(["development", "preview", "production"]).default("development"),
     DRIZZLE_LOG: z.string().default("false"),
   },
   server: {
-    NEXTJS_URL: z.preprocess(
-      (str) => (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : str),
-      process.env.VERCEL_URL ? z.string().min(1) : z.string().url()
-    ),
     DATABASE_PRIMARY_URL: z.string().min(1).url(),
     DATABASE_READ1_URL: z.string().min(1).url(),
     DATABASE_READ2_URL: z.string().min(1).url(),
