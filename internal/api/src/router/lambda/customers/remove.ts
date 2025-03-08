@@ -1,16 +1,19 @@
+import { z } from "zod"
+
 import { TRPCError } from "@trpc/server"
 import { and, eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
+import { customers } from "@unprice/db/schema"
 import { customerSelectSchema } from "@unprice/db/validators"
-import { z } from "zod"
-import { protectedApiOrActiveProjectProcedure } from "../../../trpc"
+import { protectedApiOrActiveProjectProcedure } from "#trpc"
+import { featureGuard } from "#utils/feature-guard"
+import { reportUsageFeature } from "#utils/shared"
 
 export const remove = protectedApiOrActiveProjectProcedure
   .meta({
     span: "customers.remove",
     openapi: {
       method: "POST",
-      path: "/edge/customers.remove",
+      path: "/lambda/customers.remove",
       protect: true,
     },
   })
@@ -19,20 +22,30 @@ export const remove = protectedApiOrActiveProjectProcedure
   .mutation(async (opts) => {
     const { id } = opts.input
     const { project } = opts.ctx
+    const unPriceCustomerId = project.workspace.unPriceCustomerId
 
-    // const unpriceCustomerId = project.workspace.unPriceCustomerId
-    // const workspaceId = project.workspaceId
+    const result = await featureGuard({
+      customerId: unPriceCustomerId,
+      featureSlug: "customers",
+      ctx: opts.ctx,
+      skipCache: true,
+      updateUsage: true,
+      isInternal: project.workspace.isInternal,
+      metadata: {
+        action: "remove",
+      },
+    })
 
-    // we just need to validate the entitlements
-    // await entitlementGuard({
-    //   project,
-    //   featureSlug: "customers",
-    //   ctx,
-    // })
+    if (!result.access) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: `You don't have access to this feature ${result.deniedReason}`,
+      })
+    }
 
     const deletedCustomer = await opts.ctx.db
-      .delete(schema.customers)
-      .where(and(eq(schema.customers.projectId, project.id), eq(schema.customers.id, id)))
+      .delete(customers)
+      .where(and(eq(customers.projectId, project.id), eq(customers.id, id)))
       .returning()
       .then((re) => re[0])
 
@@ -43,16 +56,16 @@ export const remove = protectedApiOrActiveProjectProcedure
       })
     }
 
-    // waitUntil(
-    //   reportUsageFeature({
-    //     customerId: unpriceCustomerId,
-    //     featureSlug: "customers",
-    //     projectId: project.id,
-    //     workspaceId: workspaceId,
-    //     ctx: ctx,
-    //     usage: -1,
-    //   })
-    // )
+    opts.ctx.waitUntil(
+      // report usage for the new project in background
+      reportUsageFeature({
+        customerId: unPriceCustomerId,
+        featureSlug: "customers",
+        usage: -1, // the deleted project
+        ctx: opts.ctx,
+        isInternal: project.workspace.isInternal,
+      })
+    )
 
     return {
       customer: deletedCustomer,

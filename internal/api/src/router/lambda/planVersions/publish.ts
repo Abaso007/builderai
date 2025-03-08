@@ -1,14 +1,16 @@
-import { TRPCError } from "@trpc/server"
-import { APP_NAME } from "@unprice/config"
 import { and, eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
 import { AesGCM } from "@unprice/db/utils"
 import { calculateFlatPricePlan, planVersionSelectBaseSchema } from "@unprice/db/validators"
-import { PaymentProviderService } from "@unprice/services/payment-provider"
 import { isZero } from "dinero.js"
 import { z } from "zod"
-import { env } from "../../../env.mjs"
-import { protectedProjectProcedure } from "../../../trpc"
+import { PaymentProviderService } from "#services/payment-provider"
+
+import { TRPCError } from "@trpc/server"
+import { APP_NAME } from "@unprice/config"
+import { env } from "#env.mjs"
+import { protectedProjectProcedure } from "#trpc"
+import { featureGuard } from "#utils/feature-guard"
 
 export const publish = protectedProjectProcedure
   .input(planVersionSelectBaseSchema.partial().required({ id: true }))
@@ -21,9 +23,29 @@ export const publish = protectedProjectProcedure
     const { id } = opts.input
 
     const project = opts.ctx.project
+    const workspace = opts.ctx.project.workspace
 
     // only owner and admin can publish a plan version
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
+
+    // check if the customer has access to the feature
+    const result = await featureGuard({
+      customerId: workspace.unPriceCustomerId,
+      featureSlug: "plan-versions",
+      ctx: opts.ctx,
+      skipCache: true,
+      isInternal: workspace.isInternal,
+      metadata: {
+        action: "publish",
+      },
+    })
+
+    if (!result.access) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: `You don't have access to this feature ${result.deniedReason}`,
+      })
+    }
 
     const planVersionData = await opts.ctx.db.query.versions.findFirst({
       with: {
@@ -48,7 +70,7 @@ export const publish = protectedProjectProcedure
     if (planVersionData.status === "published") {
       throw new TRPCError({
         code: "BAD_REQUEST",
-        message: "Cannot update a published version, read only",
+        message: "Version already published",
       })
     }
 
@@ -73,7 +95,7 @@ export const publish = protectedProjectProcedure
       throw new TRPCError({
         code: "BAD_REQUEST",
         message:
-          "Payment provider config not found or not active. Please check the payment provider config in the project settings.",
+          "Payment provider config not found or not active. Please check the payment provider config in the project settings. You can create a new one in the project settings.",
       })
     }
 

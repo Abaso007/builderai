@@ -10,7 +10,9 @@ import {
   configUsageSchema,
   planVersionSelectBaseSchema,
 } from "@unprice/db/validators"
-import { protectedProjectProcedure } from "../../../trpc"
+
+import { protectedProjectProcedure } from "#trpc"
+import { featureGuard } from "#utils/feature-guard"
 
 export const update = protectedProjectProcedure
   .input(planVersionSelectBaseSchema.partial().required({ id: true }))
@@ -25,8 +27,7 @@ export const update = protectedProjectProcedure
       id,
       description,
       currency,
-      billingPeriod,
-      startCycle,
+      billingConfig,
       gracePeriod,
       title,
       tags,
@@ -42,6 +43,29 @@ export const update = protectedProjectProcedure
 
     // only owner and admin can update a plan version
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
+
+    const workspace = opts.ctx.project.workspace
+    const customerId = workspace.unPriceCustomerId
+    const featureSlug = "plan-versions"
+
+    // check if the customer has access to the feature
+    const result = await featureGuard({
+      customerId,
+      featureSlug,
+      ctx: opts.ctx,
+      skipCache: true,
+      isInternal: workspace.isInternal,
+      metadata: {
+        action: "update",
+      },
+    })
+
+    if (!result.access) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: `You don't have access to this feature ${result.deniedReason}`,
+      })
+    }
 
     const planVersionData = await opts.ctx.db.query.versions.findFirst({
       with: {
@@ -261,8 +285,7 @@ export const update = protectedProjectProcedure
         .set({
           ...(description && { description }),
           ...(currency && { currency }),
-          ...(billingPeriod && { billingPeriod }),
-          ...(startCycle && { startCycle }),
+          ...(billingConfig && { billingConfig }),
           ...(gracePeriod !== undefined && { gracePeriod }),
           ...(title && { title }),
           ...(tags && { tags }),

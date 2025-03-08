@@ -4,8 +4,8 @@ import { domains } from "@unprice/db/schema"
 import { domainSelectBaseSchema, domainUpdateBaseSchema } from "@unprice/db/validators"
 import { Vercel } from "@unprice/vercel"
 import { z } from "zod"
-import { env } from "../../../env.mjs"
-import { protectedWorkspaceProcedure } from "../../../trpc"
+import { env } from "#env.mjs"
+import { protectedWorkspaceProcedure } from "#trpc"
 
 export const update = protectedWorkspaceProcedure
   .input(domainUpdateBaseSchema)

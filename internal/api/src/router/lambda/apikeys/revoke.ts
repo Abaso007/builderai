@@ -2,7 +2,8 @@ import { TRPCError } from "@trpc/server"
 import { sql } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
 import { z } from "zod"
-import { protectedProjectProcedure } from "../../../trpc"
+import { protectedProjectProcedure } from "#trpc"
+import { featureGuard } from "#utils/feature-guard"
 
 export const revoke = protectedProjectProcedure
   .input(z.object({ ids: z.string().array() }))
@@ -11,7 +12,27 @@ export const revoke = protectedProjectProcedure
     const { ids } = opts.input
     const project = opts.ctx.project
 
-    const result = await opts.ctx.db
+    opts.ctx.verifyRole(["OWNER", "ADMIN"])
+
+    const result = await featureGuard({
+      customerId: project.workspace.unPriceCustomerId,
+      featureSlug: "apikeys",
+      ctx: opts.ctx,
+      skipCache: true,
+      isInternal: project.workspace.isInternal,
+      metadata: {
+        action: "revoke",
+      },
+    })
+
+    if (!result.access) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: `You don't have access to this feature ${result.deniedReason}`,
+      })
+    }
+
+    const data = await opts.ctx.db
       .update(schema.apikeys)
       .set({ revokedAt: Date.now(), updatedAtM: Date.now() })
       .where(
@@ -19,7 +40,7 @@ export const revoke = protectedProjectProcedure
       )
       .returning()
 
-    if (result.length === 0) {
+    if (data.length === 0) {
       throw new TRPCError({
         code: "NOT_FOUND",
         message: "API key not found you don't have access to this project",
@@ -28,8 +49,8 @@ export const revoke = protectedProjectProcedure
 
     // remove from cache
     opts.ctx.waitUntil(
-      Promise.all(result.map(async (apikey) => opts.ctx.cache.apiKeyByHash.remove(apikey.hash)))
+      Promise.all(data.map(async (apikey) => opts.ctx.cache.apiKeyByHash.remove(apikey.hash)))
     )
 
-    return { success: true, numRevoked: result.length }
+    return { success: true, numRevoked: data.length }
   })

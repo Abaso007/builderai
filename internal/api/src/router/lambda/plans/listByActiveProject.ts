@@ -1,7 +1,12 @@
-import { planSelectBaseSchema, planVersionSelectBaseSchema } from "@unprice/db/validators"
+import {
+  featureVerificationSchema,
+  planSelectBaseSchema,
+  planVersionSelectBaseSchema,
+} from "@unprice/db/validators"
 import { z } from "zod"
 
-import { protectedProjectProcedure } from "../../../trpc"
+import { protectedProjectProcedure } from "#trpc"
+import { featureGuard } from "#utils/feature-guard"
 
 export const listByActiveProject = protectedProjectProcedure
   .input(
@@ -27,11 +32,32 @@ export const listByActiveProject = protectedProjectProcedure
           ),
         })
       ),
+      error: featureVerificationSchema,
     })
   )
   .query(async (opts) => {
     const { fromDate, toDate, published, active } = opts.input
     const project = opts.ctx.project
+
+    const workspace = opts.ctx.project.workspace
+    const customerId = workspace.unPriceCustomerId
+    const featureSlug = "plans"
+
+    // check if the customer has access to the feature
+    const result = await featureGuard({
+      customerId,
+      featureSlug,
+      ctx: opts.ctx,
+      skipCache: true,
+      isInternal: workspace.isInternal,
+    })
+
+    if (!result.access) {
+      return {
+        plans: [],
+        error: result,
+      }
+    }
 
     const needsPublished = published === undefined || published
     const needsActive = active === undefined || active
@@ -65,5 +91,6 @@ export const listByActiveProject = protectedProjectProcedure
 
     return {
       plans,
+      error: result,
     }
   })

@@ -5,7 +5,8 @@ import { eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
 import { projectInsertBaseSchema, projectSelectBaseSchema } from "@unprice/db/validators"
 
-import { protectedProjectProcedure } from "../../../trpc"
+import { protectedProjectProcedure } from "#trpc"
+import { featureGuard } from "#utils/feature-guard"
 
 export const update = protectedProjectProcedure
   .input(projectInsertBaseSchema.required({ id: true }))
@@ -16,9 +17,31 @@ export const update = protectedProjectProcedure
   )
   .mutation(async (opts) => {
     const { id, name, defaultCurrency, timezone, url } = opts.input
+    const workspace = opts.ctx.project.workspace
+    const customerId = workspace.unPriceCustomerId
+    const featureSlug = "projects"
 
     // only owner and admin can update a plan
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
+
+    // check if the customer has access to the feature
+    const result = await featureGuard({
+      customerId,
+      featureSlug,
+      ctx: opts.ctx,
+      skipCache: true,
+      isInternal: workspace.isInternal,
+      metadata: {
+        action: "update",
+      },
+    })
+
+    if (!result.access) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: `You don't have access to this feature ${result.deniedReason}`,
+      })
+    }
 
     const projectData = await opts.ctx.db.query.projects.findFirst({
       where: (project, { eq }) => eq(project.id, id),

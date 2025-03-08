@@ -1,16 +1,18 @@
+import { z } from "zod"
+
 import { TRPCError } from "@trpc/server"
 import { and, eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
+import { customers } from "@unprice/db/schema"
 import { customerSelectSchema } from "@unprice/db/validators"
-import { z } from "zod"
-import { protectedApiOrActiveProjectProcedure } from "../../../trpc"
+import { protectedApiOrActiveProjectProcedure } from "#trpc"
+import { featureGuard } from "#utils/feature-guard"
 
 export const update = protectedApiOrActiveProjectProcedure
   .meta({
     span: "customers.update",
     openapi: {
       method: "POST",
-      path: "/edge/customers.update",
+      path: "/lambda/customers.update",
       protect: true,
     },
   })
@@ -35,6 +37,27 @@ export const update = protectedApiOrActiveProjectProcedure
     const { email, id, description, metadata, name, timezone } = opts.input
     const { project } = opts.ctx
 
+    const unPriceCustomerId = project.workspace.unPriceCustomerId
+    const featureSlug = "customers"
+
+    const result = await featureGuard({
+      customerId: unPriceCustomerId,
+      featureSlug,
+      ctx: opts.ctx,
+      skipCache: true,
+      isInternal: project.workspace.isInternal,
+      metadata: {
+        action: "update",
+      },
+    })
+
+    if (!result.access) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: `You don't have access to this feature ${result.deniedReason}`,
+      })
+    }
+
     const customerData = await opts.ctx.db.query.customers.findFirst({
       where: (feature, { eq, and }) => and(eq(feature.id, id), eq(feature.projectId, project.id)),
     })
@@ -47,7 +70,7 @@ export const update = protectedApiOrActiveProjectProcedure
     }
 
     const updatedCustomer = await opts.ctx.db
-      .update(schema.customers)
+      .update(customers)
       .set({
         ...(email && { email }),
         ...(description && { description }),
@@ -61,7 +84,7 @@ export const update = protectedApiOrActiveProjectProcedure
         ...(timezone && { timezone }),
         updatedAtM: Date.now(),
       })
-      .where(and(eq(schema.customers.id, id), eq(schema.customers.projectId, project.id)))
+      .where(and(eq(customers.id, id), eq(customers.projectId, project.id)))
       .returning()
       .then((data) => data[0])
 

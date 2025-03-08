@@ -1,11 +1,11 @@
 import { TRPCError } from "@trpc/server"
-import { z } from "zod"
-
 import * as schema from "@unprice/db/schema"
-import * as utils from "@unprice/db/utils"
+import { newId } from "@unprice/db/utils"
 import { featureInsertBaseSchema, featureSelectBaseSchema } from "@unprice/db/validators"
-
-import { protectedProjectProcedure } from "../../../trpc"
+import { z } from "zod"
+import { protectedProjectProcedure } from "#trpc"
+import { featureGuard } from "#utils/feature-guard"
+import { reportUsageFeature } from "#utils/shared"
 
 export const create = protectedProjectProcedure
   .input(featureInsertBaseSchema)
@@ -14,8 +14,25 @@ export const create = protectedProjectProcedure
     const { description, slug, title } = opts.input
     const project = opts.ctx.project
 
-    const featureId = utils.newId("feature")
+    // check if the customer has access to the feature
+    const result = await featureGuard({
+      customerId: project.workspace.unPriceCustomerId,
+      featureSlug: "features",
+      ctx: opts.ctx,
+      skipCache: true,
+      // update usage when creating a feature
+      updateUsage: true,
+      isInternal: project.workspace.isInternal,
+    })
 
+    if (!result.access) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: `You don't have access to this feature ${result.deniedReason}`,
+      })
+    }
+
+    const featureId = newId("feature")
     const featureData = await opts.ctx.db
       .insert(schema.features)
       .values({
@@ -34,6 +51,17 @@ export const create = protectedProjectProcedure
         message: "Error creating feature",
       })
     }
+
+    opts.ctx.waitUntil(
+      // report usage for the new project in background
+      reportUsageFeature({
+        customerId: project.workspace.unPriceCustomerId,
+        featureSlug: "features",
+        usage: 1, // the new project
+        ctx: opts.ctx,
+        isInternal: project.workspace.isInternal,
+      })
+    )
 
     return {
       feature: featureData,

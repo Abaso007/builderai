@@ -1,14 +1,15 @@
+import { z } from "zod"
+
 import { TRPCError } from "@trpc/server"
 import { customerSelectSchema } from "@unprice/db/validators"
-import { z } from "zod"
-import { protectedApiOrActiveProjectProcedure } from "../../../trpc"
+import { protectedApiOrActiveProjectProcedure } from "#trpc"
 
 export const getByEmail = protectedApiOrActiveProjectProcedure
   .meta({
     span: "customers.getByEmail",
     openapi: {
       method: "GET",
-      path: "/edge/customers.getByEmail",
+      path: "/lambda/customers.getByEmail",
       protect: true,
     },
   })
@@ -16,7 +17,7 @@ export const getByEmail = protectedApiOrActiveProjectProcedure
   .output(z.object({ customer: customerSelectSchema }))
   .query(async (opts) => {
     const { email } = opts.input
-    const { project } = opts.ctx
+    const project = opts.ctx.project
 
     const customerData = await opts.ctx.db.query.customers.findFirst({
       where: (customer, { eq, and }) =>

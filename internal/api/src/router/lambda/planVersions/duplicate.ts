@@ -4,7 +4,9 @@ import * as schema from "@unprice/db/schema"
 import * as utils from "@unprice/db/utils"
 import { planVersionSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
-import { protectedProjectProcedure } from "../../../trpc"
+
+import { protectedProjectProcedure } from "#trpc"
+import { featureGuard } from "#utils/feature-guard"
 
 export const duplicate = protectedProjectProcedure
   .input(
@@ -20,9 +22,28 @@ export const duplicate = protectedProjectProcedure
   .mutation(async (opts) => {
     const { id } = opts.input
     const project = opts.ctx.project
+    const workspace = opts.ctx.project.workspace
 
     // only owner and admin can duplicate a plan version
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
+
+    const result = await featureGuard({
+      customerId: workspace.unPriceCustomerId,
+      featureSlug: "plan-versions",
+      ctx: opts.ctx,
+      skipCache: true,
+      isInternal: workspace.isInternal,
+      metadata: {
+        action: "duplicate",
+      },
+    })
+
+    if (!result.access) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: `You don't have access to this feature ${result.deniedReason}`,
+      })
+    }
 
     const planVersionData = await opts.ctx.db.query.versions.findFirst({
       where: (version, { and, eq }) => and(eq(version.id, id), eq(version.projectId, project.id)),
@@ -62,7 +83,7 @@ export const duplicate = protectedProjectProcedure
             ...planVersionData,
             id: planVersionId,
             trialDays: planVersionData.trialDays,
-            startCycle: planVersionData.startCycle,
+            billingConfig: planVersionData.billingConfig,
             autoRenew: planVersionData.autoRenew,
             paymentMethodRequired: planVersionData.paymentMethodRequired,
             metadata: {
@@ -77,7 +98,7 @@ export const duplicate = protectedProjectProcedure
           })
           .returning()
           .catch((err) => {
-            console.error(err)
+            opts.ctx.logger.error(err.message)
             tx.rollback()
             throw err
           })

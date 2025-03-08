@@ -9,15 +9,15 @@
   "packageManager": "pnpm@8.15.4",
   "scripts": {
     "build": "turbo run build",
-    "clean": "git clean -xdf node_modules dist .next",
+    "clean": "git clean -xdf node_modules dist .next && rm -rf node_modules",
     "clean:workspaces": "turbo clean --parallel",
     "dev": "cross-env FORCE_COLOR=1 turbo run dev --parallel",
-    "with-infisical": "infisical run --env=preview --path=/ --recursive --",
+    "with-infisical": "infisical run --env=prod --path=/ --recursive --",
     "typecheck": "turbo run typecheck",
     "wh": "pnpm dlx webhookthing@latest",
     "knip": "knip --include files,dependencies",
     "test": "cross-env SKIP_ENV_VALIDATION=1 NODE_ENV=test turbo run test",
-    "fmt:fix": "pnpm biome format . --write && pnpm biome check . --apply-unsafe",
+    "fmt:fix": "pnpm biome format . --write && pnpm biome check .  --write --unsafe ",
     "fmt": "pnpm biome format . && pnpm biome check .",
     "validate": "pnpm typecheck && pnpm manypkg check && pnpm fmt:fix",
     "manypkg:fix": "pnpm manypkg fix",
@@ -27,7 +27,7 @@
     "preinstall": "npx only-allow pnpm"
   },
   "dependencies": {
-    "@biomejs/biome": "1.7.3",
+    "@biomejs/biome": "1.9.4",
     "@changesets/cli": "^2.27.7",
     "@manypkg/cli": "^0.21.2",
     "@turbo/gen": "^1.12.4",

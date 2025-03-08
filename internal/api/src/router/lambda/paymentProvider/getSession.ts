@@ -1,17 +1,18 @@
+import { paymentProviderSchema } from "@unprice/db/validators"
+import { z } from "zod"
+
 import { TRPCError } from "@trpc/server"
 import { AesGCM } from "@unprice/db/utils"
-import { paymentProviderSchema } from "@unprice/db/validators"
-import { PaymentProviderService } from "@unprice/services/payment-provider"
-import { z } from "zod"
-import { env } from "../../../env.mjs"
-import { rateLimiterProcedure } from "../../../trpc"
+import { env } from "#env.mjs"
+import { PaymentProviderService } from "#services/payment-provider/service"
+import { rateLimiterProcedure } from "#trpc"
 
 export const getSession = rateLimiterProcedure
   .meta({
     span: "paymentProvider.getSession",
     openapi: {
       method: "POST",
-      path: "/edge/paymentProvider.getSession",
+      path: "/lambda/paymentProvider.getSession",
       protect: true,
     },
   })
