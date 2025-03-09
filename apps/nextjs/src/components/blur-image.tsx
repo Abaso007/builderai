@@ -1,3 +1,5 @@
+"use client"
+
 import { cn } from "@unprice/ui/utils"
 import Image, { type ImageProps } from "next/image"
 import { useEffect, useState } from "react"
@@ -20,6 +22,7 @@ export function BlurImage(props: ImageProps) {
       {...props}
       src={src}
       alt={props.alt}
+      priority={props.priority ?? true}
       className={cn(loading ? "blur-[2px]" : "blur-0", props.className)}
       onLoad={handleLoad}
       onError={() => {

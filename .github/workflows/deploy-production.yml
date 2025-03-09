@@ -8,6 +8,10 @@ on:
 env:
   SKIP_ENV_VALIDATION: 1
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-lint:
     uses: ./.github/workflows/job_build.yaml
@@ -19,11 +23,18 @@ jobs:
       MACHINE_IDENTITY_CLIENT_ID: ${{ secrets.MACHINE_IDENTITY_CLIENT_ID }}
       MACHINE_IDENTITY_CLIENT_SECRET: ${{ secrets.MACHINE_IDENTITY_CLIENT_SECRET }}
 
+  deploy-prod-tinybird:
+    uses: ./.github/workflows/job_tinybird_cd.yml
+    needs:
+      - build-lint
+    secrets: inherit
+
   deploy-prod:
     runs-on: ubuntu-latest
 
     needs:
       - build-lint
+      - deploy-prod-tinybird
 
     permissions:
       pull-requests: write
@@ -48,7 +59,8 @@ jobs:
 
       - uses: ./.github/actions/install
         with:
-          ts: true
+          ts: "true"
+          python: "false"
 
       - uses: cardinalby/export-env-action@v2
         with:
@@ -64,32 +76,22 @@ jobs:
           VERCEL_ENV: production
           NODE_ENV: production
 
-      - name: verify auth-proxy turbo-ignore
-        # verify if auth-proxy has changed, if it has, we need to deploy it
-        run: |
-          # If the command exits with code 1, the build continues as normal
-          # If the command exits with code 0, the build is immediately aborted
-          check=$(npx turbo-ignore -d apps/auth-proxy) || true
-
-          # if check has Proceeding with deployment string, we need to deploy it use  grep
-          if echo "$check" | grep -q "Proceeding with deployment"; then
-            echo "Proceeding with deployment, deploying auth-proxy"
-            echo "deploy_auth_proxy=true" >> $GITHUB_OUTPUT
-          else
-            echo "No changes detected in auth-proxy folder, skipping build"
-            echo "deploy_auth_proxy=false" >> $GITHUB_OUTPUT
-          fi
+      - name: Check for changes
+        id: turbo-ignore
+        continue-on-error: true
+        run: npx turbo-ignore -d apps/auth-proxy
 
       - uses: amondnet/vercel-action@v25.2.0 #deploy
         name: Deploy Unprice auth to Vercel
         id: deploy-auth
-        if: ${{ steps.verify-auth-proxy.outputs.deploy_auth_proxy == 'true' }}
+        # if turbo-ignore fails,that means there are no changes in the auth-proxy folder
+        if: steps.turbo-ignore.outcome == 'failure'
         with:
           vercel-token: ${{ env.VERCEL_TOKEN }} # Required
           vercel-org-id: ${{ env.VERCEL_ORG_ID}}  #Required
           vercel-project-id: ${{ env.VERCEL_PROJECT_AUTH_UNPRICE_ID }} #Required
           # always prod because the auth proxy link has to be stable
-          vercel-args: '--env "VERCEL_ENV=production" --env "VERCEL=true" --env "NODE_ENV=production" --prod --build-env "VERCEL_ENV=production" --build-env "VERCEL=true" --build-env "NODE_ENV=production"'
+          vercel-args: '--env VERCEL_ENV=production --env NODE_ENV=production --prod --build-env VERCEL_ENV=production --build-env NODE_ENV=production'
           working-directory: ./
 
       # deploy unprice to vercel
@@ -101,7 +103,7 @@ jobs:
           vercel-org-id: ${{ env.VERCEL_ORG_ID}}  #Required
           vercel-project-id: ${{ env.VERCEL_PROJECT_UNPRICE_ID}} #Required
           working-directory: ./
-          vercel-args: '--env "VERCEL=true" --env "NODE_ENV=production" --env "VERCEL_ENV=production" --env "DATABASE_URL=${{ env.DATABASE_URL }}" --env "NEXT_PUBLIC_APP_DOMAIN=unprice.dev" --build-env "NODE_ENV=production" --build-env "VERCEL=true" --build-env "VERCEL_ENV=production" --build-env "DATABASE_URL=${{ env.DATABASE_URL }}" --build-env "NEXT_PUBLIC_APP_DOMAIN=unprice.dev" --prod'
+          vercel-args: '--prod --env NEXT_PUBLIC_APP_DOMAIN=unprice.dev --env NEXT_PUBLIC_VERCEL_ENV=production --build-env NEXT_PUBLIC_APP_DOMAIN=unprice.dev --build-env NEXT_PUBLIC_VERCEL_ENV=production'
           alias-domains: |
             unprice.vercel.app
 

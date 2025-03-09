@@ -3,7 +3,7 @@ import { and, eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
 import { featureSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
-import { protectedProjectProcedure } from "../../../trpc"
+import { protectedProjectProcedure } from "#trpc"
 
 export const update = protectedProjectProcedure
   .input(

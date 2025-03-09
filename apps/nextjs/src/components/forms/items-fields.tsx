@@ -272,7 +272,7 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
                                 </Button>
                               </DialogTrigger>
 
-                              <DialogContent className="flex max-h-[800px] w-full flex-col justify-between overflow-y-scroll lg:w-[600px] md:w-1/2">
+                              <DialogContent className="flex max-h-[800px] w-full flex-col justify-between overflow-y-scroll md:w-1/2 lg:w-[600px]">
                                 <DialogHeader>
                                   <DialogTitle>Feature: {feature.feature.title}</DialogTitle>
                                 </DialogHeader>
@@ -389,7 +389,7 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
 
               <TableRow className="border-t border-b text-muted-foreground">
                 <TableCell colSpan={2} className="h-10 gap-1 pl-1 text-left font-semibold">
-                  Total per {selectedPlanVersion?.billingPeriod}
+                  Total per {selectedPlanVersion?.billingConfig.billingInterval}
                 </TableCell>
                 <TableCell colSpan={1} className="h-10 text-right text-xs">
                   {displayTotalPrice}

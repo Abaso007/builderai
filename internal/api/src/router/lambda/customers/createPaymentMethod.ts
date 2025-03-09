@@ -1,18 +1,18 @@
+import { paymentProviderSchema } from "@unprice/db/validators"
+import { z } from "zod"
+
 import { TRPCError } from "@trpc/server"
 import { AesGCM } from "@unprice/db/utils"
-import { paymentProviderSchema } from "@unprice/db/validators"
-import { PaymentProviderService } from "@unprice/services/payment-provider"
-import { z } from "zod"
-import { env } from "../../../env.mjs"
-import { protectedApiOrActiveProjectProcedure } from "../../../trpc"
+import { env } from "#env.mjs"
+import { PaymentProviderService } from "#services/payment-provider/service"
+import { protectedApiOrActiveProjectProcedure } from "#trpc"
 
-// TODO: move to payment provider endpoint
 export const createPaymentMethod = protectedApiOrActiveProjectProcedure
   .meta({
     span: "customers.createPaymentMethod",
     openapi: {
       method: "POST",
-      path: "/edge/customers.createPaymentMethod",
+      path: "/lambda/customers.createPaymentMethod",
       protect: true,
     },
   })
@@ -26,9 +26,9 @@ export const createPaymentMethod = protectedApiOrActiveProjectProcedure
   )
   .output(z.object({ success: z.boolean(), url: z.string() }))
   .mutation(async (opts) => {
-    const project = opts.ctx.project
-
     const { successUrl, cancelUrl, customerId, paymentProvider } = opts.input
+
+    const project = opts.ctx.project
 
     const customerData = await opts.ctx.db.query.customers.findFirst({
       where: (customer, { and, eq }) =>

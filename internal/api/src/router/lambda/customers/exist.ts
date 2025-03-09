@@ -1,13 +1,14 @@
-import { customerSelectSchema } from "@unprice/db/validators"
 import { z } from "zod"
-import { protectedApiOrActiveProjectProcedure } from "../../../trpc"
+
+import { customerSelectSchema } from "@unprice/db/validators"
+import { protectedApiOrActiveProjectProcedure } from "#trpc"
 
 export const exist = protectedApiOrActiveProjectProcedure
   .meta({
     span: "customers.exist",
     openapi: {
       method: "POST",
-      path: "/edge/customers.exist",
+      path: "/lambda/customers.exist",
       protect: true,
     },
   })
@@ -15,7 +16,7 @@ export const exist = protectedApiOrActiveProjectProcedure
   .output(z.object({ exist: z.boolean() }))
   .mutation(async (opts) => {
     const { email } = opts.input
-    const { project } = opts.ctx
+    const project = opts.ctx.project
 
     const customerData = await opts.ctx.db.query.customers.findFirst({
       columns: {

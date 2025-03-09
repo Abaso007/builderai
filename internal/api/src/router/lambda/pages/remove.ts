@@ -3,7 +3,10 @@ import { and, eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
 import { pageSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
-import { protectedProjectProcedure } from "../../../trpc"
+
+import { protectedProjectProcedure } from "#trpc"
+import { featureGuard } from "#utils/feature-guard"
+import { reportUsageFeature } from "#utils/shared"
 
 export const remove = protectedProjectProcedure
   .input(pageSelectBaseSchema.pick({ id: true }))
@@ -11,6 +14,29 @@ export const remove = protectedProjectProcedure
   .mutation(async (opts) => {
     const { id } = opts.input
     const project = opts.ctx.project
+    const workspace = opts.ctx.project.workspace
+    const customerId = workspace.unPriceCustomerId
+    const featureSlug = "pages"
+
+    // only owner can delete a page
+    opts.ctx.verifyRole(["OWNER"])
+
+    // check if the customer has access to the feature
+    const result = await featureGuard({
+      customerId,
+      featureSlug,
+      ctx: opts.ctx,
+      skipCache: true,
+      updateUsage: true,
+      isInternal: workspace.isInternal,
+    })
+
+    if (!result.access) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: `You don't have access to this feature ${result.deniedReason}`,
+      })
+    }
 
     const deletedPage = await opts.ctx.db
       .delete(schema.pages)
@@ -24,6 +50,17 @@ export const remove = protectedProjectProcedure
         message: "Error deleting page",
       })
     }
+
+    opts.ctx.waitUntil(
+      // report usage for the new project in background
+      reportUsageFeature({
+        customerId,
+        featureSlug,
+        usage: -1, // the deleted project
+        ctx: opts.ctx,
+        isInternal: workspace.isInternal,
+      })
+    )
 
     return {
       page: deletedPage,
