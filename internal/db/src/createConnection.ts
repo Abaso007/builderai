@@ -81,7 +81,11 @@ export function createConnection(opts: ConnectionDatabaseOptions): Database {
   )
 
   db =
-    opts.env === "production" && opts.read1DatabaseUrl !== "" && opts.read2DatabaseUrl !== ""
+    opts.env === "production" &&
+    opts.read1DatabaseUrl &&
+    opts.read2DatabaseUrl &&
+    opts.read1DatabaseUrl !== "" &&
+    opts.read2DatabaseUrl !== ""
       ? withReplicas(primary, [read1, read2])
       : withReplicas(primary, [primary])
 
