@@ -84,7 +84,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
 
     // start a new timer
     startTime(c, "initMetrics")
-    const emitMetrics = c.env.EMIT_METRICS_LOGS
+    const emitMetrics = c.env.EMIT_METRICS_LOGS.toString() === "true"
 
     const metrics: Metrics = emitMetrics
       ? new LogdrainMetrics({
@@ -110,7 +110,10 @@ export function init(): MiddlewareHandler<HonoEnv> {
     )
 
     const cloudflareCacheStore =
-      c.env.CLOUDFLARE_ZONE_ID && c.env.CLOUDFLARE_API_TOKEN
+      c.env.CLOUDFLARE_ZONE_ID &&
+      c.env.CLOUDFLARE_API_TOKEN &&
+      c.env.CLOUDFLARE_ZONE_ID !== "" &&
+      c.env.CLOUDFLARE_API_TOKEN !== ""
         ? new CloudflareStore({
             cloudflareApiKey: c.env.CLOUDFLARE_API_TOKEN,
             zoneId: c.env.CLOUDFLARE_ZONE_ID,
@@ -141,7 +144,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       primaryDatabaseUrl: c.env.DATABASE_URL,
       read1DatabaseUrl: c.env.DATABASE_READ1_URL,
       read2DatabaseUrl: c.env.DATABASE_READ2_URL,
-      logger: c.env.DRIZZLE_LOG,
+      logger: c.env.DRIZZLE_LOG.toString() === "true",
       singleton: false,
     })
 
@@ -151,7 +154,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
     startTime(c, "initAnalytics")
 
     const analytics = new Analytics({
-      emit: c.env.EMIT_ANALYTICS,
+      emit: c.env.EMIT_ANALYTICS.toString() === "true",
       tinybirdToken: c.env.TINYBIRD_TOKEN,
       tinybirdUrl: c.env.TINYBIRD_URL,
     })

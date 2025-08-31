@@ -16,7 +16,7 @@ async function main() {
     read1DatabaseUrl: env.DATABASE_READ1_URL,
     read2DatabaseUrl: env.DATABASE_READ2_URL,
     logger: env.DRIZZLE_LOG,
-    singleton: true,
+    singleton: false,
   })
 
   await migrate(db, { migrationsFolder: "src/migrations" })

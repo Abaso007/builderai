@@ -2,7 +2,7 @@ import { createRoute } from "@hono/zod-openapi"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent } from "stoker/openapi/helpers"
 
-import { getActivePhaseResponseSchema } from "@unprice/db/validators"
+import { subscriptionPhaseCacheSchema } from "@unprice/db/validators"
 import { UnPriceCustomerError } from "@unprice/services/customers"
 import { z } from "zod"
 import { keyAuth } from "~/auth/key"
@@ -28,7 +28,7 @@ export const route = createRoute({
   },
   responses: {
     [HttpStatusCodes.OK]: jsonContent(
-      getActivePhaseResponseSchema,
+      subscriptionPhaseCacheSchema,
       "The result of the get active phase"
     ),
     ...openApiErrorResponses,

@@ -1,11 +1,10 @@
 import { createRoute } from "@hono/zod-openapi"
+import { subscriptionCacheSchema } from "@unprice/db/validators"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent } from "stoker/openapi/helpers"
 
-import { getSubscriptionResponseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { keyAuth } from "~/auth/key"
-import { UnpriceApiError } from "~/errors/http"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 
@@ -28,7 +27,7 @@ export const route = createRoute({
   },
   responses: {
     [HttpStatusCodes.OK]: jsonContent(
-      getSubscriptionResponseSchema,
+      subscriptionCacheSchema,
       "The result of the get subscription"
     ),
     ...openApiErrorResponses,
@@ -48,23 +47,14 @@ export const registerGetSubscriptionV1 = (app: App) =>
     // validate the request
     const key = await keyAuth(c)
 
-    const { val: subscription, err } = await customer.getActiveSubscription(
+    const { val: subscription, err } = await customer.getActiveSubscription({
       customerId,
-      key.projectId
-    )
+      // TODO: what happens if the key is root?
+      projectId: key.projectId,
+    })
 
     if (err) {
-      throw new UnpriceApiError({
-        code: "NOT_FOUND",
-        message: "Subscription not found or not active",
-      })
-    }
-
-    if (!subscription) {
-      throw new UnpriceApiError({
-        code: "NOT_FOUND",
-        message: "Subscription not found or not active",
-      })
+      throw err
     }
 
     return c.json(subscription, HttpStatusCodes.OK)

@@ -13,19 +13,20 @@ import type { CanRequest, ReportUsageRequest, ReportUsageResponse } from "./inte
 
 import { env } from "cloudflare:workers"
 import { createConnection } from "@unprice/db"
-import type { CustomerEntitlementExtended } from "@unprice/db/validators"
+import type { CustomerEntitlementExtended, SubscriptionCache } from "@unprice/db/validators"
 import { FetchError } from "@unprice/error"
 import { Err, Ok, type Result } from "@unprice/error"
 import { ConsoleLogger, type Logger } from "@unprice/logging"
 import { CacheService } from "@unprice/services/cache"
-import {
-  CustomerService,
-  type DenyReason,
-  type UnPriceCustomerError,
-} from "@unprice/services/customers"
+import { CustomerService, type DenyReason, UnPriceCustomerError } from "@unprice/services/customers"
 import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/metrics"
 
 interface UsageLimiterConfig {
+  subscription:
+    | (SubscriptionCache & {
+        lastUsageUpdateAt?: number
+      })
+    | null
   entitlements: CustomerEntitlementExtended[]
 }
 
@@ -34,6 +35,8 @@ interface UsageLimiterConfig {
 export class DurableObjectUsagelimiter extends Server {
   // if the do is initialized
   private initialized = false
+  // subscription
+  private subscription: UsageLimiterConfig["subscription"] = null
   // once the durable object is initialized we can avoid
   // querying the db for usage on each request
   private featuresUsage: Map<string, CustomerEntitlementExtended> = new Map()
@@ -56,7 +59,7 @@ export class DurableObjectUsagelimiter extends Server {
   // debounce delay for the broadcast events
   private readonly DEBOUNCE_DELAY = 1000 * 1 // 1 second
   // update period for the entitlements for invalidation
-  private readonly UPDATE_PERIOD = 1000 * 60 * 24 // 24 hours
+  private readonly UPDATE_PERIOD = 1000 * 5 // 5 mins
 
   // hibernate the do when no websocket nor connections are active
   static options = {
@@ -69,7 +72,7 @@ export class DurableObjectUsagelimiter extends Server {
     this.db = drizzle(ctx.storage, { logger: false })
 
     this.analytics = new Analytics({
-      emit: env.EMIT_ANALYTICS,
+      emit: env.EMIT_ANALYTICS.toString() === "true",
       tinybirdToken: env.TINYBIRD_TOKEN,
       tinybirdUrl: env.TINYBIRD_URL,
     })
@@ -83,7 +86,7 @@ export class DurableObjectUsagelimiter extends Server {
       },
     })
 
-    const emitMetrics = env.EMIT_METRICS_LOGS
+    const emitMetrics = env.EMIT_METRICS_LOGS.toString() === "true"
 
     this.metrics = emitMetrics
       ? new LogdrainMetrics({
@@ -120,7 +123,7 @@ export class DurableObjectUsagelimiter extends Server {
         primaryDatabaseUrl: env.DATABASE_URL,
         read1DatabaseUrl: env.DATABASE_READ1_URL,
         read2DatabaseUrl: env.DATABASE_READ2_URL,
-        logger: env.DRIZZLE_LOG,
+        logger: env.DRIZZLE_LOG.toString() === "true",
         singleton: false, // Don't use singleton for hibernating DOs
       }),
     })
@@ -148,11 +151,16 @@ export class DurableObjectUsagelimiter extends Server {
         // we save the entitlements in the do to avoid querying the db for each request
         // then we update the entitlements every UPDATE_PERIOD
         const entitlements = config.entitlements
+        // get the subscription from the db
+        const subscription = config.subscription
 
         // user can't have the same feature slug for different entitlements
         entitlements.forEach((e) => {
           this.featuresUsage.set(e.featureSlug, e)
         })
+
+        // set the subscription
+        this.subscription = subscription
 
         this.initialized = true
       } catch (e) {
@@ -178,18 +186,39 @@ export class DurableObjectUsagelimiter extends Server {
     }
   }
 
-  private async updateConfig(config: UsageLimiterConfig) {
+  private async updateConfig(data: {
+    entitlements?: CustomerEntitlementExtended[]
+    subscription?: UsageLimiterConfig["subscription"]
+  }) {
     if (!this.initialized) {
       // initialize if not initialized
       this.initialize()
     }
-
-    const cleanConfig = {
-      ...config,
-      entitlements: config.entitlements.filter((e) => e?.id !== undefined),
+    if (data.entitlements) {
+      await this.ctx.storage.put("config", {
+        ...data,
+        entitlements: data.entitlements?.filter((e) => e?.id !== undefined) ?? [],
+      })
     }
 
-    await this.ctx.storage.put("config", cleanConfig)
+    if (data.subscription) {
+      await this.ctx.storage.put("config", {
+        ...data,
+        subscription: data.subscription ?? this.subscription,
+      })
+    }
+  }
+
+  private async updateSubscription(subscription: UsageLimiterConfig["subscription"]) {
+    // update the config
+    await this.updateConfig({
+      subscription,
+    })
+
+    // update the state
+    this.ctx.blockConcurrencyWhile(async () => {
+      this.subscription = subscription
+    })
   }
 
   private async updateEntitlement(entitlement: CustomerEntitlementExtended) {
@@ -197,13 +226,12 @@ export class DurableObjectUsagelimiter extends Server {
     const entitlements = config.entitlements.filter(
       (e) => e.featureSlug !== entitlement.featureSlug
     )
-    entitlements.push({
-      ...entitlement,
-      lastUsageUpdateAt: Date.now(),
-    })
+    entitlements.push(entitlement)
 
     // update the config
-    await this.updateConfig({ entitlements })
+    await this.updateConfig({
+      entitlements,
+    })
 
     // update the state
     this.ctx.blockConcurrencyWhile(async () => {
@@ -304,6 +332,103 @@ export class DurableObjectUsagelimiter extends Server {
     return Ok(entitlement)
   }
 
+  private async revalidateSubscription({
+    customerId,
+    projectId,
+    opts,
+  }: {
+    customerId: string
+    projectId: string
+    opts?: {
+      skipCache?: boolean
+    }
+  }) {
+    const { err, val } = await this.customerService.getActiveSubscription({
+      customerId,
+      projectId,
+      opts: {
+        skipCache: opts?.skipCache ?? false, // INPORTANT: we don't skip cache here because we only have in memory cache
+      },
+    })
+
+    if (err) {
+      return Err(err)
+    }
+
+    // update the state
+    this.updateSubscription({
+      ...val,
+      lastUsageUpdateAt: Date.now(),
+    })
+
+    return Ok(val)
+  }
+
+  private async getSubscription({
+    customerId,
+    projectId,
+    now,
+    opts,
+  }: {
+    customerId: string
+    projectId: string
+    now: number
+    opts?: {
+      skipCache?: boolean
+    }
+  }): Promise<Result<SubscriptionCache, FetchError | UnPriceCustomerError>> {
+    const subscriptionState = this.subscription
+    // try to refresh the subscription
+    const shouldRefresh = subscriptionState
+      ? subscriptionState?.lastUsageUpdateAt &&
+        subscriptionState.lastUsageUpdateAt + this.UPDATE_PERIOD - now < 0
+      : true
+
+    // if subscription is in state validate it
+    if (shouldRefresh) {
+      // stale while revalidate pattern
+      if (!subscriptionState?.id) {
+        const { err: subscriptionErr, val: subscription } = await this.revalidateSubscription({
+          customerId,
+          projectId,
+          opts: {
+            skipCache: opts?.skipCache ?? false, // INPORTANT: we don't skip cache here because we only have in memory cache
+          },
+        })
+
+        if (subscriptionErr) {
+          return Err(subscriptionErr)
+        }
+
+        return Ok(subscription)
+      }
+
+      this.ctx.waitUntil(
+        this.revalidateSubscription({
+          customerId,
+          projectId,
+          opts: {
+            skipCache: opts?.skipCache ?? false,
+          },
+        })
+      )
+
+      return Ok(subscriptionState)
+    }
+
+    // if not found, return an error
+    if (!subscriptionState) {
+      return Err(
+        new UnPriceCustomerError({
+          message: "subscription not found",
+          code: "CUSTOMER_SUBSCRIPTION_NOT_FOUND",
+        })
+      )
+    }
+
+    return Ok(subscriptionState)
+  }
+
   // this is a simple way to revalidate the entitlement
   public async revalidateEntitlement({
     customerId,
@@ -316,6 +441,7 @@ export class DurableObjectUsagelimiter extends Server {
     featureSlug: string
     now: number
   }): Promise<Result<CustomerEntitlementExtended, FetchError | UnPriceCustomerError>> {
+    // TODO: revalidate subscription and customer as well
     // get the entitlement from the db
     const { err, val } = await this.customerService.getActiveEntitlement(
       customerId,
@@ -352,7 +478,10 @@ export class DurableObjectUsagelimiter extends Server {
     }
 
     // update the config
-    await this.updateEntitlement(val)
+    await this.updateEntitlement({
+      ...val,
+      lastUsageUpdateAt: Date.now(),
+    })
 
     return Ok(val)
   }
@@ -395,82 +524,78 @@ export class DurableObjectUsagelimiter extends Server {
     }
   }
 
-  private isValidEntitlement(
-    entitlement: CustomerEntitlementExtended,
-    opts: { allowOverage?: boolean }
-  ): {
-    valid: boolean
-    message: string
-    deniedReason?: DenyReason
-    limit?: number
-    usage?: number
-  } {
+  private entitlementGuard({
+    entitlement,
+    now,
+    opts,
+  }: {
+    entitlement: CustomerEntitlementExtended
+    now: number
+    opts?: {
+      allowOverage?: boolean
+    }
+  }):
+    | {
+        valid: true
+        message: string
+        deniedReason?: DenyReason
+        limit?: number
+        usage?: number
+      }
+    | {
+        valid: false
+        message: string
+        deniedReason: DenyReason
+        limit?: number
+        usage?: number
+      } {
     // check if all the DO is initialized
     if (!this.initialized) {
       return {
         valid: false,
         message: "DO not initialized",
+        deniedReason: "DO_NOT_INITIALIZED",
       }
     }
 
-    if (entitlement.project.enabled === false) {
+    // check if the entitlement is valid
+    const isValidResult = this.customerService.isValidEntitlement({
+      entitlement,
+      now,
+    })
+
+    // if the entitlement is not valid, return the error
+    if (!isValidResult.valid) {
       return {
         valid: false,
-        message: "DO: Project is disabled",
-        deniedReason: "PROJECT_DISABLED",
+        message: isValidResult.message,
+        deniedReason: isValidResult.deniedReason,
+        limit: isValidResult.limit,
+        usage: isValidResult.usage,
       }
     }
 
-    if (entitlement.customer.active === false) {
-      return {
-        valid: false,
-        message: "DO: Customer is disabled",
-        deniedReason: "CUSTOMER_DISABLED",
-      }
-    }
+    // check limits
+    const checkLimitResult = this.customerService.checkLimitEntitlement({
+      entitlement,
+      opts,
+    })
 
-    if (entitlement.subscription.active === false) {
-      return {
-        valid: false,
-        message: "DO: Subscription is disabled",
-        deniedReason: "SUBSCRIPTION_DISABLED",
-      }
-    }
-
-    const now = Date.now()
-
-    // check if the entitlement has expired with a buffer period in days
-    // buffer period is used to avoid race conditions when the entitlement is updated
-    // and the customer is still using the feature
-    // this will generate overage of course, but it's better than not having it
-    const validUntil = entitlement.validTo
-      ? entitlement.validTo + entitlement.bufferPeriodDays * 24 * 60 * 60 * 1000
-      : null
-
-    if (validUntil && now > validUntil) {
-      return {
-        valid: false,
-        message: "entitlement expired",
-        deniedReason: "ENTITLEMENT_EXPIRED",
-      }
-    }
-
-    // check if the entitlement has a limit and the usage is greater than the limit
-    const checkLimitResult = this.checkLimit(entitlement, opts)
-
-    if (!checkLimitResult.success) {
+    if (!checkLimitResult.valid) {
       return {
         valid: false,
         message: checkLimitResult.message,
         deniedReason: checkLimitResult.deniedReason,
-        limit: Number(checkLimitResult.limit),
-        usage: Number(checkLimitResult.usage),
+        limit: checkLimitResult.limit,
+        usage: checkLimitResult.usage,
       }
     }
 
     return {
       valid: true,
       message: "entitlement is valid",
+      limit: checkLimitResult.limit,
+      usage: checkLimitResult.usage,
     }
   }
 
@@ -531,6 +656,23 @@ export class DurableObjectUsagelimiter extends Server {
     // first initialize the do
     this.initialize()
 
+    // get the subscription
+    const { err: subscriptionErr } = await this.getSubscription({
+      customerId: data.customerId,
+      projectId: data.projectId,
+      now: data.timestamp,
+    })
+
+    if (subscriptionErr) {
+      // TODO: if subscription not found anymore, lets send the events that the object have
+      // and reset the object
+      return {
+        success: false,
+        message: subscriptionErr.message,
+        deniedReason: subscriptionErr.code as DenyReason,
+      }
+    }
+
     // i need to know the latency of the request
     const startLatency = performance.now()
 
@@ -541,6 +683,7 @@ export class DurableObjectUsagelimiter extends Server {
       featureSlug: data.featureSlug,
       now: data.timestamp,
     })
+
     const endLatency = performance.now()
     console.info(`getEntitlement latency: ${endLatency - startLatency}ms`)
 
@@ -548,13 +691,17 @@ export class DurableObjectUsagelimiter extends Server {
       return {
         success: false,
         message: err.message,
-        deniedReason: "ENTITLEMENT_NOT_FOUND",
+        deniedReason: err.code as DenyReason,
       }
     }
 
-    // first get the entitlement
-    const { valid, message, deniedReason, limit, usage } = this.isValidEntitlement(entitlement, {
-      allowOverage: false, // for verification we don't allow overage
+    // validate the entitlement
+    const entitlementGuardResult = this.entitlementGuard({
+      entitlement,
+      now: data.timestamp,
+      opts: {
+        allowOverage: false, // for verification we don't allow overage
+      },
     })
 
     // ensure the alarm is set so we can send usage to tinybird periodically
@@ -576,7 +723,7 @@ export class DurableObjectUsagelimiter extends Server {
       },
       data,
       performance.now() - data.performanceStart,
-      deniedReason
+      entitlementGuardResult.deniedReason
     )
 
     if (!verification?.id) {
@@ -588,54 +735,11 @@ export class DurableObjectUsagelimiter extends Server {
     }
 
     return {
-      success: valid,
-      message: message,
-      deniedReason: deniedReason,
-      limit: Number(limit),
-      usage: Number(usage),
-    }
-  }
-
-  private checkLimit(
-    entitlement: CustomerEntitlementExtended,
-    opts: { allowOverage?: boolean }
-  ): {
-    success: boolean
-    message: string
-    limit?: number
-    usage?: number
-    deniedReason?: DenyReason
-  } {
-    switch (entitlement.featureType) {
-      case "flat":
-        return { success: true, message: "flat feature is not applicable for usage limit" }
-      case "tier":
-      case "package":
-      case "usage": {
-        const { usage, limit } = entitlement
-        const hitLimit = limit ? Number(usage) > Number(limit) : false
-
-        if (hitLimit) {
-          if (opts.allowOverage) {
-            return {
-              success: true,
-              message: "limit exceeded, but overage is allowed",
-              limit: Number(limit),
-              usage: Number(usage),
-            }
-          }
-
-          return {
-            success: false,
-            message: "limit exceeded",
-            deniedReason: "LIMIT_EXCEEDED",
-            limit: Number(limit),
-            usage: Number(usage),
-          }
-        }
-
-        return { success: true, message: "can", limit: Number(limit), usage: Number(usage) }
-      }
+      success: entitlementGuardResult.valid,
+      message: entitlementGuardResult.message,
+      deniedReason: entitlementGuardResult.deniedReason,
+      limit: Number(entitlementGuardResult.limit),
+      usage: Number(entitlementGuardResult.usage),
     }
   }
 
@@ -643,7 +747,25 @@ export class DurableObjectUsagelimiter extends Server {
     // first initialize the do
     this.initialize()
 
-    // first get the entitlement
+    // get the subscription
+    const { err: subscriptionErr } = await this.getSubscription({
+      customerId: data.customerId,
+      projectId: data.projectId,
+      now: data.timestamp,
+    })
+
+    if (subscriptionErr) {
+      return {
+        success: false,
+        message: subscriptionErr.message,
+        deniedReason: subscriptionErr.code as DenyReason,
+      }
+    }
+
+    // i need to know the latency of the request
+    const startLatency = performance.now()
+
+    // get the entitlement
     const { err, val: entitlement } = await this.getEntitlement({
       customerId: data.customerId,
       projectId: data.projectId,
@@ -651,26 +773,34 @@ export class DurableObjectUsagelimiter extends Server {
       now: data.timestamp,
     })
 
+    const endLatency = performance.now()
+    console.info(`getEntitlement latency: ${endLatency - startLatency}ms`)
+
     if (err) {
       return {
         success: false,
         message: err.message,
-        deniedReason: "ENTITLEMENT_NOT_FOUND",
+        deniedReason: err.code as DenyReason,
       }
     }
 
-    const { valid, message, deniedReason } = this.isValidEntitlement(entitlement, {
-      allowOverage: true, // for reporting usage we allow overage
+    // validate the entitlement
+    const entitlementGuardResult = this.entitlementGuard({
+      entitlement,
+      now: data.timestamp,
+      opts: {
+        allowOverage: true, // for reporting usage we allow overage
+      },
     })
 
     // if the entitlement is not valid, we return an error
     // why? because we don't want to report usage for invalid entitlements, simply
     // as for verification we want to report the verification event even if the entitlement is invalid
-    if (!valid) {
+    if (!entitlementGuardResult.valid) {
       return {
         success: false,
-        message: message,
-        deniedReason: deniedReason,
+        message: entitlementGuardResult.message,
+        deniedReason: entitlementGuardResult.deniedReason,
       }
     }
 
@@ -729,7 +859,26 @@ export class DurableObjectUsagelimiter extends Server {
     // after validating, we set the usage and agregate it to the DO state for the next request.
     // keep in mind that database calls are 0 latency because of the Durable Object
     // we keep the agregated state in a map to avoid having to query the db for each request
-    const result = await this.setUsage(entitlement, data.usage)
+    const result = this.customerService.setNewUsageEntitlement({
+      entitlement,
+      usage: Number(data.usage),
+    })
+
+    if (result.success === false) {
+      return {
+        success: false,
+        message: result.message,
+        deniedReason: result.deniedReason,
+        limit: result.limit,
+        usage: result.usage,
+      }
+    }
+
+    // update state
+    this.updateEntitlement({
+      ...entitlement,
+      usage: result.usage.toString(),
+    })
 
     return {
       success: result.success,
@@ -761,95 +910,6 @@ export class DurableObjectUsagelimiter extends Server {
       this.ctx.storage.deleteAlarm()
       this.ctx.storage.setAlarm(nextAlarm)
     }
-  }
-
-  private calculateNewUsage(entitlement: CustomerEntitlementExtended, usage: number) {
-    const aggregation = entitlement.aggregationMethod
-    const currentUsage = Number(entitlement.usage)
-    const accumulatedUsage = Number(entitlement.accumulatedUsage)
-
-    switch (aggregation) {
-      case "sum":
-        return currentUsage + usage
-      case "max":
-        return Math.max(currentUsage, usage)
-      case "last_during_period":
-        return usage
-      case "count":
-        return currentUsage + 1
-      case "count_all":
-        return accumulatedUsage + 1
-      case "max_all":
-        return Math.max(accumulatedUsage, usage)
-      case "sum_all":
-        return accumulatedUsage + usage
-      default:
-        return usage
-    }
-  }
-
-  private async setUsage(
-    entitlement: CustomerEntitlementExtended,
-    usage: number
-  ): Promise<{
-    success: boolean
-    message: string
-    notifyUsage?: boolean
-    usage?: number
-    limit?: number
-  }> {
-    const threshold = 90 // notify when the usage is 90% or more
-    const limit = entitlement.limit ? Number(entitlement.limit) : undefined
-
-    let message = ""
-    let notifyUsage = false
-
-    // check flat features
-    if (entitlement.featureType === "flat") {
-      return {
-        success: false,
-        message:
-          "feature is flat, limit is not applicable, but events are billed. Please don't report usage for flat features to avoid overbilling.",
-        usage: 0,
-        limit: 1,
-      }
-    }
-
-    const newUsage = this.calculateNewUsage(entitlement, usage)
-
-    // check limit
-    if (limit) {
-      const usagePercentage = (newUsage / limit) * 100
-
-      if (newUsage >= limit) {
-        // Usage has reached or exceeded the limit
-        message = `Your feature ${entitlement.featureSlug} has reached or exceeded its usage limit of ${limit}. Current usage: ${newUsage.toFixed(
-          2
-        )}% of its usage limit. This is over the limit by ${newUsage - limit}`
-        notifyUsage = true
-      } else if (usagePercentage >= threshold) {
-        // Usage is at or above the threshold
-        message = `Your feature ${entitlement.featureSlug} is at ${usagePercentage.toFixed(
-          2
-        )}% of its usage limit`
-        notifyUsage = true
-      }
-    }
-
-    // update the featuresUsage map with block concurrency
-    this.ctx.blockConcurrencyWhile(async () => {
-      this.featuresUsage.set(entitlement.featureSlug, {
-        ...entitlement,
-        usage: newUsage.toString(),
-      })
-    })
-
-    // reset everything in the config from the map which is the source of truth
-    await this.updateConfig({
-      entitlements: Array.from(this.featuresUsage.values()),
-    })
-
-    return { success: true, message, notifyUsage, usage: newUsage, limit }
   }
 
   onStart(): void | Promise<void> {

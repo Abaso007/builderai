@@ -242,7 +242,7 @@ export const subscriptionChangePlanSchema = subscriptionSelectSchema
     whenToChange: z.enum(["immediately", "end_of_cycle"]).optional(),
   })
 
-export const getActivePhaseResponseSchema = subscriptionPhaseSelectSchema.extend({
+export const subscriptionPhaseCacheSchema = subscriptionPhaseSelectSchema.extend({
   planVersion: planVersionSelectBaseSchema,
   customerEntitlements: z.array(
     customerEntitlementSchema.extend({
@@ -253,7 +253,7 @@ export const getActivePhaseResponseSchema = subscriptionPhaseSelectSchema.extend
   ),
 })
 
-export const getSubscriptionResponseSchema = subscriptionSelectSchema.extend({
+export const subscriptionCacheSchema = subscriptionSelectSchema.extend({
   project: projectSelectBaseSchema.pick({
     enabled: true,
   }),
@@ -272,6 +272,8 @@ export type SubscriptionMetadata = z.infer<typeof subscriptionMetadataSchema>
 export type SubscriptionPhaseMetadata = z.infer<typeof subscriptionPhaseMetadataSchema>
 export type SubscriptionChangePlan = z.infer<typeof subscriptionChangePlanSchema>
 export type InvoiceMetadata = z.infer<typeof invoiceMetadataSchema>
+export type SubscriptionCache = z.infer<typeof subscriptionCacheSchema>
+export type SubscriptionPhaseCache = z.infer<typeof subscriptionPhaseCacheSchema>
 
 // TODO: TEST THIS
 export const createDefaultSubscriptionConfig = ({

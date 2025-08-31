@@ -18,15 +18,12 @@ import type {
   Feature,
   PlanVersionApi,
   Project,
+  SubscriptionCache,
+  SubscriptionPhaseCache,
   Workspace,
-  getActivePhaseResponseSchema,
-  getSubscriptionResponseSchema,
 } from "@unprice/db/validators"
-import type { z } from "zod"
 import type { DenyReason } from "../customers/errors"
 
-export type SubscriptionPhaseCache = z.infer<typeof getActivePhaseResponseSchema>
-export type SubcriptionCache = z.infer<typeof getSubscriptionResponseSchema>
 export type ProjectFeatureCache = {
   project: {
     enabled: boolean
@@ -52,7 +49,7 @@ export type CustomerCache = Customer & {
 
 export type CacheNamespaces = {
   apiKeyByHash: ApiKeyExtended | null
-  customerSubscription: SubcriptionCache | null
+  customerSubscription: SubscriptionCache | null
   customer: CustomerCache | null
   customerActivePhase: SubscriptionPhaseCache | null
   customerEntitlement: CustomerEntitlementExtended | null

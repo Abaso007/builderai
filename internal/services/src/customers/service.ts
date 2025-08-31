@@ -17,7 +17,6 @@ import {
   customers,
   features,
   planVersionFeatures,
-  projects,
   subscriptions,
 } from "@unprice/db/schema"
 import { AesGCM, newId } from "@unprice/db/utils"
@@ -31,18 +30,20 @@ import {
   type Plan,
   type PlanVersion,
   type Project,
+  type SubscriptionCache,
+  type SubscriptionPhaseCache,
   customerEntitlementExtendedSchema,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import { env } from "../../env"
-import type { CustomerCache, SubcriptionCache, SubscriptionPhaseCache } from "../cache"
+import type { CustomerCache } from "../cache"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
 import { PaymentProviderService } from "../payment-provider/service"
 import { SubscriptionService } from "../subscriptions/service"
 import { retry } from "../utils/retry"
-import { UnPriceCustomerError } from "./errors"
+import { type DenyReason, UnPriceCustomerError } from "./errors"
 
 export class CustomerService {
   private readonly db: Database | TransactionDatabase
@@ -143,7 +144,7 @@ export class CustomerService {
   }: {
     customerId: string
     projectId: string
-  }): Promise<SubcriptionCache | null> {
+  }): Promise<SubscriptionCache | null> {
     const subscription = await this.db.query.subscriptions
       .findFirst({
         with: {
@@ -165,7 +166,7 @@ export class CustomerService {
         ),
       })
       .catch((e) => {
-        this.logger.error("error getting active subscription data", {
+        this.logger.error("error getting getActiveSubscriptionData from db", {
           error: e.message,
         })
 
@@ -206,12 +207,18 @@ export class CustomerService {
       skipCache: boolean
     }
   ): Promise<Result<CustomerCache | null, FetchError | UnPriceCustomerError>> {
+    if (opts?.skipCache) {
+      this.logger.info("skipping cache for getCustomer", {
+        customerId,
+      })
+    }
+
     const { val, err } = opts?.skipCache
       ? await wrapResult(
           this.getCustomerData(customerId),
           (err) =>
             new FetchError({
-              message: `unable to query db for customer, ${err.message}`,
+              message: `unable to query for getCustomerData, ${err.message}`,
               retry: false,
             })
         )
@@ -219,7 +226,7 @@ export class CustomerService {
           3,
           async () => this.cache.customer.swr(customerId, () => this.getCustomerData(customerId)),
           (attempt, err) => {
-            this.logger.warn("Failed to fetch customer data from cache, retrying...", {
+            this.logger.warn("Failed to fetch getCustomerData data from cache, retrying...", {
               customerId: customerId,
               attempt,
               error: err.message,
@@ -228,12 +235,15 @@ export class CustomerService {
         )
 
     if (err) {
-      this.logger.error("error getting customer data", {
+      this.logger.error("error getting getCustomerData", {
         error: err.message,
       })
 
       return Err(
-        new FetchError({ message: `unable to query db for customer, ${err.message}`, retry: false })
+        new FetchError({
+          message: `unable to query db for getCustomerData, ${err.message}`,
+          retry: false,
+        })
       )
     }
 
@@ -245,15 +255,19 @@ export class CustomerService {
   }
 
   // validate the customer has and active subscription and is active
-  public async getActiveSubscription(
-    customerId: string,
-    projectId: string,
+  public async getActiveSubscription({
+    customerId,
+    projectId,
+    opts,
+  }: {
+    customerId: string
+    projectId: string
     opts?: {
       skipCache: boolean
     }
-  ): Promise<Result<SubcriptionCache | null, FetchError | UnPriceCustomerError>> {
+  }): Promise<Result<SubscriptionCache, FetchError | UnPriceCustomerError>> {
     if (opts?.skipCache) {
-      this.logger.info("skipping cache for active subscription", {
+      this.logger.info("skipping cache for getActiveSubscription", {
         customerId,
         projectId,
       })
@@ -268,7 +282,7 @@ export class CustomerService {
           }),
           (err) =>
             new FetchError({
-              message: `unable to query db for active subscription, ${err.message}`,
+              message: `unable to query db for getActiveSubscriptionData, ${err.message}`,
               retry: false,
               context: {
                 error: err.message,
@@ -288,11 +302,14 @@ export class CustomerService {
               })
             ),
           (attempt, err) => {
-            this.logger.warn("Failed to fetch subscription data from cache, retrying...", {
-              customerId: customerId,
-              attempt,
-              error: err.message,
-            })
+            this.logger.warn(
+              "Failed to fetch getActiveSubscriptionData data from cache, retrying...",
+              {
+                customerId: customerId,
+                attempt,
+                error: err.message,
+              }
+            )
           }
         )
 
@@ -311,7 +328,12 @@ export class CustomerService {
     }
 
     if (!val) {
-      return Ok(null)
+      return Err(
+        new UnPriceCustomerError({
+          code: "SUBSCRIPTION_NOT_FOUND",
+          message: "subscription not found or is not active for this customer",
+        })
+      )
     }
 
     if (val.project.enabled === false) {
@@ -332,17 +354,6 @@ export class CustomerService {
       )
     }
 
-    // take a look if the subscription is expired
-    // const bufferPeriod = 24 * 60 * 60 * 1000 // 1 day
-    // const validUntil = val.currentCycleEndAt + bufferPeriod
-    // const validFrom = val.currentCycleStartAt
-
-    // if (now < validFrom || now > validUntil) {
-    //   return Err(
-    //     new UnPriceCustomerError({ code: "SUBSCRIPTION_EXPIRED", message: "subscription expired" })
-    //   )
-    // }
-
     return Ok(val)
   }
 
@@ -359,6 +370,13 @@ export class CustomerService {
       skipCache: boolean
     }
   }): Promise<Result<SubscriptionPhaseCache | null, FetchError | UnPriceCustomerError>> {
+    if (opts?.skipCache) {
+      this.logger.info("skipping cache for getActivePhase", {
+        customerId,
+        projectId,
+      })
+    }
+
     const { val, err } = opts?.skipCache
       ? await wrapResult(
           this.getActivePhaseData({
@@ -368,7 +386,7 @@ export class CustomerService {
           }),
           (err) =>
             new FetchError({
-              message: "unable to query db for active phase",
+              message: "unable to query db for getActivePhaseData",
               retry: false,
               context: {
                 error: err.message,
@@ -389,7 +407,7 @@ export class CustomerService {
               })
             ),
           (attempt, err) => {
-            this.logger.warn("Failed to fetch active phase data from cache, retrying...", {
+            this.logger.warn("Failed to fetch getActivePhaseData data from cache, retrying...", {
               customerId: customerId,
               attempt,
               error: err.message,
@@ -398,7 +416,7 @@ export class CustomerService {
         )
 
     if (err) {
-      this.logger.error("error getting active phase", {
+      this.logger.error("error getting getActivePhaseData", {
         error: err.message,
       })
 
@@ -542,21 +560,6 @@ export class CustomerService {
     // if not found in DO, then we query the db
     const entitlements = await this.db.query.customerEntitlements.findMany({
       with: {
-        customer: {
-          columns: {
-            active: true,
-          },
-        },
-        subscription: {
-          columns: {
-            active: true,
-          },
-        },
-        project: {
-          columns: {
-            enabled: true,
-          },
-        },
         featurePlanVersion: {
           columns: {
             aggregationMethod: true,
@@ -609,9 +612,6 @@ export class CustomerService {
           featureSlug: entitlement.featurePlanVersion.feature.slug,
           featureType: entitlement.featurePlanVersion.featureType,
           aggregationMethod: entitlement.featurePlanVersion.aggregationMethod,
-          customer: entitlement.customer,
-          subscription: entitlement.subscription,
-          project: entitlement.project,
         })
 
         if (!result.success) {
@@ -727,15 +727,6 @@ export class CustomerService {
         customerEntitlement: customerEntitlements,
         featureType: planVersionFeatures.featureType,
         aggregationMethod: planVersionFeatures.aggregationMethod,
-        customer: {
-          active: customers.active,
-        },
-        subscription: {
-          active: subscriptions.active,
-        },
-        project: {
-          enabled: projects.enabled,
-        },
       })
       .from(customerEntitlements)
       .leftJoin(
@@ -752,21 +743,6 @@ export class CustomerService {
           eq(planVersionFeatures.projectId, features.projectId)
         )
       )
-      .leftJoin(
-        customers,
-        and(
-          eq(customerEntitlements.customerId, customers.id),
-          eq(customerEntitlements.projectId, customers.projectId)
-        )
-      )
-      .leftJoin(
-        subscriptions,
-        and(
-          eq(customerEntitlements.subscriptionId, subscriptions.id),
-          eq(customerEntitlements.projectId, subscriptions.projectId)
-        )
-      )
-      .leftJoin(projects, eq(customerEntitlements.projectId, projects.id))
       .where(
         and(
           eq(features.slug, featureSlug),
@@ -811,14 +787,7 @@ export class CustomerService {
       projectId,
     })
 
-    if (
-      !entitlement ||
-      !entitlement.featureType ||
-      !entitlement.aggregationMethod ||
-      !entitlement.customer?.active ||
-      !entitlement.subscription?.active ||
-      !entitlement.project?.enabled
-    ) {
+    if (!entitlement || !entitlement.featureType || !entitlement.aggregationMethod) {
       return null
     }
 
@@ -842,9 +811,6 @@ export class CustomerService {
         featureType: entitlement.featureType,
         aggregationMethod: entitlement.aggregationMethod,
         featureSlug,
-        customer: entitlement.customer,
-        subscription: entitlement.subscription,
-        project: entitlement.project,
         usage: val.usage.toString(),
         accumulatedUsage: val.accumulatedUsage.toString(),
       })
@@ -877,9 +843,6 @@ export class CustomerService {
       featureType: entitlement.featureType,
       aggregationMethod: entitlement.aggregationMethod,
       featureSlug,
-      customer: entitlement.customer,
-      subscription: entitlement.subscription,
-      project: entitlement.project,
     }
 
     return result
@@ -968,7 +931,15 @@ export class CustomerService {
       skipCache?: boolean // skip cache to force revalidation
       withLastUsage?: boolean // if true, we will get the last usage from analytics
     }
-  ): Promise<Result<CustomerEntitlementExtended | null, FetchError | UnPriceCustomerError>> {
+  ): Promise<Result<CustomerEntitlementExtended, FetchError | UnPriceCustomerError>> {
+    const cacheKey = `${projectId}:${customerId}:${featureSlug}`
+    if (opts?.skipCache) {
+      this.logger.info("skipping cache for getActiveEntitlement", {
+        customerId,
+        projectId,
+        featureSlug,
+      })
+    }
     // first try to get the entitlement from cache, if not found try to get it from DO,
     const { val, err } = opts?.skipCache
       ? await wrapResult(
@@ -989,14 +960,14 @@ export class CustomerService {
                 error: err.message,
                 url: "",
                 customerId: customerId,
-                method: "getActiveEntitlement",
+                method: "getEntitlementData",
               },
             })
         )
       : await retry(
           3,
           async () =>
-            this.cache.customerEntitlement.swr(`${projectId}:${customerId}:${featureSlug}`, () =>
+            this.cache.customerEntitlement.swr(cacheKey, () =>
               this.getEntitlementData({
                 customerId,
                 featureSlug,
@@ -1008,16 +979,19 @@ export class CustomerService {
               })
             ),
           (attempt, err) => {
-            this.logger.warn("Failed to fetch entitlement data from cache, retrying...", {
-              customerId: customerId,
-              attempt,
-              error: err.message,
-            })
+            this.logger.warn(
+              "Failed to fetch entitlement data from cache in getEntitlementData, retrying...",
+              {
+                customerId: customerId,
+                attempt,
+                error: err.message,
+              }
+            )
           }
         )
 
     if (err) {
-      this.logger.error("error getting entitlement", {
+      this.logger.error("error getting entitlement in getEntitlementData", {
         error: err.message,
       })
 
@@ -1031,41 +1005,247 @@ export class CustomerService {
     }
 
     if (!val) {
-      return Ok(null)
+      return Err(
+        new UnPriceCustomerError({
+          code: "ENTITLEMENT_NOT_FOUND",
+          message: "entitlement not found",
+        })
+      )
     }
 
     // if the entitlement is found, and the cache is skipped, update the cache
     // this is important to avoid stale data
     if (opts?.skipCache) {
-      this.waitUntil(
-        this.cache.customerEntitlement.set(`${projectId}:${customerId}:${featureSlug}`, val)
-      )
+      this.waitUntil(this.cache.customerEntitlement.set(cacheKey, val))
     }
 
     // entitlement could be expired since is in cache, validate it again
-    const bufferPeriod = val.bufferPeriodDays * 24 * 60 * 60 * 1000
-    const validUntil = val.validTo ? val.validTo + bufferPeriod : null
-    const active = val.active
+    const isValidVal = this.isValidEntitlement({
+      entitlement: val,
+      now,
+    })
 
-    if (now < val.validFrom || (validUntil && now > validUntil)) {
+    if (isValidVal.valid === false) {
       return Err(
         new UnPriceCustomerError({
-          code: "ENTITLEMENT_EXPIRED",
-          message: "entitlement expired",
-        })
-      )
-    }
-
-    if (active === false) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "ENTITLEMENT_NOT_ACTIVE",
-          message: "entitlement is not active",
+          code: isValidVal.deniedReason,
+          message: isValidVal.message,
         })
       )
     }
 
     return Ok(val)
+  }
+
+  public setNewUsageEntitlement({
+    entitlement,
+    usage,
+  }: {
+    entitlement: CustomerEntitlementExtended
+    usage: number
+  }):
+    | {
+        success: true
+        message: string
+        notifyUsage?: boolean
+        usage: number
+        limit?: number
+      }
+    | {
+        success: false
+        message: string
+        deniedReason: DenyReason
+        limit?: number
+        usage?: number
+      } {
+    const threshold = 90 // notify when the usage is 90% or more
+    const limit = entitlement.limit ? Number(entitlement.limit) : undefined
+
+    let message = ""
+    let notifyUsage = false
+
+    // check flat features
+    if (entitlement.featureType === "flat") {
+      return {
+        success: false,
+        message:
+          "feature is flat, limit is not applicable, but events are billed. Please don't report usage for flat features to avoid overbilling.",
+        deniedReason: "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE",
+        usage: 0,
+        limit: 1,
+      }
+    }
+
+    const aggregation = entitlement.aggregationMethod
+    const currentUsage = Number(entitlement.usage)
+    const accumulatedUsage = Number(entitlement.accumulatedUsage)
+    let newUsage = currentUsage
+
+    switch (aggregation) {
+      case "sum":
+        newUsage = currentUsage + usage
+        break
+      case "max":
+        newUsage = Math.max(currentUsage, usage)
+        break
+      case "last_during_period":
+        newUsage = usage
+        break
+      case "count":
+        newUsage = currentUsage + 1
+        break
+      case "count_all":
+        newUsage = accumulatedUsage + 1
+        break
+      case "max_all":
+        newUsage = Math.max(accumulatedUsage, usage)
+        break
+      case "sum_all":
+        newUsage = accumulatedUsage + usage
+        break
+      default:
+        return {
+          success: false,
+          message: "invalid aggregation method",
+          deniedReason: "INVALID_ENTITLEMENT_TYPE",
+          usage: currentUsage,
+          limit,
+        }
+    }
+
+    // check limit
+    if (limit) {
+      const usagePercentage = (newUsage / limit) * 100
+
+      if (newUsage >= limit) {
+        // Usage has reached or exceeded the limit
+        message = `Your feature ${entitlement.featureSlug} has reached or exceeded its usage limit of ${limit}. Current usage: ${newUsage.toFixed(
+          2
+        )}% of its usage limit. This is over the limit by ${newUsage - limit}`
+        notifyUsage = true
+      } else if (usagePercentage >= threshold) {
+        // Usage is at or above the threshold
+        message = `Your feature ${entitlement.featureSlug} is at ${usagePercentage.toFixed(
+          2
+        )}% of its usage limit`
+        notifyUsage = true
+      }
+    }
+
+    return {
+      success: true,
+      message,
+      notifyUsage,
+      usage: newUsage,
+      limit,
+    }
+  }
+
+  public isValidEntitlement({
+    entitlement,
+    now,
+  }: {
+    entitlement: CustomerEntitlementExtended
+    now: number
+  }):
+    | {
+        valid: true
+        message: string
+        limit?: number
+        usage?: number
+      }
+    | {
+        valid: false
+        message: string
+        deniedReason: DenyReason
+        limit?: number
+        usage?: number
+      } {
+    const bufferPeriod = entitlement.bufferPeriodDays * 24 * 60 * 60 * 1000
+    const validUntil = entitlement.validTo ? entitlement.validTo + bufferPeriod : null
+    const active = entitlement.active
+
+    if (now < entitlement.validFrom || (validUntil && now > validUntil)) {
+      return {
+        valid: false,
+        message: "entitlement expired",
+        deniedReason: "ENTITLEMENT_EXPIRED",
+      }
+    }
+
+    if (active === false) {
+      return {
+        valid: false,
+        message: "entitlement is not active",
+        deniedReason: "ENTITLEMENT_NOT_ACTIVE",
+      }
+    }
+
+    return {
+      valid: true,
+      message: "entitlement is valid",
+    }
+  }
+
+  public checkLimitEntitlement({
+    entitlement,
+    opts,
+  }: {
+    entitlement: CustomerEntitlementExtended
+    opts?: {
+      allowOverage?: boolean
+    }
+  }):
+    | {
+        valid: true
+        message: string
+        limit?: number
+        usage?: number
+      }
+    | {
+        valid: false
+        message: string
+        deniedReason: DenyReason
+        limit?: number
+        usage?: number
+      } {
+    switch (entitlement.featureType) {
+      case "flat":
+        return { valid: true, message: "flat feature is not applicable for usage limit" }
+      case "tier":
+      case "package":
+      case "usage": {
+        const { usage, limit } = entitlement
+        const hitLimit = limit ? Number(usage) > Number(limit) : false
+
+        if (hitLimit) {
+          if (opts?.allowOverage) {
+            return {
+              valid: true,
+              message: "limit exceeded, but overage is allowed",
+              limit: Number(limit),
+              usage: Number(usage),
+            }
+          }
+
+          return {
+            valid: false,
+            message: "limit exceeded",
+            deniedReason: "LIMIT_EXCEEDED",
+            limit: Number(limit),
+            usage: Number(usage),
+          }
+        }
+
+        return { valid: true, message: "can", limit: Number(limit), usage: Number(usage) }
+      }
+      default:
+        return {
+          valid: false,
+          deniedReason: "ENTITLEMENT_NOT_FOUND",
+          message: "invalid entitlement type",
+        }
+    }
   }
 
   private async getPaymentMethodsData({

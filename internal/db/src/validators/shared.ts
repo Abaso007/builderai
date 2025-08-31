@@ -53,7 +53,32 @@ export const billingIntervalSchema = z.enum(BILLING_INTERVALS)
 export const billingIntervalCountSchema = z.coerce.number().int().min(1).max(12)
 export const planTypeSchema = z.enum(PLAN_TYPES)
 
-export const unpriceCustomerErrorSchema = z.enum([
+export const unpriceProjectErrorSchema = z.enum([
+  "PROJECT_FEATURES_NOT_FOUND",
+  "PROJECT_NOT_FOUND",
+  "PROJECT_NOT_ENABLED",
+])
+
+export const unpricePlanErrorSchema = z.enum(["PLAN_VERSION_NOT_FOUND"])
+
+export const deniedReasonSchema = z.enum([
+  "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE",
+  "RATE_LIMITED",
+  "CUSTOMER_SUBSCRIPTION_NOT_FOUND",
+  "ENTITLEMENT_NOT_FOUND",
+  "LIMIT_EXCEEDED",
+  "ENTITLEMENT_EXPIRED",
+  "ENTITLEMENT_NOT_ACTIVE",
+  "DO_NOT_INITIALIZED",
+  "INCORRECT_USAGE_REPORTING",
+  "ERROR_INSERTING_USAGE_DO",
+  "ERROR_INSERTING_VERIFICATION_DO",
+  "PROJECT_DISABLED",
+  "CUSTOMER_DISABLED",
+  "SUBSCRIPTION_DISABLED",
+  "FETCH_ERROR",
+  "SUBSCRIPTION_ERROR",
+  "ENTITLEMENT_ERROR",
   "SUBSCRIPTION_EXPIRED",
   "NO_DEFAULT_PLAN_FOUND",
   "SUBSCRIPTION_NOT_ACTIVE",
@@ -80,30 +105,9 @@ export const unpriceCustomerErrorSchema = z.enum([
   "CUSTOMER_PHASE_NOT_FOUND",
   "CURRENCY_MISMATCH",
   "BILLING_INTERVAL_MISMATCH",
-])
-
-export const unpriceProjectErrorSchema = z.enum([
-  "PROJECT_FEATURES_NOT_FOUND",
-  "PROJECT_NOT_FOUND",
-  "PROJECT_NOT_ENABLED",
-])
-
-export const unpricePlanErrorSchema = z.enum(["PLAN_VERSION_NOT_FOUND"])
-
-export const deniedReasonSchema = z.enum([
-  "RATE_LIMITED",
-  "CUSTOMER_SUBSCRIPTION_NOT_FOUND",
   "ENTITLEMENT_NOT_FOUND",
-  "LIMIT_EXCEEDED",
-  "ENTITLEMENT_EXPIRED",
-  "ENTITLEMENT_NOT_ACTIVE",
-  "DO_NOT_INITIALIZED",
-  "INCORRECT_USAGE_REPORTING",
-  "ERROR_INSERTING_USAGE_DO",
-  "ERROR_INSERTING_VERIFICATION_DO",
-  "PROJECT_DISABLED",
-  "CUSTOMER_DISABLED",
-  "SUBSCRIPTION_DISABLED",
+  "SUBSCRIPTION_NOT_FOUND",
+  "INVALID_ENTITLEMENT_TYPE",
 ])
 
 export const convertDateToUTC = (date: Date) => {

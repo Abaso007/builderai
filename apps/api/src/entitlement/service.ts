@@ -3,6 +3,7 @@ import type { Analytics } from "@unprice/analytics"
 import type { Stats } from "@unprice/analytics/utils"
 import type { Database } from "@unprice/db"
 import {
+  type SubscriptionCache,
   calculateFlatPricePlan,
   calculateFreeUnits,
   calculatePricePerFeature,
@@ -11,7 +12,7 @@ import {
 } from "@unprice/db/validators"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
-import type { Cache, SubcriptionCache } from "@unprice/services/cache"
+import type { Cache } from "@unprice/services/cache"
 import type { CustomerService } from "@unprice/services/customers"
 import { UnPriceCustomerError } from "@unprice/services/customers"
 import type { Metrics } from "@unprice/services/metrics"
@@ -111,23 +112,18 @@ export class EntitlementService {
     opts?: {
       skipCache?: boolean
     }
-  ): Promise<Result<SubcriptionCache, FetchError | UnPriceCustomerError>> {
+  ): Promise<Result<SubscriptionCache, FetchError | UnPriceCustomerError>> {
     const { err: subscriptionErr, val: subscription } =
-      await this.customerService.getActiveSubscription(customerId, projectId, {
-        skipCache: opts?.skipCache ?? false,
+      await this.customerService.getActiveSubscription({
+        customerId,
+        projectId,
+        opts: {
+          skipCache: opts?.skipCache ?? false,
+        },
       })
 
     if (subscriptionErr) {
       return Err(subscriptionErr)
-    }
-
-    if (!subscription) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "CUSTOMER_SUBSCRIPTION_NOT_FOUND",
-          message: "customer has no active subscription",
-        })
-      )
     }
 
     return Ok(subscription)
