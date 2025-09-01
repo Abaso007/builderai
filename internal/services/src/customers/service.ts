@@ -17,22 +17,22 @@ import {
   customers,
   features,
   planVersionFeatures,
+  projects,
   subscriptions,
 } from "@unprice/db/schema"
 import { AesGCM, newId } from "@unprice/db/utils"
-import {
-  type AggregationMethod,
-  type Customer,
-  type CustomerEntitlementExtended,
-  type CustomerPaymentMethod,
-  type CustomerSignUp,
-  type PaymentProvider,
-  type Plan,
-  type PlanVersion,
-  type Project,
-  type SubscriptionCache,
-  type SubscriptionPhaseCache,
-  customerEntitlementExtendedSchema,
+import type {
+  AggregationMethod,
+  Customer,
+  CustomerEntitlementExtended,
+  CustomerPaymentMethod,
+  CustomerSignUp,
+  PaymentProvider,
+  Plan,
+  PlanVersion,
+  Project,
+  SubscriptionCache,
+  SubscriptionPhaseCache,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
@@ -560,37 +560,77 @@ export class CustomerService {
     const millisecondsInADay = 86400000
 
     // if not found in DO, then we query the db
-    const entitlements = await this.db.query.customerEntitlements.findMany({
-      with: {
-        featurePlanVersion: {
-          columns: {
-            aggregationMethod: true,
-            featureType: true,
+    // if not found in DO, then we query the db
+    const entitlements = await this.db.query.customerEntitlements
+      .findMany({
+        with: {
+          project: {
+            columns: {
+              enabled: true,
+            },
           },
-          with: {
-            feature: {
-              columns: {
-                slug: true,
+          customer: {
+            columns: {
+              active: true,
+            },
+          },
+          subscription: {
+            columns: {
+              active: true,
+            },
+          },
+          featurePlanVersion: {
+            columns: {
+              aggregationMethod: true,
+              featureType: true,
+            },
+            with: {
+              feature: {
+                columns: {
+                  slug: true,
+                },
               },
             },
           },
         },
-      },
-      where: (entitlement, { and, eq, gte, lte, isNull, or }) =>
-        and(
-          eq(entitlement.customerId, customerId),
-          eq(entitlement.projectId, projectId),
-          eq(entitlement.active, true),
-          lte(entitlement.validFrom, now),
-          or(
-            isNull(entitlement.validTo),
-            gte(
-              sql`${entitlement.validTo} + ${entitlement.bufferPeriodDays} * ${millisecondsInADay}`,
-              now
+        where: (entitlement, { and, eq, gte, lte, isNull, or }) =>
+          and(
+            eq(entitlement.customerId, customerId),
+            eq(entitlement.projectId, projectId),
+            eq(entitlement.active, true),
+            lte(entitlement.validFrom, now),
+            or(
+              isNull(entitlement.validTo),
+              gte(
+                sql`${entitlement.validTo} + ${entitlement.bufferPeriodDays} * ${millisecondsInADay}`,
+                now
+              )
             )
-          )
-        ),
-    })
+          ),
+      })
+      .then((e) => {
+        return e.map((e) => {
+          return {
+            ...e,
+            featureType: e.featurePlanVersion.featureType,
+            aggregationMethod: e.featurePlanVersion.aggregationMethod,
+            featureSlug: e.featurePlanVersion.feature.slug,
+          }
+        })
+      })
+      .catch((e) => {
+        this.logger.error(
+          `error getting entitlement in getEntitlementData from db - ${e.message}`,
+          {
+            error: JSON.stringify(e),
+            customerId,
+            projectId,
+            now,
+          }
+        )
+
+        throw e
+      })
 
     const end = performance.now()
 
@@ -603,31 +643,7 @@ export class CustomerService {
       projectId,
     })
 
-    if (entitlements.length === 0) {
-      return null
-    }
-
-    const result = entitlements
-      .map((entitlement) => {
-        const result = customerEntitlementExtendedSchema.safeParse({
-          ...entitlement,
-          featureSlug: entitlement.featurePlanVersion.feature.slug,
-          featureType: entitlement.featurePlanVersion.featureType,
-          aggregationMethod: entitlement.featurePlanVersion.aggregationMethod,
-        })
-
-        if (!result.success) {
-          this.logger.error("error parsing entitlement", {
-            error: result.error?.toString(),
-            entitlement,
-          })
-        }
-
-        return result.data
-      })
-      .filter((r) => r !== undefined)
-
-    return result
+    return entitlements
   }
 
   public async getActiveEntitlements({
@@ -698,7 +714,7 @@ export class CustomerService {
     }
 
     if (!val) {
-      return Ok(null)
+      return Ok([])
     }
 
     return Ok(val)
@@ -726,11 +742,48 @@ export class CustomerService {
 
     const entitlement = await this.db
       .select({
-        customerEntitlement: customerEntitlements,
+        project: {
+          enabled: projects.enabled,
+        },
+        customer: {
+          active: customers.active,
+        },
+        subscription: {
+          active: subscriptions.active,
+        },
+        customerEntitlements,
         featureType: planVersionFeatures.featureType,
         aggregationMethod: planVersionFeatures.aggregationMethod,
+        featureSlug: features.slug,
       })
-      .from(customerEntitlements)
+      .from(customers)
+      .leftJoin(projects, and(eq(customers.projectId, projects.id)))
+      .leftJoin(
+        subscriptions,
+        and(
+          eq(customers.id, subscriptions.customerId),
+          eq(customers.projectId, subscriptions.projectId)
+        )
+      )
+      .leftJoin(
+        customerEntitlements,
+        and(
+          eq(customers.id, customerEntitlements.customerId),
+          eq(customers.projectId, customerEntitlements.projectId),
+          // Entitlement-specific conditions are now here:
+          eq(customerEntitlements.active, true),
+          lte(customerEntitlements.validFrom, now),
+          or(
+            isNull(customerEntitlements.validTo),
+            gte(
+              sql`(${customerEntitlements.validTo} + ${
+                customerEntitlements.bufferPeriodDays
+              } * ${millisecondsInADay})`,
+              now
+            )
+          )
+        )
+      )
       .leftJoin(
         planVersionFeatures,
         and(
@@ -748,20 +801,33 @@ export class CustomerService {
       .where(
         and(
           eq(features.slug, featureSlug),
-          eq(customerEntitlements.customerId, customerId),
-          eq(customerEntitlements.projectId, projectId),
-          eq(customerEntitlements.active, true),
-          lte(customerEntitlements.validFrom, now),
-          or(
-            isNull(customerEntitlements.validTo),
-            gte(
-              sql`${customerEntitlements.validTo} + ${customerEntitlements.bufferPeriodDays} * ${millisecondsInADay}`,
-              now
-            )
-          )
+          eq(customers.id, customerId),
+          eq(customers.projectId, projectId)
         )
       )
-      .then((e) => e[0])
+      .then((e) => {
+        const entitlement = e[0]
+
+        if (
+          !entitlement ||
+          !entitlement?.customerEntitlements?.id ||
+          !entitlement.featureType ||
+          !entitlement.aggregationMethod ||
+          !entitlement.featureSlug
+        ) {
+          return null
+        }
+
+        return {
+          ...entitlement.customerEntitlements,
+          featureType: entitlement.featureType,
+          aggregationMethod: entitlement.aggregationMethod,
+          featureSlug: entitlement.featureSlug,
+          project: entitlement.project,
+          customer: entitlement.customer,
+          subscription: entitlement.subscription,
+        } as CustomerEntitlementExtended
+      })
       .catch((e) => {
         this.logger.error(
           `error getting entitlement in getEntitlementData from db - ${e.message}`,
@@ -777,6 +843,8 @@ export class CustomerService {
         throw e
       })
 
+    console.info("entitlement", entitlement)
+
     const end = performance.now()
 
     this.metrics.emit({
@@ -789,9 +857,12 @@ export class CustomerService {
       projectId,
     })
 
-    if (!entitlement || !entitlement.featureType || !entitlement.aggregationMethod) {
+    if (!entitlement) {
       return null
     }
+
+    let usage = entitlement.usage
+    let accumulatedUsage = entitlement.accumulatedUsage
 
     // get the usage from analytics if the entitlement was updated more than 1 minute ago
     if (opts?.withLastUsage) {
@@ -799,7 +870,7 @@ export class CustomerService {
         customerId,
         projectId,
         featureSlug,
-        startAt: entitlement.customerEntitlement.validFrom,
+        startAt: entitlement.validFrom ?? Date.now(),
         endAt: now,
         aggregationMethod: entitlement.aggregationMethod,
       })
@@ -808,43 +879,27 @@ export class CustomerService {
         throw err
       }
 
-      const result = customerEntitlementExtendedSchema.safeParse({
-        ...entitlement.customerEntitlement,
-        featureType: entitlement.featureType,
-        aggregationMethod: entitlement.aggregationMethod,
-        featureSlug,
-        usage: val.usage.toString(),
-        accumulatedUsage: val.accumulatedUsage.toString(),
-      })
+      // update the usage
+      usage = val.usage.toString()
+      accumulatedUsage = val.accumulatedUsage.toString()
 
       // update the entitlement with the new usage
       this.waitUntil(
         this.db
           .update(customerEntitlements)
           .set({
-            usage: val.usage.toString(),
-            accumulatedUsage: val.accumulatedUsage.toString(),
+            usage: usage,
+            accumulatedUsage: accumulatedUsage,
             lastUsageUpdateAt: Date.now(),
           })
-          .where(eq(customerEntitlements.id, entitlement.customerEntitlement.id))
+          .where(eq(customerEntitlements.id, entitlement.id))
       )
-
-      if (!result.success) {
-        this.logger.error("error parsing entitlement", {
-          error: result.error?.toString(),
-          entitlement: result.data,
-        })
-        return null
-      }
-
-      return result.data
     }
 
     const result = {
-      ...entitlement.customerEntitlement,
-      featureType: entitlement.featureType,
-      aggregationMethod: entitlement.aggregationMethod,
-      featureSlug,
+      ...entitlement,
+      usage: usage,
+      accumulatedUsage: accumulatedUsage,
     }
 
     return result
@@ -1007,24 +1062,57 @@ export class CustomerService {
       )
     }
 
-    if (!val) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "ENTITLEMENT_NOT_FOUND",
-          message: "entitlement not found",
-        })
-      )
-    }
+    const result = val
 
     // if the entitlement is found, and the cache is skipped, update the cache
     // this is important to avoid stale data
     if (opts?.skipCache) {
-      this.waitUntil(this.cache.customerEntitlement.set(cacheKey, val))
+      this.waitUntil(this.cache.customerEntitlement.set(cacheKey, result ?? null))
+    }
+
+    if (!result || !result.subscription || !result.project || !result.customer) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "ENTITLEMENT_NOT_FOUND",
+          message:
+            "subscription, project or customer not found. Please verify the entitlement and the customer data.",
+        })
+      )
+    }
+
+    // subscription is not active
+    if (result.subscription.active === false) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "SUBSCRIPTION_NOT_ACTIVE",
+          message: "this subscription is not active",
+        })
+      )
+    }
+
+    // project is not enabled
+    if (result.project.enabled === false) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "PROJECT_DISABLED",
+          message: "this project is disabled",
+        })
+      )
+    }
+
+    // customer is not active
+    if (result.customer.active === false) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "CUSTOMER_DISABLED",
+          message: "this customer is disabled",
+        })
+      )
     }
 
     // entitlement could be expired since is in cache, validate it again
     const isValidVal = this.isValidEntitlement({
-      entitlement: val,
+      entitlement: result,
       now,
     })
 
@@ -1037,7 +1125,7 @@ export class CustomerService {
       )
     }
 
-    return Ok(val)
+    return Ok(result)
   }
 
   public setNewUsageEntitlement({

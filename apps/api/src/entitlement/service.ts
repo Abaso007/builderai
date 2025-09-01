@@ -171,6 +171,12 @@ export class EntitlementService {
     }
   }
 
+  private async updateCache(key: string, result: CanResponse) {
+    if (env.VERCEL_ENV === "production" && !result.success) {
+      this.hashCache.set(key, JSON.stringify(result))
+    }
+  }
+
   public async can(data: CanRequest): Promise<CanResponse> {
     const key = `${data.customerId}:${data.featureSlug}:${data.projectId}`
     const cached = this.hashCache.get(key)
@@ -201,54 +207,56 @@ export class EntitlementService {
       )
 
       if (err) {
-        return {
+        const result = {
           success: false,
           message: err.message,
           deniedReason: err.code as DenyReason,
         }
+        // update cache
+        this.updateCache(key, result)
+
+        return result
       }
 
       const validEntitlement = this.customerService.entitlementGuard({
-        entitlement,
+        entitlement: entitlement,
         now: data.timestamp,
         opts: {
           allowOverage: false,
         },
       })
 
-      if (!validEntitlement.valid) {
-        const result = {
-          success: false,
-          message: validEntitlement.message,
-          deniedReason: validEntitlement.deniedReason,
-          limit: validEntitlement.limit,
-          usage: validEntitlement.usage,
-        }
-
-        // report the verification event to the DO
-        this.waitUntil(
-          durableObject.insertVerification({
-            entitlement,
-            success: false,
-            deniedReason: validEntitlement.deniedReason,
-            data,
-            latency: performance.now() - data.performanceStart,
-          })
-        )
-
-        // save in memory cache
-        this.hashCache.set(key, JSON.stringify(result))
-
-        // return the result
-        return result
-      }
-
-      return {
-        success: true,
+      const result = {
+        success: validEntitlement.valid,
         message: validEntitlement.message,
+        deniedReason: validEntitlement.deniedReason,
         limit: validEntitlement.limit,
         usage: validEntitlement.usage,
       }
+
+      // report the verification event to the DO
+      this.waitUntil(
+        durableObject.insertVerification({
+          entitlement: entitlement,
+          success: validEntitlement.valid,
+          deniedReason: validEntitlement.deniedReason,
+          // add async to the metadata to keep track of the request
+          data: {
+            ...data,
+            metadata: {
+              ...data.metadata,
+              async: true,
+            },
+          },
+          latency: performance.now() - data.performanceStart,
+        })
+      )
+
+      // save in memory cache
+      this.updateCache(key, result)
+
+      // return the result
+      return result
     }
 
     // this is the most expensive call in terms of latency

@@ -610,48 +610,6 @@ export class DurableObjectUsagelimiter extends Server {
       }
     }
 
-    const startLatencySubscription = performance.now()
-    // get the subscription
-    const { err: subscriptionErr } = await this.getSubscription({
-      customerId: data.customerId,
-      projectId: data.projectId,
-      now: data.timestamp,
-    })
-
-    console.info("subscriptionErr", subscriptionErr)
-    const endLatencySubscription = performance.now()
-    console.info(`getSubscription latency: ${endLatencySubscription - startLatencySubscription}ms`)
-
-    if (subscriptionErr) {
-      // TODO: if subscription not found anymore, lets send the events that the object have
-      // and reset the object
-
-      if (subscriptionErr instanceof UnPriceCustomerError) {
-        return {
-          success: false,
-          message: subscriptionErr.message,
-          deniedReason: subscriptionErr.code as DenyReason,
-        }
-      }
-
-      if (subscriptionErr instanceof FetchError) {
-        return {
-          success: false,
-          message: subscriptionErr.message,
-          deniedReason: "FETCH_ERROR",
-        }
-      }
-
-      return {
-        success: false,
-        message: "error getting subscription from do.",
-        deniedReason: "SUBSCRIPTION_ERROR",
-      }
-    }
-
-    // i need to know the latency of the request
-    const startLatency = performance.now()
-
     // get the entitlement
     const { err, val: entitlement } = await this.getEntitlement({
       customerId: data.customerId,
@@ -659,9 +617,6 @@ export class DurableObjectUsagelimiter extends Server {
       featureSlug: data.featureSlug,
       now: data.timestamp,
     })
-
-    const endLatency = performance.now()
-    console.info(`getEntitlement latency: ${endLatency - startLatency}ms`)
 
     if (err) {
       if (err instanceof UnPriceCustomerError) {
@@ -736,37 +691,6 @@ export class DurableObjectUsagelimiter extends Server {
         success: false,
         message: "DO not initialized",
         deniedReason: "DO_NOT_INITIALIZED",
-      }
-    }
-
-    // get the subscription
-    const { err: subscriptionErr } = await this.getSubscription({
-      customerId: data.customerId,
-      projectId: data.projectId,
-      now: data.timestamp,
-    })
-
-    if (subscriptionErr) {
-      if (subscriptionErr instanceof UnPriceCustomerError) {
-        return {
-          success: false,
-          message: subscriptionErr.message,
-          deniedReason: subscriptionErr.code as DenyReason,
-        }
-      }
-
-      if (subscriptionErr instanceof FetchError) {
-        return {
-          success: false,
-          message: subscriptionErr.message,
-          deniedReason: "FETCH_ERROR",
-        }
-      }
-
-      return {
-        success: false,
-        message: "error getting subscription from do.",
-        deniedReason: "SUBSCRIPTION_ERROR",
       }
     }
 

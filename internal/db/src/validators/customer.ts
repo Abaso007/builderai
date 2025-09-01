@@ -244,6 +244,15 @@ export const customerEntitlementExtendedSchema = customerEntitlementSchema.exten
   featureType: typeFeatureSchema,
   aggregationMethod: aggregationMethodSchema,
   featureSlug: z.string(),
+  project: z.object({
+    enabled: z.boolean(),
+  }),
+  customer: z.object({
+    active: z.boolean(),
+  }),
+  subscription: z.object({
+    active: z.boolean(),
+  }),
 })
 
 export const customerPaymentMethodSchema = z.object({
