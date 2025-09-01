@@ -662,10 +662,27 @@ export class DurableObjectUsagelimiter extends Server {
     if (subscriptionErr) {
       // TODO: if subscription not found anymore, lets send the events that the object have
       // and reset the object
+
+      if (subscriptionErr instanceof UnPriceCustomerError) {
+        return {
+          success: false,
+          message: subscriptionErr.message,
+          deniedReason: subscriptionErr.code as DenyReason,
+        }
+      }
+
+      if (subscriptionErr instanceof FetchError) {
+        return {
+          success: false,
+          message: subscriptionErr.message,
+          deniedReason: "FETCH_ERROR",
+        }
+      }
+
       return {
         success: false,
-        message: subscriptionErr.message,
-        deniedReason: subscriptionErr.code as DenyReason,
+        message: "error getting subscription from do.",
+        deniedReason: "SUBSCRIPTION_ERROR",
       }
     }
 
@@ -684,10 +701,26 @@ export class DurableObjectUsagelimiter extends Server {
     console.info(`getEntitlement latency: ${endLatency - startLatency}ms`)
 
     if (err) {
+      if (err instanceof UnPriceCustomerError) {
+        return {
+          success: false,
+          message: err.message,
+          deniedReason: err.code as DenyReason,
+        }
+      }
+
+      if (err instanceof FetchError) {
+        return {
+          success: false,
+          message: err.message,
+          deniedReason: "FETCH_ERROR",
+        }
+      }
+
       return {
         success: false,
-        message: err.message,
-        deniedReason: err.code as DenyReason,
+        message: "error getting entitlement from do.",
+        deniedReason: "ENTITLEMENT_ERROR",
       }
     }
 
@@ -751,10 +784,26 @@ export class DurableObjectUsagelimiter extends Server {
     })
 
     if (subscriptionErr) {
+      if (subscriptionErr instanceof UnPriceCustomerError) {
+        return {
+          success: false,
+          message: subscriptionErr.message,
+          deniedReason: subscriptionErr.code as DenyReason,
+        }
+      }
+
+      if (subscriptionErr instanceof FetchError) {
+        return {
+          success: false,
+          message: subscriptionErr.message,
+          deniedReason: "FETCH_ERROR",
+        }
+      }
+
       return {
         success: false,
-        message: subscriptionErr.message,
-        deniedReason: subscriptionErr.code as DenyReason,
+        message: "error getting subscription from do.",
+        deniedReason: "SUBSCRIPTION_ERROR",
       }
     }
 
@@ -767,10 +816,26 @@ export class DurableObjectUsagelimiter extends Server {
     })
 
     if (err) {
+      if (err instanceof UnPriceCustomerError) {
+        return {
+          success: false,
+          message: err.message,
+          deniedReason: err.code as DenyReason,
+        }
+      }
+
+      if (err instanceof FetchError) {
+        return {
+          success: false,
+          message: err.message,
+          deniedReason: "FETCH_ERROR",
+        }
+      }
+
       return {
         success: false,
-        message: err.message,
-        deniedReason: err.code as DenyReason,
+        message: "error getting entitlement from do.",
+        deniedReason: "ENTITLEMENT_ERROR",
       }
     }
 

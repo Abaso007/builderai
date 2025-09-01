@@ -15,7 +15,6 @@ export const env = createEnv({
   server: {
     UNPRICE_API_KEY: z.string(),
     UNPRICE_API_URL: z.string().url(),
-    FLAGS_SECRET: z.string(),
   },
   runtimeEnv: process.env,
   skipValidation: !!process.env.SKIP_ENV_VALIDATION || process.env.npm_lifecycle_event === "lint",

@@ -41,7 +41,7 @@ export class ConsoleLogger implements Logger {
     // don't show colored output in production mode because it's not readable
     const coloredOutput = this.environment !== "production"
     console.debug(
-      coloredOutput ? "\x1b[32m%s\x1b[0m" : "%s",
+      coloredOutput ? "\x1b[32m%s\x1b[0m" : undefined,
       "debug",
       "-",
       this.marshal("debug", message, fields)
@@ -56,7 +56,7 @@ export class ConsoleLogger implements Logger {
     // don't show colored output in production mode because it's not readable
     const coloredOutput = this.environment !== "production"
     console.info(
-      coloredOutput ? "\x1b[36m%s\x1b[0m" : "%s",
+      coloredOutput ? "\x1b[36m%s\x1b[0m" : undefined,
       "info",
       "-",
       this.marshal("info", message, fields)
@@ -66,7 +66,7 @@ export class ConsoleLogger implements Logger {
     // don't show colored output in production mode because it's not readable
     const coloredOutput = this.environment !== "production"
     console.warn(
-      coloredOutput ? "\x1b[33m%s\x1b[0m" : "%s",
+      coloredOutput ? "\x1b[33m%s\x1b[0m" : undefined,
       "warn",
       "-",
       this.marshal("warn", message, fields)
@@ -76,7 +76,7 @@ export class ConsoleLogger implements Logger {
     // don't show colored output in production mode because it's not readable
     const coloredOutput = this.environment !== "production"
     console.error(
-      coloredOutput ? "\x1b[31m%s\x1b[0m" : "%s",
+      coloredOutput ? "\x1b[31m%s\x1b[0m" : undefined,
       "error",
       "-",
       this.marshal("error", message, fields)
@@ -86,7 +86,7 @@ export class ConsoleLogger implements Logger {
     // don't show colored output in production mode because it's not readable
     const coloredOutput = this.environment !== "production"
     console.error(
-      coloredOutput ? "\x1b[31m%s\x1b[0m" : "%s",
+      coloredOutput ? "\x1b[31m%s\x1b[0m" : undefined,
       "fatal",
       "-",
       this.marshal("fatal", message, fields)

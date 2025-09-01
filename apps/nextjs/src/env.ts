@@ -18,6 +18,11 @@ export const env = createEnv({
     ENCRYPTION_KEY: z.string(),
     AXIOM_API_TOKEN: z.string(),
     AXIOM_DATASET: z.string(),
+    FLAGS_SECRET: z
+      .string()
+      .describe(
+        "This secret is used to encrypt and sign overrides, and so Flags Explorer can make authenticated requests to the /.well-known/vercel/flags"
+      ),
   },
   runtimeEnv: process.env,
   clientPrefix: "NEXT_PUBLIC_",

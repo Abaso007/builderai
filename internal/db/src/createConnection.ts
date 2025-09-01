@@ -27,6 +27,19 @@ export function createConnection(opts: ConnectionDatabaseOptions): Database {
     return db as Database
   }
 
+  console.info("createConnection", opts)
+
+  // because an error in cloudflare read1DatabaseUrl is equal to  """"
+  // we need to parse that and make it a string
+  if (opts.read1DatabaseUrl === "" || opts.read1DatabaseUrl?.toString() === "") {
+    opts.read1DatabaseUrl = undefined
+  }
+  if (opts.read2DatabaseUrl === "" || opts.read2DatabaseUrl?.toString() === "") {
+    opts.read2DatabaseUrl = undefined
+  }
+
+  console.info("createConnection", opts)
+
   if (opts.env === "development") {
     neonConfig.wsProxy = (host) => {
       return `${host}:5433/v1?address=db:5432`
@@ -81,11 +94,7 @@ export function createConnection(opts: ConnectionDatabaseOptions): Database {
   )
 
   db =
-    opts.env === "production" &&
-    opts.read1DatabaseUrl &&
-    opts.read2DatabaseUrl &&
-    opts.read1DatabaseUrl !== "" &&
-    opts.read2DatabaseUrl !== ""
+    opts.env === "production" && opts.read1DatabaseUrl && opts.read2DatabaseUrl
       ? withReplicas(primary, [read1, read2])
       : withReplicas(primary, [primary])
 
