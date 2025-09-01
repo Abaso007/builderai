@@ -591,33 +591,30 @@ export class DurableObjectUsagelimiter extends Server {
     }
   }
 
-  private async insertVerification(
-    entitlement: {
-      entitlementId: string
-      customerId: string
-      projectId: string
-      featureSlug: string
-      requestId: string
-      metadata: string | null
-      featurePlanVersionId: string
-      subscriptionItemId: string | null
-      subscriptionPhaseId: string | null
-      subscriptionId: string | null
-    },
-    data: CanRequest,
-    latency: number,
+  private async insertVerification({
+    entitlement,
+    data,
+    latency,
+    deniedReason,
+    success,
+  }: {
+    entitlement: CustomerEntitlementExtended
+    data: CanRequest
+    latency: number
     deniedReason?: DenyReason
-  ) {
+    success: boolean
+  }) {
     return this.db
       .insert(verifications)
       .values({
-        entitlementId: entitlement.entitlementId,
+        entitlementId: entitlement.id,
         customerId: data.customerId,
         projectId: data.projectId,
         featureSlug: data.featureSlug,
         requestId: data.requestId,
         timestamp: data.timestamp,
         createdAt: Date.now(),
+        success: success ? 1 : 0,
         latency: latency.toString() ?? "0",
         metadata: data.metadata ? JSON.stringify(data.metadata) : null,
         deniedReason: deniedReason,
@@ -737,25 +734,16 @@ export class DurableObjectUsagelimiter extends Server {
     await this.ensureAlarmIsSet(data.secondsToLive)
 
     // insert verification this is zero latency
-    const verification = await this.insertVerification(
-      {
-        entitlementId: entitlement.id,
-        customerId: data.customerId,
-        projectId: data.projectId,
-        featureSlug: data.featureSlug,
-        requestId: data.requestId,
-        metadata: JSON.stringify(data.metadata),
-        featurePlanVersionId: entitlement.featurePlanVersionId,
-        subscriptionItemId: entitlement.subscriptionItemId,
-        subscriptionPhaseId: entitlement.subscriptionPhaseId,
-        subscriptionId: entitlement.subscriptionId,
-      },
+    const verification = await this.insertVerification({
+      entitlement,
+      success: entitlementGuardResult.valid,
+      deniedReason: entitlementGuardResult.deniedReason,
       data,
-      performance.now() - data.performanceStart,
-      entitlementGuardResult.deniedReason
-    )
+      latency: performance.now() - data.performanceStart,
+    })
 
     if (!verification?.id) {
+      // TODO: send notification error
       return {
         success: false,
         message: "error inserting verification from do, please try again later",

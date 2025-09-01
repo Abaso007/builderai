@@ -40,30 +40,4 @@ export function createRuntimeEnv(workerEnv: Record<string, string | number | boo
   })
 }
 
-// export const env = createEnv({
-//   shared: {
-//     NODE_ENV: z.enum(["development", "test", "production", "preview"]).default("development"),
-//   },
-//   server: {
-//     AUTH_SECRET: z.string(),
-//     VERSION: z.string().default("unknown"),
-//     usagelimit: z.custom<DurableObjectNamespace<DurableObjectUsagelimiter>>(
-//       (ns) => typeof ns === "object"
-//     ),
-//     projectdo: z.custom<DurableObjectNamespace<DurableObjectProject>>(
-//       (ns) => typeof ns === "object"
-//     ),
-//     RL_FREE_600_60s: cloudflareRatelimiter,
-//     CLOUDFLARE_ZONE_ID: z.string().optional(),
-//     CLOUDFLARE_API_TOKEN: z.string().optional(),
-//   },
-//   emptyStringAsUndefined: true,
-//   runtimeEnv: process.env,
-//   extends: [envServices, envDb, envAnalytics, envLogging],
-//   skipValidation: !!process.env.SKIP_ENV_VALIDATION || process.env.npm_lifecycle_event === "lint",
-//   onValidationError: (issues: readonly StandardSchemaV1.Issue[]) => {
-//     throw new Error(`Invalid environment variables in API: ${JSON.stringify(issues, null, 2)}`)
-//   },
-// })
-
 export type Env = ReturnType<typeof createRuntimeEnv>
