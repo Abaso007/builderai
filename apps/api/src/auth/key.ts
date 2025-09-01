@@ -20,6 +20,22 @@ export async function keyAuth(c: Context<HonoEnv>) {
   const { apikey } = c.get("services")
 
   // start a new timer
+  startTime(c, "rateLimitApiKey")
+
+  // rate limit the apikey
+  const result = await apikey.rateLimit(c, { key: authorization })
+
+  // end the timer
+  endTime(c, "rateLimitApiKey")
+
+  if (!result) {
+    throw new UnpriceApiError({
+      code: "RATE_LIMITED",
+      message: "apikey rate limit exceeded",
+    })
+  }
+
+  // start a new timer
   startTime(c, "verifyApiKey")
 
   const { val: key, err } = await apikey.verifyApiKey(c, {

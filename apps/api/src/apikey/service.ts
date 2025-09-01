@@ -121,7 +121,6 @@ export class ApiKeysService {
   }
 
   private async _getApiKey(
-    c: Context,
     req: {
       key: string
     },
@@ -183,18 +182,6 @@ export class ApiKeysService {
       )
     }
 
-    // rate limit the apikey
-    const result = await this.rateLimit(c, { keyHash: keyHash })
-
-    if (!result) {
-      return Err(
-        new UnPriceApiKeyError({
-          code: "RATE_LIMIT_EXCEEDED",
-          message: "apikey rate limit exceeded",
-        })
-      )
-    }
-
     return Ok(data)
   }
 
@@ -208,7 +195,6 @@ export class ApiKeysService {
       const { key } = req
 
       const result = await this._getApiKey(
-        c,
         {
           key,
         },
@@ -222,7 +208,6 @@ export class ApiKeysService {
 
         await this.cache.apiKeyByHash.remove(await this.hash(req.key))
         return await this._getApiKey(
-          c,
           {
             key,
           },
@@ -298,12 +283,15 @@ export class ApiKeysService {
     }
   }
 
-  public async rateLimit(c: Context, req: { keyHash: string }) {
-    // TODO: change this for PRO and FREE plans
-    const limiter = c.env.RL_FREE_600_60s
-    const result = await limiter.limit({ key: req.keyHash })
+  public async rateLimit(c: Context, req: { key: string }) {
+    // hash the key
+    const keyHash = await this.hash(req.key)
 
-    const start = c.get("performanceStart") as number
+    // TODO: change this for PRO and FREE plans
+    const start = performance.now()
+    const limiter = c.env.RL_FREE_600_60s
+    const result = await limiter.limit({ key: keyHash })
+    const end = performance.now()
     const workspaceId = c.get("workspaceId") as string
 
     if (result.success) {
@@ -313,8 +301,8 @@ export class ApiKeysService {
           this.metrics.emit({
             metric: "metric.ratelimit",
             workspaceId,
-            identifier: req.keyHash,
-            latency: performance.now() - start,
+            identifier: keyHash,
+            latency: end - start,
             mode: "cloudflare",
             success: result.success,
             error: !result.success,
