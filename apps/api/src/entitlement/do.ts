@@ -72,8 +72,12 @@ export class DurableObjectUsagelimiter extends Server {
     this.db = drizzle(ctx.storage, { logger: false })
 
     // set a revalidation period of 5 secs for development
-    if (env.NODE_ENV === "development") {
-      this.UPDATE_PERIOD = 1000 * 5 // 5 secs
+    if (env.VERCEL_ENV === "development") {
+      this.UPDATE_PERIOD = 1000 * 10 // 10 secs
+    }
+    // set a revalidation period of 5 mins for preview
+    if (env.VERCEL_ENV === "preview") {
+      this.UPDATE_PERIOD = 1000 * 60 * 1 // 1 mins
     }
 
     this.analytics = new Analytics({
@@ -1132,7 +1136,7 @@ export class DurableObjectUsagelimiter extends Server {
       for (const event of events) {
         // in dev we use the idempotence key and timestamp to deduplicate so we can test the usage
         const key =
-          env.NODE_ENV === "production"
+          env.VERCEL_ENV === "production"
             ? `${event.idempotenceKey}`
             : `${event.idempotenceKey}-${event.timestamp}`
 

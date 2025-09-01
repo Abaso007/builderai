@@ -179,7 +179,7 @@ export class EntitlementService {
     // only for request that are denied.
     // we don't use the normal swr cache here because it doesn't make sense to call
     // the cache layer, the idea is to speed up the next request
-    if (cached && env.NODE_ENV === "production") {
+    if (cached && env.VERCEL_ENV === "production") {
       const result = JSON.parse(cached) as CanResponse
 
       // TODO: we could still send the verification event to the DO
@@ -203,7 +203,7 @@ export class EntitlementService {
   public async reportUsage(data: ReportUsageRequest): Promise<ReportUsageResponse> {
     // in dev we use the idempotence key and timestamp to deduplicate reuse the same key for the same request
     const idempotentKey =
-      env.NODE_ENV === "production"
+      env.VERCEL_ENV === "production"
         ? `${data.idempotenceKey}`
         : `${data.idempotenceKey}:${data.timestamp}`
 
