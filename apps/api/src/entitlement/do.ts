@@ -24,7 +24,7 @@ import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/me
 interface UsageLimiterConfig {
   subscription:
     | (SubscriptionCache & {
-        lastUsageUpdateAt?: number
+        lastUpdatedAt: number
       })
     | null
   entitlements: CustomerEntitlementExtended[]
@@ -59,7 +59,7 @@ export class DurableObjectUsagelimiter extends Server {
   // debounce delay for the broadcast events
   private readonly DEBOUNCE_DELAY = 1000 * 1 // 1 second
   // update period for the entitlements for invalidation
-  private readonly UPDATE_PERIOD = 1000 * 5 // 5 mins
+  private UPDATE_PERIOD = 1000 * 60 * 60 * 24 // 24 hours
 
   // hibernate the do when no websocket nor connections are active
   static options = {
@@ -70,6 +70,11 @@ export class DurableObjectUsagelimiter extends Server {
     super(ctx, env)
 
     this.db = drizzle(ctx.storage, { logger: false })
+
+    // set a revalidation period of 5 secs for development
+    if (env.NODE_ENV === "development") {
+      this.UPDATE_PERIOD = 1000 * 5 // 5 secs
+    }
 
     this.analytics = new Analytics({
       emit: env.EMIT_ANALYTICS.toString() === "true",
@@ -183,29 +188,22 @@ export class DurableObjectUsagelimiter extends Server {
     }
   }
 
-  private async updateConfig(data: {
-    entitlements?: CustomerEntitlementExtended[]
-    subscription?: UsageLimiterConfig["subscription"]
-  }) {
-    if (data.entitlements) {
-      await this.ctx.storage.put("config", {
-        ...data,
-        entitlements: data.entitlements?.filter((e) => e?.id !== undefined) ?? [],
-      })
-    }
-
-    if (data.subscription) {
-      await this.ctx.storage.put("config", {
-        ...data,
-        subscription: data.subscription ?? this.subscription,
-      })
-    }
+  private async updateConfig(config: UsageLimiterConfig) {
+    const cleanedEntitlements = config.entitlements?.filter((e) => e?.id !== undefined)
+    await this.ctx.storage.put("config", {
+      ...config,
+      // clean the config from undefined entitlements
+      entitlements: cleanedEntitlements.length > 0 ? cleanedEntitlements : [],
+    })
   }
 
   private async updateSubscription(subscription: UsageLimiterConfig["subscription"]) {
+    const config = await this.getConfig()
+
     // update the config
     await this.updateConfig({
       subscription,
+      entitlements: config.entitlements,
     })
 
     // update the state
@@ -216,13 +214,15 @@ export class DurableObjectUsagelimiter extends Server {
 
   private async updateEntitlement(entitlement: CustomerEntitlementExtended) {
     const config = await this.getConfig()
-    const entitlements = config.entitlements.filter(
-      (e) => e.featureSlug !== entitlement.featureSlug
-    )
+
+    // remove the entitlement from the config
+    const entitlements = config.entitlements.filter((e) => e.id !== entitlement.id)
+    // add the entitlement to the config
     entitlements.push(entitlement)
 
     // update the config
     await this.updateConfig({
+      subscription: config.subscription,
       entitlements,
     })
 
@@ -253,15 +253,13 @@ export class DurableObjectUsagelimiter extends Server {
       forceRefresh?: boolean
     }
   }): Promise<Result<CustomerEntitlementExtended, FetchError | UnPriceCustomerError>> {
-    // get the config
-    const config = await this.getConfig()
-    // get the entitlement from the config
-    let entitlement = config.entitlements.find((e) => e.featureSlug === featureSlug)
+    // get entitlement from memory
+    let entitlement = this.featuresUsage.get(featureSlug)
     // if the last update is more than UPDATE_PERIOD, refresh the entitlements
     const timeToRefresh = entitlement
       ? entitlement.lastUsageUpdateAt + this.UPDATE_PERIOD - now < 0
       : true
-    const shouldRefresh = timeToRefresh || opts?.forceRefresh
+    const shouldRefresh = timeToRefresh ?? opts?.forceRefresh
 
     // to improve performance allow this request to return the entitlement that already exists in the DO
     // and update the entitlement in the DO in the background
@@ -281,10 +279,7 @@ export class DurableObjectUsagelimiter extends Server {
           return Err(err)
         }
 
-        // if the entitlement is found, assign it to the entitlement
-        if (val) {
-          entitlement = val
-        }
+        entitlement = val
       }
 
       // revalidate in background is found in the first time but should refresh
@@ -302,9 +297,9 @@ export class DurableObjectUsagelimiter extends Server {
     // and the entitlement is not found, return an error
     if (!entitlement?.id) {
       return Err(
-        new FetchError({
+        new UnPriceCustomerError({
           message: "entitlement not found",
-          retry: false,
+          code: "ENTITLEMENT_NOT_FOUND",
         })
       )
     }
@@ -312,11 +307,11 @@ export class DurableObjectUsagelimiter extends Server {
     // placeholder is used to avoid spamming the db with requests when entitlement is not found
     if (entitlement?.id === "placeholder") {
       return Err(
-        new FetchError({
+        new UnPriceCustomerError({
           message: `DO: Entitlement not found, entitlement will be refreshed in ${Math.round(
             (entitlement.lastUsageUpdateAt + this.UPDATE_PERIOD - now) / 1000
           )} seconds`,
-          retry: false,
+          code: "ENTITLEMENT_NOT_FOUND",
         })
       )
     }
@@ -335,7 +330,7 @@ export class DurableObjectUsagelimiter extends Server {
     opts?: {
       skipCache?: boolean
     }
-  }) {
+  }): Promise<Result<UsageLimiterConfig["subscription"], FetchError | UnPriceCustomerError>> {
     const { err, val } = await this.customerService.getActiveSubscription({
       customerId,
       projectId,
@@ -345,16 +340,30 @@ export class DurableObjectUsagelimiter extends Server {
     })
 
     if (err) {
+      this.logger.error("error revalidating subscription", {
+        error: err.message,
+      })
+
+      // update the state to null
+      this.updateSubscription({
+        id: "placeholder",
+        lastUpdatedAt: Date.now(),
+        customerId,
+        projectId,
+        active: false,
+      } as unknown as UsageLimiterConfig["subscription"])
       return Err(err)
     }
 
-    // update the state
-    this.updateSubscription({
+    const subscription = {
       ...val,
-      lastUsageUpdateAt: Date.now(),
-    })
+      lastUpdatedAt: Date.now(),
+    }
 
-    return Ok(val)
+    // update the state
+    this.updateSubscription(subscription)
+
+    return Ok(subscription)
   }
 
   private async getSubscription({
@@ -369,18 +378,19 @@ export class DurableObjectUsagelimiter extends Server {
     opts?: {
       skipCache?: boolean
     }
-  }): Promise<Result<SubscriptionCache, FetchError | UnPriceCustomerError>> {
-    const subscriptionState = this.subscription
+  }): Promise<Result<UsageLimiterConfig["subscription"], FetchError | UnPriceCustomerError>> {
+    let subscriptionState = this.subscription
+
     // try to refresh the subscription
     const shouldRefresh = subscriptionState
-      ? subscriptionState?.lastUsageUpdateAt &&
-        subscriptionState.lastUsageUpdateAt + this.UPDATE_PERIOD - now < 0
+      ? subscriptionState?.lastUpdatedAt &&
+        subscriptionState.lastUpdatedAt + this.UPDATE_PERIOD - now < 0
       : true
 
     // if subscription is in state validate it
     if (shouldRefresh) {
       // stale while revalidate pattern
-      if (!subscriptionState?.id) {
+      if (!subscriptionState?.id || subscriptionState?.id === "placeholder") {
         const { err: subscriptionErr, val: subscription } = await this.revalidateSubscription({
           customerId,
           projectId,
@@ -393,28 +403,35 @@ export class DurableObjectUsagelimiter extends Server {
           return Err(subscriptionErr)
         }
 
-        return Ok(subscription)
+        subscriptionState = subscription
       }
 
       this.ctx.waitUntil(
         this.revalidateSubscription({
           customerId,
           projectId,
-          opts: {
-            skipCache: opts?.skipCache ?? false,
-          },
+          opts,
         })
       )
-
-      return Ok(subscriptionState)
     }
 
     // if not found, return an error
-    if (!subscriptionState) {
+    if (!subscriptionState?.id) {
       return Err(
         new UnPriceCustomerError({
-          message: "subscription not found",
-          code: "CUSTOMER_SUBSCRIPTION_NOT_FOUND",
+          message: "subscription not found or is not active for this customer",
+          code: "SUBSCRIPTION_NOT_FOUND",
+        })
+      )
+    }
+
+    if (subscriptionState?.id === "placeholder") {
+      return Err(
+        new UnPriceCustomerError({
+          message: `DO: Subscription not found or is not active for this customer, subscription will be refreshed in ${Math.round(
+            (subscriptionState.lastUpdatedAt + this.UPDATE_PERIOD - now) / 1000
+          )} seconds`,
+          code: "SUBSCRIPTION_NOT_FOUND",
         })
       )
     }
@@ -452,6 +469,16 @@ export class DurableObjectUsagelimiter extends Server {
       this.logger.error("error getting entitlement from do", {
         error: err.message,
       })
+      // if the entitlement is not found we want to keep a placeholder
+      // so in future request don't spam the db
+      const placeholderEntitlement = {
+        id: "placeholder",
+        featureSlug: featureSlug,
+        lastUsageUpdateAt: now,
+      } as CustomerEntitlementExtended
+
+      await this.updateEntitlement(placeholderEntitlement)
+
       return Err(err)
     }
 
@@ -653,6 +680,7 @@ export class DurableObjectUsagelimiter extends Server {
       now: data.timestamp,
     })
 
+    console.info("subscriptionErr", subscriptionErr)
     const endLatencySubscription = performance.now()
     console.info(`getSubscription latency: ${endLatencySubscription - startLatencySubscription}ms`)
 
@@ -1225,6 +1253,8 @@ export class DurableObjectUsagelimiter extends Server {
     // send the current usage and verifications to tinybird
     await this.sendUsageToTinybird()
     await this.sendVerificationsToTinybird()
+
+    console.info("resetting DO")
 
     let slugs: string[] = []
 

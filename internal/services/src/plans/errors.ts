@@ -20,7 +20,7 @@ export class UnPricePlanError extends BaseError<{ projectId?: string }> {
     message?: string
   }) {
     super({
-      message: `Plan service error: ${message}`,
+      message: message ?? "",
       context: {
         projectId,
       },

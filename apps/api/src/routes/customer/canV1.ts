@@ -116,12 +116,12 @@ export const registerCanV1 = (app: App) =>
             return
           }
 
-          const shouldReportUsage =
-            !unPriceCustomer.project.workspace.isInternal &&
-            !unPriceCustomer.project.workspace.isMain
+          // main or inrernal don't report usage
+          const shouldNotReportUsage =
+            unPriceCustomer.project.workspace.isMain || unPriceCustomer.project.workspace.isInternal
 
           // if the unprice customer is internal or main, we don't need to report the usage
-          if (shouldReportUsage) {
+          if (shouldNotReportUsage) {
             return
           }
 

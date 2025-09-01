@@ -266,6 +266,8 @@ export class CustomerService {
       skipCache: boolean
     }
   }): Promise<Result<SubscriptionCache, FetchError | UnPriceCustomerError>> {
+    const cacheKey = `${projectId}:${customerId}`
+
     if (opts?.skipCache) {
       this.logger.info("skipping cache for getActiveSubscription", {
         customerId,
@@ -295,7 +297,7 @@ export class CustomerService {
       : await retry(
           3,
           async () =>
-            this.cache.customerSubscription.swr(`${projectId}:${customerId}`, () =>
+            this.cache.customerSubscription.swr(cacheKey, () =>
               this.getActiveSubscriptionData({
                 customerId,
                 projectId,

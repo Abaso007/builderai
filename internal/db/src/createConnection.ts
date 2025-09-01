@@ -26,7 +26,6 @@ export function createConnection(opts: ConnectionDatabaseOptions): Database {
   if (db && opts.singleton) {
     return db as Database
   }
-  console.info("createConnection", opts)
 
   // because an error in cloudflare read1DatabaseUrl is equal to  """"
   // we need to parse that and make it a string
@@ -44,8 +43,6 @@ export function createConnection(opts: ConnectionDatabaseOptions): Database {
   ) {
     opts.read2DatabaseUrl = undefined
   }
-
-  console.info("createConnection", opts)
 
   if (opts.env === "development") {
     neonConfig.wsProxy = (host) => {

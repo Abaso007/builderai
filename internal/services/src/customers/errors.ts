@@ -20,7 +20,7 @@ export class UnPriceCustomerError extends BaseError<{ customerId?: string }> {
     message?: string
   }) {
     super({
-      message: `Customer service error: ${message}`,
+      message: message ?? "",
       context: {
         customerId,
       },

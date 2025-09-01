@@ -6,7 +6,7 @@ export class UnPriceCalculationError extends BaseError {
 
   constructor({ message }: { message: string }) {
     super({
-      message: `Failed to calculate price: ${message}`,
+      message: message ?? "",
     })
   }
 }
@@ -17,7 +17,7 @@ export class UnPriceSubscriptionError extends BaseError {
 
   constructor({ message }: { message: string }) {
     super({
-      message: `Failed to create subscription: ${message}`,
+      message: message ?? "",
     })
   }
 }

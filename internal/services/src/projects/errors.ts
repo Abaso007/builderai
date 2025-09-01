@@ -20,7 +20,7 @@ export class UnPriceProjectError extends BaseError<{ projectId?: string }> {
     message?: string
   }) {
     super({
-      message: `Project service error: ${message}`,
+      message: message ?? "",
       context: {
         projectId,
       },

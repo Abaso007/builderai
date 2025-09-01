@@ -27,7 +27,7 @@ export class UnPriceApiKeyError extends BaseError<{ customerId: string }> {
     message?: string
   }) {
     super({
-      message: `Apikey API error: ${message}`,
+      message: message ?? "",
     })
     this.code = code
   }
