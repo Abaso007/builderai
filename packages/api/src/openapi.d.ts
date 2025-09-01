@@ -743,11 +743,6 @@ export interface operations {
            */
           featureSlug: string
           /**
-           * @description The timestamp of the request
-           * @example 1717852800
-           */
-          timestamp?: number
-          /**
            * @description The usage
            * @example 30
            */
@@ -879,14 +874,34 @@ export interface operations {
         content: {
           "application/json": {
             entitlements: {
-              featureSlug: string
+              id: string
+              projectId: string
+              createdAtM: number
+              updatedAtM: number
+              customerId: string
+              subscriptionId: string
+              featurePlanVersionId: string
+              subscriptionItemId: string | null
+              subscriptionPhaseId: string | null
+              limit: number | null
+              units: number | null
+              usage: string
+              accumulatedUsage: string
+              realtime: boolean
+              /** @enum {string} */
+              type: "feature" | "addon"
               validFrom: number
               validTo: number | null
+              bufferPeriodDays: number
+              resetedAt: number
+              active: boolean
+              isCustom: boolean
+              lastUsageUpdateAt: number
+              metadata: {
+                [key: string]: (string | number | boolean | unknown | unknown) | undefined
+              } | null
               /** @enum {string} */
               featureType: "flat" | "tier" | "package" | "usage"
-              usage: string
-              limit: number | null
-              featurePlanVersionId: string
               /** @enum {string} */
               aggregationMethod:
                 | "sum"
@@ -896,8 +911,16 @@ export interface operations {
                 | "count_all"
                 | "max"
                 | "max_all"
-              units: number | null
-              id: string
+              featureSlug: string
+              project: {
+                enabled: boolean
+              }
+              customer: {
+                active: boolean
+              }
+              subscription: {
+                active: boolean
+              }
             }[]
           }
         }
@@ -998,10 +1021,10 @@ export interface operations {
            */
           featureSlug: string
           /**
-           * @description The timestamp of the request
-           * @example 1717852800
+           * @description If true will check the entitlement from cache and revalidate asyncronously. This will reduce latency for the request but won't have 100% accuracy
+           * @example true
            */
-          timestamp?: number
+          async?: boolean
           /**
            * @description The metadata
            * @example {
@@ -1027,14 +1050,54 @@ export interface operations {
             message?: string
             /** @enum {string} */
             deniedReason?:
+              | "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE"
               | "RATE_LIMITED"
-              | "CUSTOMER_SUBSCRIPTION_NOT_FOUND"
               | "ENTITLEMENT_NOT_FOUND"
               | "LIMIT_EXCEEDED"
               | "ENTITLEMENT_EXPIRED"
               | "ENTITLEMENT_NOT_ACTIVE"
+              | "DO_NOT_INITIALIZED"
+              | "INCORRECT_USAGE_REPORTING"
+              | "ERROR_INSERTING_USAGE_DO"
+              | "ERROR_INSERTING_VERIFICATION_DO"
+              | "PROJECT_DISABLED"
+              | "CUSTOMER_DISABLED"
+              | "SUBSCRIPTION_DISABLED"
+              | "FETCH_ERROR"
+              | "SUBSCRIPTION_ERROR"
+              | "ENTITLEMENT_ERROR"
+              | "SUBSCRIPTION_EXPIRED"
+              | "NO_DEFAULT_PLAN_FOUND"
+              | "SUBSCRIPTION_NOT_ACTIVE"
+              | "PHASE_NOT_CREATED"
+              | "FEATURE_NOT_FOUND_IN_SUBSCRIPTION"
+              | "CUSTOMER_NOT_FOUND"
+              | "CUSTOMER_ENTITLEMENTS_NOT_FOUND"
+              | "FEATURE_TYPE_NOT_SUPPORTED"
+              | "PROJECT_DISABLED"
+              | "CUSTOMER_DISABLED"
+              | "PLAN_VERSION_NOT_PUBLISHED"
+              | "PLAN_VERSION_NOT_ACTIVE"
+              | "PAYMENT_PROVIDER_CONFIG_NOT_FOUND"
+              | "ENTITLEMENT_EXPIRED"
+              | "ENTITLEMENT_NOT_ACTIVE"
+              | "CUSTOMER_SESSION_NOT_CREATED"
+              | "CUSTOMER_SESSION_NOT_FOUND"
+              | "PLAN_VERSION_NOT_FOUND"
+              | "PAYMENT_PROVIDER_ERROR"
+              | "SUBSCRIPTION_NOT_CREATED"
+              | "CUSTOMER_NOT_CREATED"
+              | "SUBSCRIPTION_NOT_CANCELED"
+              | "CUSTOMER_PHASE_NOT_FOUND"
+              | "CURRENCY_MISMATCH"
+              | "BILLING_INTERVAL_MISMATCH"
+              | "ENTITLEMENT_NOT_FOUND"
+              | "SUBSCRIPTION_NOT_FOUND"
+              | "INVALID_ENTITLEMENT_TYPE"
             cacheHit?: boolean
             remaining?: number
+            limit?: number
+            usage?: number
           }
         }
       }
@@ -1141,6 +1204,7 @@ export interface operations {
           "application/json": {
             success: boolean
             message?: string
+            slugs?: string[]
           }
         }
       }
@@ -1259,8 +1323,6 @@ export interface operations {
             active: boolean
             planSlug: string
             timezone: string
-            locked: boolean
-            lockedAt: number | null
             currentCycleStartAt: number
             currentCycleEndAt: number
             previousCycleStartAt: number | null

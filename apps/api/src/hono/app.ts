@@ -43,7 +43,7 @@ export function newApp() {
       version: "1.0.0",
     },
     servers:
-      env.NODE_ENV === "production"
+      env.VERCEL_ENV === "production"
         ? [
             {
               url: "https://api.unprice.dev",

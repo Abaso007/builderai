@@ -13,7 +13,7 @@ import type { CanRequest, ReportUsageRequest, ReportUsageResponse } from "./inte
 
 import { env } from "cloudflare:workers"
 import { createConnection } from "@unprice/db"
-import type { CustomerEntitlementExtended, SubscriptionCache } from "@unprice/db/validators"
+import type { CustomerEntitlementExtended } from "@unprice/db/validators"
 import { FetchError } from "@unprice/error"
 import { Err, Ok, type Result } from "@unprice/error"
 import { ConsoleLogger, type Logger } from "@unprice/logging"
@@ -22,11 +22,6 @@ import { CustomerService, type DenyReason, UnPriceCustomerError } from "@unprice
 import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/metrics"
 
 interface UsageLimiterConfig {
-  subscription:
-    | (SubscriptionCache & {
-        lastUpdatedAt: number
-      })
-    | null
   entitlements: CustomerEntitlementExtended[]
 }
 
@@ -35,8 +30,6 @@ interface UsageLimiterConfig {
 export class DurableObjectUsagelimiter extends Server {
   // if the do is initialized
   private initialized = false
-  // subscription
-  private subscription: UsageLimiterConfig["subscription"] = null
   // once the durable object is initialized we can avoid
   // querying the db for usage on each request
   private featuresUsage: Map<string, CustomerEntitlementExtended> = new Map()
@@ -158,15 +151,11 @@ export class DurableObjectUsagelimiter extends Server {
 
         // initialize the state
         const entitlements = config.entitlements
-        const subscription = config.subscription
 
         // user can't have the same feature slug at the same time
         entitlements.forEach((e) => {
           this.featuresUsage.set(e.featureSlug, e)
         })
-
-        // set the subscription
-        this.subscription = subscription
 
         this.initialized = true
       } catch (e) {
@@ -201,21 +190,6 @@ export class DurableObjectUsagelimiter extends Server {
     })
   }
 
-  private async updateSubscription(subscription: UsageLimiterConfig["subscription"]) {
-    const config = await this.getConfig()
-
-    // update the config
-    await this.updateConfig({
-      subscription,
-      entitlements: config.entitlements,
-    })
-
-    // update the state
-    this.ctx.blockConcurrencyWhile(async () => {
-      this.subscription = subscription
-    })
-  }
-
   private async updateEntitlement(entitlement: CustomerEntitlementExtended) {
     const config = await this.getConfig()
 
@@ -226,7 +200,6 @@ export class DurableObjectUsagelimiter extends Server {
 
     // update the config
     await this.updateConfig({
-      subscription: config.subscription,
       entitlements,
     })
 
@@ -322,125 +295,6 @@ export class DurableObjectUsagelimiter extends Server {
 
     // if the entitlement is found, return the entitlement
     return Ok(entitlement)
-  }
-
-  private async revalidateSubscription({
-    customerId,
-    projectId,
-    opts,
-  }: {
-    customerId: string
-    projectId: string
-    opts?: {
-      skipCache?: boolean
-    }
-  }): Promise<Result<UsageLimiterConfig["subscription"], FetchError | UnPriceCustomerError>> {
-    const { err, val } = await this.customerService.getActiveSubscription({
-      customerId,
-      projectId,
-      opts: {
-        skipCache: opts?.skipCache ?? false, // INPORTANT: we don't skip cache here because we only have in memory cache
-      },
-    })
-
-    if (err) {
-      this.logger.error("error revalidating subscription", {
-        error: err.message,
-      })
-
-      // update the state to null
-      this.updateSubscription({
-        id: "placeholder",
-        lastUpdatedAt: Date.now(),
-        customerId,
-        projectId,
-        active: false,
-      } as unknown as UsageLimiterConfig["subscription"])
-      return Err(err)
-    }
-
-    const subscription = {
-      ...val,
-      lastUpdatedAt: Date.now(),
-    }
-
-    // update the state
-    this.updateSubscription(subscription)
-
-    return Ok(subscription)
-  }
-
-  private async getSubscription({
-    customerId,
-    projectId,
-    now,
-    opts,
-  }: {
-    customerId: string
-    projectId: string
-    now: number
-    opts?: {
-      skipCache?: boolean
-    }
-  }): Promise<Result<UsageLimiterConfig["subscription"], FetchError | UnPriceCustomerError>> {
-    let subscriptionState = this.subscription
-
-    // try to refresh the subscription
-    const shouldRefresh = subscriptionState
-      ? subscriptionState?.lastUpdatedAt &&
-        subscriptionState.lastUpdatedAt + this.UPDATE_PERIOD - now < 0
-      : true
-
-    // if subscription is in state validate it
-    if (shouldRefresh) {
-      // stale while revalidate pattern
-      if (!subscriptionState?.id || subscriptionState?.id === "placeholder") {
-        const { err: subscriptionErr, val: subscription } = await this.revalidateSubscription({
-          customerId,
-          projectId,
-          opts: {
-            skipCache: opts?.skipCache ?? false, // INPORTANT: we don't skip cache here because we only have in memory cache
-          },
-        })
-
-        if (subscriptionErr) {
-          return Err(subscriptionErr)
-        }
-
-        subscriptionState = subscription
-      }
-
-      this.ctx.waitUntil(
-        this.revalidateSubscription({
-          customerId,
-          projectId,
-          opts,
-        })
-      )
-    }
-
-    // if not found, return an error
-    if (!subscriptionState?.id) {
-      return Err(
-        new UnPriceCustomerError({
-          message: "subscription not found or is not active for this customer",
-          code: "SUBSCRIPTION_NOT_FOUND",
-        })
-      )
-    }
-
-    if (subscriptionState?.id === "placeholder") {
-      return Err(
-        new UnPriceCustomerError({
-          message: `DO: Subscription not found or is not active for this customer, subscription will be refreshed in ${Math.round(
-            (subscriptionState.lastUpdatedAt + this.UPDATE_PERIOD - now) / 1000
-          )} seconds`,
-          code: "SUBSCRIPTION_NOT_FOUND",
-        })
-      )
-    }
-
-    return Ok(subscriptionState)
   }
 
   // this is a simple way to revalidate the entitlement
@@ -832,7 +686,7 @@ export class DurableObjectUsagelimiter extends Server {
   }
 
   // instead of creating a cron job alarm we set and alarm on every request
-  private async ensureAlarmIsSet(flushTime?: number): Promise<void> {
+  public async ensureAlarmIsSet(flushTime?: number): Promise<void> {
     // we set alarms to send usage to tinybird periodically
     // this would avoid having too many events in the db as well
     const alarm = await this.ctx.storage.getAlarm()

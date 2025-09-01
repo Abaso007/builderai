@@ -34,8 +34,7 @@ const unprice = new Unprice({
   baseUrl: process.env.UNPRICE_API_URL || "http://localhost:8787",
 })
 
-async function generateData(customerId: string, date: Date) {
-  console.info(`Generating data for ${customerId} on ${date.toISOString()}`)
+async function generateData(customerId: string, async?: boolean) {
   const now = performance.now()
 
   const { result: data } = await unprice.customers.getEntitlements(customerId)
@@ -52,9 +51,6 @@ async function generateData(customerId: string, date: Date) {
   )!
 
   for (let i = 0; i < 100; i++) {
-    // add a random number of seconds to the date to have different timestamps in the same day
-    const timestamp = date.getTime() + Math.floor(Math.random() * 1000)
-
     // ramdom usage between 1 and 100
     const usage = Math.floor(Math.random() * 100) + 1
     // pick a random feature slug
@@ -67,7 +63,6 @@ async function generateData(customerId: string, date: Date) {
         featureSlug,
         usage,
         idempotenceKey: randomUUID(),
-        timestamp,
       })
 
       if (result.result?.success) {
@@ -85,12 +80,19 @@ async function generateData(customerId: string, date: Date) {
       entitlements[Math.floor(Math.random() * entitlements.length)]?.featureSlug!
 
     if (randomFeatureSlug) {
+      const startTime = performance.now()
       // verify the usage
       const result = await unprice.customers.can({
         customerId,
         featureSlug: randomFeatureSlug,
-        timestamp,
+        async,
       })
+
+      const endTime = performance.now()
+
+      console.info(
+        `Verification ${randomFeatureSlug} verified for ${customerId} in ${endTime - startTime}ms`
+      )
 
       if (result.result?.success) {
         console.info(`Verification ${randomFeatureSlug} verified for ${customerId}`)
@@ -107,40 +109,18 @@ async function generateData(customerId: string, date: Date) {
 }
 
 async function main() {
-  const today = new Date()
-  // need to create a new date object to avoid change the original date
-  const yesterday = new Date(new Date().setDate(today.getDate() - 1))
-  const twoDaysAgo = new Date(new Date().setDate(today.getDate() - 2))
-  const threeDaysAgo = new Date(new Date().setDate(today.getDate() - 3))
-  const fourDaysAgo = new Date(new Date().setDate(today.getDate() - 4))
-  const fiveDaysAgo = new Date(new Date().setDate(today.getDate() - 5))
   const customerFree = "cus_1MeUjVxFbv8DP9X7f1UW9"
-  const customerPro = "cus_1NEvymKXA6peGHVcCZiHD"
+  const customerPro = "cus_1Kvgvu9qaReLXMtx3tNcg"
   const customerEnterprise = "cus_1MVdMxZ45uJKDo5z48hYJ"
 
   // PRO plan
-  await generateData(customerPro, today)
-  await generateData(customerPro, yesterday)
-  await generateData(customerPro, twoDaysAgo)
-  await generateData(customerPro, threeDaysAgo)
-  await generateData(customerPro, fourDaysAgo)
-  await generateData(customerPro, fiveDaysAgo)
+  await generateData(customerPro, false)
 
   // FREE plan
-  await generateData(customerFree, today)
-  await generateData(customerFree, yesterday)
-  await generateData(customerFree, twoDaysAgo)
-  await generateData(customerFree, threeDaysAgo)
-  await generateData(customerFree, fourDaysAgo)
-  await generateData(customerFree, fiveDaysAgo)
+  await generateData(customerFree)
 
   // ENTERPRISE plan
-  await generateData(customerEnterprise, today)
-  await generateData(customerEnterprise, yesterday)
-  await generateData(customerEnterprise, twoDaysAgo)
-  await generateData(customerEnterprise, threeDaysAgo)
-  await generateData(customerEnterprise, fourDaysAgo)
-  await generateData(customerEnterprise, fiveDaysAgo)
+  await generateData(customerEnterprise)
 }
 
 main()

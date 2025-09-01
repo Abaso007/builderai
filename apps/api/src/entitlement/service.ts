@@ -188,7 +188,6 @@ export class EntitlementService {
     if (cached && env.VERCEL_ENV === "production") {
       const result = JSON.parse(cached) as CanResponse
 
-      // TODO: we could still send the verification event to the DO
       return { ...result, cacheHit: true }
     }
 
@@ -236,20 +235,24 @@ export class EntitlementService {
 
       // report the verification event to the DO
       this.waitUntil(
-        durableObject.insertVerification({
-          entitlement: entitlement,
-          success: validEntitlement.valid,
-          deniedReason: validEntitlement.deniedReason,
-          // add async to the metadata to keep track of the request
-          data: {
-            ...data,
-            metadata: {
-              ...data.metadata,
-              async: true,
+        Promise.all([
+          durableObject.insertVerification({
+            entitlement: entitlement,
+            success: validEntitlement.valid,
+            deniedReason: validEntitlement.deniedReason,
+            // add async to the metadata to keep track of the request
+            data: {
+              ...data,
+              metadata: {
+                ...data.metadata,
+                async: true,
+              },
             },
-          },
-          latency: performance.now() - data.performanceStart,
-        })
+            latency: performance.now() - data.performanceStart,
+          }),
+          // ensure the alarm is set so we can send usage to tinybird periodically
+          durableObject.ensureAlarmIsSet(data.flushTime),
+        ])
       )
 
       // save in memory cache
