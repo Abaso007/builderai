@@ -169,7 +169,7 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
               requestId,
               usage: 1,
               // short ttl for dev
-              secondsToLive: c.env.NODE_ENV === "development" ? 5 : undefined,
+              flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
               idempotenceKey: `${requestId}:${unPriceCustomer.id}`,
               timestamp: Date.now(),
               metadata: {

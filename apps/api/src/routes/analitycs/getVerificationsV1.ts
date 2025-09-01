@@ -167,7 +167,7 @@ export const registerGetAnalyticsVerificationsV1 = (app: App) =>
               idempotenceKey: `${requestId}:${unPriceCustomer.id}`,
               timestamp: Date.now(),
               // short ttl for dev
-              secondsToLive: c.env.NODE_ENV === "development" ? 5 : undefined,
+              flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
               metadata: {
                 action: "verifications",
               },

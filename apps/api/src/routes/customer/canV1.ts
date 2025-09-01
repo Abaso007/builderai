@@ -83,7 +83,7 @@ export const registerCanV1 = (app: App) =>
       requestId,
       performanceStart,
       // short ttl for dev
-      secondsToLive: c.env.NODE_ENV === "development" ? 5 : undefined,
+      flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
       timestamp: Date.now(), // for now we report the usage at the time of the request
       metadata: {
         ...metadata,
@@ -133,7 +133,7 @@ export const registerCanV1 = (app: App) =>
               requestId,
               usage: 1,
               // short ttl for dev
-              secondsToLive: c.env.NODE_ENV === "development" ? 5 : undefined,
+              flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
               idempotenceKey: `${requestId}:${unPriceCustomer.id}`,
               timestamp: Date.now(),
               metadata: {

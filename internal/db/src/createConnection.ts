@@ -26,15 +26,22 @@ export function createConnection(opts: ConnectionDatabaseOptions): Database {
   if (db && opts.singleton) {
     return db as Database
   }
-
   console.info("createConnection", opts)
 
   // because an error in cloudflare read1DatabaseUrl is equal to  """"
   // we need to parse that and make it a string
-  if (opts.read1DatabaseUrl === "" || opts.read1DatabaseUrl?.toString() === "") {
+  if (
+    opts.read1DatabaseUrl === "" ||
+    opts.read1DatabaseUrl?.toString() === '""' ||
+    opts.read1DatabaseUrl?.toString() === ""
+  ) {
     opts.read1DatabaseUrl = undefined
   }
-  if (opts.read2DatabaseUrl === "" || opts.read2DatabaseUrl?.toString() === "") {
+  if (
+    opts.read2DatabaseUrl === "" ||
+    opts.read2DatabaseUrl?.toString() === '""' ||
+    opts.read2DatabaseUrl?.toString() === ""
+  ) {
     opts.read2DatabaseUrl = undefined
   }
 

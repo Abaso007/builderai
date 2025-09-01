@@ -731,7 +731,7 @@ export class DurableObjectUsagelimiter extends Server {
     })
 
     // ensure the alarm is set so we can send usage to tinybird periodically
-    await this.ensureAlarmIsSet(data.secondsToLive)
+    await this.ensureAlarmIsSet(data.flushTime)
 
     // insert verification this is zero latency
     const verification = await this.insertVerification({
@@ -858,7 +858,7 @@ export class DurableObjectUsagelimiter extends Server {
     }
 
     // ensure the alarm is set so we can send usage to tinybird periodically
-    await this.ensureAlarmIsSet(data.secondsToLive)
+    await this.ensureAlarmIsSet(data.flushTime)
 
     // insert usage into db
     const usageRecord = await this.db
@@ -933,16 +933,16 @@ export class DurableObjectUsagelimiter extends Server {
   }
 
   // instead of creating a cron job alarm we set and alarm on every request
-  private async ensureAlarmIsSet(secondsToLive?: number): Promise<void> {
+  private async ensureAlarmIsSet(flushTime?: number): Promise<void> {
     // we set alarms to send usage to tinybird periodically
     // this would avoid having too many events in the db as well
     const alarm = await this.ctx.storage.getAlarm()
     const now = Date.now()
 
     // there is a default ttl for the usage records
-    // alternatively we can use the secondsToLive from the request
+    // alternatively we can use the flushTime from the request
     // this can be usefull if we want to support realtime usage reporting for some clients
-    const nextAlarm = secondsToLive ? now + secondsToLive * 1000 : now + this.MS_TTL
+    const nextAlarm = flushTime ? now + flushTime * 1000 : now + this.MS_TTL
 
     // if there is no alarm set one given the ttl
     if (!alarm) {

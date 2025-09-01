@@ -171,12 +171,8 @@ export class EntitlementService {
     }
   }
 
-  private getHashKey(data: CanRequest): string {
-    return `${data.customerId}:${data.featureSlug}:${data.projectId}`
-  }
-
   public async can(data: CanRequest): Promise<CanResponse> {
-    const key = this.getHashKey(data)
+    const key = `${data.customerId}:${data.featureSlug}:${data.projectId}`
     const cached = this.hashCache.get(key)
 
     // if we hit the same isolate we can return the cached result
@@ -197,8 +193,8 @@ export class EntitlementService {
     const result = await durableObject.can(data)
 
     // in extreme cases we hit in memory cache for the same isolate, speeding up the next request
-    if (!result.success && result.deniedReason) {
-      this.hashCache.set(this.getHashKey(data), JSON.stringify(result))
+    if (!result.success) {
+      this.hashCache.set(key, JSON.stringify(result))
     }
 
     return result

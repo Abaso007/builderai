@@ -14,7 +14,7 @@ export const reportUsageSchema = z.object({
   featureSlug: z.string(),
   usage: z.number(),
   idempotenceKey: z.string(),
-  secondsToLive: z.number().optional(),
+  flushTime: z.number().optional(),
   timestamp: z.number(),
   projectId: z.string(),
   sync: z.boolean().optional(),
@@ -29,7 +29,7 @@ export const canSchema = z.object({
   projectId: z.string(),
   requestId: z.string(),
   metadata: z.record(z.string(), z.any()).optional(),
-  secondsToLive: z.number().optional(),
+  flushTime: z.number().optional(),
   performanceStart: z.number(),
 })
 

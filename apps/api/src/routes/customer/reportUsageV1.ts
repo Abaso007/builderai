@@ -94,7 +94,7 @@ export const registerReportUsageV1 = (app: App) =>
       timestamp: Date.now(), // for now we report the usage at the time of the request
       idempotenceKey,
       // short ttl for dev
-      secondsToLive: c.env.NODE_ENV === "development" ? 5 : undefined,
+      flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
       projectId: key.projectId,
       requestId,
       metadata: {
@@ -147,7 +147,7 @@ export const registerReportUsageV1 = (app: App) =>
               requestId,
               usage: 1,
               // short ttl for dev
-              secondsToLive: c.env.NODE_ENV === "development" ? 5 : undefined,
+              flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
               idempotenceKey: `${requestId}:${unPriceCustomer.id}`,
               timestamp: Date.now(),
               metadata: {
