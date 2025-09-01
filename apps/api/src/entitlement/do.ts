@@ -59,7 +59,7 @@ export class DurableObjectUsagelimiter extends Server {
   // debounce delay for the broadcast events
   private readonly DEBOUNCE_DELAY = 1000 * 1 // 1 second
   // update period for the entitlements for invalidation
-  private UPDATE_PERIOD = 1000 * 60 * 60 * 24 // 24 hours
+  private UPDATE_PERIOD = 1000 * 60 * 60 * 1 // 1 hour
 
   // hibernate the do when no websocket nor connections are active
   static options = {
@@ -547,82 +547,7 @@ export class DurableObjectUsagelimiter extends Server {
     }
   }
 
-  private entitlementGuard({
-    entitlement,
-    now,
-    opts,
-  }: {
-    entitlement: CustomerEntitlementExtended
-    now: number
-    opts?: {
-      allowOverage?: boolean
-    }
-  }):
-    | {
-        valid: true
-        message: string
-        deniedReason?: DenyReason
-        limit?: number
-        usage?: number
-      }
-    | {
-        valid: false
-        message: string
-        deniedReason: DenyReason
-        limit?: number
-        usage?: number
-      } {
-    // check if all the DO is initialized
-    if (!this.initialized) {
-      return {
-        valid: false,
-        message: "DO not initialized",
-        deniedReason: "DO_NOT_INITIALIZED",
-      }
-    }
-
-    // check if the entitlement is valid
-    const isValidResult = this.customerService.isValidEntitlement({
-      entitlement,
-      now,
-    })
-
-    // if the entitlement is not valid, return the error
-    if (!isValidResult.valid) {
-      return {
-        valid: false,
-        message: isValidResult.message,
-        deniedReason: isValidResult.deniedReason,
-        limit: isValidResult.limit,
-        usage: isValidResult.usage,
-      }
-    }
-
-    // check limits
-    const checkLimitResult = this.customerService.checkLimitEntitlement({
-      entitlement,
-      opts,
-    })
-
-    if (!checkLimitResult.valid) {
-      return {
-        valid: false,
-        message: checkLimitResult.message,
-        deniedReason: checkLimitResult.deniedReason,
-        limit: checkLimitResult.limit,
-        usage: checkLimitResult.usage,
-      }
-    }
-
-    return {
-      valid: true,
-      message: "entitlement is valid",
-      limit: checkLimitResult.limit,
-      usage: checkLimitResult.usage,
-    }
-  }
-
-  private async insertVerification({
+  public async insertVerification({
     entitlement,
     data,
     latency,
@@ -675,6 +600,15 @@ export class DurableObjectUsagelimiter extends Server {
   }> {
     // make sure the do is initialized
     this.initialize()
+
+    // check if all the DO is initialized
+    if (!this.initialized) {
+      return {
+        success: false,
+        message: "DO not initialized",
+        deniedReason: "DO_NOT_INITIALIZED",
+      }
+    }
 
     const startLatencySubscription = performance.now()
     // get the subscription
@@ -754,7 +688,7 @@ export class DurableObjectUsagelimiter extends Server {
     }
 
     // validate the entitlement
-    const entitlementGuardResult = this.entitlementGuard({
+    const entitlementGuardResult = this.customerService.entitlementGuard({
       entitlement,
       now: data.timestamp,
       opts: {
@@ -795,6 +729,15 @@ export class DurableObjectUsagelimiter extends Server {
   public async reportUsage(data: ReportUsageRequest): Promise<ReportUsageResponse> {
     // first initialize the do
     this.initialize()
+
+    // check if all the DO is initialized
+    if (!this.initialized) {
+      return {
+        success: false,
+        message: "DO not initialized",
+        deniedReason: "DO_NOT_INITIALIZED",
+      }
+    }
 
     // get the subscription
     const { err: subscriptionErr } = await this.getSubscription({
@@ -860,7 +803,7 @@ export class DurableObjectUsagelimiter extends Server {
     }
 
     // validate the entitlement
-    const entitlementGuardResult = this.entitlementGuard({
+    const entitlementGuardResult = this.customerService.entitlementGuard({
       entitlement,
       now: data.timestamp,
       opts: {

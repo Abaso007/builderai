@@ -935,6 +935,7 @@ export class CustomerService {
     }
   ): Promise<Result<CustomerEntitlementExtended, FetchError | UnPriceCustomerError>> {
     const cacheKey = `${projectId}:${customerId}:${featureSlug}`
+
     if (opts?.skipCache) {
       this.logger.info("skipping cache for getActiveEntitlement", {
         customerId,
@@ -1155,6 +1156,7 @@ export class CustomerService {
         message: string
         limit?: number
         usage?: number
+        deniedReason?: DenyReason
       }
     | {
         valid: false
@@ -1203,6 +1205,7 @@ export class CustomerService {
         message: string
         limit?: number
         usage?: number
+        deniedReason?: DenyReason
       }
     | {
         valid: false
@@ -1247,6 +1250,72 @@ export class CustomerService {
           deniedReason: "ENTITLEMENT_NOT_FOUND",
           message: "invalid entitlement type",
         }
+    }
+  }
+
+  public entitlementGuard({
+    entitlement,
+    now,
+    opts,
+  }: {
+    entitlement: CustomerEntitlementExtended
+    now: number
+    opts?: {
+      allowOverage?: boolean
+    }
+  }):
+    | {
+        valid: true
+        message: string
+        deniedReason?: DenyReason
+        limit?: number
+        usage?: number
+      }
+    | {
+        valid: false
+        message: string
+        deniedReason: DenyReason
+        limit?: number
+        usage?: number
+      } {
+    // check if the entitlement is valid
+    const isValidResult = this.isValidEntitlement({
+      entitlement,
+      now,
+    })
+
+    // if the entitlement is not valid, return the error
+    if (!isValidResult.valid) {
+      return {
+        valid: false,
+        message: isValidResult.message,
+        deniedReason: isValidResult.deniedReason,
+        limit: isValidResult.limit,
+        usage: isValidResult.usage,
+      }
+    }
+
+    // check limits
+    const checkLimitResult = this.checkLimitEntitlement({
+      entitlement,
+      opts,
+    })
+
+    if (!checkLimitResult.valid) {
+      return {
+        valid: false,
+        message: checkLimitResult.message,
+        deniedReason: checkLimitResult.deniedReason,
+        limit: checkLimitResult.limit,
+        usage: checkLimitResult.usage,
+      }
+    }
+
+    return {
+      valid: true,
+      message: "entitlement is valid",
+      limit: checkLimitResult.limit,
+      usage: checkLimitResult.usage,
     }
   }
 

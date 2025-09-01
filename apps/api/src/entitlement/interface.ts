@@ -31,6 +31,12 @@ export const canSchema = z.object({
   metadata: z.record(z.string(), z.any()).optional(),
   flushTime: z.number().optional(),
   performanceStart: z.number(),
+  async: z
+    .boolean()
+    .optional()
+    .describe(
+      "if true will check the entitlement from cache and revalidate asyncronously. This will reduce latency for the request but won't have 100% accuracy"
+    ),
 })
 
 export type ReportUsageRequest = z.infer<typeof reportUsageSchema>

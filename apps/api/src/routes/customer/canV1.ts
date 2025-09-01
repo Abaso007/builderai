@@ -30,6 +30,11 @@ export const route = createRoute({
           description: "The feature slug",
           example: "tokens",
         }),
+        async: z.boolean().optional().openapi({
+          description:
+            "If true will check the entitlement from cache and revalidate asyncronously. This will reduce latency for the request but won't have 100% accuracy",
+          example: true,
+        }),
         // timestamp: z.number().optional().openapi({
         //   description: "The timestamp of the request",
         //   example: 1717852800,
@@ -63,7 +68,7 @@ export type CanResponse = z.infer<
 
 export const registerCanV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId, featureSlug, metadata } = c.req.valid("json")
+    const { customerId, featureSlug, metadata, async } = c.req.valid("json")
     const { entitlement, customer, logger } = c.get("services")
     const stats = c.get("stats")
     const requestId = c.get("requestId")
@@ -73,7 +78,7 @@ export const registerCanV1 = (app: App) =>
     const key = await keyAuth(c)
 
     // start a new timer
-    startTime(c, "can")
+    startTime(c, `can${async ? "Async" : "Sync"}`)
 
     // validate usage from db
     const result = await entitlement.can({
@@ -82,6 +87,7 @@ export const registerCanV1 = (app: App) =>
       projectId: key.projectId,
       requestId,
       performanceStart,
+      async,
       // short ttl for dev
       flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
       timestamp: Date.now(), // for now we report the usage at the time of the request
@@ -158,7 +164,7 @@ export const registerCanV1 = (app: App) =>
     )
 
     // end the timer
-    endTime(c, "can")
+    endTime(c, `can${async ? "Async" : "Sync"}`)
 
     return c.json(result, HttpStatusCodes.OK)
   })

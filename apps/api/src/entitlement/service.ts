@@ -13,7 +13,7 @@ import {
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import type { Cache } from "@unprice/services/cache"
-import type { CustomerService } from "@unprice/services/customers"
+import type { CustomerService, DenyReason } from "@unprice/services/customers"
 import { UnPriceCustomerError } from "@unprice/services/customers"
 import type { Metrics } from "@unprice/services/metrics"
 import type { DurableObjectProject } from "~/project/do"
@@ -186,10 +186,73 @@ export class EntitlementService {
       return { ...result, cacheHit: true }
     }
 
-    // after this point we can report the verification event
     const durableObject = this.getStub(this.getDurableObjectCustomerId(data.customerId))
 
+    // if the request is async, we can validate entitlement from cache
+    if (data.async) {
+      const { err, val: entitlement } = await this.customerService.getActiveEntitlement(
+        data.customerId,
+        data.featureSlug,
+        data.projectId,
+        data.timestamp,
+        {
+          skipCache: false, // use entitlement from cache
+        }
+      )
+
+      if (err) {
+        return {
+          success: false,
+          message: err.message,
+          deniedReason: err.code as DenyReason,
+        }
+      }
+
+      const validEntitlement = this.customerService.entitlementGuard({
+        entitlement,
+        now: data.timestamp,
+        opts: {
+          allowOverage: false,
+        },
+      })
+
+      if (!validEntitlement.valid) {
+        const result = {
+          success: false,
+          message: validEntitlement.message,
+          deniedReason: validEntitlement.deniedReason,
+          limit: validEntitlement.limit,
+          usage: validEntitlement.usage,
+        }
+
+        // report the verification event to the DO
+        this.waitUntil(
+          durableObject.insertVerification({
+            entitlement,
+            success: false,
+            deniedReason: validEntitlement.deniedReason,
+            data,
+            latency: performance.now() - data.performanceStart,
+          })
+        )
+
+        // save in memory cache
+        this.hashCache.set(key, JSON.stringify(result))
+
+        // return the result
+        return result
+      }
+
+      return {
+        success: true,
+        message: validEntitlement.message,
+        limit: validEntitlement.limit,
+        usage: validEntitlement.usage,
+      }
+    }
+
     // this is the most expensive call in terms of latency
+    // this will trigger a call to the DO and validate the entitlement given the current usage
     const result = await durableObject.can(data)
 
     // in extreme cases we hit in memory cache for the same isolate, speeding up the next request
