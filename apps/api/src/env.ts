@@ -15,7 +15,7 @@ export const cloudflareRatelimiter = z.custom<{
 export function createRuntimeEnv(workerEnv: Record<string, string | number | boolean | undefined>) {
   return createEnv({
     shared: {
-      NODE_ENV: z.enum(["development", "test", "production", "preview"]).default("development"),
+      NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     },
     server: {
       AUTH_SECRET: z.string(),

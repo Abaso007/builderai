@@ -119,6 +119,8 @@ const handler = {
         env as unknown as Record<string, string | number | boolean>
       )
 
+      console.info(parsedEnv)
+
       return app.fetch(req, parsedEnv, executionCtx)
     } catch (error) {
       new ConsoleLogger({

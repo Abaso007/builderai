@@ -147,14 +147,11 @@ export class DurableObjectUsagelimiter extends Server {
         // save the config in the do storage
         const config = await this.getConfig()
 
-        // get the entitlements from the db
-        // we save the entitlements in the do to avoid querying the db for each request
-        // then we update the entitlements every UPDATE_PERIOD
+        // initialize the state
         const entitlements = config.entitlements
-        // get the subscription from the db
         const subscription = config.subscription
 
-        // user can't have the same feature slug for different entitlements
+        // user can't have the same feature slug at the same time
         entitlements.forEach((e) => {
           this.featuresUsage.set(e.featureSlug, e)
         })
@@ -190,10 +187,6 @@ export class DurableObjectUsagelimiter extends Server {
     entitlements?: CustomerEntitlementExtended[]
     subscription?: UsageLimiterConfig["subscription"]
   }) {
-    if (!this.initialized) {
-      // initialize if not initialized
-      this.initialize()
-    }
     if (data.entitlements) {
       await this.ctx.storage.put("config", {
         ...data,
@@ -441,7 +434,6 @@ export class DurableObjectUsagelimiter extends Server {
     featureSlug: string
     now: number
   }): Promise<Result<CustomerEntitlementExtended, FetchError | UnPriceCustomerError>> {
-    // TODO: revalidate subscription and customer as well
     // get the entitlement from the db
     const { err, val } = await this.customerService.getActiveEntitlement(
       customerId,
@@ -653,15 +645,19 @@ export class DurableObjectUsagelimiter extends Server {
     limit?: number
     usage?: number
   }> {
-    // first initialize the do
+    // make sure the do is initialized
     this.initialize()
 
+    const startLatencySubscription = performance.now()
     // get the subscription
     const { err: subscriptionErr } = await this.getSubscription({
       customerId: data.customerId,
       projectId: data.projectId,
       now: data.timestamp,
     })
+
+    const endLatencySubscription = performance.now()
+    console.info(`getSubscription latency: ${endLatencySubscription - startLatencySubscription}ms`)
 
     if (subscriptionErr) {
       // TODO: if subscription not found anymore, lets send the events that the object have
@@ -762,9 +758,6 @@ export class DurableObjectUsagelimiter extends Server {
       }
     }
 
-    // i need to know the latency of the request
-    const startLatency = performance.now()
-
     // get the entitlement
     const { err, val: entitlement } = await this.getEntitlement({
       customerId: data.customerId,
@@ -772,9 +765,6 @@ export class DurableObjectUsagelimiter extends Server {
       featureSlug: data.featureSlug,
       now: data.timestamp,
     })
-
-    const endLatency = performance.now()
-    console.info(`getEntitlement latency: ${endLatency - startLatency}ms`)
 
     if (err) {
       return {

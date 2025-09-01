@@ -38,22 +38,59 @@ export class ConsoleLogger implements Logger {
   }
 
   public debug(message: string, fields?: Fields): void {
-    console.debug("\x1b[32m%s\x1b[0m", "debug", "-", this.marshal("debug", message, fields))
+    // don't show colored output in production mode because it's not readable
+    const coloredOutput = this.environment !== "production"
+    console.debug(
+      coloredOutput ? "\x1b[32m%s\x1b[0m" : "%s",
+      "debug",
+      "-",
+      this.marshal("debug", message, fields)
+    )
   }
+
   public emit(message: string, fields?: Fields): void {
     console.info(this.marshal("debug", message, fields))
   }
+
   public info(message: string, fields?: Fields): void {
-    console.info("\x1b[36m%s\x1b[0m", "info", "-", this.marshal("info", message, fields))
+    // don't show colored output in production mode because it's not readable
+    const coloredOutput = this.environment !== "production"
+    console.info(
+      coloredOutput ? "\x1b[36m%s\x1b[0m" : "%s",
+      "info",
+      "-",
+      this.marshal("info", message, fields)
+    )
   }
   public warn(message: string, fields?: Fields): void {
-    console.warn("\x1b[33m%s\x1b[0m", "warn", "-", this.marshal("warn", message, fields))
+    // don't show colored output in production mode because it's not readable
+    const coloredOutput = this.environment !== "production"
+    console.warn(
+      coloredOutput ? "\x1b[33m%s\x1b[0m" : "%s",
+      "warn",
+      "-",
+      this.marshal("warn", message, fields)
+    )
   }
   public error(message: string, fields?: Fields): void {
-    console.error("\x1b[31m%s\x1b[0m", "error", "-", this.marshal("error", message, fields))
+    // don't show colored output in production mode because it's not readable
+    const coloredOutput = this.environment !== "production"
+    console.error(
+      coloredOutput ? "\x1b[31m%s\x1b[0m" : "%s",
+      "error",
+      "-",
+      this.marshal("error", message, fields)
+    )
   }
   public fatal(message: string, fields?: Fields): void {
-    console.error("\x1b[31m%s\x1b[0m", "fatal", "-", this.marshal("fatal", message, fields))
+    // don't show colored output in production mode because it's not readable
+    const coloredOutput = this.environment !== "production"
+    console.error(
+      coloredOutput ? "\x1b[31m%s\x1b[0m" : "%s",
+      "fatal",
+      "-",
+      this.marshal("fatal", message, fields)
+    )
   }
 
   public async flush(): Promise<void> {
