@@ -178,6 +178,7 @@ export class EntitlementService {
   }
 
   public async can(data: CanRequest): Promise<CanResponse> {
+    const start = performance.now()
     const key = `${data.customerId}:${data.featureSlug}:${data.projectId}`
     const cached = this.hashCache.get(key)
 
@@ -192,6 +193,7 @@ export class EntitlementService {
     }
 
     const durableObject = this.getStub(this.getDurableObjectCustomerId(data.customerId))
+    console.info("latency getStub:", performance.now() - start)
 
     // if the request is async, we can validate entitlement from cache
     if (data.async) {
@@ -204,6 +206,7 @@ export class EntitlementService {
           skipCache: false, // use entitlement from cache
         }
       )
+      console.info("latency getActiveEntitlement:", performance.now() - start)
 
       if (err) {
         const result = {
@@ -217,20 +220,21 @@ export class EntitlementService {
         return result
       }
 
-      const validEntitlement = this.customerService.entitlementGuard({
+      const entitlementGuard = this.customerService.entitlementGuard({
         entitlement: entitlement,
         now: data.timestamp,
         opts: {
           allowOverage: false,
         },
       })
+      console.info("latency entitlementGuard:", performance.now() - start)
 
       const result = {
-        success: validEntitlement.valid,
-        message: validEntitlement.message,
-        deniedReason: validEntitlement.deniedReason,
-        limit: validEntitlement.limit,
-        usage: validEntitlement.usage,
+        success: entitlementGuard.valid,
+        message: entitlementGuard.message,
+        deniedReason: entitlementGuard.deniedReason,
+        limit: entitlementGuard.limit,
+        usage: entitlementGuard.usage,
       }
 
       // report the verification event to the DO
@@ -238,8 +242,8 @@ export class EntitlementService {
         Promise.all([
           durableObject.insertVerification({
             entitlement: entitlement,
-            success: validEntitlement.valid,
-            deniedReason: validEntitlement.deniedReason,
+            success: entitlementGuard.valid,
+            deniedReason: entitlementGuard.deniedReason,
             // add async to the metadata to keep track of the request
             data: {
               ...data,
@@ -249,14 +253,18 @@ export class EntitlementService {
               },
             },
             latency: performance.now() - data.performanceStart,
+            alarm: {
+              ensure: true,
+              flushTime: data.flushTime,
+            },
           }),
-          // ensure the alarm is set so we can send usage to tinybird periodically
-          durableObject.ensureAlarmIsSet(data.flushTime),
         ])
       )
+      console.info("latency insertVerification:", performance.now() - start)
 
       // save in memory cache
       this.updateCache(key, result)
+      console.info("latency updateCache:", performance.now() - start)
 
       // return the result
       return result
@@ -265,10 +273,12 @@ export class EntitlementService {
     // this is the most expensive call in terms of latency
     // this will trigger a call to the DO and validate the entitlement given the current usage
     const result = await durableObject.can(data)
+    console.info("latency durableObject.can:", performance.now() - start)
 
     // in extreme cases we hit in memory cache for the same isolate, speeding up the next request
     if (!result.success) {
       this.hashCache.set(key, JSON.stringify(result))
+      console.info("latency this.hashCache.set:", performance.now() - start)
     }
 
     return result
@@ -349,6 +359,8 @@ export class EntitlementService {
         const entitlementDO = entitlementsDO.find((e) => e.featureSlug === entitlement.featureSlug)
         if (entitlementDO) {
           entitlement.usage = entitlementDO.usage
+          entitlement.lastUsageUpdateAt = entitlementDO.lastUsageUpdateAt
+          entitlement.accumulatedUsage = entitlementDO.accumulatedUsage
         }
       })
     }
@@ -380,13 +392,6 @@ export class EntitlementService {
       throw phaseErr
     }
 
-    if (!phase) {
-      throw new UnPriceCustomerError({
-        code: "CUSTOMER_PHASE_NOT_FOUND",
-        message: "customer has no active phase",
-      })
-    }
-
     const { err: entitlementsErr, val: entitlements } =
       await this.customerService.getActiveEntitlements({
         customerId,
@@ -398,14 +403,7 @@ export class EntitlementService {
       throw entitlementsErr
     }
 
-    if (!entitlements || entitlements.length === 0) {
-      throw new UnPriceCustomerError({
-        code: "CUSTOMER_ENTITLEMENTS_NOT_FOUND",
-        message: "customer has no entitlements",
-      })
-    }
-
-    // get the entitlements from the DO
+    // get the entitlements from the DO which have the latest usage
     const durableObject = this.getStub(this.getDurableObjectCustomerId(customerId))
     const entitlementsDO = await durableObject.getEntitlements()
 
@@ -415,6 +413,8 @@ export class EntitlementService {
         const entitlementDO = entitlementsDO.find((e) => e.featureSlug === entitlement.featureSlug)
         if (entitlementDO) {
           entitlement.usage = entitlementDO.usage
+          entitlement.lastUsageUpdateAt = entitlementDO.lastUsageUpdateAt
+          entitlement.accumulatedUsage = entitlementDO.accumulatedUsage
         }
       })
     }
@@ -450,17 +450,16 @@ export class EntitlementService {
     const { err: flatPriceErr, val: flatPrice } = calculateFlatPricePlan({
       planVersion: {
         ...phase.planVersion,
-        // TODO: improve this
         planFeatures: phase.customerEntitlements.map((e) => e.featurePlanVersion),
       },
-      prorate: 1,
+      prorate: 1, // TODO: calculate the prorate
     })
 
     if (totalPricePlanErr || flatPriceErr) {
       throw totalPricePlanErr || flatPriceErr
     }
 
-    // TODO: save this to cache
+    // TODO: save this to cache to avoid recalculating the price for the same request
     const result = {
       planVersion: {
         description: phase.planVersion.description,

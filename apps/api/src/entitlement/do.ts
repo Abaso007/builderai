@@ -407,13 +407,22 @@ export class DurableObjectUsagelimiter extends Server {
     latency,
     deniedReason,
     success,
+    alarm,
   }: {
     entitlement: CustomerEntitlementExtended
     data: CanRequest
     latency: number
     deniedReason?: DenyReason
     success: boolean
+    alarm?: {
+      ensure?: boolean
+      flushTime?: number
+    }
   }) {
+    if (alarm?.ensure) {
+      await this.ensureAlarmIsSet(alarm.flushTime)
+    }
+
     return this.db
       .insert(verifications)
       .values({
@@ -451,7 +460,10 @@ export class DurableObjectUsagelimiter extends Server {
     deniedReason?: DenyReason
     limit?: number
     usage?: number
+    latency?: number
   }> {
+    const _start = performance.now()
+
     // make sure the do is initialized
     this.initialize()
 
@@ -505,8 +517,7 @@ export class DurableObjectUsagelimiter extends Server {
       },
     })
 
-    // ensure the alarm is set so we can send usage to tinybird periodically
-    await this.ensureAlarmIsSet(data.flushTime)
+    const latency = performance.now() - data.performanceStart
 
     // insert verification this is zero latency
     const verification = await this.insertVerification({
@@ -514,7 +525,11 @@ export class DurableObjectUsagelimiter extends Server {
       success: entitlementGuardResult.valid,
       deniedReason: entitlementGuardResult.deniedReason,
       data,
-      latency: performance.now() - data.performanceStart,
+      latency,
+      alarm: {
+        ensure: true,
+        flushTime: data.flushTime,
+      },
     })
 
     if (!verification?.id) {
@@ -532,6 +547,7 @@ export class DurableObjectUsagelimiter extends Server {
       deniedReason: entitlementGuardResult.deniedReason,
       limit: Number(entitlementGuardResult.limit),
       usage: Number(entitlementGuardResult.usage),
+      latency,
     }
   }
 

@@ -120,7 +120,7 @@ export class CustomerService {
           error: e.message,
         })
 
-        throw e
+        return null
       })
 
     // return explicitly null to avoid cache miss
@@ -170,7 +170,7 @@ export class CustomerService {
           error: e.message,
         })
 
-        throw e
+        return null
       })
 
     // return explicitly null to avoid cache miss
@@ -371,7 +371,7 @@ export class CustomerService {
     opts?: {
       skipCache: boolean
     }
-  }): Promise<Result<SubscriptionPhaseCache | null, FetchError | UnPriceCustomerError>> {
+  }): Promise<Result<SubscriptionPhaseCache, FetchError | UnPriceCustomerError>> {
     if (opts?.skipCache) {
       this.logger.info("skipping cache for getActivePhase", {
         customerId,
@@ -432,7 +432,12 @@ export class CustomerService {
     }
 
     if (!val) {
-      return Ok(null)
+      return Err(
+        new UnPriceCustomerError({
+          code: "CUSTOMER_PHASE_NOT_FOUND",
+          message: "customer has no active phase",
+        })
+      )
     }
 
     return Ok(val)
@@ -659,7 +664,7 @@ export class CustomerService {
       skipCache?: boolean // skip cache to force revalidation
       withLastUsage?: boolean // if true, we will get the last usage from analytics
     }
-  }): Promise<Result<CustomerEntitlementExtended[] | null, FetchError | UnPriceCustomerError>> {
+  }): Promise<Result<CustomerEntitlementExtended[], FetchError | UnPriceCustomerError>> {
     // first try to get the entitlement from cache, if not found try to get it from DO,
     const { val, err } = opts?.skipCache
       ? await wrapResult(
@@ -713,8 +718,13 @@ export class CustomerService {
       )
     }
 
-    if (!val) {
-      return Ok([])
+    if (!val || val.length === 0) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "CUSTOMER_ENTITLEMENTS_NOT_FOUND",
+          message: "customer has no entitlements",
+        })
+      )
     }
 
     return Ok(val)
