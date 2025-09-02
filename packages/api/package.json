@@ -6,20 +6,11 @@
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "license": "AGPL-3.0",
-  "files": [
-    "./dist/**"
-  ],
+  "files": ["./dist/**"],
   "publishConfig": {
     "access": "public"
   },
-  "keywords": [
-    "unprice",
-    "pricing",
-    "saas",
-    "subscription",
-    "billing",
-    "payments"
-  ],
+  "keywords": ["unprice", "pricing", "saas", "subscription", "billing", "payments"],
   "bugs": {
     "url": "https://github.com/jhonsfran1165/unprice/issues"
   },
