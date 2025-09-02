@@ -114,7 +114,7 @@ async function main() {
   const customerEnterprise = "cus_1MVdMxZ45uJKDo5z48hYJ"
 
   // PRO plan
-  await generateData(customerPro, true)
+  await generateData(customerPro, false)
 
   // FREE plan
   await generateData(customerFree)

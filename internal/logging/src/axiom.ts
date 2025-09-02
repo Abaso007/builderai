@@ -36,7 +36,7 @@ export class AxiomLogger implements Logger {
       transports: [
         new ConsoleTransport({
           prettyPrint: true,
-          logLevel: "error", // only log errors
+          // logLevel: "error", // only log errors
         }),
         new AxiomJSTransport({
           axiom: axiom,

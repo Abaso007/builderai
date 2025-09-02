@@ -16,7 +16,7 @@ import { createConnection } from "@unprice/db"
 import type { CustomerEntitlementExtended } from "@unprice/db/validators"
 import { FetchError } from "@unprice/error"
 import { Err, Ok, type Result } from "@unprice/error"
-import { ConsoleLogger, type Logger } from "@unprice/logging"
+import { AxiomLogger, ConsoleLogger, type Logger } from "@unprice/logging"
 import { CacheService } from "@unprice/services/cache"
 import { CustomerService, type DenyReason, UnPriceCustomerError } from "@unprice/services/customers"
 import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/metrics"
@@ -79,16 +79,27 @@ export class DurableObjectUsagelimiter extends Server {
       tinybirdUrl: env.TINYBIRD_URL,
     })
 
-    this.logger = new ConsoleLogger({
-      requestId: this.ctx.id.toString(),
-      service: "usagelimiter",
-      environment: env.NODE_ENV,
-      defaultFields: {
-        durableObjectId: this.ctx.id.toString(),
-      },
-    })
-
     const emitMetrics = env.EMIT_METRICS_LOGS.toString() === "true"
+
+    this.logger = emitMetrics
+      ? new AxiomLogger({
+          apiKey: env.AXIOM_API_TOKEN,
+          dataset: env.AXIOM_DATASET,
+          requestId: this.ctx.id.toString(),
+          environment: env.NODE_ENV,
+          service: "usagelimiter",
+          defaultFields: {
+            durableObjectId: this.ctx.id.toString(),
+          },
+        })
+      : new ConsoleLogger({
+          requestId: this.ctx.id.toString(),
+          service: "usagelimiter",
+          environment: env.NODE_ENV,
+          defaultFields: {
+            durableObjectId: this.ctx.id.toString(),
+          },
+        })
 
     this.metrics = emitMetrics
       ? new LogdrainMetrics({
