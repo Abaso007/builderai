@@ -100,8 +100,6 @@ jobs:
             AXIOM_DATASET
             UPSTASH_REDIS_REST_URL
             UPSTASH_REDIS_REST_TOKEN
-            TURSO_URL
-            TURSO_AUTH_TOKEN
           vars: |
             VERSION
             NODE_ENV
@@ -130,5 +128,3 @@ jobs:
           AXIOM_DATASET: ${{ env.AXIOM_DATASET }}
           UPSTASH_REDIS_REST_URL: ${{ env.UPSTASH_REDIS_REST_URL }}
           UPSTASH_REDIS_REST_TOKEN: ${{ env.UPSTASH_REDIS_REST_TOKEN }}
-          TURSO_URL: ${{ env.TURSO_URL }}
-          TURSO_AUTH_TOKEN: ${{ env.TURSO_AUTH_TOKEN }}

@@ -48,9 +48,7 @@
         "AXIOM_DATASET",
         "EMIT_ANALYTICS",
         "UPSTASH_REDIS_REST_URL",
-        "UPSTASH_REDIS_REST_TOKEN",
-        "TURSO_URL",
-        "TURSO_AUTH_TOKEN"
+        "UPSTASH_REDIS_REST_TOKEN"
       ]
     },
     "fmt": {
@@ -97,9 +95,7 @@
         "AXIOM_DATASET",
         "EMIT_ANALYTICS",
         "UPSTASH_REDIS_REST_URL",
-        "UPSTASH_REDIS_REST_TOKEN",
-        "TURSO_URL",
-        "TURSO_AUTH_TOKEN"
+        "UPSTASH_REDIS_REST_TOKEN"
       ]
     },
     "test": {

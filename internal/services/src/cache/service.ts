@@ -103,8 +103,8 @@ export class CacheService {
         this.context,
         {
           ...defaultOpts,
-          fresh: 1000 * 60, // 1 minute
-          stale: 1000 * 60, // revalidate after 1 minutes
+          fresh: 1000 * 30, // 30 seconds
+          stale: 1000 * 60, // delete after 1 minute
         }
       ),
       customerSubscription: new Namespace<CacheNamespaces["customerSubscription"]>(

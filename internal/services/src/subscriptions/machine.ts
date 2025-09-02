@@ -752,6 +752,13 @@ export class SubscriptionMachine {
                 .returning() // Add returning to ensure the update completed
                 .then((result) => {
                   if (!result.length) {
+                    this.logger.error("Failed to update subscription status", {
+                      subscriptionId: this.subscriptionId,
+                      projectId: this.projectId,
+                      now: this.now,
+                      currentState,
+                    })
+
                     throw new Error("Failed to update subscription status")
                   }
                 })

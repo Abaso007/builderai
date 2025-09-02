@@ -283,7 +283,7 @@ export class EntitlementService {
         ? `${data.idempotenceKey}`
         : `${data.idempotenceKey}:${data.timestamp}`
 
-    const cacheKey = `${data.customerId}:${data.featureSlug}:${data.projectId}:${idempotentKey}`
+    const cacheKey = `${data.projectId}:${data.customerId}:${data.featureSlug}:${idempotentKey}`
     // Fast path: check if the event has already been sent to the DO
     const { val: sent } = await this.cache.idempotentRequestUsageByHash.get(cacheKey)
 

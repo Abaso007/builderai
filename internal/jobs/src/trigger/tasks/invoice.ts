@@ -48,8 +48,19 @@ export const invoiceTask = task({
       throw billingInvoiceResult.err
     }
 
+    // get the subscription
+    const subscription = await subscriptionService.getSubscriptionData({
+      subscriptionId,
+      projectId,
+    })
+
+    if (!subscription) {
+      throw new Error("Subscription not found after invoicing")
+    }
+
     return {
       status: billingInvoiceResult.val.status,
+      subscription,
     }
   },
 })

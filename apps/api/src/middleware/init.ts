@@ -1,5 +1,4 @@
-import { createClient } from "@libsql/client"
-import { LibSQLStore } from "@unkey/cache/stores"
+import { CloudflareStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
@@ -110,38 +109,24 @@ export function init(): MiddlewareHandler<HonoEnv> {
       emitMetrics
     )
 
-    // const cloudflareCacheStore =
-    //   c.env.CLOUDFLARE_ZONE_ID &&
-    //   c.env.CLOUDFLARE_API_TOKEN &&
-    //   c.env.CLOUDFLARE_ZONE_ID !== "" &&
-    //   c.env.CLOUDFLARE_API_TOKEN !== ""
-    //     ? new CloudflareStore({
-    //         cloudflareApiKey: c.env.CLOUDFLARE_API_TOKEN,
-    //         zoneId: c.env.CLOUDFLARE_ZONE_ID,
-    //         domain: "cache.unprice.dev",
-    //         cacheBuster: "v2",
-    //       })
-    //     : undefined
-
-    const libsqlCacheStore =
-      c.env.TURSO_URL &&
-      c.env.TURSO_AUTH_TOKEN &&
-      c.env.TURSO_URL !== "" &&
-      c.env.TURSO_AUTH_TOKEN !== ""
-        ? new LibSQLStore({
-            client: createClient({ url: c.env.TURSO_URL, authToken: c.env.TURSO_AUTH_TOKEN }),
+    const cloudflareCacheStore =
+      c.env.CLOUDFLARE_ZONE_ID &&
+      c.env.CLOUDFLARE_API_TOKEN &&
+      c.env.CLOUDFLARE_ZONE_ID !== "" &&
+      c.env.CLOUDFLARE_API_TOKEN !== ""
+        ? new CloudflareStore({
+            cloudflareApiKey: c.env.CLOUDFLARE_API_TOKEN,
+            zoneId: c.env.CLOUDFLARE_ZONE_ID,
+            domain: "cache.unprice.dev",
+            cacheBuster: "v2",
           })
         : undefined
 
     const stores = []
 
     // push the cloudflare store first to hit it first
-    // if (cloudflareCacheStore) {
-    //   stores.push(cloudflareCacheStore)
-    // }
-
-    if (libsqlCacheStore) {
-      stores.push(libsqlCacheStore)
+    if (cloudflareCacheStore) {
+      stores.push(cloudflareCacheStore)
     }
 
     // register the cloudflare store if it is configured

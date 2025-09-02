@@ -215,7 +215,7 @@ export class DurableObjectUsagelimiter extends Server {
   }
 
   // this is a simple way to revalidate the entitlement
-  public async getEntitlement({
+  private async getEntitlement({
     customerId,
     projectId,
     featureSlug,
@@ -298,7 +298,7 @@ export class DurableObjectUsagelimiter extends Server {
   }
 
   // this is a simple way to revalidate the entitlement
-  public async revalidateEntitlement({
+  private async revalidateEntitlement({
     customerId,
     projectId,
     featureSlug,
@@ -462,245 +462,277 @@ export class DurableObjectUsagelimiter extends Server {
     usage?: number
     latency?: number
   }> {
-    // make sure the do is initialized
-    this.initialize()
+    try {
+      // make sure the do is initialized
+      this.initialize()
 
-    // check if all the DO is initialized
-    if (!this.initialized) {
-      return {
-        success: false,
-        message: "DO not initialized",
-        deniedReason: "DO_NOT_INITIALIZED",
-      }
-    }
-
-    // get the entitlement
-    const { err, val: entitlement } = await this.getEntitlement({
-      customerId: data.customerId,
-      projectId: data.projectId,
-      featureSlug: data.featureSlug,
-      now: data.timestamp,
-    })
-
-    if (err) {
-      if (err instanceof UnPriceCustomerError) {
+      // check if all the DO is initialized
+      if (!this.initialized) {
         return {
           success: false,
-          message: err.message,
-          deniedReason: err.code as DenyReason,
+          message: "DO not initialized",
+          deniedReason: "DO_NOT_INITIALIZED",
         }
       }
 
-      if (err instanceof FetchError) {
+      // get the entitlement
+      const { err, val: entitlement } = await this.getEntitlement({
+        customerId: data.customerId,
+        projectId: data.projectId,
+        featureSlug: data.featureSlug,
+        now: data.timestamp,
+      })
+
+      if (err) {
+        if (err instanceof UnPriceCustomerError) {
+          return {
+            success: false,
+            message: err.message,
+            deniedReason: err.code as DenyReason,
+          }
+        }
+
+        if (err instanceof FetchError) {
+          return {
+            success: false,
+            message: err.message,
+            deniedReason: "FETCH_ERROR",
+          }
+        }
+
         return {
           success: false,
-          message: err.message,
-          deniedReason: "FETCH_ERROR",
+          message: "error getting entitlement from do.",
+          deniedReason: "ENTITLEMENT_ERROR",
+        }
+      }
+
+      // validate the entitlement
+      const entitlementGuardResult = this.customerService.entitlementGuard({
+        entitlement,
+        now: data.timestamp,
+        opts: {
+          allowOverage: false, // for verification we don't allow overage
+        },
+      })
+
+      const latency = performance.now() - data.performanceStart
+
+      // insert verification this is zero latency
+      const verification = await this.insertVerification({
+        entitlement,
+        success: entitlementGuardResult.valid,
+        deniedReason: entitlementGuardResult.deniedReason,
+        data,
+        latency,
+        alarm: {
+          ensure: true,
+          flushTime: data.flushTime,
+        },
+      })
+
+      if (!verification?.id) {
+        // TODO: send notification error
+        return {
+          success: false,
+          message: "error inserting verification from do, please try again later",
+          deniedReason: "ERROR_INSERTING_VERIFICATION_DO",
         }
       }
 
       return {
-        success: false,
-        message: "error getting entitlement from do.",
-        deniedReason: "ENTITLEMENT_ERROR",
+        success: entitlementGuardResult.valid,
+        message: entitlementGuardResult.message,
+        deniedReason: entitlementGuardResult.deniedReason,
+        limit: Number(entitlementGuardResult.limit),
+        usage: Number(entitlementGuardResult.usage),
+        latency,
       }
-    }
+    } catch (error) {
+      this.logger.error("error can from do", {
+        error: error instanceof Error ? error.message : "unknown error",
+      })
 
-    // validate the entitlement
-    const entitlementGuardResult = this.customerService.entitlementGuard({
-      entitlement,
-      now: data.timestamp,
-      opts: {
-        allowOverage: false, // for verification we don't allow overage
-      },
-    })
-
-    const latency = performance.now() - data.performanceStart
-
-    // insert verification this is zero latency
-    const verification = await this.insertVerification({
-      entitlement,
-      success: entitlementGuardResult.valid,
-      deniedReason: entitlementGuardResult.deniedReason,
-      data,
-      latency,
-      alarm: {
-        ensure: true,
-        flushTime: data.flushTime,
-      },
-    })
-
-    if (!verification?.id) {
-      // TODO: send notification error
       return {
         success: false,
-        message: "error inserting verification from do, please try again later",
+        message: error instanceof Error ? error.message : "unknown error",
         deniedReason: "ERROR_INSERTING_VERIFICATION_DO",
       }
-    }
-
-    return {
-      success: entitlementGuardResult.valid,
-      message: entitlementGuardResult.message,
-      deniedReason: entitlementGuardResult.deniedReason,
-      limit: Number(entitlementGuardResult.limit),
-      usage: Number(entitlementGuardResult.usage),
-      latency,
+    } finally {
+      this.flush()
     }
   }
 
   public async reportUsage(data: ReportUsageRequest): Promise<ReportUsageResponse> {
-    // first initialize the do
-    this.initialize()
+    try {
+      // first initialize the do
+      this.initialize()
 
-    // check if all the DO is initialized
-    if (!this.initialized) {
-      return {
-        success: false,
-        message: "DO not initialized",
-        deniedReason: "DO_NOT_INITIALIZED",
-      }
-    }
-
-    // get the entitlement
-    const { err, val: entitlement } = await this.getEntitlement({
-      customerId: data.customerId,
-      projectId: data.projectId,
-      featureSlug: data.featureSlug,
-      now: data.timestamp,
-    })
-
-    if (err) {
-      if (err instanceof UnPriceCustomerError) {
+      // check if all the DO is initialized
+      if (!this.initialized) {
         return {
           success: false,
-          message: err.message,
-          deniedReason: err.code as DenyReason,
+          message: "DO not initialized",
+          deniedReason: "DO_NOT_INITIALIZED",
         }
       }
 
-      if (err instanceof FetchError) {
-        return {
-          success: false,
-          message: err.message,
-          deniedReason: "FETCH_ERROR",
-        }
-      }
-
-      return {
-        success: false,
-        message: "error getting entitlement from do.",
-        deniedReason: "ENTITLEMENT_ERROR",
-      }
-    }
-
-    // validate the entitlement
-    const entitlementGuardResult = this.customerService.entitlementGuard({
-      entitlement,
-      now: data.timestamp,
-      opts: {
-        allowOverage: true, // for reporting usage we allow overage
-      },
-    })
-
-    // if the entitlement is not valid, we return an error
-    // why? because we don't want to report usage for invalid entitlements, simply
-    // as for verification we want to report the verification event even if the entitlement is invalid
-    if (!entitlementGuardResult.valid) {
-      return {
-        success: false,
-        message: entitlementGuardResult.message,
-        deniedReason: entitlementGuardResult.deniedReason,
-      }
-    }
-
-    // if the use is negative but the entitlement aggregationMethod is not in sum or sum_all
-    // we need to return an error
-    if (Number(data.usage) < 0 && !["sum", "sum_all"].includes(entitlement.aggregationMethod)) {
-      return {
-        success: false,
-        message: `Usage cannot be negative when the feature type is not sum or sum_all, got ${entitlement.aggregationMethod}. This will disturb aggregations.`,
-        deniedReason: "INCORRECT_USAGE_REPORTING",
-      }
-    }
-
-    // ensure the alarm is set so we can send usage to tinybird periodically
-    await this.ensureAlarmIsSet(data.flushTime)
-
-    // insert usage into db
-    const usageRecord = await this.db
-      .insert(usageRecords)
-      .values({
+      // get the entitlement
+      const { err, val: entitlement } = await this.getEntitlement({
         customerId: data.customerId,
-        featureSlug: data.featureSlug,
-        usage: entitlement.featureType === "flat" ? "0" : data.usage.toString(),
-        timestamp: data.timestamp,
-        idempotenceKey: data.idempotenceKey,
-        requestId: data.requestId,
         projectId: data.projectId,
-        featurePlanVersionId: entitlement.featurePlanVersionId,
-        entitlementId: entitlement.id,
-        subscriptionItemId: entitlement.subscriptionItemId,
-        subscriptionPhaseId: entitlement.subscriptionPhaseId,
-        subscriptionId: entitlement.subscriptionId,
-        createdAt: Date.now(),
-        metadata: data.metadata ? JSON.stringify(data.metadata) : null,
+        featureSlug: data.featureSlug,
+        now: data.timestamp,
       })
-      .returning()
-      .catch((e) => {
-        this.logger.error("error inserting usage from do", {
-          error: e.message,
+
+      if (err) {
+        if (err instanceof UnPriceCustomerError) {
+          return {
+            success: false,
+            message: err.message,
+            deniedReason: err.code as DenyReason,
+          }
+        }
+
+        if (err instanceof FetchError) {
+          return {
+            success: false,
+            message: err.message,
+            deniedReason: "FETCH_ERROR",
+          }
+        }
+
+        return {
+          success: false,
+          message: "error getting entitlement from do.",
+          deniedReason: "ENTITLEMENT_ERROR",
+        }
+      }
+
+      // validate the entitlement
+      const entitlementGuardResult = this.customerService.entitlementGuard({
+        entitlement,
+        now: data.timestamp,
+        opts: {
+          allowOverage: true, // for reporting usage we allow overage
+        },
+      })
+
+      // if the entitlement is not valid, we return an error
+      // why? because we don't want to report usage for invalid entitlements, simply
+      // as for verification we want to report the verification event even if the entitlement is invalid
+      if (!entitlementGuardResult.valid) {
+        return {
+          success: false,
+          message: entitlementGuardResult.message,
+          deniedReason: entitlementGuardResult.deniedReason,
+        }
+      }
+
+      // if the use is negative but the entitlement aggregationMethod is not in sum or sum_all
+      // we need to return an error
+      if (Number(data.usage) < 0 && !["sum", "sum_all"].includes(entitlement.aggregationMethod)) {
+        return {
+          success: false,
+          message: `Usage cannot be negative when the feature type is not sum or sum_all, got ${entitlement.aggregationMethod}. This will disturb aggregations.`,
+          deniedReason: "INCORRECT_USAGE_REPORTING",
+        }
+      }
+
+      // ensure the alarm is set so we can send usage to tinybird periodically
+      await this.ensureAlarmIsSet(data.flushTime)
+
+      // insert usage into db
+      const usageRecord = await this.db
+        .insert(usageRecords)
+        .values({
+          customerId: data.customerId,
+          featureSlug: data.featureSlug,
+          usage: entitlement.featureType === "flat" ? "0" : data.usage.toString(),
+          timestamp: data.timestamp,
+          idempotenceKey: data.idempotenceKey,
+          requestId: data.requestId,
+          projectId: data.projectId,
+          featurePlanVersionId: entitlement.featurePlanVersionId,
+          entitlementId: entitlement.id,
+          subscriptionItemId: entitlement.subscriptionItemId,
+          subscriptionPhaseId: entitlement.subscriptionPhaseId,
+          subscriptionId: entitlement.subscriptionId,
+          createdAt: Date.now(),
+          metadata: data.metadata ? JSON.stringify(data.metadata) : null,
+        })
+        .returning()
+        .catch((e) => {
+          this.logger.error("error inserting usage from do", {
+            error: e.message,
+          })
+
+          throw e
+        })
+        .then((result) => {
+          return result?.[0] ?? null
         })
 
-        throw e
-      })
-      .then((result) => {
-        return result?.[0] ?? null
+      if (!usageRecord?.id) {
+        return {
+          success: false,
+          message: "error inserting usage from do, please try again later",
+          deniedReason: "ERROR_INSERTING_USAGE_DO",
+        }
+      }
+
+      // after validating, we set the usage and agregate it to the DO state for the next request.
+      // keep in mind that database calls are 0 latency because of the Durable Object
+      // we keep the agregated state in a map to avoid having to query the db for each request
+      const result = this.customerService.setNewUsageEntitlement({
+        entitlement,
+        usage: Number(data.usage),
       })
 
-    if (!usageRecord?.id) {
+      if (result.success === false) {
+        return {
+          success: false,
+          message: result.message,
+          deniedReason: result.deniedReason,
+          limit: result.limit,
+          usage: result.usage,
+        }
+      }
+
+      // update state
+      this.updateEntitlement({
+        ...entitlement,
+        usage: result.usage.toString(),
+      })
+
+      return {
+        success: result.success,
+        message: result.message,
+        notifyUsage: result.notifyUsage,
+        usage: result.usage,
+        limit: result.limit,
+      }
+    } catch (error) {
+      this.logger.error("error reporting usage from do", {
+        error: error instanceof Error ? error.message : "unknown error",
+      })
+
       return {
         success: false,
-        message: "error inserting usage from do, please try again later",
+        message: error instanceof Error ? error.message : "unknown error",
         deniedReason: "ERROR_INSERTING_USAGE_DO",
       }
-    }
-
-    // after validating, we set the usage and agregate it to the DO state for the next request.
-    // keep in mind that database calls are 0 latency because of the Durable Object
-    // we keep the agregated state in a map to avoid having to query the db for each request
-    const result = this.customerService.setNewUsageEntitlement({
-      entitlement,
-      usage: Number(data.usage),
-    })
-
-    if (result.success === false) {
-      return {
-        success: false,
-        message: result.message,
-        deniedReason: result.deniedReason,
-        limit: result.limit,
-        usage: result.usage,
-      }
-    }
-
-    // update state
-    this.updateEntitlement({
-      ...entitlement,
-      usage: result.usage.toString(),
-    })
-
-    return {
-      success: result.success,
-      message: result.message,
-      notifyUsage: result.notifyUsage,
-      usage: result.usage,
-      limit: result.limit,
+    } finally {
+      this.flush()
     }
   }
 
+  private flush() {
+    this.ctx.waitUntil(Promise.all([this.metrics.flush(), this.logger.flush()]))
+  }
+
   // instead of creating a cron job alarm we set and alarm on every request
-  public async ensureAlarmIsSet(flushTime?: number): Promise<void> {
+  private async ensureAlarmIsSet(flushTime?: number): Promise<void> {
     // we set alarms to send usage to tinybird periodically
     // this would avoid having too many events in the db as well
     const alarm = await this.ctx.storage.getAlarm()
@@ -723,11 +755,18 @@ export class DurableObjectUsagelimiter extends Server {
   }
 
   onStart(): void | Promise<void> {
-    console.info("onStart")
+    console.info("onStart initializing do")
+    this.initialize()
   }
 
   onConnect(): void | Promise<void> {
     console.info("onConnect")
+  }
+
+  onClose(): void | Promise<void> {
+    console.info("onClose flushing metrics and logs")
+    // flush the metrics and logs
+    this.flush()
   }
 
   private async sendVerificationsToTinybird() {
@@ -978,6 +1017,8 @@ export class DurableObjectUsagelimiter extends Server {
     await this.sendUsageToTinybird()
     // send verifications to tinybird on alarm
     await this.sendVerificationsToTinybird()
+    // flush the metrics and logs
+    this.flush()
   }
 
   // resetDO the do used when the customer is signed out
@@ -997,41 +1038,55 @@ export class DurableObjectUsagelimiter extends Server {
 
     // we are setting the state so better do it inside a block concurrency
     return this.ctx.blockConcurrencyWhile(async () => {
-      // check if the are events in the db this should be 0 latency
-      const events = await this.db
-        .select({
-          count: count(),
+      try {
+        // check if the are events in the db this should be 0 latency
+        const events = await this.db
+          .select({
+            count: count(),
+          })
+          .from(usageRecords)
+          .then((e) => e[0])
+
+        const verification_events = await this.db
+          .select({
+            count: count(),
+          })
+          .from(verifications)
+          .then((e) => e[0])
+
+        // if there are no events, delete the do
+        if (events?.count === 0 && verification_events?.count === 0) {
+          // get the entitlements from the db
+          const entitlements = await this.getEntitlements()
+          // get the slugs from the entitlements
+          slugs = entitlements.map((e) => e.featureSlug)
+
+          await this.ctx.storage.deleteAll()
+          this.initialized = false
+        } else {
+          return {
+            success: false,
+            message: `DO has ${events?.count} events and ${verification_events?.count} verification events, can't delete.`,
+          }
+        }
+
+        return {
+          success: true,
+          message: "DO deleted",
+          slugs,
+        }
+      } catch (error) {
+        this.logger.error("error resetting do", {
+          error: error instanceof Error ? error.message : "unknown error",
         })
-        .from(usageRecords)
-        .then((e) => e[0])
 
-      const verification_events = await this.db
-        .select({
-          count: count(),
-        })
-        .from(verifications)
-        .then((e) => e[0])
-
-      // if there are no events, delete the do
-      if (events?.count === 0 && verification_events?.count === 0) {
-        // get the entitlements from the db
-        const entitlements = await this.getEntitlements()
-        // get the slugs from the entitlements
-        slugs = entitlements.map((e) => e.featureSlug)
-
-        await this.ctx.storage.deleteAll()
-        this.initialized = false
-      } else {
         return {
           success: false,
-          message: `DO has ${events?.count} events and ${verification_events?.count} verification events, can't delete.`,
+          message: error instanceof Error ? error.message : "unknown error",
+          deniedReason: "ERROR_RESETTING_DO",
         }
-      }
-
-      return {
-        success: true,
-        message: "DO deleted",
-        slugs,
+      } finally {
+        this.flush()
       }
     })
   }

@@ -938,6 +938,31 @@ export class SubscriptionService {
     return Ok(subscription)
   }
 
+  public async getSubscriptionData({
+    subscriptionId,
+    projectId,
+  }: {
+    subscriptionId: string
+    projectId: string
+  }): Promise<Subscription | null> {
+    const subscriptionData = await this.db.query.subscriptions.findFirst({
+      with: {
+        project: true,
+      },
+      where: (subscription, operators) =>
+        operators.and(
+          operators.eq(subscription.id, subscriptionId),
+          operators.eq(subscription.projectId, projectId)
+        ),
+    })
+
+    if (!subscriptionData?.id) {
+      return null
+    }
+
+    return subscriptionData
+  }
+
   public async endTrial({
     subscriptionId,
     projectId,

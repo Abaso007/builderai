@@ -6,7 +6,7 @@ type DiscriminateMetric<T, M = Metric> = M extends { metric: T } ? M : never
 
 export function metrics(): MiddlewareHandler<HonoEnv> {
   return async (c, next) => {
-    const { metrics } = c.get("services")
+    const { metrics, logger } = c.get("services")
     const stats = c.get("stats")
     const start = c.get("performanceStart")
 
@@ -63,7 +63,7 @@ export function metrics(): MiddlewareHandler<HonoEnv> {
         '"plaintext": "<REDACTED>"'
       )
 
-      c.executionCtx.waitUntil(Promise.all([metrics.emit(m), metrics.flush()]))
+      c.executionCtx.waitUntil(Promise.all([metrics.emit(m), metrics.flush(), logger.flush()]))
     }
   }
 }
