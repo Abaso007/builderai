@@ -2,12 +2,11 @@ import { CloudflareStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
-import { ConsoleLogger } from "@unprice/logging"
+import { AxiomLogger, ConsoleLogger } from "@unprice/logging"
 import { ApiKeysService } from "@unprice/services/apikey"
 import { CacheService } from "@unprice/services/cache"
 import { CustomerService } from "@unprice/services/customers"
 import { LogdrainMetrics, NoopMetrics } from "@unprice/services/metrics"
-import type { Metrics } from "@unprice/services/metrics"
 import type { MiddlewareHandler } from "hono"
 import { EntitlementService } from "~/entitlement/service"
 import type { HonoEnv } from "~/hono/env"
@@ -37,6 +36,8 @@ let isolateCreatedAt: number | undefined = undefined
  */
 export function init(): MiddlewareHandler<HonoEnv> {
   return async (c, next) => {
+    const stats = c.get("stats")
+
     if (!isolateId) {
       isolateId = newId("isolate")
       isolateCreatedAt = Date.now()
@@ -59,34 +60,64 @@ export function init(): MiddlewareHandler<HonoEnv> {
     // Set request ID header
     c.res.headers.set("unprice-request-id", requestId)
 
+    const emitMetrics = c.env.EMIT_METRICS_LOGS.toString() === "true"
     // start a new timer
     startTime(c, "initLogger")
 
-    const logger = new ConsoleLogger({
-      requestId,
-      environment: c.env.NODE_ENV,
-      service: "api",
-      defaultFields: {
-        isolateId: c.get("isolateId"),
-        isolateCreatedAt: c.get("isolateCreatedAt"),
-        requestId: c.get("requestId"),
-        requestStartedAt: c.get("requestStartedAt"),
-        performanceStart: c.get("performanceStart"),
-        location: c.get("stats").colo,
-        workspaceId: c.get("workspaceId"),
-        projectId: c.get("projectId"),
-        userAgent: c.get("stats").ua,
-        path: c.req.path,
-      },
-    })
+    const logger = emitMetrics
+      ? new AxiomLogger({
+          apiKey: c.env.AXIOM_API_TOKEN,
+          dataset: c.env.AXIOM_DATASET,
+          requestId,
+          environment: c.env.NODE_ENV,
+          service: "api",
+          defaultFields: {
+            isolateId,
+            isolateCreatedAt,
+            requestId,
+            requestStartedAt,
+            performanceStart,
+            workspaceId: c.get("workspaceId"),
+            projectId: c.get("projectId"),
+            location: stats.colo,
+            userAgent: stats.ua,
+            path: c.req.path,
+            region: stats.region,
+            country: stats.country,
+            source: stats.source,
+            ip: stats.ip,
+            pathname: c.req.path,
+          },
+        })
+      : new ConsoleLogger({
+          requestId,
+          environment: c.env.NODE_ENV,
+          service: "api",
+          defaultFields: {
+            isolateId,
+            isolateCreatedAt,
+            requestId,
+            requestStartedAt,
+            performanceStart,
+            workspaceId: c.get("workspaceId"),
+            projectId: c.get("projectId"),
+            location: stats.colo,
+            userAgent: stats.ua,
+            path: c.req.path,
+            region: stats.region,
+            country: stats.country,
+            source: stats.source,
+            ip: stats.ip,
+            pathname: c.req.path,
+          },
+        })
 
     endTime(c, "initLogger")
 
     // start a new timer
     startTime(c, "initMetrics")
-    const emitMetrics = c.env.EMIT_METRICS_LOGS.toString() === "true"
 
-    const metrics: Metrics = emitMetrics
+    const metrics = emitMetrics
       ? new LogdrainMetrics({
           requestId,
           environment: c.env.NODE_ENV,

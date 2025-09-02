@@ -63,7 +63,8 @@ export function metrics(): MiddlewareHandler<HonoEnv> {
         '"plaintext": "<REDACTED>"'
       )
 
-      c.executionCtx.waitUntil(Promise.all([metrics.emit(m), metrics.flush(), logger.flush()]))
+      metrics.emit(m)
+      c.executionCtx.waitUntil(Promise.all([metrics.flush(), logger.flush()]))
     }
   }
 }
