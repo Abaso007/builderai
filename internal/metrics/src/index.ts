@@ -66,8 +66,9 @@ export const metricSchema = z.discriminatedUnion("metric", [
     country: z.string().optional(),
     city: z.string().optional(),
     userAgent: z.string().optional(),
-    fromAgent: z.string().optional(),
+    source: z.string().optional(),
     service: z.string(),
+    platform: z.string(),
   }),
   z.object({
     metric: z.literal("metric.db.read"),
@@ -103,16 +104,6 @@ export const metricSchema = z.discriminatedUnion("metric", [
     isAccumulated: z.boolean().optional(),
     start: z.number().optional(),
     end: z.number().optional(),
-  }),
-  z.object({
-    metric: z.literal("metric.server.latency"),
-    status: z.number(),
-    country: z.string(),
-    continent: z.string(),
-    latency: z.number(),
-    platform: z.string(),
-    colo: z.string(),
-    path: z.string(),
   }),
 ])
 

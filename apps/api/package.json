@@ -20,6 +20,7 @@
   "dependencies": {
     "@auth/core": "^0.34.1",
     "@hono/zod-openapi": "^0.19.2",
+    "@libsql/client": "^0.15.14",
     "@scalar/hono-api-reference": "^0.7.2",
     "@t3-oss/env-core": "^0.12.0",
     "@unkey/cache": "^1.5.0",

@@ -31,12 +31,7 @@ export class LogdrainMetrics implements Metrics {
       service: this.service,
     })
 
-    this.logger.emit(log.toString(), {
-      ...metric,
-      $axiom: {
-        metricName: metric.metric,
-      },
-    })
+    this.logger.emit(log.toString(), metric)
   }
 
   public async flush(): Promise<void> {

@@ -11,6 +11,8 @@ export const env = createEnv({
     ENCRYPTION_KEY: z.string().min(1),
     UPSTASH_REDIS_REST_URL: z.string().url().optional(),
     UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
+    TURSO_URL: z.string().url().optional(),
+    TURSO_AUTH_TOKEN: z.string().optional(),
   },
 
   /**

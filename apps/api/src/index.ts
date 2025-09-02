@@ -3,6 +3,7 @@ import { cors } from "hono/cors"
 import { type Env, createRuntimeEnv } from "~/env"
 import { newApp } from "~/hono/app"
 import { init } from "~/middleware/init"
+import { metrics } from "~/middleware/metrics"
 
 import serveEmojiFavicon from "stoker/middlewares/serve-emoji-favicon"
 
@@ -39,6 +40,7 @@ app.use(serveEmojiFavicon("◎"))
 
 app.use("*", init())
 app.use("*", cors())
+app.use("*", metrics())
 
 // Handle websocket connections for Durable Objects
 app.use(

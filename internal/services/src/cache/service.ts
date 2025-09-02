@@ -38,12 +38,16 @@ export class CacheService {
     if (this.isInitialized || this.cache) return
 
     // emit the cache size
-    this.metrics.emit({
-      metric: "metric.cache.size",
-      tier: "memory",
-      size: persistentMap.size,
-      name: "cache",
-    })
+    this.context.waitUntil(
+      Promise.all([
+        this.metrics.emit({
+          metric: "metric.cache.size",
+          tier: "memory",
+          size: persistentMap.size,
+          name: "cache",
+        }),
+      ])
+    )
 
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     const stores: Array<Store<CacheNamespace, any>> = []

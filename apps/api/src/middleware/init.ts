@@ -1,3 +1,5 @@
+import { createClient } from "@libsql/client"
+import { LibSQLStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
@@ -12,7 +14,6 @@ import { EntitlementService } from "~/entitlement/service"
 import type { HonoEnv } from "~/hono/env"
 import { ApiProjectService } from "~/project"
 
-import { CloudflareStore } from "@unkey/cache/stores"
 import { SubscriptionService } from "@unprice/services/subscriptions"
 import { endTime, startTime } from "hono/timing"
 
@@ -109,24 +110,38 @@ export function init(): MiddlewareHandler<HonoEnv> {
       emitMetrics
     )
 
-    const cloudflareCacheStore =
-      c.env.CLOUDFLARE_ZONE_ID &&
-      c.env.CLOUDFLARE_API_TOKEN &&
-      c.env.CLOUDFLARE_ZONE_ID !== "" &&
-      c.env.CLOUDFLARE_API_TOKEN !== ""
-        ? new CloudflareStore({
-            cloudflareApiKey: c.env.CLOUDFLARE_API_TOKEN,
-            zoneId: c.env.CLOUDFLARE_ZONE_ID,
-            domain: "cache.unprice.dev",
-            cacheBuster: "v2",
+    // const cloudflareCacheStore =
+    //   c.env.CLOUDFLARE_ZONE_ID &&
+    //   c.env.CLOUDFLARE_API_TOKEN &&
+    //   c.env.CLOUDFLARE_ZONE_ID !== "" &&
+    //   c.env.CLOUDFLARE_API_TOKEN !== ""
+    //     ? new CloudflareStore({
+    //         cloudflareApiKey: c.env.CLOUDFLARE_API_TOKEN,
+    //         zoneId: c.env.CLOUDFLARE_ZONE_ID,
+    //         domain: "cache.unprice.dev",
+    //         cacheBuster: "v2",
+    //       })
+    //     : undefined
+
+    const libsqlCacheStore =
+      c.env.TURSO_URL &&
+      c.env.TURSO_AUTH_TOKEN &&
+      c.env.TURSO_URL !== "" &&
+      c.env.TURSO_AUTH_TOKEN !== ""
+        ? new LibSQLStore({
+            client: createClient({ url: c.env.TURSO_URL, authToken: c.env.TURSO_AUTH_TOKEN }),
           })
         : undefined
 
     const stores = []
 
     // push the cloudflare store first to hit it first
-    if (cloudflareCacheStore) {
-      stores.push(cloudflareCacheStore)
+    // if (cloudflareCacheStore) {
+    //   stores.push(cloudflareCacheStore)
+    // }
+
+    if (libsqlCacheStore) {
+      stores.push(libsqlCacheStore)
     }
 
     // register the cloudflare store if it is configured
@@ -263,19 +278,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
       duration: performance.now() - performanceStart,
     })
 
-    try {
-      await next()
-    } finally {
-      metrics.emit({
-        metric: "metric.server.latency",
-        path: c.req.path,
-        platform: "cloudflare",
-        status: c.res.status,
-        country: (c.req.raw?.cf?.country as string) ?? "unknown",
-        continent: (c.req.raw?.cf?.continent as string) ?? "unknown",
-        colo: (c.req.raw?.cf?.colo as string) ?? "unknown",
-        latency: performance.now() - performanceStart,
-      })
-    }
+    await next()
   }
 }

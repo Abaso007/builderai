@@ -6,11 +6,20 @@
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "license": "AGPL-3.0",
-  "files": ["./dist/**"],
+  "files": [
+    "./dist/**"
+  ],
   "publishConfig": {
     "access": "public"
   },
-  "keywords": ["unprice", "pricing", "saas", "subscription", "billing", "payments"],
+  "keywords": [
+    "unprice",
+    "pricing",
+    "saas",
+    "subscription",
+    "billing",
+    "payments"
+  ],
   "bugs": {
     "url": "https://github.com/jhonsfran1165/unprice/issues"
   },
@@ -24,7 +33,6 @@
     "build": "rm -rf dist && tsup",
     "dev": "tsup --watch"
   },
-  "dependencies": {},
   "devDependencies": {
     "@types/node": "20.11.24",
     "@unprice/tsconfig": "^0.1.0",
