@@ -2,17 +2,17 @@ import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
 import { ConsoleLogger } from "@unprice/logging"
-import { CacheService, createRedis } from "@unprice/services/cache"
+import { ApiKeysService } from "@unprice/services/apikey"
+import { CacheService } from "@unprice/services/cache"
 import { CustomerService } from "@unprice/services/customers"
 import { LogdrainMetrics, NoopMetrics } from "@unprice/services/metrics"
 import type { Metrics } from "@unprice/services/metrics"
 import type { MiddlewareHandler } from "hono"
-import { ApiKeysService } from "~/apikey/service"
 import { EntitlementService } from "~/entitlement/service"
 import type { HonoEnv } from "~/hono/env"
 import { ApiProjectService } from "~/project"
 
-import { UpstashRedisStore } from "@unkey/cache/stores"
+import { CloudflareStore } from "@unkey/cache/stores"
 import { SubscriptionService } from "@unprice/services/subscriptions"
 import { endTime, startTime } from "hono/timing"
 
@@ -109,39 +109,24 @@ export function init(): MiddlewareHandler<HonoEnv> {
       emitMetrics
     )
 
-    // const cloudflareCacheStore =
-    //   c.env.CLOUDFLARE_ZONE_ID &&
-    //   c.env.CLOUDFLARE_API_TOKEN &&
-    //   c.env.CLOUDFLARE_ZONE_ID !== "" &&
-    //   c.env.CLOUDFLARE_API_TOKEN !== ""
-    //     ? new CloudflareStore({
-    //         cloudflareApiKey: c.env.CLOUDFLARE_API_TOKEN,
-    //         zoneId: c.env.CLOUDFLARE_ZONE_ID,
-    //         domain: "cache.unprice.dev",
-    //         cacheBuster: "v2",
-    //       })
-    //     : undefined
-
-    const upstashCacheStore =
-      c.env.UPSTASH_REDIS_REST_URL && c.env.UPSTASH_REDIS_REST_TOKEN
-        ? new UpstashRedisStore({
-            redis: createRedis({
-              token: c.env.UPSTASH_REDIS_REST_TOKEN,
-              url: c.env.UPSTASH_REDIS_REST_URL,
-              latencyLogging: c.env.VERCEL_ENV !== "production",
-            }),
+    const cloudflareCacheStore =
+      c.env.CLOUDFLARE_ZONE_ID &&
+      c.env.CLOUDFLARE_API_TOKEN &&
+      c.env.CLOUDFLARE_ZONE_ID !== "" &&
+      c.env.CLOUDFLARE_API_TOKEN !== ""
+        ? new CloudflareStore({
+            cloudflareApiKey: c.env.CLOUDFLARE_API_TOKEN,
+            zoneId: c.env.CLOUDFLARE_ZONE_ID,
+            domain: "cache.unprice.dev",
+            cacheBuster: "v2",
           })
         : undefined
 
     const stores = []
 
     // push the cloudflare store first to hit it first
-    // if (cloudflareCacheStore) {
-    //   stores.push(cloudflareCacheStore)
-    // }
-
-    if (upstashCacheStore) {
-      stores.push(upstashCacheStore)
+    if (cloudflareCacheStore) {
+      stores.push(cloudflareCacheStore)
     }
 
     // register the cloudflare store if it is configured

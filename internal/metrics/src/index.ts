@@ -50,10 +50,10 @@ export const metricSchema = z.discriminatedUnion("metric", [
     namespaceId: z.string().optional(),
     identifier: z.string(),
     latency: z.number(),
-    mode: z.enum(["cloudflare"]),
+    mode: z.string(),
     success: z.boolean().optional(),
     error: z.boolean().optional(),
-    source: z.enum(["cloudflare"]),
+    source: z.string(),
   }),
   z.object({
     metric: z.literal("metric.http.request"),

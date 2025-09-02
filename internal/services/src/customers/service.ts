@@ -853,8 +853,6 @@ export class CustomerService {
         throw e
       })
 
-    console.info("entitlement", entitlement)
-
     const end = performance.now()
 
     this.metrics.emit({

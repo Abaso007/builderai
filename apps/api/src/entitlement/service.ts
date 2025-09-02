@@ -178,7 +178,6 @@ export class EntitlementService {
   }
 
   public async can(data: CanRequest): Promise<CanResponse> {
-    const start = performance.now()
     const key = `${data.customerId}:${data.featureSlug}:${data.projectId}`
     const cached = this.hashCache.get(key)
 
@@ -193,7 +192,6 @@ export class EntitlementService {
     }
 
     const durableObject = this.getStub(this.getDurableObjectCustomerId(data.customerId))
-    console.info("latency getStub:", performance.now() - start)
 
     // if the request is async, we can validate entitlement from cache
     if (data.async) {
@@ -206,7 +204,6 @@ export class EntitlementService {
           skipCache: false, // use entitlement from cache
         }
       )
-      console.info("latency getActiveEntitlement:", performance.now() - start)
 
       if (err) {
         const result = {
@@ -227,7 +224,6 @@ export class EntitlementService {
           allowOverage: false,
         },
       })
-      console.info("latency entitlementGuard:", performance.now() - start)
 
       const result = {
         success: entitlementGuard.valid,
@@ -260,11 +256,9 @@ export class EntitlementService {
           }),
         ])
       )
-      console.info("latency insertVerification:", performance.now() - start)
 
       // save in memory cache
       this.updateCache(key, result)
-      console.info("latency updateCache:", performance.now() - start)
 
       // return the result
       return result
@@ -273,12 +267,10 @@ export class EntitlementService {
     // this is the most expensive call in terms of latency
     // this will trigger a call to the DO and validate the entitlement given the current usage
     const result = await durableObject.can(data)
-    console.info("latency durableObject.can:", performance.now() - start)
 
     // in extreme cases we hit in memory cache for the same isolate, speeding up the next request
     if (!result.success) {
       this.hashCache.set(key, JSON.stringify(result))
-      console.info("latency this.hashCache.set:", performance.now() - start)
     }
 
     return result

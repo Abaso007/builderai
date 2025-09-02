@@ -1,6 +1,6 @@
 import type { Analytics } from "@unprice/analytics"
-import { hashStringSHA256 } from "@unprice/db/utils"
-import type { ApiKeyExtended } from "@unprice/db/validators"
+import { hashStringSHA256, newId } from "@unprice/db/utils"
+import type { ApiKey, ApiKeyExtended } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, type SchemaError, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import type { Cache } from "@unprice/services/cache"
@@ -9,9 +9,12 @@ import type { Metrics } from "@unprice/services/metrics"
 import type { Database } from "@unprice/db"
 import { and, eq } from "@unprice/db"
 import { apikeys } from "@unprice/db/schema"
-import type { Context } from "~/hono/app"
-import { retry } from "~/util/retry"
+import { retry } from "../utils/retry"
 import { UnPriceApiKeyError } from "./errors"
+
+export type ApiKeyLimiter = {
+  limit: (opts: { key: string }) => Promise<{ success: boolean }>
+}
 
 export class ApiKeysService {
   private readonly cache: Cache
@@ -98,7 +101,7 @@ export class ApiKeysService {
           keyHash,
         })
 
-        throw e
+        return null
       })
 
     if (!data) {
@@ -120,7 +123,7 @@ export class ApiKeysService {
     return data
   }
 
-  private async _getApiKey(
+  public async getApiKey(
     req: {
       key: string
     },
@@ -131,7 +134,7 @@ export class ApiKeysService {
     const keyHash = await this.hash(req.key)
 
     if (opts?.skipCache) {
-      this.logger.info("force skipping cache for _getApiKey", {
+      this.logger.info("force skipping cache for getApiKey", {
         keyHash,
       })
     }
@@ -155,7 +158,7 @@ export class ApiKeysService {
           3,
           async () => this.cache.apiKeyByHash.swr(keyHash, (h) => this.getData(h)),
           (attempt, err) => {
-            this.logger.warn("Failed to fetch key data, retrying... _getApiKey", {
+            this.logger.warn("Failed to fetch key data, retrying... getApiKey", {
               hash: keyHash,
               attempt,
               error: err.message,
@@ -166,7 +169,7 @@ export class ApiKeysService {
     if (err) {
       return Err(
         new FetchError({
-          message: `unable to fetch _getApiKey, ${err.message}`,
+          message: `unable to fetch getApiKey, ${err.message}`,
           retry: false,
           cause: err,
         })
@@ -185,16 +188,13 @@ export class ApiKeysService {
     return Ok(data)
   }
 
-  public async verifyApiKey(
-    c: Context,
-    req: {
-      key: string
-    }
-  ): Promise<Result<ApiKeyExtended, UnPriceApiKeyError | FetchError | SchemaError>> {
+  public async verifyApiKey(req: {
+    key: string
+  }): Promise<Result<ApiKeyExtended, UnPriceApiKeyError | FetchError | SchemaError>> {
     try {
       const { key } = req
 
-      const result = await this._getApiKey(
+      const result = await this.getApiKey(
         {
           key,
         },
@@ -207,7 +207,7 @@ export class ApiKeysService {
         })
 
         await this.cache.apiKeyByHash.remove(await this.hash(req.key))
-        return await this._getApiKey(
+        return await this.getApiKey(
           {
             key,
           },
@@ -227,7 +227,7 @@ export class ApiKeysService {
 
       const apiKey = result.val
 
-      if (apiKey.revokedAt !== null) {
+      if (apiKey.revokedAt && apiKey.revokedAt < Date.now()) {
         return Err(
           new UnPriceApiKeyError({
             code: "REVOKED",
@@ -263,10 +263,6 @@ export class ApiKeysService {
         )
       }
 
-      c.set("workspaceId", result.val.project.workspaceId)
-      c.set("projectId", result.val.project.id)
-      c.set("unPriceCustomerId", result.val.project.workspace.unPriceCustomerId)
-
       return Ok(apiKey)
     } catch (e) {
       const error = e as Error
@@ -283,16 +279,66 @@ export class ApiKeysService {
     }
   }
 
-  public async rateLimit(c: Context, req: { key: string }) {
+  public async rollApiKey(req: {
+    key: string
+  }): Promise<Result<ApiKey & { newKey: string }, SchemaError | FetchError | UnPriceApiKeyError>> {
+    const { val: apiKey, err: apiKeyErr } = await this.getApiKey(
+      { key: req.key },
+      { skipCache: true }
+    )
+
+    if (apiKeyErr) {
+      return Err(apiKeyErr)
+    }
+
+    const newKey = newId("apikey_key")
+    // generate hash of the key
+    const apiKeyHash = await hashStringSHA256(newKey)
+
+    const newApiKey = await this.db
+      .update(apikeys)
+      .set({ updatedAtM: Date.now(), hash: apiKeyHash })
+      .where(eq(apikeys.id, apiKey.id))
+      .returning()
+      .then((res) => res[0])
+
+    if (!newApiKey) {
+      return Err(
+        new FetchError({
+          message: "Failed to update API key",
+          retry: false,
+        })
+      )
+    }
+
+    const newApiKeyExtended = {
+      ...newApiKey,
+      newKey,
+    }
+
+    // update cache
+    this.waitUntil(
+      this.cache.apiKeyByHash.set(apiKeyHash, {
+        ...apiKey,
+        ...newApiKey,
+      })
+    )
+
+    return Ok(newApiKeyExtended)
+  }
+
+  public async rateLimit(req: {
+    limiter: ApiKeyLimiter
+    key: string
+    workspaceId: string
+    source: string
+  }) {
     // hash the key
     const keyHash = await this.hash(req.key)
-
-    // TODO: change this for PRO and FREE plans
     const start = performance.now()
-    const limiter = c.env.RL_FREE_600_60s
-    const result = await limiter.limit({ key: keyHash })
+    const result = await req.limiter.limit({ key: keyHash })
     const end = performance.now()
-    const workspaceId = c.get("workspaceId") as string
+    const workspaceId = req.workspaceId
 
     if (result.success) {
       // emit metrics
@@ -303,10 +349,10 @@ export class ApiKeysService {
             workspaceId,
             identifier: keyHash,
             latency: end - start,
-            mode: "cloudflare",
+            mode: req.source,
             success: result.success,
             error: !result.success,
-            source: "cloudflare",
+            source: req.source,
           }),
         ])
       )

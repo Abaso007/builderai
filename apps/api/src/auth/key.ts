@@ -23,7 +23,13 @@ export async function keyAuth(c: Context<HonoEnv>) {
   startTime(c, "rateLimitApiKey")
 
   // rate limit the apikey
-  const result = await apikey.rateLimit(c, { key: authorization })
+  const result = await apikey.rateLimit({
+    key: authorization,
+    workspaceId: c.get("workspaceId") as string,
+    source: "cloudflare",
+    // TODO: we need to think how to rate limit per plan
+    limiter: c.env.RL_FREE_600_60s,
+  })
 
   // end the timer
   endTime(c, "rateLimitApiKey")
@@ -38,7 +44,7 @@ export async function keyAuth(c: Context<HonoEnv>) {
   // start a new timer
   startTime(c, "verifyApiKey")
 
-  const { val: key, err } = await apikey.verifyApiKey(c, {
+  const { val: key, err } = await apikey.verifyApiKey({
     key: authorization,
   })
 
@@ -65,6 +71,10 @@ export async function keyAuth(c: Context<HonoEnv>) {
       message: "key not found",
     })
   }
+
+  c.set("workspaceId", key.project.workspaceId)
+  c.set("projectId", key.project.id)
+  c.set("unPriceCustomerId", key.project.workspace.unPriceCustomerId)
 
   return key
 }

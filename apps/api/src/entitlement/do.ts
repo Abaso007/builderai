@@ -462,8 +462,6 @@ export class DurableObjectUsagelimiter extends Server {
     usage?: number
     latency?: number
   }> {
-    const _start = performance.now()
-
     // make sure the do is initialized
     this.initialize()
 
@@ -994,8 +992,6 @@ export class DurableObjectUsagelimiter extends Server {
     // send the current usage and verifications to tinybird
     await this.sendUsageToTinybird()
     await this.sendVerificationsToTinybird()
-
-    console.info("resetting DO")
 
     let slugs: string[] = []
 

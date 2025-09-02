@@ -8,14 +8,7 @@
     "./routes": "./src/routes.ts",
     "./router/edge": "./src/router/edge/index.ts",
     "./router/lambda": "./src/router/lambda/index.ts",
-    "./transformer": "./src/transformer.ts",
-    "./services/subscriptions": "./src/services/subscriptions/index.ts",
-    "./services/customers": "./src/services/customers/index.ts",
-    "./services/payment-provider": "./src/services/payment-provider/index.ts",
-    "./services/apikeys": "./src/services/apikeys/index.ts",
-    "./services/cache": "./src/services/cache/index.ts",
-    "./services/metrics": "./src/services/metrics/index.ts",
-    "./services/package": "./src/services/package/index.ts"
+    "./transformer": "./src/transformer.ts"
   },
   "typesVersions": {
     "*": {

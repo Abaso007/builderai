@@ -12,6 +12,7 @@
     "./payment-provider": "./src/payment-provider/index.ts",
     "./cache": "./src/cache/index.ts",
     "./projects": "./src/projects/index.ts",
+    "./apikey": "./src/apikey/index.ts",
     "./env": "./env.ts"
   },
   "typesVersions": {

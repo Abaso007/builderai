@@ -1,11 +1,9 @@
 import { TRPCError } from "@trpc/server"
-import { hashStringSHA256, newId } from "@unprice/db/utils"
 import { selectApiKeySchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
-import { eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
+import { ApiKeysService } from "@unprice/services/apikey"
 import { featureGuard } from "#utils/feature-guard"
 
 export const roll = protectedProjectProcedure
@@ -39,38 +37,24 @@ export const roll = protectedProjectProcedure
       })
     }
 
-    const apiKey = await opts.ctx.db.query.apikeys.findFirst({
-      where: (apikey, { eq, and }) => and(eq(apikey.id, id), eq(apikey.projectId, project.id)),
+    const apikeyService = new ApiKeysService({
+      cache: opts.ctx.cache,
+      metrics: opts.ctx.metrics,
+      analytics: opts.ctx.analytics,
+      logger: opts.ctx.logger,
+      db: opts.ctx.db,
+      waitUntil: opts.ctx.waitUntil,
+      hashCache: opts.ctx.hashCache,
     })
 
-    if (!apiKey) {
-      throw new TRPCError({
-        code: "NOT_FOUND",
-        message: "API key not found",
-      })
-    }
+    const { val: newApiKey, err: newApiKeyErr } = await apikeyService.rollApiKey({ key: id })
 
-    // Generate a new key
-    const newKey = newId("apikey_key")
-    // generate hash of the key
-    const apiKeyHash = await hashStringSHA256(newKey)
-
-    const newApiKey = await opts.ctx.db
-      .update(schema.apikeys)
-      .set({ updatedAtM: Date.now(), hash: apiKeyHash })
-      .where(eq(schema.apikeys.id, opts.input.id))
-      .returning()
-      .then((res) => res[0])
-
-    if (!newApiKey) {
+    if (newApiKeyErr) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
         message: "Failed to roll API key",
       })
     }
 
-    // remove from cache
-    opts.ctx.waitUntil(opts.ctx.cache.apiKeyByHash.remove(apiKey.hash))
-
-    return { apikey: { ...newApiKey, key: newKey } }
+    return { apikey: { ...newApiKey, key: newApiKey.newKey } }
   })

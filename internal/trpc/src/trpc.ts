@@ -9,7 +9,7 @@ import type { NextAuthRequest } from "@unprice/auth"
 import type { Session } from "@unprice/auth/server"
 import { auth } from "@unprice/auth/server"
 import { COOKIES_APP } from "@unprice/config"
-import type { Database, TransactionDatabase } from "@unprice/db"
+import type { Database } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
 import { AxiomLogger, ConsoleLogger, type Logger } from "@unprice/logging"
 import type { CacheNamespaces } from "@unprice/services/cache"
@@ -24,6 +24,8 @@ import { projectWorkspaceGuard } from "./utils"
 import { db } from "./utils/db"
 import { workspaceGuard } from "./utils/workspace-guard"
 
+// this is a cache between request executions
+const hashCache = new Map()
 /**
  * 1. CONTEXT
  *
@@ -46,6 +48,7 @@ export interface CreateContextOptions {
   // pass this in the context so we can migrate easily to other providers
   waitUntil: (p: Promise<unknown>) => void
   ip: string
+  hashCache: Map<string, string>
 }
 
 /**
@@ -55,7 +58,7 @@ export interface CreateContextOptions {
 export const createInnerTRPCContext = (
   opts: CreateContextOptions
 ): CreateContextOptions & {
-  db: Database | TransactionDatabase
+  db: Database
   analytics: Analytics
 } => {
   return {
@@ -171,6 +174,7 @@ export const createTRPCContext = async (opts: {
     metrics,
     cache,
     waitUntil, // abstracted to allow migration to other providers
+    hashCache,
   })
 }
 
