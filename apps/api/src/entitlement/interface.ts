@@ -50,6 +50,7 @@ export const canResponseSchema = z.object({
   remaining: z.number().optional(),
   limit: z.number().optional(),
   usage: z.number().optional(),
+  latency: z.number().optional(),
 })
 export type CanResponse = z.infer<typeof canResponseSchema>
 

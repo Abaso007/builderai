@@ -1098,6 +1098,7 @@ export interface operations {
             remaining?: number
             limit?: number
             usage?: number
+            latency?: number
           }
         }
       }

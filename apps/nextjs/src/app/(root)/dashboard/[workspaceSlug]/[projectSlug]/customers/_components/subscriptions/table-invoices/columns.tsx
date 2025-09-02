@@ -76,7 +76,7 @@ export const columns: ColumnDef<InvoiceCustomer>[] = [
     },
     size: 20,
     filterFn: (row, _id, value) => {
-      const status = ["void", "paid"].includes(row.original.status) ? "paid" : "unpaid"
+      const status = row.original.status.toLowerCase()
 
       return Array.isArray(value) && value.includes(status)
     },

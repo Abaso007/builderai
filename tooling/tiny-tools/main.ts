@@ -66,9 +66,12 @@ async function generateData(customerId: string, async?: boolean) {
       })
 
       if (result.result?.success) {
-        console.info(`Usage ${usage} reported for ${featureSlug}`)
+        console.info(`Usage ${usage} ${async ? "async" : "sync"} reported for ${featureSlug}`)
       } else {
-        console.error(`Usage ${usage} reported for ${featureSlug} failed`, result.result?.message)
+        console.error(
+          `Usage ${usage} ${async ? "async" : "sync"} reported for ${featureSlug} failed`,
+          result.result?.message
+        )
       }
     }
 
@@ -80,7 +83,6 @@ async function generateData(customerId: string, async?: boolean) {
       entitlements[Math.floor(Math.random() * entitlements.length)]?.featureSlug!
 
     if (randomFeatureSlug) {
-      const startTime = performance.now()
       // verify the usage
       const result = await unprice.customers.can({
         customerId,
@@ -88,10 +90,8 @@ async function generateData(customerId: string, async?: boolean) {
         async,
       })
 
-      const endTime = performance.now()
-
       console.info(
-        `Verification ${randomFeatureSlug} verified for ${customerId} in ${endTime - startTime}ms`
+        `Verification ${randomFeatureSlug} verified for ${customerId} in ${result.result?.latency}ms`
       )
 
       if (result.result?.success) {
@@ -114,7 +114,7 @@ async function main() {
   const customerEnterprise = "cus_1MVdMxZ45uJKDo5z48hYJ"
 
   // PRO plan
-  await generateData(customerPro, false)
+  await generateData(customerPro, true)
 
   // FREE plan
   await generateData(customerFree)

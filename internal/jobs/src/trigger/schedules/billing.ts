@@ -14,12 +14,14 @@ export const billingSchedule = schedules.task({
     const pendingInvoices = await db.query.invoices.findMany({
       where: (table, { inArray, and, lte }) =>
         and(inArray(table.status, ["draft", "unpaid", "waiting"]), lte(table.dueAt, now)),
-      limit: 1000,
+      limit: 100, // limit to 100 invoices to avoid overwhelming the system
       with: {
         subscriptionPhase: true,
       },
     })
 
+    // TODO: the problem here is we are waiting for the task to finish before triggering the next one
+    // this can take too much time, PLEASE FIX THIS
     // trigger the end trial task for each subscription phase
     for (const invoice of pendingInvoices) {
       const isNotFinalize = invoice.status === "draft"
