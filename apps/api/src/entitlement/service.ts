@@ -225,12 +225,15 @@ export class EntitlementService {
         },
       })
 
+      const latency = performance.now() - data.performanceStart
+
       const result = {
         success: entitlementGuard.valid,
         message: entitlementGuard.message,
         deniedReason: entitlementGuard.deniedReason,
         limit: entitlementGuard.limit,
         usage: entitlementGuard.usage,
+        latency: latency,
       }
 
       // report the verification event to the DO
@@ -248,7 +251,7 @@ export class EntitlementService {
                 async: true,
               },
             },
-            latency: performance.now() - data.performanceStart,
+            latency: latency,
             alarm: {
               ensure: true,
               flushTime: data.flushTime,

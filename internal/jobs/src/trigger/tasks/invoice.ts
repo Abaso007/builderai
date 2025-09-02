@@ -1,5 +1,5 @@
 import { task } from "@trigger.dev/sdk/v3"
-import { SubscriptionService } from "@unprice/services/subscriptions"
+import { SubscriptionService, type SusbriptionMachineStatus } from "@unprice/services/subscriptions"
 import { createContext } from "./context"
 
 export const invoiceTask = task({
@@ -36,31 +36,70 @@ export const invoiceTask = task({
     })
 
     const subscriptionService = new SubscriptionService(context)
+    let status: SusbriptionMachineStatus
+    let count = 0
+    const maxInvoicesPerAttempt = 10
 
-    // init phase machine
-    const billingInvoiceResult = await subscriptionService.invoiceSubscription({
-      subscriptionId,
-      projectId,
-      now,
-    })
+    // we need to do this as many time as needed until the next invoiceAt is in the future
+    while (true) {
+      count++
+      // init phase machine
+      const billingInvoiceResult = await subscriptionService.invoiceSubscription({
+        subscriptionId,
+        projectId,
+        now,
+      })
 
-    if (billingInvoiceResult.err) {
-      throw billingInvoiceResult.err
+      if (billingInvoiceResult.err) {
+        throw billingInvoiceResult.err
+      }
+
+      // get the subscription
+      const subscription = await subscriptionService.getSubscriptionData({
+        subscriptionId,
+        projectId,
+      })
+
+      if (!subscription) {
+        throw new Error("Subscription not found after invoicing")
+      }
+
+      console.info("Invoicing subscription again", {
+        subscriptionId,
+        projectId,
+        currentInvoiceAt: new Date(subscription.invoiceAt).toISOString(),
+        currentBillingCycleStartAt: new Date(subscription.currentCycleStartAt).toISOString(),
+        currentBillingCycleEndAt: new Date(subscription.currentCycleEndAt).toISOString(),
+      })
+
+      status = billingInvoiceResult.val.status
+
+      if (subscription.invoiceAt > now) {
+        console.info("Subscription is not due to be invoiced", {
+          subscriptionId,
+          projectId,
+          currentInvoiceAt: new Date(subscription.invoiceAt).toISOString(),
+        })
+
+        break
+      }
+
+      if (count > maxInvoicesPerAttempt) {
+        break
+      }
     }
 
-    // get the subscription
-    const subscription = await subscriptionService.getSubscriptionData({
+    console.info("Invoicing subscription finished", {
       subscriptionId,
       projectId,
+      status: status,
+      count,
+      maxInvoicesPerAttempt,
     })
-
-    if (!subscription) {
-      throw new Error("Subscription not found after invoicing")
-    }
 
     return {
-      status: billingInvoiceResult.val.status,
-      subscription,
+      status: status,
+      count,
     }
   },
 })
