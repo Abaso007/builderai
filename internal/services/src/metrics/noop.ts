@@ -6,5 +6,9 @@ export class NoopMetrics implements Metrics {
     return Promise.resolve()
   }
 
+  public setColo(_colo: string): void {
+    return
+  }
+
   public async flush(): Promise<void> {}
 }

@@ -1021,10 +1021,11 @@ export interface operations {
            */
           featureSlug: string
           /**
-           * @description If true will check the entitlement from cache and revalidate asyncronously. This will reduce latency for the request but won't have 100% accuracy
+           * @description if true will check the entitlement from cache and revalidate asyncronously. This will reduce latency for the request but won't have 100% accuracy. If false, the entitlement will be validated synchronously 100% accurate but will have a higher latency
+           * @default false
            * @example true
            */
-          async?: boolean
+          async: boolean
           /**
            * @description The metadata
            * @example {
@@ -1051,6 +1052,7 @@ export interface operations {
             /** @enum {string} */
             deniedReason?:
               | "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE"
+              | "ERROR_RESETTING_DO"
               | "RATE_LIMITED"
               | "ENTITLEMENT_NOT_FOUND"
               | "LIMIT_EXCEEDED"
@@ -3936,7 +3938,7 @@ export interface operations {
            */
           customerId?: string
           /**
-           * @description The project ID (optional, if not provided, the project ID will be the one of the key)
+           * @description The project ID (optional, only available for main projects)
            * @example project_1H7KQFLr7RepUyQBKdnvY
            */
           projectId: string

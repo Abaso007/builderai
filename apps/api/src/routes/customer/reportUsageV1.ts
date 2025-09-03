@@ -1,5 +1,4 @@
 import { createRoute } from "@hono/zod-openapi"
-import { FEATURE_SLUGS } from "@unprice/config"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 
@@ -7,6 +6,7 @@ import { z } from "zod"
 import { keyAuth } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { reportUsage } from "~/util/reportUsage"
 
 const tags = ["customer"]
 
@@ -78,7 +78,7 @@ export type ReportUsageResponse = z.infer<
 export const registerReportUsageV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customerId, featureSlug, usage, idempotenceKey, metadata } = c.req.valid("json")
-    const { entitlement, customer, logger } = c.get("services")
+    const { entitlement } = c.get("services")
     const stats = c.get("stats")
     const requestId = c.get("requestId")
 
@@ -112,64 +112,8 @@ export const registerReportUsageV1 = (app: App) =>
       },
     })
 
-    // unprice customer is the customer onwinging the key
-    // so once the request is done, we can report the usage for the unprice customer
-    const unPriceCustomerId = c.get("unPriceCustomerId")
-
     // send analytics event for the unprice customer
-    c.executionCtx.waitUntil(
-      Promise.resolve().then(async () => {
-        if (unPriceCustomerId) {
-          const { val: unPriceCustomer, err: unPriceCustomerErr } =
-            await customer.getCustomer(unPriceCustomerId)
-
-          if (unPriceCustomerErr || !unPriceCustomer) {
-            logger.error("Failed to get unprice customer", {
-              error: unPriceCustomerErr,
-            })
-            return
-          }
-
-          const shouldReportUsage =
-            !unPriceCustomer.project.workspace.isInternal &&
-            !unPriceCustomer.project.workspace.isMain
-
-          // if the unprice customer is internal or main, we don't need to report the usage
-          if (shouldReportUsage) {
-            return
-          }
-
-          await entitlement
-            .reportUsage({
-              customerId: unPriceCustomer.id,
-              featureSlug: FEATURE_SLUGS.EVENTS,
-              projectId: unPriceCustomer.projectId,
-              requestId,
-              usage: 1,
-              // short ttl for dev
-              flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
-              idempotenceKey: `${requestId}:${unPriceCustomer.id}`,
-              timestamp: Date.now(),
-              metadata: {
-                action: "reportUsage",
-                ip: stats.ip,
-                country: stats.country,
-                region: stats.region,
-                colo: stats.colo,
-                city: stats.city,
-                latitude: stats.latitude,
-                longitude: stats.longitude,
-                ua: stats.ua,
-                continent: stats.continent,
-                source: stats.source,
-              },
-            })
-            .catch((err) => {
-              logger.error("Failed to report usage", err)
-            })
-        }
-      })
-    )
+    c.executionCtx.waitUntil(reportUsage(c, { action: "reportUsage" }))
 
     return c.json(result, HttpStatusCodes.OK)
   })

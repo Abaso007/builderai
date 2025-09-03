@@ -339,9 +339,8 @@ export class Analytics {
     return this.readClient.buildPipe({
       pipe: "v1_get_feature_usage_period",
       parameters: z.object({
-        projectId: z.string().optional(),
+        projectId: z.string(),
         customerId: z.string().optional(),
-        featureSlug: z.string().optional(),
         entitlementId: z.string().optional(),
         intervalDays: z.number().optional(),
         start: z.number().optional(),
@@ -371,13 +370,12 @@ export class Analytics {
       parameters: z.object({
         projectId: z.string(),
         customerId: z.string(),
-        featureSlug: z.string().optional(),
-        entitlementId: z.string().optional(),
+        entitlementId: z.string(),
       }),
       data: z.object({
         projectId: z.string(),
         customerId: z.string(),
-        entitlementId: z.string().optional(),
+        entitlementId: z.string(),
         featureSlug: z.string(),
         count_all: z.number(),
         sum_all: z.number(),

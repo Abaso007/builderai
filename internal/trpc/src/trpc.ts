@@ -111,6 +111,7 @@ export const createTRPCContext = async (opts: {
         dataset: env.AXIOM_DATASET,
         environment: env.NODE_ENV,
         service: "trpc",
+        logLevel: env.VERCEL_ENV === "production" ? "error" : "info",
       })
     : new ConsoleLogger({
         requestId,
@@ -127,9 +128,18 @@ export const createTRPCContext = async (opts: {
       })
 
   const metrics: Metrics = env.EMIT_METRICS_LOGS
-    ? new LogdrainMetrics({ requestId, logger, environment: env.NODE_ENV, service: "trpc" })
+    ? new LogdrainMetrics({
+        requestId,
+        logger,
+        environment: env.NODE_ENV,
+        service: "trpc",
+        colo: region,
+      })
     : new NoopMetrics()
 
+  // INFO: we have this problem that the store cache for TRPC
+  // is different than the one in the API, if we need to invalidate
+  // caches from trpc to API we need to expose workers cache API!
   const cacheService = new CacheService(
     {
       waitUntil,

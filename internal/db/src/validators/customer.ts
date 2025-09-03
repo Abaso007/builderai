@@ -2,12 +2,16 @@ import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import { z } from "zod"
 import { extendZodWithOpenApi } from "zod-openapi"
 import * as schema from "../schema"
+import { featureSelectBaseSchema } from "./features"
+import { planVersionFeatureSelectBaseSchema } from "./planVersionFeatures"
+import { billingConfigSchema } from "./planVersions"
 import {
   aggregationMethodSchema,
   billingIntervalSchema,
   currencySchema,
   featureVersionType,
   paymentProviderSchema,
+  subscriptionStatusSchema,
   typeFeatureSchema,
 } from "./shared"
 import { subscriptionItemsConfigSchema } from "./subscriptions/items"
@@ -264,6 +268,49 @@ export const customerPaymentMethodSchema = z.object({
   brand: z.string().optional(),
 })
 
+export const getCurrentUsageSchema = z.object({
+  planVersion: z.object({
+    description: z.string(),
+    flatPrice: z.string(),
+    currentTotalPrice: z.string(),
+    billingConfig: billingConfigSchema,
+  }),
+  subscription: z.object({
+    planSlug: z.string(),
+    status: subscriptionStatusSchema,
+    currentCycleEndAt: z.number(),
+    timezone: z.string(),
+    currentCycleStartAt: z.number(),
+    prorationFactor: z.number(),
+    prorated: z.boolean(),
+  }),
+  phase: z.object({
+    trialEndsAt: z.number().nullable(),
+    endAt: z.number().nullable(),
+    trialDays: z.number(),
+    isTrial: z.boolean(),
+  }),
+  entitlement: z.array(
+    z
+      .object({
+        featureSlug: z.string(),
+        featureType: typeFeatureSchema,
+        isCustom: z.boolean(),
+        limit: z.number().nullable(),
+        usage: z.number(),
+        freeUnits: z.number(),
+        max: z.number().nullable(),
+        units: z.number().nullable(),
+        included: z.number(),
+        featureVersion: planVersionFeatureSelectBaseSchema.extend({
+          feature: featureSelectBaseSchema,
+        }),
+        price: z.string().nullable(),
+      })
+      .optional()
+  ),
+})
+
 export type StripePlanVersion = z.infer<typeof stripePlanVersionSchema>
 export type Customer = z.infer<typeof customerSelectSchema>
 export type InsertCustomer = z.infer<typeof customerInsertBaseSchema>
@@ -274,3 +321,4 @@ export type CustomerEntitlement = z.infer<typeof customerEntitlementSchema>
 export type InsertCustomerEntitlement = z.infer<typeof customerEntitlementInsertSchema>
 export type CustomerEntitlementExtended = z.infer<typeof customerEntitlementExtendedSchema>
 export type CustomerPaymentMethod = z.infer<typeof customerPaymentMethodSchema>
+export type GetCurrentUsage = z.infer<typeof getCurrentUsageSchema>

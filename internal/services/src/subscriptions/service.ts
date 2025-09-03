@@ -229,6 +229,15 @@ export class SubscriptionService {
     const startAtToUse = startAt ?? now
     const endAtToUse = endAt ?? undefined
 
+    // if the end date is in the past, set it to the current date
+    if (endAtToUse && endAtToUse < now) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: "End date is in the past",
+        })
+      )
+    }
+
     // get subscription with phases from start date
     const subscriptionWithPhases = await (db ?? this.db).query.subscriptions.findFirst({
       where: (sub, { eq }) => eq(sub.id, subscriptionId),
@@ -629,6 +638,14 @@ export class SubscriptionService {
   }): Promise<Result<SubscriptionPhase, UnPriceSubscriptionError | SchemaError>> {
     const { startAt, endAt, items } = input
 
+    let endAtToUse = endAt ?? undefined
+
+    // TODO: check this
+    // if the end date is in the past, set it to the current date
+    if (endAt && endAt < now) {
+      endAtToUse = now
+    }
+
     // get subscription with phases from start date
     const subscriptionWithPhases = await (db ?? this.db).query.subscriptions.findFirst({
       where: (sub, { eq }) => eq(sub.id, subscriptionId),
@@ -686,7 +703,7 @@ export class SubscriptionService {
       const endAtPhase = p.endAt ?? Number.POSITIVE_INFINITY
 
       return (
-        (startAtPhase < endAt! || startAtPhase === endAt!) &&
+        (startAtPhase < endAtToUse! || startAtPhase === endAtToUse!) &&
         (endAtPhase > startAt || endAtPhase === startAt)
       )
     })
@@ -707,7 +724,7 @@ export class SubscriptionService {
         phaseToCheck = {
           ...p,
           startAt,
-          endAt,
+          endAt: endAtToUse ?? null,
         }
       }
 
@@ -728,7 +745,6 @@ export class SubscriptionService {
     }
 
     // validate the the end date is not less that the end date of the current billing cycle
-
     const currentCycleEndAt = subscriptionWithPhases.currentCycleEndAt
 
     if (endAt && endAt < currentCycleEndAt) {
@@ -745,7 +761,7 @@ export class SubscriptionService {
         .update(subscriptionPhases)
         .set({
           startAt: startAt,
-          endAt: endAt ?? null,
+          endAt: endAtToUse ?? null,
         })
         .where(eq(subscriptionPhases.id, input.id))
         .returning()
@@ -816,7 +832,7 @@ export class SubscriptionService {
       const setEndEntitlementsResult = await this.setEndEntitlementsForPhase({
         phaseId: subscriptionPhase.id,
         projectId,
-        endAt: endAt,
+        endAt: endAtToUse ?? null,
         db: trx,
       })
 

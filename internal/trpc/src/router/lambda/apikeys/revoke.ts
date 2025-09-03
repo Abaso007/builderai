@@ -5,6 +5,7 @@ import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 import { featureGuard } from "#utils/feature-guard"
 
+// TODO: move this to apikey service
 export const revoke = protectedProjectProcedure
   .input(z.object({ ids: z.string().array() }))
   .output(z.object({ success: z.boolean(), numRevoked: z.number() }))

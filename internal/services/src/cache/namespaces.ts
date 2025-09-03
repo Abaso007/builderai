@@ -16,6 +16,7 @@ import type {
   CustomerEntitlementExtended,
   CustomerPaymentMethod,
   Feature,
+  GetCurrentUsage,
   PlanVersionApi,
   Project,
   SubscriptionCache,
@@ -70,6 +71,7 @@ export type CacheNamespaces = {
   getUsage: Usage | null
   getVerifications: Verifications | null
   getVerificationRegions: VerificationRegions | null
+  getCurrentUsage: GetCurrentUsage | null
 }
 
 export type CacheNamespace = keyof CacheNamespaces

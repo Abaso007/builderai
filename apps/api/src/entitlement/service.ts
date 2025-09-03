@@ -3,6 +3,7 @@ import type { Analytics } from "@unprice/analytics"
 import type { Stats } from "@unprice/analytics/utils"
 import type { Database } from "@unprice/db"
 import {
+  type GetCurrentUsage,
   type SubscriptionCache,
   calculateFlatPricePlan,
   calculateFreeUnits,
@@ -24,7 +25,6 @@ import type {
   GetEntitlementsRequest,
   GetEntitlementsResponse,
   GetUsageRequest,
-  GetUsageResponse,
   ReportUsageRequest,
   ReportUsageResponse,
 } from "./interface"
@@ -344,29 +344,14 @@ export class EntitlementService {
       })
     }
 
-    // get the entitlements from the DO
-    const durableObject = this.getStub(this.getDurableObjectCustomerId(customerId))
-    const entitlementsDO = await durableObject.getEntitlements()
-
-    if (entitlementsDO) {
-      // set the usage from the DO to the entitlements
-      entitlements.forEach((entitlement) => {
-        const entitlementDO = entitlementsDO.find((e) => e.featureSlug === entitlement.featureSlug)
-        if (entitlementDO) {
-          entitlement.usage = entitlementDO.usage
-          entitlement.lastUsageUpdateAt = entitlementDO.lastUsageUpdateAt
-          entitlement.accumulatedUsage = entitlementDO.accumulatedUsage
-        }
-      })
-    }
-
     return {
       entitlements,
     }
   }
 
-  public async getUsage(req: GetUsageRequest): Promise<GetUsageResponse> {
+  public async getCurrentUsage(req: GetUsageRequest): Promise<GetCurrentUsage> {
     const { customerId, projectId, now } = req
+    const cacheKey = `${projectId}:${customerId}`
 
     const { err: subscriptionErr, val: subscription } = await this.validateSubscription(
       customerId,
@@ -398,136 +383,139 @@ export class EntitlementService {
       throw entitlementsErr
     }
 
-    // get the entitlements from the DO which have the latest usage
-    const durableObject = this.getStub(this.getDurableObjectCustomerId(customerId))
-    const entitlementsDO = await durableObject.getEntitlements()
+    const { err: resultErr, val: result } = await this.cache.getCurrentUsage.swr(
+      cacheKey,
+      async () => {
+        const quantities = entitlements.reduce(
+          (acc, entitlement) => {
+            acc[entitlement.featurePlanVersionId] =
+              entitlement.featureType === "usage"
+                ? Number(entitlement.usage)
+                : Number(entitlement.units)
+            return acc
+          },
+          {} as Record<string, number>
+        )
 
-    if (entitlementsDO) {
-      // set the usage from the DO to the entitlements
-      entitlements.forEach((entitlement) => {
-        const entitlementDO = entitlementsDO.find((e) => e.featureSlug === entitlement.featureSlug)
-        if (entitlementDO) {
-          entitlement.usage = entitlementDO.usage
-          entitlement.lastUsageUpdateAt = entitlementDO.lastUsageUpdateAt
-          entitlement.accumulatedUsage = entitlementDO.accumulatedUsage
-        }
-      })
-    }
+        const calculatedBillingCycle = configureBillingCycleSubscription({
+          currentCycleStartAt: subscription.currentCycleStartAt,
+          billingConfig: phase.planVersion.billingConfig,
+          trialUnits: phase.trialDays,
+          alignStartToDay: true,
+          alignEndToDay: true,
+          endAt: phase.endAt ?? undefined,
+          alignToCalendar: true,
+        })
 
-    const quantities = entitlements.reduce(
-      (acc, entitlement) => {
-        acc[entitlement.featurePlanVersionId] =
-          entitlement.featureType === "usage"
-            ? Number(entitlement.usage)
-            : Number(entitlement.units)
-        return acc
-      },
-      {} as Record<string, number>
-    )
+        const { val: totalPricePlan, err: totalPricePlanErr } = calculateTotalPricePlan({
+          features: phase.customerEntitlements.map((e) => e.featurePlanVersion),
+          quantities: quantities,
+          prorate: calculatedBillingCycle.prorationFactor,
+          currency: phase.planVersion.currency,
+        })
 
-    const calculatedBillingCycle = configureBillingCycleSubscription({
-      currentCycleStartAt: subscription.currentCycleStartAt,
-      billingConfig: phase.planVersion.billingConfig,
-      trialUnits: phase.trialDays,
-      alignStartToDay: true,
-      alignEndToDay: true,
-      endAt: phase.endAt ?? undefined,
-      alignToCalendar: true,
-    })
-
-    const { val: totalPricePlan, err: totalPricePlanErr } = calculateTotalPricePlan({
-      features: phase.customerEntitlements.map((e) => e.featurePlanVersion),
-      quantities: quantities,
-      prorate: calculatedBillingCycle.prorationFactor,
-      currency: phase.planVersion.currency,
-    })
-
-    const { err: flatPriceErr, val: flatPrice } = calculateFlatPricePlan({
-      planVersion: {
-        ...phase.planVersion,
-        planFeatures: phase.customerEntitlements.map((e) => e.featurePlanVersion),
-      },
-      prorate: 1, // TODO: calculate the prorate
-    })
-
-    if (totalPricePlanErr || flatPriceErr) {
-      throw totalPricePlanErr || flatPriceErr
-    }
-
-    // TODO: save this to cache to avoid recalculating the price for the same request
-    const result = {
-      planVersion: {
-        description: phase.planVersion.description,
-        flatPrice: flatPrice.displayAmount,
-        currentTotalPrice: totalPricePlan.displayAmount,
-        billingConfig: phase.planVersion.billingConfig,
-      },
-      subscription: {
-        planSlug: subscription.planSlug,
-        status: subscription.status,
-        currentCycleEndAt: subscription.currentCycleEndAt,
-        timezone: subscription.timezone,
-        currentCycleStartAt: subscription.currentCycleStartAt,
-        prorationFactor: calculatedBillingCycle.prorationFactor,
-        prorated: calculatedBillingCycle.prorationFactor !== 1,
-      },
-      phase: {
-        trialEndsAt: phase.trialEndsAt,
-        endAt: phase.endAt,
-        trialDays: phase.trialDays,
-        isTrial: phase.trialEndsAt ? Date.now() < phase.trialEndsAt : false,
-      },
-      entitlement: entitlements.map((e) => {
-        const entitlementPhase = phase.customerEntitlements.find((p) => e.id === p.id)
-
-        // if the entitlement is not found in the phase, it means it's a custom entitlement
-        // no need to add price information
-        if (!entitlementPhase) {
-          const featureVersion = phase.customerEntitlements.find(
-            (p) => p.featurePlanVersionId === e.featurePlanVersionId
-          )
-          return {
-            featureSlug: e.featureSlug,
-            featureType: e.featureType,
-            isCustom: true,
-            limit: e.limit,
-            usage: Number(e.usage),
-            units: e.units,
-            freeUnits: 0,
-            max: e.limit || Number.POSITIVE_INFINITY,
-            included: 0,
-            featureVersion: featureVersion?.featurePlanVersion!,
-            price: null,
-          }
-        }
-
-        const { config, featureType } = entitlementPhase.featurePlanVersion
-        const freeUnits = calculateFreeUnits({ config: config!, featureType: featureType })
-        const { val: price } = calculatePricePerFeature({
-          config: config!,
-          featureType: featureType,
-          quantity: quantities[entitlementPhase.featurePlanVersionId] ?? 0,
+        const { err: flatPriceErr, val: flatPrice } = calculateFlatPricePlan({
+          planVersion: {
+            ...phase.planVersion,
+            planFeatures: phase.customerEntitlements.map((e) => e.featurePlanVersion),
+          },
           prorate: calculatedBillingCycle.prorationFactor,
         })
 
-        return {
-          featureSlug: e.featureSlug,
-          featureType: e.featureType,
-          limit: e.limit,
-          usage: Number(e.usage),
-          units: e.units,
-          isCustom: false,
-          freeUnits,
-          included:
-            freeUnits === Number.POSITIVE_INFINITY
-              ? e.limit || Number.POSITIVE_INFINITY
-              : freeUnits,
-          price: price?.totalPrice.displayAmount ?? "0",
-          max: e.limit || Number.POSITIVE_INFINITY,
-          featureVersion: entitlementPhase.featurePlanVersion,
+        if (totalPricePlanErr || flatPriceErr) {
+          throw totalPricePlanErr || flatPriceErr
         }
-      }),
+
+        const result = {
+          planVersion: {
+            description: phase.planVersion.description,
+            flatPrice: flatPrice.displayAmount,
+            currentTotalPrice: totalPricePlan.displayAmount,
+            billingConfig: phase.planVersion.billingConfig,
+          },
+          subscription: {
+            planSlug: subscription.planSlug,
+            status: subscription.status,
+            currentCycleEndAt: subscription.currentCycleEndAt,
+            timezone: subscription.timezone,
+            currentCycleStartAt: subscription.currentCycleStartAt,
+            prorationFactor: calculatedBillingCycle.prorationFactor,
+            prorated: calculatedBillingCycle.prorationFactor !== 1,
+          },
+          phase: {
+            trialEndsAt: phase.trialEndsAt,
+            endAt: phase.endAt,
+            trialDays: phase.trialDays,
+            isTrial: phase.trialEndsAt ? Date.now() < phase.trialEndsAt : false,
+          },
+          entitlement: entitlements.map((e) => {
+            const entitlementPhase = phase.customerEntitlements.find((p) => e.id === p.id)
+
+            // if the entitlement is not found in the phase, it means it's a custom entitlement
+            // no need to add price information
+            if (!entitlementPhase) {
+              const featureVersion = phase.customerEntitlements.find(
+                (p) => p.featurePlanVersionId === e.featurePlanVersionId
+              )
+              return {
+                featureSlug: e.featureSlug,
+                featureType: e.featureType,
+                isCustom: true,
+                limit: e.limit,
+                usage: Number(e.usage),
+                units: e.units,
+                freeUnits: 0,
+                max: e.limit || Number.POSITIVE_INFINITY,
+                included: 0,
+                featureVersion: featureVersion?.featurePlanVersion!,
+                price: null,
+              }
+            }
+
+            const { config, featureType } = entitlementPhase.featurePlanVersion
+            const freeUnits = calculateFreeUnits({ config: config!, featureType: featureType })
+            const { val: price } = calculatePricePerFeature({
+              config: config!,
+              featureType: featureType,
+              quantity: quantities[entitlementPhase.featurePlanVersionId] ?? 0,
+              prorate: calculatedBillingCycle.prorationFactor,
+            })
+
+            return {
+              featureSlug: e.featureSlug,
+              featureType: e.featureType,
+              limit: e.limit,
+              usage: Number(e.usage),
+              units: e.units,
+              isCustom: false,
+              freeUnits,
+              included:
+                freeUnits === Number.POSITIVE_INFINITY
+                  ? e.limit || Number.POSITIVE_INFINITY
+                  : freeUnits,
+              price: price?.totalPrice.displayAmount ?? "0",
+              max: e.limit || Number.POSITIVE_INFINITY,
+              featureVersion: entitlementPhase.featurePlanVersion,
+            }
+          }),
+        }
+
+        return result
+      }
+    )
+
+    if (resultErr) {
+      throw resultErr
     }
+
+    if (!result) {
+      throw new UnPriceCustomerError({
+        code: "ENTITLEMENT_NOT_FOUND",
+        message: "failed to get current usage",
+      })
+    }
+
+    this.waitUntil(this.cache.getCurrentUsage.set(cacheKey, result))
 
     return result
   }

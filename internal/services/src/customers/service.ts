@@ -10,6 +10,7 @@ import {
   sql,
 } from "@unprice/db"
 
+import type { CacheError } from "@unkey/cache"
 import type { Analytics } from "@unprice/analytics"
 import {
   customerEntitlements,
@@ -443,10 +444,65 @@ export class CustomerService {
     return Ok(val)
   }
 
+  public async syncEntitlementsUsageCache({
+    entitlements,
+  }: {
+    entitlements: CustomerEntitlementExtended[]
+  }): Promise<void> {
+    // set cache
+    const promises: Promise<Result<void, CacheError>>[] = []
+    entitlements.forEach((entitlement) => {
+      if (!entitlement.usage) {
+        return
+      }
+
+      promises.push(
+        this.cache.customerEntitlement.set(
+          `${entitlement.projectId}:${entitlement.customerId}:${entitlement.featureSlug}`,
+          {
+            ...entitlement,
+            usage: entitlement.usage,
+            accumulatedUsage: entitlement.accumulatedUsage,
+            lastUsageUpdateAt: Date.now(),
+          }
+        )
+      )
+    })
+
+    await Promise.all(promises)
+
+    return
+  }
+
+  public async syncEntitlementsUsageDB({
+    entitlements,
+  }: {
+    entitlements: CustomerEntitlementExtended[]
+  }): Promise<void> {
+    const updatePromises = entitlements.map((entitlement) =>
+      this.db
+        .update(customerEntitlements)
+        .set({
+          usage: entitlement.usage,
+          accumulatedUsage: entitlement.accumulatedUsage,
+          lastUsageUpdateAt: Date.now(),
+        })
+        .where(
+          and(
+            eq(customerEntitlements.customerId, entitlement.customerId),
+            eq(customerEntitlements.projectId, entitlement.projectId),
+            eq(customerEntitlements.id, entitlement.id)
+          )
+        )
+    )
+
+    await Promise.all(updatePromises)
+  }
+
   private async getUsagePerFeatureFromAnalytics({
     customerId,
     projectId,
-    featureSlug,
+    entitlementId,
     startAt,
     endAt,
     aggregationMethod,
@@ -454,7 +510,7 @@ export class CustomerService {
   }: {
     customerId: string
     projectId: string
-    featureSlug: string
+    entitlementId: string
     startAt: number
     endAt: number
     aggregationMethod: AggregationMethod
@@ -470,7 +526,7 @@ export class CustomerService {
             .getFeaturesUsageTotal({
               customerId,
               projectId,
-              featureSlug,
+              entitlementId,
             })
             .then((usage) => usage.data[0] ?? 0)
             .catch((error) => {
@@ -478,7 +534,8 @@ export class CustomerService {
                 error: error.message,
                 customerId,
                 method: "getFeaturesUsageTotal",
-                featureSlug,
+                entitlementId,
+                projectId,
                 startAt,
                 endAt,
               })
@@ -493,7 +550,7 @@ export class CustomerService {
         .getFeaturesUsagePeriod({
           customerId,
           projectId,
-          featureSlug,
+          entitlementId,
           start: startAt,
           end: endAt,
         })
@@ -503,7 +560,8 @@ export class CustomerService {
             error: error.message,
             customerId,
             method: "getFeaturesUsagePeriod",
-            featureSlug,
+            entitlementId,
+            projectId,
             startAt,
             endAt,
           })
@@ -523,7 +581,7 @@ export class CustomerService {
       duration: end - start,
       service: "customer",
       customerId,
-      featureSlug,
+      entitlementId,
       projectId,
       isAccumulated,
       start,
@@ -665,6 +723,15 @@ export class CustomerService {
       withLastUsage?: boolean // if true, we will get the last usage from analytics
     }
   }): Promise<Result<CustomerEntitlementExtended[], FetchError | UnPriceCustomerError>> {
+    const cacheKey = `${projectId}:${customerId}`
+
+    if (opts?.skipCache) {
+      this.logger.info("skipping cache for getActiveEntitlements", {
+        customerId,
+        projectId,
+      })
+    }
+
     // first try to get the entitlement from cache, if not found try to get it from DO,
     const { val, err } = opts?.skipCache
       ? await wrapResult(
@@ -688,7 +755,7 @@ export class CustomerService {
       : await retry(
           3,
           async () =>
-            this.cache.customerEntitlements.swr(`${projectId}:${customerId}`, () =>
+            this.cache.customerEntitlements.swr(cacheKey, () =>
               this.getEntitlementsData({
                 customerId,
                 projectId,
@@ -872,12 +939,12 @@ export class CustomerService {
     let usage = entitlement.usage
     let accumulatedUsage = entitlement.accumulatedUsage
 
-    // get the usage from analytics if the entitlement was updated more than 1 minute ago
+    // get the last usage from analytics
     if (opts?.withLastUsage) {
       const { err, val } = await this.getUsagePerFeatureFromAnalytics({
         customerId,
         projectId,
-        featureSlug,
+        entitlementId: entitlement.id,
         startAt: entitlement.validFrom ?? Date.now(),
         endAt: now,
         aggregationMethod: entitlement.aggregationMethod,
@@ -1136,7 +1203,7 @@ export class CustomerService {
     return Ok(result)
   }
 
-  public setNewUsageEntitlement({
+  public calculateEntitlementUsage({
     entitlement,
     usage,
   }: {
@@ -1172,6 +1239,14 @@ export class CustomerService {
         deniedReason: "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE",
         usage: 0,
         limit: 1,
+      }
+    }
+
+    if (Number(usage) < 0 && !["sum", "sum_all"].includes(entitlement.aggregationMethod)) {
+      return {
+        success: false,
+        message: `Usage cannot be negative when the feature type is not sum or sum_all, got ${entitlement.aggregationMethod}. This will disturb aggregations.`,
+        deniedReason: "INCORRECT_USAGE_REPORTING",
       }
     }
 
@@ -1243,9 +1318,13 @@ export class CustomerService {
   public isValidEntitlement({
     entitlement,
     now,
+    opts,
   }: {
     entitlement: CustomerEntitlementExtended
     now: number
+    opts?: {
+      allowOverage?: boolean
+    }
   }):
     | {
         valid: true
@@ -1253,6 +1332,7 @@ export class CustomerService {
         limit?: number
         usage?: number
         deniedReason?: DenyReason
+        isInBufferPeriod?: boolean
       }
     | {
         valid: false
@@ -1260,16 +1340,26 @@ export class CustomerService {
         deniedReason: DenyReason
         limit?: number
         usage?: number
+        isInBufferPeriod?: boolean
       } {
     const bufferPeriod = entitlement.bufferPeriodDays * 24 * 60 * 60 * 1000
-    const validUntil = entitlement.validTo ? entitlement.validTo + bufferPeriod : null
+    // allow buffer period if allowOverage is true
+    const allowBufferPeriod = opts?.allowOverage ?? false
+    const validUntil = entitlement.validTo
+      ? allowBufferPeriod
+        ? entitlement.validTo + bufferPeriod
+        : entitlement.validTo
+      : null
     const active = entitlement.active
+    const isInBufferPeriod = entitlement.validTo && now > entitlement.validTo
 
     if (now < entitlement.validFrom || (validUntil && now > validUntil)) {
       return {
         valid: false,
         message: "entitlement expired",
         deniedReason: "ENTITLEMENT_EXPIRED",
+        limit: entitlement.limit ?? undefined,
+        usage: Number(entitlement.usage) ?? undefined,
       }
     }
 
@@ -1278,12 +1368,17 @@ export class CustomerService {
         valid: false,
         message: "entitlement is not active",
         deniedReason: "ENTITLEMENT_NOT_ACTIVE",
+        limit: entitlement.limit ?? undefined,
+        usage: Number(entitlement.usage) ?? undefined,
       }
     }
 
     return {
       valid: true,
-      message: "entitlement is valid",
+      message: `entitlement is valid ${isInBufferPeriod ? "but in buffer period" : ""}`,
+      isInBufferPeriod: !!isInBufferPeriod,
+      limit: entitlement.limit ?? undefined,
+      usage: Number(entitlement.usage) ?? undefined,
     }
   }
 
@@ -1378,6 +1473,7 @@ export class CustomerService {
     const isValidResult = this.isValidEntitlement({
       entitlement,
       now,
+      opts,
     })
 
     // if the entitlement is not valid, return the error
@@ -1400,7 +1496,7 @@ export class CustomerService {
     if (!checkLimitResult.valid) {
       return {
         valid: false,
-        message: checkLimitResult.message,
+        message: `${checkLimitResult.message} ${isValidResult.isInBufferPeriod ? "(buffer period)" : ""}`,
         deniedReason: checkLimitResult.deniedReason,
         limit: checkLimitResult.limit,
         usage: checkLimitResult.usage,

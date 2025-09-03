@@ -1,12 +1,4 @@
-import {
-  billingConfigSchema,
-  customerEntitlementExtendedSchema,
-  deniedReasonSchema,
-  featureSelectBaseSchema,
-  planVersionFeatureSelectBaseSchema,
-  subscriptionStatusSchema,
-  typeFeatureSchema,
-} from "@unprice/db/validators"
+import { customerEntitlementExtendedSchema, deniedReasonSchema } from "@unprice/db/validators"
 import { z } from "zod"
 
 export const reportUsageSchema = z.object({
@@ -84,48 +76,3 @@ export const getUsageRequestSchema = z.object({
   now: z.number(),
 })
 export type GetUsageRequest = z.infer<typeof getUsageRequestSchema>
-
-export const getUsageResponseSchema = z.object({
-  planVersion: z.object({
-    description: z.string(),
-    flatPrice: z.string(),
-    currentTotalPrice: z.string(),
-    billingConfig: billingConfigSchema,
-  }),
-  subscription: z.object({
-    planSlug: z.string(),
-    status: subscriptionStatusSchema,
-    currentCycleEndAt: z.number(),
-    timezone: z.string(),
-    currentCycleStartAt: z.number(),
-    prorationFactor: z.number(),
-    prorated: z.boolean(),
-  }),
-  phase: z.object({
-    trialEndsAt: z.number().nullable(),
-    endAt: z.number().nullable(),
-    trialDays: z.number(),
-    isTrial: z.boolean(),
-  }),
-  entitlement: z.array(
-    z
-      .object({
-        featureSlug: z.string(),
-        featureType: typeFeatureSchema,
-        isCustom: z.boolean(),
-        limit: z.number().nullable(),
-        usage: z.number(),
-        freeUnits: z.number(),
-        max: z.number().nullable(),
-        units: z.number().nullable(),
-        included: z.number(),
-        featureVersion: planVersionFeatureSelectBaseSchema.extend({
-          feature: featureSelectBaseSchema,
-        }),
-        price: z.string().nullable(),
-      })
-      .optional()
-  ),
-})
-
-export type GetUsageResponse = z.infer<typeof getUsageResponseSchema>

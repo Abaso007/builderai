@@ -1,5 +1,4 @@
 import { Pool, neonConfig } from "@neondatabase/serverless"
-import { DefaultLogger } from "drizzle-orm"
 import { drizzle as drizzleNeon } from "drizzle-orm/neon-serverless"
 import { withReplicas } from "drizzle-orm/pg-core"
 import ws from "ws"
@@ -13,6 +12,17 @@ export type ConnectionDatabaseOptions = {
   read2DatabaseUrl?: string
   logger: boolean
   singleton?: boolean
+}
+
+const loggerQuery = (query: string, params?: unknown[]) => {
+  console.info("=".repeat(40))
+  console.info("\n\x1b[36m[Drizzle]\x1b[0m\n")
+  console.info(`Query:\n${query}\n`)
+
+  if (params && params.length > 0) {
+    console.info(`Params:\n${JSON.stringify(params, null, 2)}\n`)
+  }
+  console.info("=".repeat(40))
 }
 
 // only for development when using node 20
@@ -65,15 +75,17 @@ export function createConnection(opts: ConnectionDatabaseOptions): Database {
     queryTimeout: 60000,
   }
 
-  const logger = opts.logger ? new DefaultLogger() : false
-
   const primary = drizzleNeon(
     new Pool(poolConfig).on("error", (err) => {
       console.error("Database error:", err)
     }),
     {
       schema: schema,
-      logger,
+      logger: opts.logger
+        ? {
+            logQuery: loggerQuery,
+          }
+        : undefined,
     }
   )
 
@@ -83,7 +95,6 @@ export function createConnection(opts: ConnectionDatabaseOptions): Database {
     }),
     {
       schema: schema,
-      logger,
     }
   )
 
@@ -93,7 +104,6 @@ export function createConnection(opts: ConnectionDatabaseOptions): Database {
     }),
     {
       schema: schema,
-      logger,
     }
   )
 

@@ -49,7 +49,6 @@ export const registerGetSubscriptionV1 = (app: App) =>
 
     const { val: subscription, err } = await customer.getActiveSubscription({
       customerId,
-      // TODO: what happens if the key is root?
       projectId: key.projectId,
     })
 

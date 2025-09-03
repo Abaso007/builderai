@@ -12,6 +12,7 @@ import type { Env } from "~/env"
 import type { CanRequest, ReportUsageRequest, ReportUsageResponse } from "./interface"
 
 import { env } from "cloudflare:workers"
+import { CloudflareStore } from "@unkey/cache/stores"
 import { createConnection } from "@unprice/db"
 import type { CustomerEntitlementExtended } from "@unprice/db/validators"
 import { FetchError } from "@unprice/error"
@@ -23,6 +24,8 @@ import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/me
 
 interface UsageLimiterConfig {
   entitlements: CustomerEntitlementExtended[]
+  colo: string
+  lastSyncUsageAt: number
 }
 
 // This durable object takes care of handling the usage of every feature per customer.
@@ -30,6 +33,8 @@ interface UsageLimiterConfig {
 export class DurableObjectUsagelimiter extends Server {
   // if the do is initialized
   private initialized = false
+  // colo of the do
+  private colo = ""
   // once the durable object is initialized we can avoid
   // querying the db for usage on each request
   private featuresUsage: Map<string, CustomerEntitlementExtended> = new Map()
@@ -86,6 +91,7 @@ export class DurableObjectUsagelimiter extends Server {
           apiKey: env.AXIOM_API_TOKEN,
           dataset: env.AXIOM_DATASET,
           requestId: this.ctx.id.toString(),
+          logLevel: env.VERCEL_ENV === "production" ? "error" : "info",
           environment: env.NODE_ENV,
           service: "usagelimiter",
           defaultFields: {
@@ -119,8 +125,28 @@ export class DurableObjectUsagelimiter extends Server {
       emitMetrics
     )
 
-    // don't register any stores - only memory
-    this.cache.init([])
+    const cloudflareCacheStore =
+      env.CLOUDFLARE_ZONE_ID &&
+      env.CLOUDFLARE_API_TOKEN &&
+      env.CLOUDFLARE_ZONE_ID !== "" &&
+      env.CLOUDFLARE_API_TOKEN !== ""
+        ? new CloudflareStore({
+            cloudflareApiKey: env.CLOUDFLARE_API_TOKEN,
+            zoneId: env.CLOUDFLARE_ZONE_ID,
+            domain: "cache.unprice.dev",
+            cacheBuster: "v2",
+          })
+        : undefined
+
+    const stores = []
+
+    // push the cloudflare store first to hit it first
+    if (cloudflareCacheStore) {
+      stores.push(cloudflareCacheStore)
+    }
+
+    // register the cloudflare store if it is configured
+    this.cache.init(stores)
 
     const cache = this.cache.getCache()
 
@@ -141,7 +167,44 @@ export class DurableObjectUsagelimiter extends Server {
       }),
     })
 
+    // initialize the do
     this.initialize()
+
+    // set the colo of the do
+    this.setColo()
+  }
+
+  async setColo() {
+    const config = await this.getConfig()
+
+    // if not initialized, set the colo
+    // localtion shouldn't change after the object is created
+    if (this.colo === "") {
+      let colo = "UNK"
+
+      try {
+        colo =
+          (
+            (await (await fetch("https://www.cloudflare.com/cdn-cgi/trace")).text()).match(
+              /^colo=(.+)/m
+            ) as string[]
+          )[1] ?? "UNK"
+      } catch (e) {
+        this.logger.error("error setting colo", {
+          error: e instanceof Error ? e.message : "unknown error",
+        })
+      }
+
+      config.colo = colo
+
+      await this.updateConfig(config)
+    }
+
+    // block concurrency while setting the colo
+    this.ctx.blockConcurrencyWhile(async () => {
+      this.colo = config.colo
+      this.metrics.setColo(config.colo)
+    })
   }
 
   async initialize() {
@@ -159,6 +222,9 @@ export class DurableObjectUsagelimiter extends Server {
 
         // save the config in the do storage
         const config = await this.getConfig()
+
+        // set the colo of the do
+        this.colo = config.colo
 
         // initialize the state
         const entitlements = config.entitlements
@@ -212,6 +278,8 @@ export class DurableObjectUsagelimiter extends Server {
     // update the config
     await this.updateConfig({
       entitlements,
+      colo: config.colo,
+      lastSyncUsageAt: config.lastSyncUsageAt,
     })
 
     // update the state
@@ -254,7 +322,7 @@ export class DurableObjectUsagelimiter extends Server {
     // basically stale while revalidate pattern
     if (shouldRefresh) {
       // if the entitlement is not found in the first time or is a placeholder, revalidate it
-      if (!entitlement?.id || entitlement?.id === "placeholder") {
+      if (!entitlement?.id || entitlement?.id === "placeholder" || opts?.forceRefresh) {
         const { err, val } = await this.revalidateEntitlement({
           customerId,
           projectId,
@@ -268,17 +336,17 @@ export class DurableObjectUsagelimiter extends Server {
         }
 
         entitlement = val
+      } else {
+        // revalidate in background is found in the first time but should refresh
+        this.ctx.waitUntil(
+          this.revalidateEntitlement({
+            customerId,
+            projectId,
+            featureSlug,
+            now,
+          })
+        )
       }
-
-      // revalidate in background is found in the first time but should refresh
-      this.ctx.waitUntil(
-        this.revalidateEntitlement({
-          customerId,
-          projectId,
-          featureSlug,
-          now,
-        })
-      )
     }
 
     // if the entitlement doesn't need to be refreshed
@@ -308,7 +376,7 @@ export class DurableObjectUsagelimiter extends Server {
     return Ok(entitlement)
   }
 
-  // this is a simple way to revalidate the entitlement
+  // INFO: this is an expensive call, should be called only when needed
   private async revalidateEntitlement({
     customerId,
     projectId,
@@ -320,6 +388,10 @@ export class DurableObjectUsagelimiter extends Server {
     featureSlug: string
     now: number
   }): Promise<Result<CustomerEntitlementExtended, FetchError | UnPriceCustomerError>> {
+    // before revalidating send any usage and verifications to tinybird
+    await this.sendUsageToTinybird()
+    await this.sendVerificationsToTinybird()
+
     // get the entitlement from the db
     const { err, val } = await this.customerService.getActiveEntitlement(
       customerId,
@@ -327,9 +399,7 @@ export class DurableObjectUsagelimiter extends Server {
       projectId,
       now,
       {
-        skipCache: false, // INPORTANT: we don't skip cache here because we only have in memory cache
-        // basically if the entitlement in not found in memory we will query the db
-        // SET TO TRUE IF YOU ADD ANOTHER CACHE LAYER!!
+        skipCache: true, // we need the latest data from the db
         withLastUsage: true, // we need the last usage to calculate the new usage
       }
     )
@@ -349,20 +419,6 @@ export class DurableObjectUsagelimiter extends Server {
       await this.updateEntitlement(placeholderEntitlement)
 
       return Err(err)
-    }
-
-    if (!val) {
-      // if the entitlement is not found we want to keep a placeholder
-      // so in future request don't spam the db
-      const placeholderEntitlement = {
-        id: "placeholder",
-        featureSlug: featureSlug,
-        lastUsageUpdateAt: now,
-      } as CustomerEntitlementExtended
-
-      await this.updateEntitlement(placeholderEntitlement)
-
-      return Ok(placeholderEntitlement)
     }
 
     // update the config
@@ -475,7 +531,7 @@ export class DurableObjectUsagelimiter extends Server {
   }> {
     try {
       // make sure the do is initialized
-      this.initialize()
+      await this.initialize()
 
       // check if all the DO is initialized
       if (!this.initialized) {
@@ -543,7 +599,13 @@ export class DurableObjectUsagelimiter extends Server {
       })
 
       if (!verification?.id) {
-        // TODO: send notification error
+        this.logger.error("error inserting verification from do, please try again later", {
+          projectId: data.projectId,
+          customerId: data.customerId,
+          featureSlug: data.featureSlug,
+          deniedReason: "ERROR_INSERTING_VERIFICATION_DO",
+        })
+
         return {
           success: false,
           message: "error inserting verification from do, please try again later",
@@ -577,7 +639,7 @@ export class DurableObjectUsagelimiter extends Server {
   public async reportUsage(data: ReportUsageRequest): Promise<ReportUsageResponse> {
     try {
       // first initialize the do
-      this.initialize()
+      await this.initialize()
 
       // check if all the DO is initialized
       if (!this.initialized) {
@@ -640,13 +702,24 @@ export class DurableObjectUsagelimiter extends Server {
         }
       }
 
-      // if the use is negative but the entitlement aggregationMethod is not in sum or sum_all
-      // we need to return an error
-      if (Number(data.usage) < 0 && !["sum", "sum_all"].includes(entitlement.aggregationMethod)) {
+      // validate the usage
+      // after validating, we set the usage and agregate it to the DO state for the next request.
+      // keep in mind that database calls are 0 latency because of the Durable Object
+      // we keep the agregated state in a map to avoid having to query the db for each request
+      const usageGuard = this.customerService.calculateEntitlementUsage({
+        entitlement,
+        usage: Number(data.usage),
+      })
+
+      // if there is something wrong with the usage, we return an error
+      // without reporting the usage to tinybird or the DO state
+      if (usageGuard.success === false) {
         return {
           success: false,
-          message: `Usage cannot be negative when the feature type is not sum or sum_all, got ${entitlement.aggregationMethod}. This will disturb aggregations.`,
-          deniedReason: "INCORRECT_USAGE_REPORTING",
+          message: usageGuard.message,
+          deniedReason: usageGuard.deniedReason,
+          limit: usageGuard.limit,
+          usage: usageGuard.usage,
         }
       }
 
@@ -685,6 +758,15 @@ export class DurableObjectUsagelimiter extends Server {
         })
 
       if (!usageRecord?.id) {
+        this.logger.error("error inserting usage from do, please try again later", {
+          projectId: data.projectId,
+          customerId: data.customerId,
+          featureSlug: data.featureSlug,
+          requestId: data.requestId,
+          timestamp: data.timestamp,
+          deniedReason: "ERROR_INSERTING_USAGE_DO",
+        })
+
         return {
           success: false,
           message: "error inserting usage from do, please try again later",
@@ -692,36 +774,25 @@ export class DurableObjectUsagelimiter extends Server {
         }
       }
 
-      // after validating, we set the usage and agregate it to the DO state for the next request.
-      // keep in mind that database calls are 0 latency because of the Durable Object
-      // we keep the agregated state in a map to avoid having to query the db for each request
-      const result = this.customerService.setNewUsageEntitlement({
-        entitlement,
-        usage: Number(data.usage),
-      })
-
-      if (result.success === false) {
-        return {
-          success: false,
-          message: result.message,
-          deniedReason: result.deniedReason,
-          limit: result.limit,
-          usage: result.usage,
-        }
-      }
-
       // update state
-      this.updateEntitlement({
+      await this.updateEntitlement({
         ...entitlement,
-        usage: result.usage.toString(),
+        usage: usageGuard.usage.toString(),
       })
+
+      // update the entitlement usage in the cache
+      this.ctx.waitUntil(
+        this.customerService.syncEntitlementsUsageCache({
+          entitlements: [entitlement],
+        })
+      )
 
       return {
-        success: result.success,
-        message: result.message,
-        notifyUsage: result.notifyUsage,
-        usage: result.usage,
-        limit: result.limit,
+        success: usageGuard.success,
+        message: usageGuard.message,
+        notifyUsage: usageGuard.notifyUsage,
+        usage: usageGuard.usage,
+        limit: usageGuard.limit,
       }
     } catch (error) {
       this.logger.error("error reporting usage from do", {
@@ -1023,11 +1094,35 @@ export class DurableObjectUsagelimiter extends Server {
     console.info("onMessage", message)
   }
 
+  public async syncEntitlementsUsageAlarmHandler() {
+    const config = await this.getConfig()
+    // sync usage on UPDATE_PERIOD
+    if (Date.now() - config.lastSyncUsageAt > this.UPDATE_PERIOD) {
+      // sync the entitlements usage
+      const entitlements = await this.getEntitlements()
+      // update the entitlement usage in the db
+      await this.customerService.syncEntitlementsUsageDB({
+        entitlements: entitlements,
+      })
+      // update the entitlement usage in the cache
+      await this.customerService.syncEntitlementsUsageCache({
+        entitlements: entitlements,
+      })
+      // update the last sync usage at
+      await this.updateConfig({
+        ...config,
+        lastSyncUsageAt: Date.now(),
+      })
+    }
+  }
+
   async onAlarm(): Promise<void> {
     // send usage to tinybird on alarm
     await this.sendUsageToTinybird()
     // send verifications to tinybird on alarm
     await this.sendVerificationsToTinybird()
+    // sync the entitlements usage
+    // await this.syncEntitlementsUsageAlarmHandler()
     // flush the metrics and logs
     this.flush()
   }
@@ -1039,7 +1134,9 @@ export class DurableObjectUsagelimiter extends Server {
     slugs?: string[]
   }> {
     // initialize the do
-    this.initialize()
+    await this.initialize()
+    // set colo of the do
+    await this.setColo()
 
     // send the current usage and verifications to tinybird
     await this.sendUsageToTinybird()

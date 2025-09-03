@@ -63,6 +63,7 @@ export const unpricePlanErrorSchema = z.enum(["PLAN_VERSION_NOT_FOUND"])
 
 export const deniedReasonSchema = z.enum([
   "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE",
+  "ERROR_RESETTING_DO",
   "RATE_LIMITED",
   "ENTITLEMENT_NOT_FOUND",
   "LIMIT_EXCEEDED",

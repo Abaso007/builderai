@@ -1,5 +1,10 @@
 import { Axiom } from "@axiomhq/js"
-import { AxiomJSTransport, ConsoleTransport, Logger as LoggerAxiom } from "@axiomhq/logging"
+import {
+  AxiomJSTransport,
+  ConsoleTransport,
+  type ConsoleTransportConfig,
+  Logger as LoggerAxiom,
+} from "@axiomhq/logging"
 import { Log, type LogSchema } from "@unprice/logs"
 import { env } from "../env"
 import type { Fields, Logger } from "./interface"
@@ -22,6 +27,7 @@ export class AxiomLogger implements Logger {
     dataset: string
     environment: LogSchema["environment"]
     service: LogSchema["service"]
+    logLevel: ConsoleTransportConfig["logLevel"]
   }) {
     this.requestId = opts.requestId
     this.defaultFields = {
@@ -36,7 +42,7 @@ export class AxiomLogger implements Logger {
       transports: [
         new ConsoleTransport({
           prettyPrint: true,
-          // logLevel: "error", // only log errors
+          logLevel: opts.logLevel, // only log errors
         }),
         new AxiomJSTransport({
           axiom: axiom,

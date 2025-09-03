@@ -10,4 +10,9 @@ export interface Metrics {
    * flush persists all metrics to durable storage
    */
   flush(): Promise<void>
+
+  /**
+   * setColo sets the colo of the metrics
+   */
+  setColo(colo: string): void
 }

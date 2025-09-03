@@ -3,7 +3,7 @@ import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
 export const getUsage = protectedProjectProcedure
-  .input(z.custom<Parameters<Analytics["getFeaturesUsagePeriod"]>[0]>())
+  .input(z.custom<Omit<Parameters<Analytics["getFeaturesUsagePeriod"]>[0], "projectId">>())
   .output(
     z.object({
       usage: z.custom<Usage>(),
