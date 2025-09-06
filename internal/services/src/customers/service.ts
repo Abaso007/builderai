@@ -1268,6 +1268,29 @@ export class CustomerService {
       )
     }
 
+    // last validation would be if the entitlemnt is outside of the current billing window
+    // we have to retry without cache
+    const currentCycleWindow = getCurrentBillingWindow({
+      now: entitlement.resetedAt,
+      anchor: entitlement.activePhase.billingAnchor,
+      interval: entitlement.activePhase.billingConfig.billingInterval,
+      intervalCount: entitlement.activePhase.billingConfig.billingIntervalCount,
+      trialEndsAt: entitlement.activePhase.trialEndsAt,
+    })
+
+    const outsideOfCurrentBillingWindow =
+      now > currentCycleWindow.end || now < currentCycleWindow.start
+
+    if (outsideOfCurrentBillingWindow) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "ENTITLEMENT_OUTSIDE_OF_CURRENT_BILLING_WINDOW",
+          message:
+            "Entitlement is outside of the current billing window. Please verify the entitlement and the customer data.",
+        })
+      )
+    }
+
     return Ok(entitlement)
   }
 
@@ -1305,48 +1328,6 @@ export class CustomerService {
 
     if (validateErr) {
       return Err(validateErr)
-    }
-
-    // last validation would be if the entitlemnt is outside of the current billing window
-    // we have to retry without cache
-    const currentCycleWindow = getCurrentBillingWindow({
-      now: validatedEntitlement.resetedAt,
-      anchor: validatedEntitlement.activePhase.billingAnchor,
-      interval: validatedEntitlement.activePhase.billingConfig.billingInterval,
-      intervalCount: validatedEntitlement.activePhase.billingConfig.billingIntervalCount,
-      trialEndsAt: validatedEntitlement.activePhase.trialEndsAt,
-    })
-
-    const outsideOfCurrentBillingWindow =
-      now > currentCycleWindow.end || now < currentCycleWindow.start
-
-    if (outsideOfCurrentBillingWindow) {
-      // retry without cache
-      const { val: result, err } = await this._getActiveEntitlement(
-        customerId,
-        featureSlug,
-        projectId,
-        now,
-        {
-          skipCache: true,
-        }
-      )
-
-      if (err) {
-        return Err(err)
-      }
-
-      // validate again
-      const { err: validateErr, val: validatedEntitlement } = this.validateEntitlement({
-        entitlement: result,
-        now,
-      })
-
-      if (validateErr) {
-        return Err(validateErr)
-      }
-
-      return Ok(validatedEntitlement)
     }
 
     return Ok(validatedEntitlement)

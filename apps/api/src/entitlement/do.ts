@@ -14,7 +14,7 @@ import type { CanRequest, ReportUsageRequest, ReportUsageResponse } from "./inte
 import { env } from "cloudflare:workers"
 import { CloudflareStore } from "@unkey/cache/stores"
 import { createConnection } from "@unprice/db"
-import type { CustomerEntitlementExtended } from "@unprice/db/validators"
+import { type CustomerEntitlementExtended, getCurrentBillingWindow } from "@unprice/db/validators"
 import { FetchError } from "@unprice/error"
 import { Err, Ok, type Result } from "@unprice/error"
 import { AxiomLogger, ConsoleLogger, type Logger } from "@unprice/logging"
@@ -331,12 +331,27 @@ export class DurableObjectUsagelimiter extends Server {
         ? entitlement?.updatedAtM + this.TTL_PLACEHOLDER_REVALIDATION - now < 0
         : true
 
+    let mustRefresh = false
+
+    // if the entitlement is not a placeholder, we need to check if it's outside of the current cycle window
+    if (entitlement && entitlement.id !== "placeholder") {
+      const currentCycleWindow = getCurrentBillingWindow({
+        now: entitlement.resetedAt,
+        anchor: entitlement.activePhase.billingAnchor,
+        interval: entitlement.activePhase.billingConfig.billingInterval,
+        intervalCount: entitlement.activePhase.billingConfig.billingIntervalCount,
+        trialEndsAt: entitlement.activePhase.trialEndsAt,
+      })
+
+      mustRefresh = now > currentCycleWindow.end || now < currentCycleWindow.start
+    }
+
     // we can force the refresh if the forceRefresh flag is set
     const shouldRefresh = timeToRefresh ?? opts?.forceRefresh
 
     // If we need to refresh but we have stale data, return the stale data
     // and trigger the refresh in the background for speeding up the request
-    if (shouldRefresh && entitlement && entitlement?.id !== "placeholder") {
+    if (shouldRefresh && entitlement && entitlement?.id !== "placeholder" && !mustRefresh) {
       this.ctx.waitUntil(
         this.revalidateEntitlement({
           customerId,
@@ -349,7 +364,7 @@ export class DurableObjectUsagelimiter extends Server {
           },
         })
       )
-    } else if (shouldRefresh || !entitlement) {
+    } else if (shouldRefresh || !entitlement || mustRefresh) {
       // If we must refresh (no data at all),
       // then we have to block the request and wait for the result.
       const { err, val } = await this.revalidateEntitlement({
