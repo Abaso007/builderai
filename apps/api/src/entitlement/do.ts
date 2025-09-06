@@ -14,7 +14,7 @@ import type { CanRequest, ReportUsageRequest, ReportUsageResponse } from "./inte
 import { env } from "cloudflare:workers"
 import { CloudflareStore } from "@unkey/cache/stores"
 import { createConnection } from "@unprice/db"
-import { type CustomerEntitlementExtended, getCurrentBillingWindow } from "@unprice/db/validators"
+import type { CustomerEntitlementExtended } from "@unprice/db/validators"
 import { FetchError } from "@unprice/error"
 import { Err, Ok, type Result } from "@unprice/error"
 import { AxiomLogger, ConsoleLogger, type Logger } from "@unprice/logging"
@@ -326,23 +326,10 @@ export class DurableObjectUsagelimiter extends Server {
     let entitlement = this.featuresUsage.get(featureSlug)
 
     // if the entitlement is a placeholder, we need to refresh it given the TTL
-    let timeToRefresh =
+    const timeToRefresh =
       entitlement && entitlement?.id === "placeholder"
         ? entitlement?.updatedAtM + this.TTL_PLACEHOLDER_REVALIDATION - now < 0
         : true
-
-    // if the entitlement is not a placeholder, we need to check if it's outside of the current cycle window
-    if (entitlement && entitlement.id !== "placeholder") {
-      const currentCycleWindow = getCurrentBillingWindow({
-        now: entitlement.resetedAt,
-        anchor: entitlement.activePhase.billingAnchor,
-        interval: entitlement.activePhase.billingConfig.billingInterval,
-        intervalCount: entitlement.activePhase.billingConfig.billingIntervalCount,
-        trialEndsAt: entitlement.activePhase.trialEndsAt,
-      })
-
-      timeToRefresh = now > currentCycleWindow.end || now < currentCycleWindow.start
-    }
 
     // we can force the refresh if the forceRefresh flag is set
     const shouldRefresh = timeToRefresh ?? opts?.forceRefresh
@@ -1162,30 +1149,40 @@ export class DurableObjectUsagelimiter extends Server {
     // make sure the do is initialized
     await this.initialize()
 
-    // send the current usage and verifications to tinybird
-    await this.sendUsageToTinybird()
-    await this.sendVerificationsToTinybird()
+    try {
+      // send the current usage and verifications to tinybird
+      await this.sendUsageToTinybird()
+      await this.sendVerificationsToTinybird()
 
-    // check if the are events in the db this should be 0 latency
-    const events = await this.db
-      .select({
-        count: count(),
+      // check if the are events in the db this should be 0 latency
+      const events = await this.db
+        .select({
+          count: count(),
+        })
+        .from(usageRecords)
+        .then((e) => e[0])
+
+      const verification_events = await this.db
+        .select({
+          count: count(),
+        })
+        .from(verifications)
+        .then((e) => e[0])
+
+      // if there are no events, delete the do
+      if (events?.count !== 0 && verification_events?.count !== 0) {
+        return {
+          success: false,
+          message: `DO has ${events?.count} events and ${verification_events?.count} verification events, can't delete.`,
+        }
+      }
+    } catch (error) {
+      this.logger.error("error resetting do", {
+        error: error instanceof Error ? error.message : "unknown error",
       })
-      .from(usageRecords)
-      .then((e) => e[0])
-
-    const verification_events = await this.db
-      .select({
-        count: count(),
-      })
-      .from(verifications)
-      .then((e) => e[0])
-
-    // if there are no events, delete the do
-    if (events?.count !== 0 && verification_events?.count !== 0) {
       return {
         success: false,
-        message: `DO has ${events?.count} events and ${verification_events?.count} verification events, can't delete.`,
+        message: error instanceof Error ? error.message : "unknown error",
       }
     }
 

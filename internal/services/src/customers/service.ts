@@ -1059,9 +1059,7 @@ export class CustomerService {
     return Ok(paymentProviderService)
   }
 
-  // a feature slug is active only once at a time per customer and project
-  // so we need to get the active entitlement for a feature slug
-  public async getActiveEntitlement(
+  public async _getActiveEntitlement(
     customerId: string,
     featureSlug: string,
     projectId: string,
@@ -1070,7 +1068,7 @@ export class CustomerService {
       skipCache?: boolean // skip cache to force revalidation
       withLastUsage?: boolean // if true, we will get the last usage from analytics
     }
-  ): Promise<Result<CustomerEntitlementExtended, FetchError | UnPriceCustomerError>> {
+  ): Promise<Result<CustomerEntitlementExtended | null, FetchError | UnPriceCustomerError>> {
     const cacheKey = `${projectId}:${customerId}:${featureSlug}`
 
     if (opts?.skipCache) {
@@ -1145,25 +1143,43 @@ export class CustomerService {
       )
     }
 
-    const result = val
+    // null will mean cache miss
+    const result = val ?? null
 
     // if the entitlement is found, and the cache is skipped, update the cache
     // this is important to avoid stale data
     if (opts?.skipCache) {
-      this.waitUntil(this.cache.customerEntitlement.set(cacheKey, result ?? null))
+      if (!err) {
+        this.waitUntil(this.cache.customerEntitlement.set(cacheKey, result))
+      } else {
+        this.waitUntil(this.cache.customerEntitlement.remove(cacheKey))
+      }
     }
 
-    // entitlement could be expired since is in cache, validate it again
-    if (!result) {
+    if (err) {
+      return Err(err)
+    }
+
+    return Ok(result)
+  }
+
+  private validateEntitlement({
+    entitlement,
+    now,
+  }: {
+    entitlement: CustomerEntitlementExtended | null | undefined
+    now: number
+  }): Result<CustomerEntitlementExtended, UnPriceCustomerError> {
+    if (!entitlement) {
       return Err(
         new UnPriceCustomerError({
           code: "ENTITLEMENT_NOT_FOUND",
-          message: "entitlement not found. Please verify the entitlement and the customer data.",
+          message: "Entitlement not found. Please verify the entitlement and the customer data.",
         })
       )
     }
 
-    if (!result.project) {
+    if (!entitlement.project) {
       return Err(
         new UnPriceCustomerError({
           code: "ENTITLEMENT_NOT_FOUND",
@@ -1172,7 +1188,7 @@ export class CustomerService {
       )
     }
 
-    if (!result.customer) {
+    if (!entitlement.customer) {
       return Err(
         new UnPriceCustomerError({
           code: "ENTITLEMENT_NOT_FOUND",
@@ -1181,7 +1197,7 @@ export class CustomerService {
       )
     }
 
-    if (!result.subscription) {
+    if (!entitlement.subscription) {
       return Err(
         new UnPriceCustomerError({
           code: "ENTITLEMENT_NOT_FOUND",
@@ -1190,7 +1206,7 @@ export class CustomerService {
       )
     }
 
-    if (!result.activePhase) {
+    if (!entitlement.activePhase) {
       return Err(
         new UnPriceCustomerError({
           code: "ENTITLEMENT_NOT_FOUND",
@@ -1199,20 +1215,8 @@ export class CustomerService {
       )
     }
 
-    if (
-      now < result.activePhase.startAt &&
-      now > (result.activePhase.endAt ?? Number.POSITIVE_INFINITY)
-    ) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "ENTITLEMENT_NOT_FOUND",
-          message: "Phase is not active. Please verify the entitlement and the customer data.",
-        })
-      )
-    }
-
     // subscription is not active
-    if (result.subscription.active === false) {
+    if (entitlement.subscription.active === false) {
       return Err(
         new UnPriceCustomerError({
           code: "SUBSCRIPTION_NOT_ACTIVE",
@@ -1222,7 +1226,7 @@ export class CustomerService {
     }
 
     // project is not enabled
-    if (result.project.enabled === false) {
+    if (entitlement.project.enabled === false) {
       return Err(
         new UnPriceCustomerError({
           code: "PROJECT_DISABLED",
@@ -1232,7 +1236,7 @@ export class CustomerService {
     }
 
     // customer is not active
-    if (result.customer.active === false) {
+    if (entitlement.customer.active === false) {
       return Err(
         new UnPriceCustomerError({
           code: "CUSTOMER_DISABLED",
@@ -1242,7 +1246,7 @@ export class CustomerService {
     }
 
     // entitlement is not active
-    if (result.active === false) {
+    if (entitlement.active === false) {
       return Err(
         new UnPriceCustomerError({
           code: "ENTITLEMENT_NOT_ACTIVE",
@@ -1251,7 +1255,101 @@ export class CustomerService {
       )
     }
 
-    return Ok(result)
+    // phase is not active
+    if (
+      now < entitlement.activePhase.startAt &&
+      now > (entitlement.activePhase.endAt ?? Number.POSITIVE_INFINITY)
+    ) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "ENTITLEMENT_NOT_FOUND",
+          message: "Phase is not active. Please verify the entitlement and the customer data.",
+        })
+      )
+    }
+
+    return Ok(entitlement)
+  }
+
+  // a feature slug is active only once at a time per customer and project
+  // so we need to get the active entitlement for a feature slug
+  // we have to be mindful as well that entitlement in cache could become stale so there must be a validation
+  // if the entitlment last rested was outside of the current billing window
+  // this way we can make sure we have the latest data
+  public async getActiveEntitlement(
+    customerId: string,
+    featureSlug: string,
+    projectId: string,
+    now: number,
+    opts?: {
+      skipCache?: boolean // skip cache to force revalidation
+      withLastUsage?: boolean // if true, we will get the last usage from analytics
+    }
+  ): Promise<Result<CustomerEntitlementExtended, FetchError | UnPriceCustomerError>> {
+    const { val, err } = await this._getActiveEntitlement(
+      customerId,
+      featureSlug,
+      projectId,
+      now,
+      opts
+    )
+
+    if (err) {
+      return Err(err)
+    }
+
+    const { err: validateErr, val: validatedEntitlement } = this.validateEntitlement({
+      entitlement: val,
+      now,
+    })
+
+    if (validateErr) {
+      return Err(validateErr)
+    }
+
+    // last validation would be if the entitlemnt is outside of the current billing window
+    // we have to retry without cache
+    const currentCycleWindow = getCurrentBillingWindow({
+      now: validatedEntitlement.resetedAt,
+      anchor: validatedEntitlement.activePhase.billingAnchor,
+      interval: validatedEntitlement.activePhase.billingConfig.billingInterval,
+      intervalCount: validatedEntitlement.activePhase.billingConfig.billingIntervalCount,
+      trialEndsAt: validatedEntitlement.activePhase.trialEndsAt,
+    })
+
+    const outsideOfCurrentBillingWindow =
+      now > currentCycleWindow.end || now < currentCycleWindow.start
+
+    if (outsideOfCurrentBillingWindow) {
+      // retry without cache
+      const { val: result, err } = await this._getActiveEntitlement(
+        customerId,
+        featureSlug,
+        projectId,
+        now,
+        {
+          skipCache: true,
+        }
+      )
+
+      if (err) {
+        return Err(err)
+      }
+
+      // validate again
+      const { err: validateErr, val: validatedEntitlement } = this.validateEntitlement({
+        entitlement: result,
+        now,
+      })
+
+      if (validateErr) {
+        return Err(validateErr)
+      }
+
+      return Ok(validatedEntitlement)
+    }
+
+    return Ok(validatedEntitlement)
   }
 
   // this is the method that calculate the usage and will
