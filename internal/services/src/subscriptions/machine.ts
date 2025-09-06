@@ -134,7 +134,7 @@ export class SubscriptionMachine {
         ),
         renewSubscription: fromPromise(
           async ({ input }: { input: { context: SubscriptionContext } }) => {
-            const result = await renewSubscription(input)
+            const result = await renewSubscription({ context: input.context, logger: this.logger })
 
             return result
           }

@@ -16,6 +16,7 @@ export const invoicingSchedule = schedules.task({
         phases: {
           where: (phase, { lte, and, gte, isNull, or }) =>
             and(lte(phase.startAt, now), or(isNull(phase.endAt), gte(phase.endAt, now))),
+          limit: 1, // we only need the active phase and there is only one at the time
         },
       },
       where: (sub, { eq, and, lte }) => and(eq(sub.active, true), lte(sub.invoiceAt, now)),

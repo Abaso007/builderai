@@ -59,6 +59,19 @@ export const columns: ColumnDef<Customer>[] = [
     enableSorting: false,
     enableHiding: false,
     enableResizing: true,
+    filterFn: (row, _, filterValue) => {
+      // search by name, email or customer id
+      const searchValue = filterValue.toLowerCase()
+      const name = row.original.name.toLowerCase()
+      const email = row.original.email.toLowerCase()
+      const id = row.original.id.toLowerCase()
+
+      if (name.includes(searchValue) || email.includes(searchValue) || id.includes(searchValue)) {
+        return true
+      }
+
+      return false
+    },
   },
   {
     accessorKey: "defaultCurrency",

@@ -10,7 +10,7 @@ export const env = createEnv({
   },
   server: {
     UNPRICE_API_KEY: z.string(),
-    UNPRICE_API_URL: z.string().url(),
+    UNPRICE_API_URL: z.string().url().optional(),
     AUTH_GITHUB_CLIENT_ID: z.string().min(1),
     AUTH_GITHUB_CLIENT_SECRET: z.string().min(1),
     AUTH_GOOGLE_CLIENT_ID: z.string().min(1),

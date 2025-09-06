@@ -13,12 +13,12 @@ export { DurableObjectProject } from "~/project/do"
 import { registerReportUsageV1 } from "~/routes/customer/reportUsageV1"
 import { registerCanV1 } from "./routes/customer/canV1"
 import { registerCreatePaymentMethodV1 } from "./routes/customer/createPaymentMethodV1"
-import { registerGetActivePhaseV1 } from "./routes/customer/getActivePhaseV1"
 import { registerGetEntitlementsV1 } from "./routes/customer/getEntitlementsV1"
 import { registerGetPaymentMethodsV1 } from "./routes/customer/getPaymentMethodsV1"
 import { registerGetSubscriptionV1 } from "./routes/customer/getSubscriptionV1"
 import { registerGetUsageV1 } from "./routes/customer/getUsageV1"
 import { registerResetEntitlementsV1 } from "./routes/customer/resetEntitlementsV1"
+import { registerRevalidateEntitlementV1 } from "./routes/customer/revalidateEntitlementV1"
 import { registerSignUpV1 } from "./routes/customer/signUpV1"
 import { registerStripeSetupV1 } from "./routes/paymentProvider/stripeSetupV1"
 import { registerStripeSignUpV1 } from "./routes/paymentProvider/stripeSignUpV1"
@@ -92,11 +92,11 @@ registerGetEntitlementsV1(app)
 registerCanV1(app)
 registerResetEntitlementsV1(app)
 registerGetSubscriptionV1(app)
-registerGetActivePhaseV1(app)
 registerGetUsageV1(app)
 registerGetPaymentMethodsV1(app)
 registerSignUpV1(app)
 registerCreatePaymentMethodV1(app)
+registerRevalidateEntitlementV1(app)
 
 // Project routes
 registerGetFeaturesV1(app)

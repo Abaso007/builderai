@@ -2,7 +2,7 @@
 
 import type { Row } from "@tanstack/react-table"
 import { useRouter } from "next/navigation"
-import { startTransition } from "react"
+import { startTransition, useState } from "react"
 
 import { selectApiKeySchema } from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
@@ -24,6 +24,7 @@ interface DataTableRowActionsProps<TData> {
 
 export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TData>) {
   const apikey = selectApiKeySchema.parse(row.original)
+  const [isOpen, setIsOpen] = useState(false)
   const router = useRouter()
   const trpc = useTRPC()
 
@@ -32,6 +33,9 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
       onSuccess: () => {
         router.refresh()
       },
+      onError: (error) => {
+        toast.error(error.message)
+      },
     })
   )
 
@@ -39,6 +43,9 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
     trpc.apikeys.roll.mutationOptions({
       onSuccess: () => {
         router.refresh()
+      },
+      onError: (error) => {
+        toast.error(error.message)
       },
     })
   )
@@ -62,7 +69,7 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
       toast.promise(
         rollApiKey
           .mutateAsync({
-            id: apikey.id,
+            hashKey: apikey.hash,
           })
           .then((data) => {
             navigator.clipboard.writeText(data.apikey.key)
@@ -76,7 +83,7 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
   }
 
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={setIsOpen} open={isOpen}>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="h-8 w-8 p-0">
           <span className="sr-only">Open menu</span>
@@ -88,6 +95,7 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
           onClick={(e) => {
             e.preventDefault()
             onRevokeKey()
+            setIsOpen(false)
           }}
           className="text-destructive"
         >
@@ -98,6 +106,7 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
           onClick={(e) => {
             e.preventDefault()
             onRollKey()
+            setIsOpen(false)
           }}
           className="text-destructive"
         >

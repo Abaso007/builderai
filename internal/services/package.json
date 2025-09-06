@@ -32,6 +32,7 @@
     "@unprice/db": "workspace:^",
     "@unprice/error": "workspace:^",
     "@unprice/logging": "workspace:^",
+    "@unprice/api": "workspace:^",
     "@unprice/logs": "workspace:^",
     "@unprice/metrics": "workspace:^",
     "@unprice/stripe": "workspace:^",

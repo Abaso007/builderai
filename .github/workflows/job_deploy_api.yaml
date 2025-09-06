@@ -100,6 +100,8 @@ jobs:
             AXIOM_DATASET
             UPSTASH_REDIS_REST_URL
             UPSTASH_REDIS_REST_TOKEN
+            UNPRICE_API_KEY
+            UNPRICE_API_URL
           vars: |
             VERSION
             NODE_ENV
@@ -128,3 +130,5 @@ jobs:
           AXIOM_DATASET: ${{ env.AXIOM_DATASET }}
           UPSTASH_REDIS_REST_URL: ${{ env.UPSTASH_REDIS_REST_URL }}
           UPSTASH_REDIS_REST_TOKEN: ${{ env.UPSTASH_REDIS_REST_TOKEN }}
+          UNPRICE_API_KEY: ${{ env.UNPRICE_API_KEY }}
+          UNPRICE_API_URL: ${{ env.UNPRICE_API_URL }}

@@ -11,6 +11,7 @@ export function metrics(): MiddlewareHandler<HonoEnv> {
     const start = c.get("performanceStart")
 
     let requestBody = await c.req.raw.clone().text()
+    // secure the request body just in case
     requestBody = requestBody.replaceAll(/"key":\s*"[a-zA-Z0-9_]+"/g, '"key": "<REDACTED>"')
     requestBody = requestBody.replaceAll(
       /"plaintext":\s*"[a-zA-Z0-9_]+"/g,
@@ -38,11 +39,11 @@ export function metrics(): MiddlewareHandler<HonoEnv> {
     try {
       await next()
     } catch (e) {
-      m.error = (e as Error).message
-      c.get("services").logger.error("request", {
+      m.error = JSON.stringify(e)
+      logger.error("request", {
         method: c.req.method,
         path: c.req.path,
-        error: e,
+        error: JSON.stringify(e),
       })
       throw e
     } finally {
@@ -57,6 +58,7 @@ export function metrics(): MiddlewareHandler<HonoEnv> {
       })
 
       let responseBody = await c.res.clone().text()
+      // secure the response body just in case
       responseBody = responseBody.replaceAll(/"key":\s*"[a-zA-Z0-9_]+"/g, '"key": "<REDACTED>"')
       responseBody = responseBody.replaceAll(
         /"plaintext":\s*"[a-zA-Z0-9_]+"/g,

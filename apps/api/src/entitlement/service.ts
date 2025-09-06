@@ -3,6 +3,7 @@ import type { Analytics } from "@unprice/analytics"
 import type { Stats } from "@unprice/analytics/utils"
 import type { Database } from "@unprice/db"
 import {
+  type CustomerEntitlementExtended,
   type GetCurrentUsage,
   type SubscriptionCache,
   calculateFlatPricePlan,
@@ -29,6 +30,9 @@ import type {
   ReportUsageResponse,
 } from "./interface"
 
+// you would understand entitlements service if you think about it as feature flag system
+// it's totally separated from billing system and you can give entitlements to customers
+// without affecting the billing.
 export class EntitlementService {
   private readonly namespace: DurableObjectNamespace<DurableObjectUsagelimiter>
   private readonly projectNamespace: DurableObjectNamespace<DurableObjectProject>
@@ -109,6 +113,7 @@ export class EntitlementService {
   private async validateSubscription(
     customerId: string,
     projectId: string,
+    now: number,
     opts?: {
       skipCache?: boolean
     }
@@ -117,6 +122,7 @@ export class EntitlementService {
       await this.customerService.getActiveSubscription({
         customerId,
         projectId,
+        now,
         opts: {
           skipCache: opts?.skipCache ?? false,
         },
@@ -129,28 +135,114 @@ export class EntitlementService {
     return Ok(subscription)
   }
 
+  public async revalidateEntitlement(data: {
+    customerId: string
+    featureSlug: string
+    projectId: string
+    timestamp: number
+  }): Promise<
+    Result<
+      {
+        success: boolean
+        message: string
+        entitlement?: CustomerEntitlementExtended
+      },
+      FetchError | UnPriceCustomerError
+    >
+  > {
+    // get last subscription details before resetting the DO
+    const { err: subscriptionErr } = await this.validateSubscription(
+      data.customerId,
+      data.projectId,
+      data.timestamp,
+      {
+        skipCache: true,
+      }
+    )
+
+    if (subscriptionErr) {
+      return Err(subscriptionErr)
+    }
+
+    // deduplicate calls if the same request is made and we hit the same isolate
+    const key = `revalidateEntitlement:${data.customerId}:${data.featureSlug}:${data.projectId}`
+    const cached = this.hashCache.get(key)
+
+    if (cached) {
+      return Ok(JSON.parse(cached))
+    }
+
+    const durableObject = this.getStub(this.getDurableObjectCustomerId(data.customerId))
+
+    // this is the most expensive call in terms of latency
+    // this will trigger a call to the DO and validate the entitlement given the current usage
+    const { err, val } = await durableObject.revalidateEntitlement({
+      customerId: data.customerId,
+      featureSlug: data.featureSlug,
+      projectId: data.projectId,
+      now: data.timestamp,
+      opts: {
+        skipCache: true,
+        withLastUsage: true,
+      },
+    })
+
+    const result = {
+      success: true,
+      message: "entitlement revalidated",
+      entitlement: val,
+    }
+
+    // if the entitlement is not found, return an error
+    if (err || !val) {
+      result.success = false
+      result.message = err?.message ?? "entitlement not found"
+      result.entitlement = val
+    }
+
+    this.hashCache.set(key, JSON.stringify(result))
+
+    return Ok(result)
+  }
+
+  // TODO: all methods should return a result
   public async resetEntitlements(
     customerId: string,
     projectId: string
-  ): Promise<{
-    success: boolean
-    message: string
-    slugs?: string[]
-  }> {
+  ): Promise<
+    Result<
+      {
+        success: boolean
+        message: string
+        slugs?: string[]
+      },
+      FetchError | UnPriceCustomerError
+    >
+  > {
     // get last subscription details before resetting the DO
-    const { err: subscriptionErr } = await this.validateSubscription(customerId, projectId, {
-      skipCache: true,
-    })
+    const { err: subscriptionErr } = await this.validateSubscription(
+      customerId,
+      projectId,
+      Date.now(),
+      {
+        skipCache: true,
+      }
+    )
 
     if (subscriptionErr) {
-      return { success: false, message: subscriptionErr.message, slugs: [] }
+      return Err(subscriptionErr)
     }
 
     const durableObject = this.getStub(this.getDurableObjectCustomerId(customerId))
     const result = await durableObject.resetDO()
 
     if (!result.success) {
-      return { success: false, message: result.message, slugs: result.slugs ?? [] }
+      return Err(
+        new UnPriceCustomerError({
+          code: "ERROR_RESETTING_DO",
+          message: result.message,
+        })
+      )
     }
 
     // cache keys to remove
@@ -164,11 +256,11 @@ export class EntitlementService {
       ])
     )
 
-    return {
+    return Ok({
       success: true,
-      message: "customer DO deleted",
+      message: "entitlements reseted",
       slugs: result.slugs ?? [],
-    }
+    })
   }
 
   private async updateCache(key: string, result: CanResponse) {
@@ -178,7 +270,7 @@ export class EntitlementService {
   }
 
   public async can(data: CanRequest): Promise<CanResponse> {
-    const key = `${data.customerId}:${data.featureSlug}:${data.projectId}`
+    const key = `can:${data.customerId}:${data.featureSlug}:${data.projectId}`
     const cached = this.hashCache.get(key)
 
     // if we hit the same isolate we can return the cached result
@@ -199,10 +291,7 @@ export class EntitlementService {
         data.customerId,
         data.featureSlug,
         data.projectId,
-        data.timestamp,
-        {
-          skipCache: false, // use entitlement from cache
-        }
+        data.timestamp
       )
 
       if (err) {
@@ -211,17 +300,19 @@ export class EntitlementService {
           message: err.message,
           deniedReason: err.code as DenyReason,
         }
+
         // update cache
         this.updateCache(key, result)
 
         return result
       }
 
-      const entitlementGuard = this.customerService.entitlementGuard({
+      const entitlementGuard = this.customerService.checkLimitEntitlement({
         entitlement: entitlement,
         now: data.timestamp,
         opts: {
           allowOverage: false,
+          autoReset: true,
         },
       })
 
@@ -320,7 +411,7 @@ export class EntitlementService {
   public async getEntitlements(req: GetEntitlementsRequest): Promise<GetEntitlementsResponse> {
     const { customerId, projectId, now } = req
 
-    const { err: subscriptionErr } = await this.validateSubscription(customerId, projectId)
+    const { err: subscriptionErr } = await this.validateSubscription(customerId, projectId, now)
 
     if (subscriptionErr) {
       throw subscriptionErr
@@ -355,21 +446,21 @@ export class EntitlementService {
 
     const { err: subscriptionErr, val: subscription } = await this.validateSubscription(
       customerId,
-      projectId
+      projectId,
+      now
     )
 
     if (subscriptionErr) {
       throw subscriptionErr
     }
 
-    const { err: phaseErr, val: phase } = await this.customerService.getActivePhase({
-      customerId,
-      projectId,
-      now,
-    })
+    const phase = subscription.activePhase
 
-    if (phaseErr) {
-      throw phaseErr
+    if (!phase) {
+      throw new UnPriceCustomerError({
+        code: "SUBSCRIPTION_NOT_FOUND",
+        message: "subscription doesn't have an active phase",
+      })
     }
 
     const { err: entitlementsErr, val: entitlements } =
@@ -390,7 +481,7 @@ export class EntitlementService {
           (acc, entitlement) => {
             acc[entitlement.featurePlanVersionId] =
               entitlement.featureType === "usage"
-                ? Number(entitlement.usage)
+                ? Number(entitlement.currentCycleUsage)
                 : Number(entitlement.units)
             return acc
           },
@@ -462,7 +553,7 @@ export class EntitlementService {
                 featureType: e.featureType,
                 isCustom: true,
                 limit: e.limit,
-                usage: Number(e.usage),
+                usage: Number(e.currentCycleUsage),
                 units: e.units,
                 freeUnits: 0,
                 max: e.limit || Number.POSITIVE_INFINITY,
@@ -485,7 +576,7 @@ export class EntitlementService {
               featureSlug: e.featureSlug,
               featureType: e.featureType,
               limit: e.limit,
-              usage: Number(e.usage),
+              usage: Number(e.currentCycleUsage),
               units: e.units,
               isCustom: false,
               freeUnits,

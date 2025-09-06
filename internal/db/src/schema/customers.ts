@@ -26,7 +26,7 @@ import type {
   stripeSetupSchema,
 } from "../validators/customer"
 
-import { currencyEnum, typeFeatureVersionEnum } from "./enums"
+import { currencyEnum } from "./enums"
 import { planVersionFeatures } from "./planVersionFeatures"
 import { projects } from "./projects"
 import { invoices, subscriptionItems, subscriptionPhases, subscriptions } from "./subscriptions"
@@ -76,34 +76,28 @@ export const customerEntitlements = pgTableProject(
     subscriptionId: cuid("subscription_id").notNull(),
     // featurePlanVersionId is the id of the feature plan version that the customer is entitled to
     featurePlanVersionId: cuid("feature_plan_version_id").notNull(),
-    // subscriptionItemId is the id of the subscription item that the customer is entitled to
-    subscriptionItemId: cuid("subscription_item_id"),
     // subscriptionPhaseId is the id of the subscription phase that the customer is entitled to
-    subscriptionPhaseId: cuid("subscription_phase_id"),
+    subscriptionPhaseId: cuid("subscription_phase_id").notNull(),
+    // subscriptionItemId is the id of the subscription item that the customer is entitled to
+    // can be null if the entitlement is custom
+    subscriptionItemId: cuid("subscription_item_id"),
 
     // ****************** defaults from plan version features ******************
+    // we have it here so we can override them if needed
     // limit is the limit of the feature that the customer is entitled to
     limit: integer("limit"),
-    // units is the units of the feature that the customer is entitled to
+    // units are tied to the amount of units the customer bought at checkout time
     units: integer("units"),
-    // usage is the usage of the feature that the customer has used
-    usage: numeric("usage").notNull().default("0"),
+    // currentCycleUsage is the usage of the feature that the customer has used
+    currentCycleUsage: numeric("current_cycle_usage").notNull().default("0"),
     // accumulatedUsage is the accumulated usage of the feature that the customer has used
     accumulatedUsage: numeric("accumulated_usage").notNull().default("0"),
     // realtime features are updated in realtime, others are updated periodically
     realtime: boolean("realtime").notNull().default(false),
-    // type of the feature plan version - feature or addon
-    type: typeFeatureVersionEnum("type").notNull().default("feature"),
     // ****************** end defaults from plan version features ******************
 
-    // normally represent the current billing cycle start and end dates
-    // but for custom entitlements can be different, for instance if the customer has a custom entitlement for 1000 users
-    // for 1 year.
-    validFrom: bigint("valid_from", { mode: "number" }).notNull(),
-    validTo: bigint("valid_to", { mode: "number" }),
-    // buffer is the period of time that the entitlement is valid after the validTo date
-    // this is used to avoid overage charges also give us a windows to revalidate the entitlement when the subscription renew is triggered
-    bufferPeriodDays: integer("buffer_period_days").notNull().default(1),
+    // entitlements are tied to a phase, in the phase there are all dates related to when
+    // the entitlement is valid or considered expired
     // resetedAt is the date when the entitlement was reseted
     // normally this is set by the subscription renew event
     resetedAt: bigint("reseted_at", { mode: "number" }).notNull(),
@@ -111,7 +105,7 @@ export const customerEntitlements = pgTableProject(
     // active is true if the entitlement is active
     active: boolean("active").notNull().default(true),
 
-    // if it's a custom entitlement, it's not tied to a subscription phase and it's not billed
+    // if it's a custom entitlement, it's not tied to a subscription item and it's not billed
     isCustom: boolean("is_custom").notNull().default(false),
 
     // entitlements are updated on a regular basis
@@ -125,9 +119,6 @@ export const customerEntitlements = pgTableProject(
     }>(),
   },
   (table) => ({
-    // create index to improve performace in date range queries
-    validFrom: index("valid_from_index").on(table.validFrom),
-    validTo: index("valid_to_index").on(table.validTo),
     primary: primaryKey({
       columns: [table.id, table.projectId],
       name: "pk_customer_entitlement",

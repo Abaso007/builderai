@@ -62,6 +62,9 @@ export function SubscriptionPhaseForm({
       onSuccess: () => {
         toastAction("success")
       },
+      onError: (error) => {
+        toastAction("error", error.message)
+      },
     })
   )
 

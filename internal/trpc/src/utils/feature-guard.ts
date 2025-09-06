@@ -35,7 +35,7 @@ export const featureGuard = async ({
       customerId,
       featureSlug,
       metadata,
-      async: false,
+      async: false, // call the DO directly
     })
 
     if (data.error) {

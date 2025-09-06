@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+
+# Please Use Google Shell Style: https://google.github.io/styleguide/shell.xml
+
+# ---- Start unofficial bash strict mode boilerplate
+# http://redsymbol.net/articles/unofficial-bash-strict-mode/
+set -o errexit  # always exit on error
+set -o errtrace # trap errors in functions as well
+set -o pipefail # don't ignore exit codes when piping output
+set -o posix    # more strict failures in subshells
+# set -x          # enable debugging
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+export NVM_DIR="$HOME/.nvm"
+# shellcheck disable=SC1090
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+
+echo "Starting up"
+
+# lets check first that docker, tb cli and node are installed
+if ! command -v docker &> /dev/null; then
+  echo "Docker could not be found"
+  exit 1
+fi
+
+if ! command -v docker-compose &> /dev/null; then
+  echo "Docker Compose could not be found"
+  exit 1
+fi
+
+if ! command -v tb &> /dev/null; then
+  echo "Tinybird CLI could not be found"
+  exit 1
+fi
+
+if ! command -v node &> /dev/null; then
+  echo "Node could not be found"
+  exit 1
+fi
+
+# start the docker compose services
+docker-compose up -d
+
+# use the correct node version
+nvm use
+
+# TODO: add tmux to start the services in different panes
+
+# take the first parameter as the mode id if not provided, use dev
+MODE_ID=${1:-dev}
+RESTART_TINYBIRD=${2:-false}
+
+if [ "$MODE_ID" = "dev" ]; then
+  # banner to show the user that we are using the preview environment
+  echo ""
+  echo "########################################################"
+  echo "# Using development environment"
+  echo "########################################################"
+  echo ""
+
+  # override tinybird host
+  NODE_ENV="development"
+  VERCEL_ENV="development"
+  UNPRICE_API_URL="http://localhost:8787"
+  UNPRICE_API_KEY="unprice_dev_1234567890"
+  DRIZZLE_LOG="true"
+  EMIT_METRICS_LOGS="false"
+  EMIT_ANALYTICS="true"
+  UPSTASH_REDIS_REST_URL="http://localhost:8079"
+  UPSTASH_REDIS_REST_TOKEN="unprice"
+
+  echo "Generating migrations"
+  infisical run --env=preview --path=/ --recursive -- env UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY DRIZZLE_LOG=$DRIZZLE_LOG EMIT_METRICS_LOGS=$EMIT_METRICS_LOGS EMIT_ANALYTICS=$EMIT_ANALYTICS NODE_ENV=$NODE_ENV VERCEL_ENV=$VERCEL_ENV pnpm --filter db generate
+
+  echo "Applying migrations"
+  infisical run --env=preview --path=/ --recursive -- env UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY DRIZZLE_LOG=$DRIZZLE_LOG EMIT_METRICS_LOGS=$EMIT_METRICS_LOGS EMIT_ANALYTICS=$EMIT_ANALYTICS NODE_ENV=$NODE_ENV VERCEL_ENV=$VERCEL_ENV pnpm --filter db migrate:custom
+else
+  echo "Invalid mode: $MODE_ID"
+  exit 1
+fi

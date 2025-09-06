@@ -476,7 +476,7 @@ const calculateInvoiceItemsPrice = async (payload: {
     UnPriceSubscriptionError
   >
 > => {
-  const { invoice, items, analytics, customer } = payload
+  const { invoice, items, analytics } = payload
 
   // when billing in advance we calculate flat price for the current cycle + usage from the past cycles
   // when billing in arrear we calculate usage for the current cycle + flat price current cycle
@@ -498,9 +498,31 @@ const calculateInvoiceItemsPrice = async (payload: {
   // we bill the subscriptions items attached to the phase, that way if the customer changes the plan,
   // we create a new phase and bill the new plan and there are no double charges for the same feature in past cycles
   // also this give us the flexibility to add new features to the plan without affecting the past invoices
-  // we called that custom entitlements (outside of the subscription)
+  // we called that custom entitlements (outside of the subscription items, meaning they are not billed)
 
   try {
+    // when billing in advance we get the usage for the previous cycle if any
+    // when billing in arrear we get the usage for the current cycle
+    const startAt = shouldBillInAdvance ? invoice.previousCycleStartAt : invoice.cycleStartAt
+    const endAt = shouldBillInAdvance ? invoice.previousCycleEndAt : invoice.cycleEndAt
+
+    let usages = null
+
+    // if not usage then usages is null
+    if (startAt && endAt) {
+      usages = await analytics.getUsageBillingSubscriptionItems({
+        customerId: invoice.customerId,
+        projectId: invoice.projectId,
+        subscriptionItems: billableItems.map((item) => ({
+          subscriptionItemId: item.id,
+          aggregationMethod: item.featurePlanVersion.aggregationMethod,
+          featureType: item.featurePlanVersion.featureType,
+        })),
+        startAt: startAt,
+        endAt: endAt,
+      })
+    }
+
     // create a item for each feature
     for (const item of billableItems) {
       let prorate = proration
@@ -514,90 +536,20 @@ const calculateInvoiceItemsPrice = async (payload: {
       let quantity = 0
 
       // get the usage depending on the billing type
-      // when billing at the end of the cycle we get the usage for the current cycle + fixed price from current cycle
-      if (!shouldBillInAdvance) {
-        // get usage only for usage features - the rest are calculated from the subscription items
-        if (["flat", "tier", "package"].includes(item.featurePlanVersion.featureType)) {
-          quantity = item.units! // all non usage features have a quantity the customer bought in the subscription
-        } else {
-          // if the aggregation method is _all we get the usage for all time
-          const usage = item.featurePlanVersion.aggregationMethod.endsWith("_all")
-            ? await analytics
-                .getBillingUsage({
-                  subscriptionItemId: item.id,
-                  projectId: item.projectId,
-                  customerId: customer.id,
-                })
-                .then((usage) => usage.data[0])
-            : await analytics
-                .getBillingUsage({
-                  subscriptionItemId: item.id,
-                  projectId: item.projectId,
-                  customerId: customer.id,
-                  // get usage for the current cycle
-                  start: invoice.cycleStartAt,
-                  end: invoice.cycleEndAt,
-                })
-                .then((usage) => {
-                  return usage.data[0]
-                })
-
-          // here we replace _all with the aggregation method because tinybird returns without _all as a key
-          const units = usage
-            ? (usage[
-                item.featurePlanVersion.aggregationMethod.replace("_all", "") as keyof typeof usage
-              ] as number) || 0
-            : 0
-
-          // the amount of units the customer used in the current cycle
-          quantity = units
-        }
+      // tier and package are not unit based, the customer bought the whole feature units and we billed that
+      if (["flat", "tier", "package"].includes(item.featurePlanVersion.featureType)) {
+        quantity = item.units ?? 1 // all non usage features have a quantity the customer bought in the subscription
       } else {
-        // get usage only for usage features - the rest are calculated from the subscription items
-        if (["flat", "tier", "package"].includes(item.featurePlanVersion.featureType)) {
-          quantity = item.units! // all non usage features have a quantity the customer bought in the subscription
-        } else {
-          // For billing in advance we need to get the usage for the previous cycle if any
-          // this way we combine one single invoice for the cycle
-          // if the aggregation method is _all we get the usage for all time
-          if (invoice.previousCycleStartAt && invoice.previousCycleEndAt) {
-            // get usage for the current cycle
-            const usage = item.featurePlanVersion.aggregationMethod.endsWith("_all")
-              ? await analytics
-                  .getBillingUsage({
-                    subscriptionItemId: item.id,
-                    customerId: customer.id,
-                    projectId: invoice.projectId,
-                  })
-                  .then((usage) => usage.data[0])
-              : await analytics
-                  .getBillingUsage({
-                    subscriptionItemId: item.id,
-                    customerId: customer.id,
-                    projectId: invoice.projectId,
-                    start: invoice.previousCycleStartAt,
-                    end: invoice.previousCycleEndAt,
-                  })
-                  .then((usage) => usage.data[0])
-
-            // here we replace _all with the aggregation method because tinybird returns without _all as a key
-            const units = usage
-              ? (usage[
-                  item.featurePlanVersion.aggregationMethod.replace(
-                    "_all",
-                    ""
-                  ) as keyof typeof usage
-                ] as number) || 0
-              : 0
-
-            // the amount of units the customer used in the previous cycle
-            quantity = units
-          }
-        }
+        // find the usage for the feature
+        const usage = usages?.find((usage) => usage.subscriptionItemId === item.id)
+        // if the aggregation method is _all we get the usage for all time
+        quantity = item.featurePlanVersion.aggregationMethod.endsWith("_all")
+          ? (usage?.accumulatedUsage ?? 0)
+          : (usage?.usage ?? 0)
       }
 
       // this should never happen but we add a check anyway just in case
-      if (quantity < 0) {
+      if (!quantity || quantity < 0) {
         // throw and cancel execution
         throw new Error(
           `quantity is negative ${item.id} ${item.featurePlanVersion.feature.slug} ${quantity}`

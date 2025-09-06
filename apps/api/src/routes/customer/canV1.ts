@@ -78,8 +78,10 @@ export const registerCanV1 = (app: App) =>
     // validate the request
     const key = await keyAuth(c)
 
+    const canType = async ? "canAsync" : "canSync"
+
     // start a new timer
-    startTime(c, `can${async ? "Async" : "Sync"}`)
+    startTime(c, canType)
 
     // validate usage from db
     const result = await entitlement.can({
@@ -111,7 +113,7 @@ export const registerCanV1 = (app: App) =>
     c.executionCtx.waitUntil(reportUsage(c, { action: "can" }))
 
     // end the timer
-    endTime(c, `can${async ? "Async" : "Sync"}`)
+    endTime(c, canType)
 
     return c.json(result, HttpStatusCodes.OK)
   })

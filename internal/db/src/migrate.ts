@@ -8,10 +8,10 @@ import { env } from "../env"
 
 async function main() {
   const start = Date.now()
-  console.info("⏳ Running migrations for environment:", env.NODE_ENV)
+  console.info("⏳ Running migrations for environment:", env.VERCEL_ENV)
 
   const db = createConnection({
-    env: env.NODE_ENV,
+    env: env.VERCEL_ENV,
     primaryDatabaseUrl: env.DATABASE_URL,
     read1DatabaseUrl: env.DATABASE_READ1_URL,
     read2DatabaseUrl: env.DATABASE_READ2_URL,

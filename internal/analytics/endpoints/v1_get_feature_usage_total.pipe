@@ -18,7 +18,7 @@ SQL >
     WHERE
         projectId = {{ String(projectId) }} AND
         customerId = {{ String(customerId) }} AND
-        entitlementId = {{ String(entitlementId) }}
+        entitlementId IN {{Array(entitlementIds, 'String', default='1,2,3')}}
     GROUP BY projectId, customerId, featureSlug, entitlementId
 
 TYPE endpoint

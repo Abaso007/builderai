@@ -4,20 +4,25 @@ import type { Fields, Logger } from "./interface"
 export class ConsoleLogger implements Logger {
   private requestId: string
   private readonly defaultFields?: Fields
-
   private readonly environment: LogSchema["environment"]
   private readonly service: LogSchema["service"]
+  private readonly logLevel: "debug" | "error" | "info" | "off" | "warn"
+  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+  private readonly console: (...args: any[]) => void
 
   constructor(opts: {
     requestId: string
     environment: LogSchema["environment"]
     service: LogSchema["service"]
     defaultFields?: Fields
+    logLevel?: "debug" | "error" | "info" | "off" | "warn"
   }) {
     this.requestId = opts.requestId
     this.environment = opts.environment
     this.service = opts.service
     this.defaultFields = opts?.defaultFields ?? {}
+    this.logLevel = opts.logLevel ?? "info"
+    this.console = opts.logLevel === "off" ? () => {} : console.log
   }
 
   private marshal(
@@ -38,9 +43,10 @@ export class ConsoleLogger implements Logger {
   }
 
   public debug(message: string, fields?: Fields): void {
+    if (this.logLevel !== "debug") return
     // don't show colored output in production mode because it's not readable
     const coloredOutput = this.environment !== "production"
-    console.debug(
+    this.console(
       coloredOutput ? "\x1b[32m%s\x1b[0m" : "",
       "debug",
       "-",
@@ -49,43 +55,52 @@ export class ConsoleLogger implements Logger {
   }
 
   public emit(message: string, fields?: Fields): void {
-    console.info(this.marshal("debug", message, fields))
+    this.console(this.marshal("debug", message, fields))
   }
 
   public info(message: string, fields?: Fields): void {
+    if (!["debug", "info"].includes(this.logLevel)) return
     // don't show colored output in production mode because it's not readable
     const coloredOutput = this.environment !== "production"
-    console.info(
+    this.console(
       coloredOutput ? "\x1b[36m%s\x1b[0m" : "",
       "info",
       "-",
       this.marshal("info", message, fields)
     )
   }
+
   public warn(message: string, fields?: Fields): void {
+    if (!["debug", "warn", "info", "error"].includes(this.logLevel)) return
     // don't show colored output in production mode because it's not readable
     const coloredOutput = this.environment !== "production"
-    console.warn(
+    this.console(
       coloredOutput ? "\x1b[33m%s\x1b[0m" : "",
       "warn",
       "-",
       this.marshal("warn", message, fields)
     )
   }
+
   public error(message: string, fields?: Fields): void {
+    // only if log level is error or debug
+    if (!["error", "debug"].includes(this.logLevel)) return
     // don't show colored output in production mode because it's not readable
     const coloredOutput = this.environment !== "production"
-    console.error(
+    this.console(
       coloredOutput ? "\x1b[31m%s\x1b[0m" : "",
       "error",
       "-",
       this.marshal("error", message, fields)
     )
   }
+
   public fatal(message: string, fields?: Fields): void {
+    // only if log level is error or debug
+    if (!["error", "debug"].includes(this.logLevel)) return
     // don't show colored output in production mode because it's not readable
     const coloredOutput = this.environment !== "production"
-    console.error(
+    this.console(
       coloredOutput ? "\x1b[31m%s\x1b[0m" : "",
       "fatal",
       "-",

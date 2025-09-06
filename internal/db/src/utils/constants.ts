@@ -122,6 +122,15 @@ export const BILLING_CONFIG: Record<
     dev: true,
     planType: "recurring",
   },
+  "every-10-minutes": {
+    label: "Every 10 minutes",
+    description: "Billed every 10 minutes",
+    billingInterval: "minute",
+    billingIntervalCount: 10,
+    billingAnchorOptions: [],
+    dev: true,
+    planType: "recurring",
+  },
   onetime: {
     label: "Onetime",
     description: "Billed once",

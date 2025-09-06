@@ -4,12 +4,10 @@ import { extendZodWithOpenApi } from "zod-openapi"
 import * as schema from "../schema"
 import { featureSelectBaseSchema } from "./features"
 import { planVersionFeatureSelectBaseSchema } from "./planVersionFeatures"
-import { billingConfigSchema } from "./planVersions"
+import { billingConfigSchema } from "./shared"
 import {
-  aggregationMethodSchema,
   billingIntervalSchema,
   currencySchema,
-  featureVersionType,
   paymentProviderSchema,
   subscriptionStatusSchema,
   typeFeatureSchema,
@@ -227,38 +225,6 @@ export const customerSessionMetadataSchema = z.object({
   pageId: z.string().optional(),
 })
 
-export const customerEntitlementMetadataSchema = z.record(
-  z.string(),
-  z.union([z.string(), z.number(), z.boolean(), z.null()])
-)
-
-export const customerEntitlementSchema = createSelectSchema(schema.customerEntitlements, {
-  type: featureVersionType,
-  metadata: customerEntitlementMetadataSchema,
-})
-
-export const customerEntitlementInsertSchema = createInsertSchema(
-  schema.customerEntitlements
-).partial({
-  id: true,
-  projectId: true,
-})
-
-export const customerEntitlementExtendedSchema = customerEntitlementSchema.extend({
-  featureType: typeFeatureSchema,
-  aggregationMethod: aggregationMethodSchema,
-  featureSlug: z.string(),
-  project: z.object({
-    enabled: z.boolean(),
-  }),
-  customer: z.object({
-    active: z.boolean(),
-  }),
-  subscription: z.object({
-    active: z.boolean(),
-  }),
-})
-
 export const customerPaymentMethodSchema = z.object({
   id: z.string(),
   name: z.string().nullable(),
@@ -317,8 +283,5 @@ export type InsertCustomer = z.infer<typeof customerInsertBaseSchema>
 export type StripeSetup = z.infer<typeof stripeSetupSchema>
 export type CustomerSignUp = z.infer<typeof customerSignUpSchema>
 export type CustomerSetUp = z.infer<typeof customerSetUpSchema>
-export type CustomerEntitlement = z.infer<typeof customerEntitlementSchema>
-export type InsertCustomerEntitlement = z.infer<typeof customerEntitlementInsertSchema>
-export type CustomerEntitlementExtended = z.infer<typeof customerEntitlementExtendedSchema>
 export type CustomerPaymentMethod = z.infer<typeof customerPaymentMethodSchema>
 export type GetCurrentUsage = z.infer<typeof getCurrentUsageSchema>

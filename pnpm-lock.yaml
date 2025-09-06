@@ -738,6 +738,9 @@ importers:
       '@unprice/analytics':
         specifier: workspace:^
         version: link:../analytics
+      '@unprice/api':
+        specifier: workspace:^
+        version: link:../../packages/api
       '@unprice/config':
         specifier: workspace:^
         version: link:../config

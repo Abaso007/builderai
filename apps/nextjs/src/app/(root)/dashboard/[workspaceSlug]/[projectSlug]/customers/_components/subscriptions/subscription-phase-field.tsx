@@ -22,6 +22,7 @@ import { SubscriptionPhaseForm } from "./subscription-phase-form"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { startTransition } from "react"
+import { toastAction } from "~/lib/toast"
 
 export default function SubscriptionPhaseFormField({
   form,
@@ -67,7 +68,16 @@ export default function SubscriptionPhaseFormField({
     })
   )
 
-  const removePhase = useMutation(trpc.subscriptions.removePhase.mutationOptions())
+  const removePhase = useMutation(
+    trpc.subscriptions.removePhase.mutationOptions({
+      onSuccess: () => {
+        toastAction("success")
+      },
+      onError: (error) => {
+        toastAction("error", error.message)
+      },
+    })
+  )
 
   const [isDelete, setConfirmDelete] = useState<Map<string, boolean>>(
     new Map<string, boolean>(fields.map((item) => [item.id, false] as [string, boolean]))

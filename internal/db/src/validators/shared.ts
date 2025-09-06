@@ -153,6 +153,14 @@ export const datetimeToUnix = z.coerce
     return val.getTime()
   })
 
+export const billingConfigSchema = z.object({
+  name: z.string().min(1),
+  billingInterval: billingIntervalSchema,
+  billingIntervalCount: billingIntervalCountSchema,
+  billingAnchor: billingAnchorSchema.default("dayOfCreation"),
+  planType: planTypeSchema,
+})
+
 export type Currency = z.infer<typeof currencySchema>
 export type PaymentProvider = z.infer<typeof paymentProviderSchema>
 export type FeatureType = z.infer<typeof typeFeatureSchema>

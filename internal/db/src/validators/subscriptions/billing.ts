@@ -1,5 +1,5 @@
 import { addDays, addMinutes, addMonths, addYears, differenceInSeconds, endOfMonth } from "date-fns"
-import type { BillingConfig } from "../../validators"
+import type { BillingConfig } from "../planVersions"
 import type { BillingAnchor, BillingInterval } from "../shared"
 
 // map of the interval to the add function
@@ -18,6 +18,128 @@ interface BillingCycleResult {
   prorationFactor: number
   billableSeconds: number
   trialEndsAtMs?: number // UTC timestamp in milliseconds
+}
+
+/**
+ * Calculates the start and end timestamps of the current billing window, handling trials, anchors, and intervals.
+ * All calculations are done in UTC to avoid timezone issues.
+ *
+ * @param opts Parameters for the calculation.
+ * @param opts.now The current timestamp.
+ * @param opts.trialEndsAt The timestamp when the trial ends (or null if no trial).
+ * @param opts.anchor The timestamp or ordinal value of the billing cycle anchor.
+ *               For daily/weekly intervals, it's a timestamp.
+ *               For monthly intervals, it's the day of the month (1-31).
+ *               For yearly intervals, it's the day of the year (1-366).
+ * @param opts.interval The billing interval unit ('onetime', 'minute', 'day', 'month', 'year').
+ * @param opts.intervalCount The number of intervals per cycle.
+ * @returns An object containing the start and end timestamps of the current billing window.
+ */
+export function getCurrentBillingWindow(opts: {
+  now: number
+  trialEndsAt: number | null
+  anchor: number
+  interval: BillingInterval
+  intervalCount: number
+}): {
+  start: number
+  end: number
+} {
+  const { now, trialEndsAt, anchor, interval, intervalCount } = opts
+
+  // 1. Handle Trial Period
+  if (trialEndsAt && now < trialEndsAt) {
+    return {
+      start: now, //Start using the service now
+      end: trialEndsAt, //It will end after the last trial day
+    }
+  }
+
+  // 2. Handle Recurring Billing Cycles
+  const nowUTCDate = new Date(now)
+  let windowStartDate: Date
+
+  switch (interval) {
+    case "onetime":
+      windowStartDate = new Date(nowUTCDate)
+      break
+    case "minute":
+      windowStartDate = new Date(nowUTCDate)
+      windowStartDate.setUTCSeconds(0, 0) // Floor to the beginning of the current minute
+      break
+    case "day":
+      windowStartDate = new Date(anchor)
+      windowStartDate.setUTCHours(0, 0, 0, 0) // Normalize to midnight UTC
+      break
+    case "month": {
+      const nowYear = nowUTCDate.getUTCFullYear()
+      const nowMonth = nowUTCDate.getUTCMonth()
+      const anchorDay = anchor
+
+      windowStartDate = new Date(Date.UTC(nowYear, nowMonth, anchorDay))
+      if (windowStartDate.getTime() > now) {
+        windowStartDate.setUTCMonth(nowMonth - 1)
+      }
+      break
+    }
+    case "year": {
+      const nowYearForYearly = nowUTCDate.getUTCFullYear()
+      windowStartDate = new Date(Date.UTC(nowYearForYearly, 0, 1))
+      windowStartDate.setUTCDate(anchor - 1)
+
+      if (windowStartDate.getTime() > now) {
+        windowStartDate.setUTCFullYear(nowYearForYearly - 1)
+      }
+      break
+    }
+    default:
+      throw new Error(`Unsupported interval type: ${interval}`)
+  }
+
+  // Make a copy of windowStartDate before the loop
+  let currentWindowStart = new Date(windowStartDate.getTime())
+
+  // Now that we have windowStartDate, let's find the end of the billing window
+  let windowEndDate: Date
+  while (true) {
+    const nextWindowStartDate = new Date(currentWindowStart) // Use copy of start date
+
+    switch (interval) {
+      case "onetime":
+        //If the interval is "onetime" it should last only for the current moment
+        windowEndDate = new Date(now)
+        break
+      case "year":
+        nextWindowStartDate.setUTCFullYear(nextWindowStartDate.getUTCFullYear() + intervalCount)
+        windowEndDate = nextWindowStartDate
+        break
+      case "month":
+        nextWindowStartDate.setUTCMonth(nextWindowStartDate.getUTCMonth() + intervalCount)
+        windowEndDate = nextWindowStartDate
+        break
+      case "minute":
+        nextWindowStartDate.setUTCMinutes(nextWindowStartDate.getUTCMinutes() + intervalCount)
+        windowEndDate = nextWindowStartDate
+        break
+      case "day":
+        nextWindowStartDate.setUTCDate(nextWindowStartDate.getUTCDate() + intervalCount)
+        windowEndDate = nextWindowStartDate
+        break
+      default:
+        throw new Error(`Unsupported interval type: ${interval}`)
+    }
+
+    // Once we determine the next possible period, we compare against 'now'
+    if (nextWindowStartDate.getTime() > now) {
+      break
+    }
+    currentWindowStart = new Date(nextWindowStartDate) // Copy for next period
+  }
+
+  return {
+    start: windowStartDate.getTime(),
+    end: windowEndDate.getTime(),
+  }
 }
 
 // given a billing interval, give a message to the user to explain the billing cycle
@@ -53,7 +175,9 @@ export function getBillingCycleMessage(billingConfig: BillingConfig): {
             ? "years"
             : billingInterval === "minute"
               ? "minutes"
-              : `${billingInterval}s`
+              : billingInterval === "week"
+                ? "weeks"
+                : `${billingInterval}`
 
     return { message: `billed once every ${intervalCount} ${intervalPlural}` }
   }

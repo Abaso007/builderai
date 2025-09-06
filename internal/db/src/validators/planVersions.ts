@@ -5,26 +5,12 @@ import { versions } from "../schema/planVersions"
 import { featureSelectBaseSchema } from "./features"
 import { planVersionFeatureSelectBaseSchema } from "./planVersionFeatures"
 import { planSelectBaseSchema } from "./plans"
-import {
-  billingAnchorSchema,
-  billingIntervalCountSchema,
-  billingIntervalSchema,
-  currencySchema,
-  planTypeSchema,
-} from "./shared"
+import { billingConfigSchema, billingIntervalSchema, currencySchema } from "./shared"
 
 extendZodWithOpenApi(z)
 
 export const planVersionMetadataSchema = z.object({
   externalId: z.string().optional(),
-})
-
-export const billingConfigSchema = z.object({
-  name: z.string().min(1),
-  billingInterval: billingIntervalSchema,
-  billingIntervalCount: billingIntervalCountSchema,
-  billingAnchor: billingAnchorSchema.default("dayOfCreation"),
-  planType: planTypeSchema,
 })
 
 export const insertBillingConfigSchema = billingConfigSchema

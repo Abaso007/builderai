@@ -5,21 +5,16 @@ import { z } from "zod"
 
 export const env = createEnv({
   shared: {
-    NODE_ENV: z.enum(["development", "test", "production", "preview"]).default("development"),
+    NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+    VERCEL_ENV: z.enum(["development", "preview", "production"]).default("development"),
   },
   server: {
     ENCRYPTION_KEY: z.string().min(1),
     UPSTASH_REDIS_REST_URL: z.string().url().optional(),
     UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
+    UNPRICE_API_KEY: z.string(),
+    UNPRICE_API_URL: z.string().url().optional(),
   },
-
-  /**
-   * The prefix that client-side variables must have. This is enforced both at
-   * a type-level and at runtime.
-   */
-  clientPrefix: "PUBLIC_",
-
-  client: {},
 
   /**
    * What object holds the environment variables at runtime. This is usually

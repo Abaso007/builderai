@@ -79,52 +79,6 @@ export class SubscriptionService {
     })
   }
 
-  // get the items for the phase and set the end date to the entitlements that are no longer valid
-  private async setEndEntitlementsForPhase({
-    phaseId,
-    projectId,
-    endAt,
-    db,
-  }: {
-    phaseId: string
-    projectId: string
-    endAt: number | null
-    db?: Database | TransactionDatabase
-  }): Promise<Result<void, UnPriceSubscriptionError>> {
-    // get the active phase for the subscription with the customer entitlements
-    const phase = await (db ?? this.db).query.subscriptionPhases.findFirst({
-      with: {
-        items: true,
-      },
-      where: (phase, { eq, and }) => and(eq(phase.id, phaseId), eq(phase.projectId, projectId)),
-    })
-
-    if (!phase) {
-      return Err(
-        new UnPriceSubscriptionError({
-          message: "Phase not found",
-        })
-      )
-    }
-
-    const { items } = phase
-
-    const ids = items.map((item) => item.id)
-
-    await (db ?? this.db)
-      .update(customerEntitlements)
-      .set({ validTo: endAt ?? null })
-      .where(inArray(customerEntitlements.subscriptionItemId, ids))
-      .catch((e) => {
-        this.logger.error(e.message)
-        throw new UnPriceSubscriptionError({
-          message: `Error while updating customer entitlements: ${e.message}`,
-        })
-      })
-
-    return Ok(undefined)
-  }
-
   // create the entitlements for the new phase
   public async createEntitlementsForPhase({
     phaseId,
@@ -528,25 +482,6 @@ export class SubscriptionService {
           .where(and(eq(subscriptions.id, subscriptionId), eq(subscriptions.projectId, projectId)))
       }
 
-      // we set end date to the entitlements that are no longer valid
-      // phases are ordered by startAt so we can get the previous phase
-      const previousPhase = orderedPhases.find((p) => p.startAt < phase.startAt)
-
-      if (previousPhase?.endAt) {
-        const removeEntitlementsResult = await this.setEndEntitlementsForPhase({
-          phaseId: previousPhase.id,
-          projectId,
-          endAt: previousPhase.endAt,
-          db: trx,
-        })
-
-        if (removeEntitlementsResult.err) {
-          this.logger.error(removeEntitlementsResult.err.message)
-          trx.rollback()
-          throw removeEntitlementsResult.err
-        }
-      }
-
       // we create the entitlements for the new phase
       const createEntitlementsResult = await this.createEntitlementsForPhase({
         phaseId: phase.id,
@@ -648,7 +583,7 @@ export class SubscriptionService {
 
     // get subscription with phases from start date
     const subscriptionWithPhases = await (db ?? this.db).query.subscriptions.findFirst({
-      where: (sub, { eq }) => eq(sub.id, subscriptionId),
+      where: (sub, { eq, and }) => and(eq(sub.id, subscriptionId), eq(sub.projectId, projectId)),
       with: {
         phases: {
           where: (phase, { gte }) => gte(phase.startAt, startAt),
@@ -807,7 +742,9 @@ export class SubscriptionService {
         await (db ?? this.db)
           .update(subscriptionItems)
           .set({ units: finalSqlItems })
-          .where(inArray(subscriptionItems.id, ids))
+          .where(
+            and(inArray(subscriptionItems.id, ids), eq(subscriptionItems.projectId, projectId))
+          )
           .catch((e) => {
             this.logger.error(e.message)
             throw new UnPriceSubscriptionError({
@@ -826,19 +763,6 @@ export class SubscriptionService {
               message: `Error while updating customer entitlements: ${e.message}`,
             })
           })
-      }
-
-      // set the new end date for the entitlements
-      const setEndEntitlementsResult = await this.setEndEntitlementsForPhase({
-        phaseId: subscriptionPhase.id,
-        projectId,
-        endAt: endAtToUse ?? null,
-        db: trx,
-      })
-
-      if (setEndEntitlementsResult.err) {
-        trx.rollback()
-        throw setEndEntitlementsResult.err
       }
 
       return Ok(subscriptionPhase)

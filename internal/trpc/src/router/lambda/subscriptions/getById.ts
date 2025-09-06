@@ -22,6 +22,15 @@ export const getById = protectedProcedure
         phases: {
           with: {
             planVersion: true,
+            customerEntitlements: {
+              with: {
+                featurePlanVersion: {
+                  with: {
+                    feature: true,
+                  },
+                },
+              },
+            },
             items: {
               with: {
                 featurePlanVersion: {
@@ -45,6 +54,14 @@ export const getById = protectedProcedure
     }
 
     return {
-      subscription: subscriptionData,
+      subscription: {
+        ...subscriptionData,
+        phases: subscriptionData.phases.map((phase) => ({
+          ...phase,
+          entitlements: phase.customerEntitlements,
+          items: phase.items,
+          planVersion: phase.planVersion,
+        })),
+      },
     }
   })

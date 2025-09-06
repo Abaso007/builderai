@@ -48,7 +48,7 @@ export const columns: ColumnDef<Subscription>[] = [
     enableResizing: false,
   },
   {
-    accessorKey: "customer",
+    accessorKey: "customerId",
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Customer" />,
     cell: ({ row }) => {
@@ -65,6 +65,25 @@ export const columns: ColumnDef<Subscription>[] = [
       )
     },
     size: 40,
+    filterFn: (row, _, filterValue) => {
+      // search by name, email or customer id
+      const searchValue = filterValue.toLowerCase()
+      const name = row.original.customer.name.toLowerCase()
+      const email = row.original.customer.email.toLowerCase()
+      const id = row.original.customer.id.toLowerCase()
+      const planSlug = row.original.planSlug.toLowerCase()
+
+      if (
+        name.includes(searchValue) ||
+        email.includes(searchValue) ||
+        id.includes(searchValue) ||
+        planSlug.includes(searchValue)
+      ) {
+        return true
+      }
+
+      return false
+    },
   },
   {
     accessorKey: "status",
@@ -73,14 +92,13 @@ export const columns: ColumnDef<Subscription>[] = [
     cell: ({ row }) => {
       return (
         <Badge variant={row.original.active ? "success" : "destructive"}>
-          {row.original.active ? "active" : "inactive"}
+          {row.original.status}
         </Badge>
       )
     },
     size: 20,
     filterFn: (row, _id, value) => {
-      const status = row.original.active ? "active" : "inactive"
-
+      const status = row.original.status.toLowerCase()
       return Array.isArray(value) && value.includes(status)
     },
   },

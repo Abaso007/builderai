@@ -3,8 +3,9 @@ import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import { z } from "zod"
 
 import type { Result } from "@unprice/error"
+import { customerEntitlements } from "../../schema/customers"
 import { subscriptionPhases, subscriptions } from "../../schema/subscriptions"
-import { customerEntitlementSchema, customerSelectSchema } from "../customer"
+import { customerSelectSchema } from "../customer"
 import { featureSelectBaseSchema } from "../features"
 import {
   type PlanVersionExtended,
@@ -44,6 +45,15 @@ const reasonSchema = z.enum([
   "auto_renew_disabled",
   "customer_signout",
 ])
+
+// schema for entitlements this is repeated but avoid circular dependencies
+const entitlementsExtendedSchema = createSelectSchema(customerEntitlements, {
+  metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
+}).extend({
+  featurePlanVersion: planVersionFeatureSelectBaseSchema.extend({
+    feature: featureSelectBaseSchema,
+  }),
+})
 
 export const invoiceMetadataSchema = z.object({
   note: z.string().optional().describe("Note about the invoice"),
@@ -97,6 +107,7 @@ export const subscriptionPhaseSelectSchema = createSelectSchema(subscriptionPhas
 
 export const subscriptionPhaseExtendedSchema = subscriptionPhaseSelectSchema.extend({
   items: subscriptionItemExtendedSchema.array(),
+  entitlements: entitlementsExtendedSchema.array(),
   planVersion: planVersionSelectBaseSchema,
 })
 
@@ -244,13 +255,7 @@ export const subscriptionChangePlanSchema = subscriptionSelectSchema
 
 export const subscriptionPhaseCacheSchema = subscriptionPhaseSelectSchema.extend({
   planVersion: planVersionSelectBaseSchema,
-  customerEntitlements: z.array(
-    customerEntitlementSchema.extend({
-      featurePlanVersion: planVersionFeatureSelectBaseSchema.extend({
-        feature: featureSelectBaseSchema,
-      }),
-    })
-  ),
+  customerEntitlements: z.array(entitlementsExtendedSchema),
 })
 
 export const subscriptionCacheSchema = subscriptionSelectSchema.extend({
@@ -260,6 +265,7 @@ export const subscriptionCacheSchema = subscriptionSelectSchema.extend({
   customer: customerSelectSchema.pick({
     active: true,
   }),
+  activePhase: subscriptionPhaseCacheSchema.optional(),
 })
 
 export type Subscription = z.infer<typeof subscriptionSelectSchema>

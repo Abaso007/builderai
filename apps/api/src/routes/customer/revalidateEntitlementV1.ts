@@ -2,6 +2,7 @@ import { createRoute } from "@hono/zod-openapi"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 
+import { customerEntitlementExtendedSchema } from "@unprice/db/validators"
 import { endTime } from "hono/timing"
 import { startTime } from "hono/timing"
 import { z } from "zod"
@@ -12,10 +13,10 @@ import type { App } from "~/hono/app"
 const tags = ["customer"]
 
 export const route = createRoute({
-  path: "/v1/customer/reset-entitlements",
-  operationId: "customer.resetEntitlements",
-  summary: "reset entitlements",
-  description: "Reset entitlements for a customer",
+  path: "/v1/customer/revalidate-entitlement",
+  operationId: "customer.revalidateEntitlement",
+  summary: "revalidate entitlement",
+  description: "Revalidate entitlement for a customer",
   method: "post",
   tags,
   request: {
@@ -25,8 +26,12 @@ export const route = createRoute({
           description: "The customer ID",
           example: "cus_1H7KQFLr7RepUyQBKdnvY",
         }),
+        featureSlug: z.string().openapi({
+          description: "The feature slug",
+          example: "tokens",
+        }),
       }),
-      "The customer ID"
+      "The customer ID and feature slug to revalidate"
     ),
   },
   responses: {
@@ -34,37 +39,42 @@ export const route = createRoute({
       z.object({
         success: z.boolean(),
         message: z.string().optional(),
-        slugs: z.array(z.string()).optional(),
+        entitlement: customerEntitlementExtendedSchema.optional(),
       }),
-      "The result of the reset entitlements"
+      "The result of the revalidate entitlement"
     ),
     ...openApiErrorResponses,
   },
 })
 
-export type ResetEntitlementsRequest = z.infer<
+export type RevalidateEntitlementRequest = z.infer<
   (typeof route.request.body)["content"]["application/json"]["schema"]
 >
-export type ResetEntitlementsResponse = z.infer<
+export type RevalidateEntitlementResponse = z.infer<
   (typeof route.responses)[200]["content"]["application/json"]["schema"]
 >
 
-export const registerResetEntitlementsV1 = (app: App) =>
+export const registerRevalidateEntitlementV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId } = c.req.valid("json")
+    const { customerId, featureSlug } = c.req.valid("json")
     const { entitlement } = c.get("services")
 
     // validate the request
     const key = await keyAuth(c)
 
     // start a timer
-    startTime(c, "resetEntitlements")
+    startTime(c, "revalidateEntitlement")
 
     // delete the customer from the DO
-    const { err, val: result } = await entitlement.resetEntitlements(customerId, key.projectId)
+    const { val: result, err } = await entitlement.revalidateEntitlement({
+      customerId,
+      featureSlug,
+      projectId: key.projectId,
+      timestamp: Date.now(),
+    })
 
     // end the timer
-    endTime(c, "resetEntitlements")
+    endTime(c, "revalidateEntitlement")
 
     if (err) {
       throw err

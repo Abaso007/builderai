@@ -50,6 +50,10 @@ export const registerGetSubscriptionV1 = (app: App) =>
     const { val: subscription, err } = await customer.getActiveSubscription({
       customerId,
       projectId: key.projectId,
+      now: Date.now(),
+      opts: {
+        skipCache: true,
+      },
     })
 
     if (err) {

@@ -262,6 +262,20 @@ export class Unprice {
         })
       },
 
+      revalidateEntitlement: async (
+        req: paths["/v1/customer/revalidate-entitlement"]["post"]["requestBody"]["content"]["application/json"]
+      ): Promise<
+        Result<
+          paths["/v1/customer/revalidate-entitlement"]["post"]["responses"]["200"]["content"]["application/json"]
+        >
+      > => {
+        return await this.fetch({
+          path: ["v1", "customer", "revalidate-entitlement"],
+          method: "POST",
+          body: req,
+        })
+      },
+
       resetEntitlements: async (
         req: paths["/v1/customer/reset-entitlements"]["post"]["requestBody"]["content"]["application/json"]
       ): Promise<
@@ -285,19 +299,6 @@ export class Unprice {
           path: ["v1", "customer", "can"],
           method: "POST",
           body: req,
-        })
-      },
-
-      getActivePhase: async (
-        customerId: string
-      ): Promise<
-        Result<
-          paths["/v1/customer/{customerId}/getActivePhase"]["get"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "customer", customerId, "getActivePhase"],
-          method: "GET",
         })
       },
 

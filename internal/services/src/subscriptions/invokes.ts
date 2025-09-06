@@ -1,11 +1,13 @@
-import { and, eq } from "@unprice/db"
+import { type SQL, and, eq, inArray, sql } from "@unprice/db"
 
-import { invoices, subscriptions } from "@unprice/db/schema"
+import { analytics } from "@unprice/analytics/client"
+import { customerEntitlements, invoices, subscriptions } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import { type InvoiceType, configureBillingCycleSubscription } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logging"
 import { addDays, addMinutes } from "date-fns"
 import { db } from "../utils/db"
+import { unprice } from "../utils/unprice"
 import type { SubscriptionContext } from "./types"
 import { validatePaymentMethod } from "./utils"
 
@@ -17,16 +19,37 @@ export async function loadSubscription(payload: {
   const { subscriptionId, projectId, now } = context
 
   const result = await db.query.subscriptions.findFirst({
-    where: (table, { eq, and }) =>
-      and(eq(table.id, subscriptionId), eq(table.projectId, projectId)),
     with: {
       phases: {
+        where: (phase, { lte, and, gte, isNull, or }) =>
+          and(lte(phase.startAt, now), or(isNull(phase.endAt), gte(phase.endAt, now))),
+        limit: 1, // we only need the active phase and there is only one at the time
         with: {
           planVersion: true,
+          customerEntitlements: {
+            with: {
+              featurePlanVersion: {
+                with: {
+                  feature: true,
+                },
+              },
+            },
+          },
+          items: {
+            with: {
+              featurePlanVersion: {
+                with: {
+                  feature: true,
+                },
+              },
+            },
+          },
         },
       },
       customer: true,
     },
+    where: (table, { eq, and }) =>
+      and(eq(table.id, subscriptionId), eq(table.projectId, projectId)),
   })
 
   if (!result) {
@@ -42,9 +65,7 @@ export async function loadSubscription(payload: {
   // phase can be undefined if the subscription is paused or ended but still the machine can be in active state
   //  for instance the subscription was pasued there is no current phase but there is an option to resume and
   // subscribe to a new phase
-  const currentPhase = phases.find(
-    (phase) => phase.startAt <= now && (!phase.endAt || phase.endAt > now)
-  )
+  const currentPhase = phases[0]
 
   // check the payment method as well
   const { paymentMethodId, requiredPaymentMethod } = await validatePaymentMethod({
@@ -54,25 +75,34 @@ export async function loadSubscription(payload: {
     logger: logger,
   })
 
+  let resultPhase = null
+
+  if (currentPhase) {
+    const { items, customerEntitlements, planVersion, ...phase } = currentPhase
+    resultPhase = {
+      ...phase,
+      items: items ?? [],
+      entitlements: customerEntitlements ?? [],
+      planVersion: planVersion ?? null,
+    }
+  }
+
   return {
     now,
     subscriptionId: subscription.id,
     projectId: subscription.projectId,
     customer,
-    currentPhase: currentPhase
-      ? {
-          ...currentPhase,
-          // items are not needed for the machine
-          items: [],
-        }
-      : null,
+    currentPhase: resultPhase,
     subscription,
     paymentMethodId,
     requiredPaymentMethod,
   }
 }
 
-export async function renewSubscription({ context }: { context: SubscriptionContext }) {
+export async function renewSubscription({
+  context,
+  logger,
+}: { context: SubscriptionContext; logger: Logger }) {
   const { subscription, currentPhase, subscriptionId } = context
 
   if (!currentPhase) throw new Error("No active phase found")
@@ -91,20 +121,108 @@ export async function renewSubscription({ context }: { context: SubscriptionCont
       ? billingCycle.cycleStartMs
       : billingCycle.cycleEndMs
 
-  // update subscription and current phase last renew at
-  const result = await db
-    .update(subscriptions)
-    .set({
-      currentCycleStartAt: billingCycle.cycleStartMs,
-      currentCycleEndAt: billingCycle.cycleEndMs,
-      renewAt: renewAt,
-      lastRenewAt: subscription.renewAt,
-      previousCycleStartAt: subscription.currentCycleStartAt,
-      previousCycleEndAt: subscription.currentCycleEndAt,
+  const result = await db.transaction(async (tx) => {
+    const entitlements = currentPhase.entitlements.map((entitlement) => ({
+      entitlementId: entitlement.id,
+      aggregationMethod: entitlement.featurePlanVersion.aggregationMethod,
+      featureType: entitlement.featurePlanVersion.featureType,
+    }))
+
+    // calculate the current usage given the new billing cycle
+    const usages = await analytics.getUsageBillingEntitlements({
+      customerId: subscription.customerId,
+      projectId: subscription.projectId,
+      entitlements,
+      startAt: billingCycle.cycleStartMs,
+      endAt: billingCycle.cycleEndMs,
     })
-    .where(eq(subscriptions.id, subscriptionId))
-    .returning()
-    .then((result) => result[0])
+
+    const sqlChunksEntitlementsUsage: SQL[] = []
+    const sqlChunksEntitlementsAccumulatedUsage: SQL[] = []
+
+    const ids: string[] = []
+    sqlChunksEntitlementsUsage.push(sql`(case`)
+    sqlChunksEntitlementsAccumulatedUsage.push(sql`(case`)
+
+    // reset the entitlement usage to the current usage
+    for (const entitlement of currentPhase.entitlements) {
+      const entitlementUsage = usages?.find((usage) => usage.entitlementId === entitlement.id)
+      // if the usage is not found, use the entitlement usage
+      const usage = entitlementUsage?.usage ?? Number(entitlement.currentCycleUsage)
+      const accumulatedUsage =
+        entitlementUsage?.accumulatedUsage ?? Number(entitlement.accumulatedUsage)
+
+      if (
+        !entitlementUsage &&
+        ["usage", "package", "tier"].includes(entitlement.featurePlanVersion.aggregationMethod)
+      ) {
+        // don't throw an error, just continue
+        logger.warn(`Usage not found for entitlement ${entitlement.id}`)
+      }
+
+      sqlChunksEntitlementsUsage.push(
+        sql`when ${customerEntitlements.id} = ${entitlement.id} then ${usage.toString()}`
+      )
+      sqlChunksEntitlementsAccumulatedUsage.push(
+        sql`when ${customerEntitlements.id} = ${entitlement.id} then ${accumulatedUsage.toString()}`
+      )
+
+      ids.push(entitlement.id)
+    }
+
+    sqlChunksEntitlementsUsage.push(sql`end)`)
+    sqlChunksEntitlementsAccumulatedUsage.push(sql`end)`)
+    const finalSqlEntitlementsUsage: SQL = sql.join(sqlChunksEntitlementsUsage, sql.raw(" "))
+    const finalSqlEntitlementsAccumulatedUsage: SQL = sql.join(
+      sqlChunksEntitlementsAccumulatedUsage,
+      sql.raw(" ")
+    )
+
+    // update the entitlement usage and accumulated usage at once
+    await tx
+      .update(customerEntitlements)
+      .set({
+        currentCycleUsage: finalSqlEntitlementsUsage,
+        accumulatedUsage: finalSqlEntitlementsAccumulatedUsage,
+        resetedAt: Date.now(),
+        updatedAtM: Date.now(),
+        lastUsageUpdateAt: Date.now(),
+      })
+      .where(
+        and(
+          eq(customerEntitlements.subscriptionId, subscriptionId),
+          eq(customerEntitlements.projectId, subscription.projectId),
+          eq(customerEntitlements.subscriptionPhaseId, currentPhase.id),
+          inArray(customerEntitlements.id, ids)
+        )
+      )
+      .catch((e) => {
+        logger.error(e.message)
+        throw e
+      })
+
+    // update subscription and current phase last renew at
+    const subscriptionResult = await tx
+      .update(subscriptions)
+      .set({
+        currentCycleStartAt: billingCycle.cycleStartMs,
+        currentCycleEndAt: billingCycle.cycleEndMs,
+        renewAt: renewAt,
+        lastRenewAt: subscription.renewAt,
+        previousCycleStartAt: subscription.currentCycleStartAt,
+        previousCycleEndAt: subscription.currentCycleEndAt,
+      })
+      .where(eq(subscriptions.id, subscriptionId))
+      .returning()
+      .then((result) => result[0])
+
+    // invalidate entitlements data in unprice API
+    await unprice.customers.resetEntitlements({
+      customerId: subscription.customerId,
+    })
+
+    return subscriptionResult
+  })
 
   if (!result) throw new Error("Subscription not found, or not updated")
 

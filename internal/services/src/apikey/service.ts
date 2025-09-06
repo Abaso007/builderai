@@ -280,15 +280,26 @@ export class ApiKeysService {
   }
 
   public async rollApiKey(req: {
-    key: string
+    keyHash: string
   }): Promise<Result<ApiKey & { newKey: string }, SchemaError | FetchError | UnPriceApiKeyError>> {
-    const { val: apiKey, err: apiKeyErr } = await this.getApiKey(
-      { key: req.key },
-      { skipCache: true }
-    )
+    const apiKey = await this.getData(req.keyHash)
 
-    if (apiKeyErr) {
-      return Err(apiKeyErr)
+    if (!apiKey) {
+      return Err(
+        new UnPriceApiKeyError({
+          code: "NOT_FOUND",
+          message: "apikey not found",
+        })
+      )
+    }
+
+    if (apiKey.revokedAt && apiKey.revokedAt < Date.now()) {
+      return Err(
+        new UnPriceApiKeyError({
+          code: "REVOKED",
+          message: "apikey is revoked",
+        })
+      )
     }
 
     const newKey = newId("apikey_key")
