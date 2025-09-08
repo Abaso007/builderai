@@ -1154,6 +1154,7 @@ export class SubscriptionService {
       case "renewing":
       case "past_due": {
         const { err: errInvoice } = await machine.invoice()
+
         if (errInvoice) {
           return Err(errInvoice)
         }

@@ -5,8 +5,8 @@ import { finilizeTask } from "../tasks/finilize"
 
 export const billingSchedule = schedules.task({
   id: "subscriptionPhase.billing",
-  // if dev then every 1 minute in dev mode
-  cron: process.env.NODE_ENV === "development" ? "*/1 * * * *" : "0 */12 * * *",
+  // if dev then every 5 minutes in dev mode
+  cron: process.env.NODE_ENV === "development" ? "*/5 * * * *" : "0 */12 * * *",
   run: async (payload) => {
     const now = payload.timestamp.getTime()
 
@@ -17,46 +17,86 @@ export const billingSchedule = schedules.task({
       limit: 100, // limit to 100 invoices to avoid overwhelming the system
       with: {
         subscriptionPhase: true,
+        customer: true,
       },
     })
 
-    // TODO: the problem here is we are waiting for the task to finish before triggering the next one
-    // this can take too much time, PLEASE FIX THIS
-    // trigger the end trial task for each subscription phase
-    for (const invoice of pendingInvoices) {
-      const isNotFinalize = invoice.status === "draft"
+    // if the customer is not active, we skip the invoice
+    // this is useful to avoid billing invoices for customers that are not active
+    const pendingInvoicesWithActiveCustomer = pendingInvoices.filter((inv) => inv.customer.active)
 
-      if (isNotFinalize) {
+    // Process invoices in bounded batches using Trigger.dev batch APIs.
+    // Preserve per-invoice ordering (finalize -> bill) by batching finalize first,
+    // then billing only those that either didn't need finalize or finalized successfully.
+    const concurrency = 10
+    for (let i = 0; i < pendingInvoicesWithActiveCustomer.length; i += concurrency) {
+      const batch = pendingInvoicesWithActiveCustomer.slice(i, i + concurrency)
+
+      const toFinalize = batch.filter((inv) => inv.status === "draft")
+
+      let finalizedOkIds = new Set<string>()
+
+      if (toFinalize.length > 0) {
         try {
-          await finilizeTask.triggerAndWait({
-            subscriptionPhaseId: invoice.subscriptionPhaseId,
-            invoiceId: invoice.id,
-            projectId: invoice.projectId,
-            subscriptionId: invoice.subscriptionPhase.subscriptionId,
-            now,
-          })
-        } catch (err) {
-          logger.error(`Failed to finalize invoice ${invoice.id}`, {
-            error: err instanceof Error ? err.message : "Unknown error",
-          })
+          const finalizeResults = await finilizeTask.batchTriggerAndWait(
+            toFinalize.map((invoice) => ({
+              payload: {
+                subscriptionPhaseId: invoice.subscriptionPhaseId,
+                invoiceId: invoice.id,
+                projectId: invoice.projectId,
+                subscriptionId: invoice.subscriptionPhase.subscriptionId,
+                now,
+              },
+            }))
+          )
 
-          continue
+          // Correlate finalize results with inputs by index and collect successes
+          const runs = finalizeResults.runs
+          const length = Math.min(toFinalize.length, runs.length)
+
+          for (let idx = 0; idx < length; idx++) {
+            const run = runs[idx]
+            const inv = toFinalize[idx]
+            if (run?.ok) {
+              if (inv) finalizedOkIds.add(inv.id)
+            } else if (run && inv) {
+              logger.error("Finalize run failed", {
+                invoiceId: inv.id,
+                error: run.error,
+              })
+            }
+          }
+        } catch (err) {
+          logger.error("Failed to batch finalize invoices", {
+            error: err instanceof Error ? err.message : "Unknown error",
+            invoiceIds: toFinalize.map((i) => i.id),
+          })
+          // On batch error, skip billing for drafts; still bill non-drafts below
+          finalizedOkIds = new Set<string>()
         }
       }
 
-      await billingTask.triggerAndWait({
-        subscriptionPhaseId: invoice.subscriptionPhaseId,
-        invoiceId: invoice.id,
-        projectId: invoice.projectId,
-        subscriptionId: invoice.subscriptionPhase.subscriptionId,
-        now,
-      })
+      const toBill = batch.filter((inv) => inv.status !== "draft" || finalizedOkIds.has(inv.id))
+
+      if (toBill.length > 0) {
+        await billingTask.batchTriggerAndWait(
+          toBill.map((invoice) => ({
+            payload: {
+              subscriptionPhaseId: invoice.subscriptionPhaseId,
+              invoiceId: invoice.id,
+              projectId: invoice.projectId,
+              subscriptionId: invoice.subscriptionPhase.subscriptionId,
+              now,
+            },
+          }))
+        )
+      }
     }
 
-    logger.info(`Found ${pendingInvoices.length} pending invoices`)
+    logger.info(`Found ${pendingInvoicesWithActiveCustomer.length} pending invoices`)
 
     return {
-      invoiceIds: pendingInvoices.map((i) => i.id),
+      invoiceIds: pendingInvoicesWithActiveCustomer.map((i) => i.id),
     }
   },
 })

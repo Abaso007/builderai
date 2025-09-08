@@ -45,7 +45,6 @@ export const createContext = async ({
       ...defaultFields,
       subscriptionId,
       projectId,
-      api: "jobs.subscription.cancel",
       phaseId,
       requestId: taskId,
     },

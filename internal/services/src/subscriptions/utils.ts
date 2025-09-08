@@ -247,6 +247,7 @@ export async function finalizeInvoice(payload: {
     billingConfig: phase.planVersion.billingConfig,
     analytics,
     customer,
+    logger,
   })
 
   if (invoiceItemsPrice.err) {
@@ -331,14 +332,11 @@ export async function finalizeInvoice(payload: {
   // Calculate final invoice totals
   paymentProviderInvoiceData.status = "unpaid"
 
-  const billingPeriod =
-    env.NODE_ENV === "development"
-      ? `${new Date(invoice.cycleStartAt).toISOString()} to ${new Date(
-          invoice.cycleEndAt
-        ).toISOString()}`
-      : `${new Date(invoice.cycleStartAt).toISOString().split("T")[0]} to ${
-          new Date(invoice.cycleEndAt).toISOString().split("T")[0]
-        }`
+  // show the correct billing period with the correct timezone
+  const timezone = subscriptionData.timezone
+  const billingPeriod = `${new Date(invoice.cycleStartAt).toLocaleString("en-US", { timeZone: timezone })} to ${new Date(
+    invoice.cycleEndAt
+  ).toLocaleString("en-US", { timeZone: timezone })}`
 
   // Create new invoice
   const paymentProviderInvoice = await paymentProviderService.createInvoice({
@@ -456,6 +454,7 @@ const calculateInvoiceItemsPrice = async (payload: {
   billingConfig: BillingConfig
   analytics: Analytics
   customer: Customer
+  logger: Logger
 }): Promise<
   Result<
     {
@@ -476,7 +475,7 @@ const calculateInvoiceItemsPrice = async (payload: {
     UnPriceSubscriptionError
   >
 > => {
-  const { invoice, items, analytics } = payload
+  const { invoice, items, analytics, logger } = payload
 
   // when billing in advance we calculate flat price for the current cycle + usage from the past cycles
   // when billing in arrear we calculate usage for the current cycle + flat price current cycle
@@ -549,7 +548,13 @@ const calculateInvoiceItemsPrice = async (payload: {
       }
 
       // this should never happen but we add a check anyway just in case
-      if (!quantity || quantity < 0) {
+      if (quantity < 0) {
+        logger.error("quantity is negative", {
+          itemId: item.id,
+          featureSlug: item.featurePlanVersion.feature.slug,
+          quantity,
+        })
+
         // throw and cancel execution
         throw new Error(
           `quantity is negative ${item.id} ${item.featurePlanVersion.feature.slug} ${quantity}`
@@ -565,6 +570,12 @@ const calculateInvoiceItemsPrice = async (payload: {
       })
 
       if (priceCalculation.err) {
+        logger.error("error calculating price", {
+          itemId: item.id,
+          featureSlug: item.featurePlanVersion.feature.slug,
+          priceCalculationErr: priceCalculation.err,
+        })
+
         throw new Error(
           `Error calculating price for ${item.featurePlanVersion.feature.slug} ${JSON.stringify(
             priceCalculation.err
@@ -628,6 +639,9 @@ const calculateInvoiceItemsPrice = async (payload: {
     })
   } catch (e) {
     const error = e as Error
+    logger.error("error calculating invoice items price", {
+      error: error.message,
+    })
     return Err(new UnPriceSubscriptionError({ message: `Unhandled error: ${error.message}` }))
   }
 }

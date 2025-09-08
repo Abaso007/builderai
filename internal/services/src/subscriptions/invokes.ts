@@ -162,10 +162,10 @@ export async function renewSubscription({
       }
 
       sqlChunksEntitlementsUsage.push(
-        sql`when ${customerEntitlements.id} = ${entitlement.id} then ${usage.toString()}`
+        sql`when ${customerEntitlements.id} = ${entitlement.id} then cast(${usage.toString()} as int)`
       )
       sqlChunksEntitlementsAccumulatedUsage.push(
-        sql`when ${customerEntitlements.id} = ${entitlement.id} then ${accumulatedUsage.toString()}`
+        sql`when ${customerEntitlements.id} = ${entitlement.id} then cast(${accumulatedUsage.toString()} as int)`
       )
 
       ids.push(entitlement.id)

@@ -53,6 +53,7 @@ export const finilizeTask = task({
 
     return {
       status: finalizeInvoiceResult.val.status,
+      invoiceId,
       subscriptionId,
       projectId,
       now,

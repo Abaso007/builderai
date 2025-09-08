@@ -13,10 +13,10 @@ import {
   calculateTotalPricePlan,
   configureBillingCycleSubscription,
 } from "@unprice/db/validators"
-import { Err, type FetchError, Ok, type Result } from "@unprice/error"
+import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import type { Cache } from "@unprice/services/cache"
-import type { CustomerService } from "@unprice/services/customers"
+import type { CustomerService, DenyReason } from "@unprice/services/customers"
 import { UnPriceCustomerError } from "@unprice/services/customers"
 import type { Metrics } from "@unprice/services/metrics"
 import type { DurableObjectProject } from "~/project/do"
@@ -292,7 +292,27 @@ export class EntitlementService {
       )
 
       if (err) {
-        return Err(err)
+        if (err instanceof UnPriceCustomerError) {
+          return Ok({
+            success: false,
+            message: err.message,
+            deniedReason: err.code as DenyReason,
+          })
+        }
+
+        if (err instanceof FetchError) {
+          return Ok({
+            success: false,
+            message: err.message,
+            deniedReason: "FETCH_ERROR",
+          })
+        }
+
+        return Ok({
+          success: false,
+          message: "error getting entitlement from do.",
+          deniedReason: "ENTITLEMENT_ERROR",
+        })
       }
 
       const entitlementGuard = this.customerService.checkLimitEntitlement({

@@ -52,7 +52,7 @@ export const getSubscriptions = protectedProjectProcedure
           },
         },
         invoices: {
-          orderBy: (table, { desc }) => [desc(table.paidAt)],
+          orderBy: (table, { desc }) => [desc(table.dueAt)],
         },
       },
       where: (table, { eq, and }) => and(eq(table.id, customerId), eq(table.projectId, project.id)),

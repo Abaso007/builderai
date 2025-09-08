@@ -885,14 +885,9 @@ export interface operations {
               subscriptionItemId: string | null
               limit: number | null
               units: number | null
-              usage: string
+              currentCycleUsage: string
               accumulatedUsage: string
               realtime: boolean
-              /** @enum {string} */
-              type: "feature" | "addon"
-              validFrom: number
-              validTo: number | null
-              bufferPeriodDays: number
               resetedAt: number
               active: boolean
               isCustom: boolean
@@ -920,6 +915,26 @@ export interface operations {
               }
               subscription: {
                 active: boolean
+                currentCycleStartAt: number
+                currentCycleEndAt: number
+              }
+              activePhase: {
+                startAt: number
+                endAt: number | null
+                billingAnchor: number
+                /** @default 0 */
+                trialDays: number | null
+                trialEndsAt: number | null
+                billingConfig: {
+                  name: string
+                  /** @enum {string} */
+                  billingInterval: "month" | "year" | "day" | "minute" | "onetime"
+                  billingIntervalCount: number
+                  /** @default dayOfCreation */
+                  billingAnchor: number | "dayOfCreation"
+                  /** @enum {string} */
+                  planType: "recurring" | "onetime"
+                }
               }
             }[]
           }
@@ -1021,11 +1036,11 @@ export interface operations {
            */
           featureSlug: string
           /**
-           * @description if true will check the entitlement from cache and revalidate asyncronously. This will reduce latency for the request but won't have 100% accuracy. If false, the entitlement will be validated synchronously 100% accurate but will have a higher latency
+           * @description if true will check the entitlement from cache. This will reduce latency for the request but won't have 100% accuracy. If false, the entitlement will be validated synchronously 100% accurate but will have a higher latency
            * @default false
            * @example true
            */
-          async: boolean
+          fromCache: boolean
           /**
            * @description The metadata
            * @example {
@@ -1052,6 +1067,7 @@ export interface operations {
             /** @enum {string} */
             deniedReason?:
               | "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE"
+              | "ENTITLEMENT_OUTSIDE_OF_CURRENT_BILLING_WINDOW"
               | "ERROR_RESETTING_DO"
               | "RATE_LIMITED"
               | "ENTITLEMENT_NOT_FOUND"
@@ -1488,14 +1504,9 @@ export interface operations {
                 subscriptionItemId: string | null
                 limit: number | null
                 units: number | null
-                usage: string
+                currentCycleUsage: string
                 accumulatedUsage: string
                 realtime: boolean
-                /** @enum {string} */
-                type: "feature" | "addon"
-                validFrom: number
-                validTo: number | null
-                bufferPeriodDays: number
                 resetedAt: number
                 active: boolean
                 isCustom: boolean
@@ -2840,14 +2851,9 @@ export interface operations {
               subscriptionItemId: string | null
               limit: number | null
               units: number | null
-              usage: string
+              currentCycleUsage: string
               accumulatedUsage: string
               realtime: boolean
-              /** @enum {string} */
-              type: "feature" | "addon"
-              validFrom: number
-              validTo: number | null
-              bufferPeriodDays: number
               resetedAt: number
               active: boolean
               isCustom: boolean
@@ -2875,6 +2881,26 @@ export interface operations {
               }
               subscription: {
                 active: boolean
+                currentCycleStartAt: number
+                currentCycleEndAt: number
+              }
+              activePhase: {
+                startAt: number
+                endAt: number | null
+                billingAnchor: number
+                /** @default 0 */
+                trialDays: number | null
+                trialEndsAt: number | null
+                billingConfig: {
+                  name: string
+                  /** @enum {string} */
+                  billingInterval: "month" | "year" | "day" | "minute" | "onetime"
+                  billingIntervalCount: number
+                  /** @default dayOfCreation */
+                  billingAnchor: number | "dayOfCreation"
+                  /** @enum {string} */
+                  planType: "recurring" | "onetime"
+                }
               }
             }
           }

@@ -14,7 +14,7 @@ import type { CanRequest, ReportUsageRequest, ReportUsageResponse } from "./inte
 import { env } from "cloudflare:workers"
 import { CloudflareStore } from "@unkey/cache/stores"
 import { createConnection } from "@unprice/db"
-import { type CustomerEntitlementExtended, getCurrentBillingWindow } from "@unprice/db/validators"
+import type { CustomerEntitlementExtended } from "@unprice/db/validators"
 import { FetchError } from "@unprice/error"
 import { Err, Ok, type Result } from "@unprice/error"
 import { AxiomLogger, ConsoleLogger, type Logger } from "@unprice/logging"
@@ -53,7 +53,7 @@ export class DurableObjectUsagelimiter extends Server {
   private readonly TTL_ANALYTICS = 1000 * 30 // 30 secs
   // Default ttl for updating usage from analytics to the db
   // we can optionally set and alarm to flush the usage to the db periodically
-  private readonly TTL_SYNC_USAGE = 1000 * 60 * 60 * 1 // 1 hour
+  private TTL_SYNC_USAGE = 1000 * 60 * 60 * 1 // 1 hour
   // Debounce delay for the broadcast
   private lastBroadcastTime = 0
   // debounce delay for the broadcast events
@@ -251,6 +251,9 @@ export class DurableObjectUsagelimiter extends Server {
         })
 
         this.featuresUsage.clear()
+        // clear the cache write timers
+        for (const [, t] of this.cacheWriteTimers) if (t?.timerId) clearTimeout(t.timerId)
+        this.cacheWriteTimers.clear()
         this.initialized = false
         this.ctx.storage.delete("config")
       }
@@ -258,12 +261,11 @@ export class DurableObjectUsagelimiter extends Server {
   }
 
   private async getConfig(): Promise<UsageLimiterConfig> {
-    const config = (await this.ctx.storage.get("config")) as UsageLimiterConfig
-
-    // clean the config from undefined entitlements
+    const raw = (await this.ctx.storage.get("config")) as UsageLimiterConfig | undefined
     return {
-      ...config,
-      entitlements: config?.entitlements?.filter((e) => e?.id !== undefined) ?? [],
+      entitlements: raw?.entitlements?.filter((e) => e?.id !== undefined) ?? [],
+      colo: raw?.colo ?? "",
+      lastSyncUsageAt: raw?.lastSyncUsageAt ?? 0,
     }
   }
 
@@ -288,8 +290,6 @@ export class DurableObjectUsagelimiter extends Server {
       .filter((e) => e.featureSlug !== featureSlug)
       .sort((a, b) => b.lastUsageUpdateAt - a.lastUsageUpdateAt)
 
-    // sort the entitlements by lastUsageUpdateAt
-    entitlements.sort((a, b) => b.lastUsageUpdateAt - a.lastUsageUpdateAt)
     // clean the entitlements from duplicates by featureSlug
     entitlementsMap = new Map(entitlements.map((e) => [e.featureSlug, e]))
     // push the entitlement to the array
@@ -302,9 +302,15 @@ export class DurableObjectUsagelimiter extends Server {
       lastSyncUsageAt: config.lastSyncUsageAt,
     })
 
-    // update the state
+    // update the state safely
     await this.ctx.blockConcurrencyWhile(async () => {
+      // flush the cache if it is in the state
+      await this.flushToCache(featureSlug)
       this.featuresUsage.delete(featureSlug)
+      // clear the cache write timer
+      const t = this.cacheWriteTimers.get(featureSlug)
+      if (t?.timerId) clearTimeout(t.timerId)
+      this.cacheWriteTimers.delete(featureSlug)
     })
   }
 
@@ -365,10 +371,10 @@ export class DurableObjectUsagelimiter extends Server {
   }): Promise<Result<CustomerEntitlementExtended, FetchError | UnPriceCustomerError>> {
     // get entitlement from memory, it should be here if the DO is initialized
     let entitlement = this.featuresUsage.get(featureSlug)
-    let isOutsideOfCurrentBillingWindow = false
+    let isValid = true
 
     // if entitlement is not in memory, get it from cache
-    if (!entitlement) {
+    if (!entitlement || !entitlement.activePhase) {
       const { err, val } = await this.revalidateEntitlement({
         customerId,
         projectId,
@@ -389,33 +395,34 @@ export class DurableObjectUsagelimiter extends Server {
     // we have a push model where the entitlement is revalidaded on every important event
     // although we also have a lazy revalidation to keep this in sync with the db
     // if the last reset was outside of the current billing window we should refresh
-    const { start, end } = getCurrentBillingWindow({
-      now: entitlement.lastUsageUpdateAt,
-      anchor: entitlement.activePhase.billingAnchor,
-      interval: entitlement.activePhase.billingConfig.billingInterval,
-      intervalCount: entitlement.activePhase.billingConfig.billingIntervalCount,
-      trialEndsAt: entitlement.activePhase.trialEndsAt,
+    const { err: validateEntitlementErr } = this.customerService.validateEntitlement({
+      entitlement,
+      now,
     })
 
-    // the entitlement is outside of the current billing window
-    isOutsideOfCurrentBillingWindow = now < start || now > end
+    if (validateEntitlementErr) {
+      isValid = false
+    }
 
     // we can force the refresh if the forceRefresh flag is set
-    const shouldRefresh = isOutsideOfCurrentBillingWindow ?? opts?.forceRefresh
+    const shouldRefresh = Boolean(opts?.forceRefresh) || !isValid
 
     if (shouldRefresh) {
-      if (isOutsideOfCurrentBillingWindow) {
+      if (!isValid) {
         this.logger.info(
-          "entitlement is outside of the current billing window, forcing revalidation",
+          `entitlement is not valid, forcing revalidation ${validateEntitlementErr?.message}`,
           {
             customerId,
             projectId,
             featureSlug,
             now,
+            reason: validateEntitlementErr?.code,
           }
         )
       }
 
+      // if for some reason is not valid again, revalidate will delete it from state
+      // so we don't run into an infinite loop of revalidations
       const { err, val } = await this.revalidateEntitlement({
         customerId,
         projectId,
@@ -478,6 +485,7 @@ export class DurableObjectUsagelimiter extends Server {
 
     if (err) {
       // if error we have to delete the entitlement from the do state
+      // this is to avoid an infinite loop of revalidations
       await this.deleteEntitlement(featureSlug)
       return Err(err)
     }
@@ -758,6 +766,9 @@ export class DurableObjectUsagelimiter extends Server {
       }
     } finally {
       this.flush()
+      // clear the cache write timers
+      for (const [, t] of this.cacheWriteTimers) if (t?.timerId) clearTimeout(t.timerId)
+      this.cacheWriteTimers.clear()
     }
   }
 
@@ -908,6 +919,9 @@ export class DurableObjectUsagelimiter extends Server {
         deniedReason: "ERROR_INSERTING_USAGE_DO",
       }
     } finally {
+      // clear the cache write timers
+      for (const [, t] of this.cacheWriteTimers) if (t?.timerId) clearTimeout(t.timerId)
+      this.cacheWriteTimers.clear()
       this.flush()
     }
   }
@@ -916,24 +930,16 @@ export class DurableObjectUsagelimiter extends Server {
     this.ctx.waitUntil(Promise.all([this.metrics.flush(), this.logger.flush()]))
   }
 
-  // instead of creating a cron job alarm we set and alarm on every request
   private async ensureAlarmIsSet(flushTime?: number): Promise<void> {
-    // we set alarms to send usage to tinybird periodically
-    // this would avoid having too many events in the db as well
     const alarm = await this.ctx.storage.getAlarm()
     const now = Date.now()
 
-    // there is a default ttl for the usage records
-    // alternatively we can use the flushTime from the request
-    // this can be usefull if we want to support realtime usage reporting for some clients
-    const nextAlarm = flushTime ? now + flushTime * 1000 : now + this.TTL_ANALYTICS
+    // min 5s, max 5m
+    const flushSec = Math.min(Math.max(flushTime ?? this.TTL_ANALYTICS / 1000, 5), 300)
+    const nextAlarm = now + flushSec * 1000
 
-    // if there is no alarm set one given the ttl
-    if (!alarm) {
-      this.ctx.storage.setAlarm(nextAlarm)
-    } else if (alarm < now) {
-      // delete the alarm if it is in the past
-      // and set it again
+    if (!alarm) this.ctx.storage.setAlarm(nextAlarm)
+    else if (alarm < now) {
       this.ctx.storage.deleteAlarm()
       this.ctx.storage.setAlarm(nextAlarm)
     }
@@ -1273,8 +1279,8 @@ export class DurableObjectUsagelimiter extends Server {
         .from(verifications)
         .then((e) => e[0])
 
-      // if there are no events, delete the do
-      if (events?.count !== 0 && verification_events?.count !== 0) {
+      // if there are any events, do not delete
+      if ((events?.count ?? 0) !== 0 || (verification_events?.count ?? 0) !== 0) {
         return {
           success: false,
           message: `DO has ${events?.count} events and ${verification_events?.count} verification events, can't delete.`,
@@ -1300,8 +1306,6 @@ export class DurableObjectUsagelimiter extends Server {
       try {
         // delete the do
         await this.ctx.storage.deleteAll()
-        this.initialized = false
-        this.featuresUsage.clear()
 
         return {
           success: true,
@@ -1313,9 +1317,6 @@ export class DurableObjectUsagelimiter extends Server {
           error: error instanceof Error ? error.message : "unknown error",
         })
 
-        this.initialized = false
-        this.featuresUsage.clear()
-
         return {
           success: false,
           message: error instanceof Error ? error.message : "unknown error",
@@ -1323,6 +1324,11 @@ export class DurableObjectUsagelimiter extends Server {
         }
       } finally {
         this.flush()
+        this.initialized = false
+        this.featuresUsage.clear()
+        // clear the cache write timers
+        for (const [, t] of this.cacheWriteTimers) if (t?.timerId) clearTimeout(t.timerId)
+        this.cacheWriteTimers.clear()
       }
     })
   }
