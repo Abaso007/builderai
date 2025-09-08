@@ -98,7 +98,7 @@ export const customerEntitlements = pgTableProject(
 
     // entitlements are tied to a phase, in the phase there are all dates related to when
     // the entitlement is valid or considered expired
-    // resetedAt is the date when the entitlement was reseted
+    // resetedAt is the date when the entitlement usage was reseted
     // normally this is set by the subscription renew event
     resetedAt: bigint("reseted_at", { mode: "number" }).notNull(),
 
@@ -112,8 +112,7 @@ export const customerEntitlements = pgTableProject(
     lastUsageUpdateAt: bigint("last_usage_update_at", { mode: "number" })
       .notNull()
       .default(0)
-      .$defaultFn(() => Date.now())
-      .$onUpdateFn(() => Date.now()),
+      .$defaultFn(() => Date.now()),
     metadata: json("metadata").$type<{
       [key: string]: string | number | boolean | null
     }>(),

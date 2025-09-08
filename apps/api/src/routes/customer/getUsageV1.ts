@@ -45,11 +45,15 @@ export const registerGetUsageV1 = (app: App) =>
     // validate the request
     const key = await keyAuth(c)
 
-    const result = await entitlement.getCurrentUsage({
+    const { err, val: result } = await entitlement.getCurrentUsage({
       customerId,
       projectId: key.projectId,
       now,
     })
+
+    if (err) {
+      throw err
+    }
 
     return c.json(result, HttpStatusCodes.OK)
   })

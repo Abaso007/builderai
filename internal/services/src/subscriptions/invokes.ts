@@ -135,6 +135,7 @@ export async function renewSubscription({
       entitlements,
       startAt: billingCycle.cycleStartMs,
       endAt: billingCycle.cycleEndMs,
+      includeAccumulatedUsage: true,
     })
 
     const sqlChunksEntitlementsUsage: SQL[] = []

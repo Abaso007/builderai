@@ -30,6 +30,7 @@ interface UsageLimiterConfig {
 
 // This durable object takes care of handling the usage of every feature per customer.
 // It is used to validate the usage of a feature and to report the usage to tinybird.
+// think of it as a queue that will be flushed to the db periodically
 export class DurableObjectUsagelimiter extends Server {
   // if the do is initialized
   private initialized = false
@@ -51,13 +52,23 @@ export class DurableObjectUsagelimiter extends Server {
   // Default ttl for the usage records and verifications
   private readonly TTL_ANALYTICS = 1000 * 30 // 30 secs
   // Default ttl for updating usage from analytics to the db
-  private readonly TTL_SYNC_USAGE = 1000 * 60 * 60 * 24 // 24 hours
-  // Default ttl for the revalidation of the placeholder entitlement
-  private readonly TTL_PLACEHOLDER_REVALIDATION = 1000 * 60 * 5 // 5 mins
+  // we can optionally set and alarm to flush the usage to the db periodically
+  private readonly TTL_SYNC_USAGE = 1000 * 60 * 60 * 1 // 1 hour
   // Debounce delay for the broadcast
   private lastBroadcastTime = 0
   // debounce delay for the broadcast events
   private readonly DEBOUNCE_DELAY = 1000 * 1 // 1 second
+  // Maps featureSlug to its current timeout ID for cache flushing
+  private cacheWriteTimers: Map<
+    string,
+    {
+      timerId: number | null // The ID of the current setTimeout for debouncing
+      lastFlushTime: number // The last time the cache was flushed
+    }
+  > = new Map()
+  // Configuration for cache flushing
+  private readonly DEBOUNCE_DELAY_MS = 2000 // Time to wait for inactivity before flushing
+  private readonly MAX_FLUSH_INTERVAL_MS = 5000 // Max time between flushes, even if active (5 seconds)
 
   // hibernate the do when no websocket nor connections are active
   static options = {
@@ -71,11 +82,12 @@ export class DurableObjectUsagelimiter extends Server {
 
     // set a revalidation period of 5 secs for development
     if (env.VERCEL_ENV === "development") {
-      this.TTL_PLACEHOLDER_REVALIDATION = 1000 * 10 // 10 secs
+      this.TTL_SYNC_USAGE = 1000 * 60 // 1 minute
     }
+
     // set a revalidation period of 5 mins for preview
     if (env.VERCEL_ENV === "preview") {
-      this.TTL_PLACEHOLDER_REVALIDATION = 1000 * 60 * 30 // 30 secs
+      this.TTL_SYNC_USAGE = 1000 * 60 * 30 // 5 mins
     }
 
     this.analytics = new Analytics({
@@ -102,7 +114,7 @@ export class DurableObjectUsagelimiter extends Server {
           requestId: this.ctx.id.toString(),
           service: "usagelimiter",
           environment: env.NODE_ENV,
-          logLevel: env.VERCEL_ENV === "production" ? "error" : "warn",
+          logLevel: env.VERCEL_ENV === "production" ? "error" : "info",
           defaultFields: {
             durableObjectId: this.ctx.id.toString(),
           },
@@ -264,20 +276,49 @@ export class DurableObjectUsagelimiter extends Server {
     })
   }
 
+  private async deleteEntitlement(featureSlug: string) {
+    const config = await this.getConfig()
+
+    let entitlementsMap = new Map<string, CustomerEntitlementExtended>()
+    let entitlements = config.entitlements
+
+    // remove the entitlement from the config and remove duplicates by featureSlug
+    // if duplicate found we keep the one with the lastUpdateUsageAt the highest
+    entitlements = entitlements
+      .filter((e) => e.featureSlug !== featureSlug)
+      .sort((a, b) => b.lastUsageUpdateAt - a.lastUsageUpdateAt)
+
+    // sort the entitlements by lastUsageUpdateAt
+    entitlements.sort((a, b) => b.lastUsageUpdateAt - a.lastUsageUpdateAt)
+    // clean the entitlements from duplicates by featureSlug
+    entitlementsMap = new Map(entitlements.map((e) => [e.featureSlug, e]))
+    // push the entitlement to the array
+    entitlements = Array.from(entitlementsMap.values())
+
+    // update the config
+    await this.updateConfig({
+      entitlements: entitlements,
+      colo: config.colo,
+      lastSyncUsageAt: config.lastSyncUsageAt,
+    })
+
+    // update the state
+    await this.ctx.blockConcurrencyWhile(async () => {
+      this.featuresUsage.delete(featureSlug)
+    })
+  }
+
   private async updateEntitlement(entitlement: CustomerEntitlementExtended) {
     const config = await this.getConfig()
 
     let entitlementsMap = new Map<string, CustomerEntitlementExtended>()
     let entitlements = config.entitlements
 
-    // entitlement is a placeholder don't validate
-    if (entitlement.id !== "placeholder") {
-      // remove the entitlement from the config and remove duplicates by featureSlug
-      // if duplicate found we keep the one with the lastUpdateUsageAt the highest
-      entitlements = entitlements
-        .filter((e) => e.id !== entitlement.id)
-        .sort((a, b) => b.lastUsageUpdateAt - a.lastUsageUpdateAt)
-    }
+    // remove the entitlement from the config and remove duplicates by featureSlug
+    // if duplicate found we keep the one with the lastUpdateUsageAt the highest
+    entitlements = entitlements
+      .filter((e) => e.id !== entitlement.id)
+      .sort((a, b) => b.lastUsageUpdateAt - a.lastUsageUpdateAt)
 
     // push the entitlement to the array
     entitlements.push(entitlement)
@@ -322,59 +363,19 @@ export class DurableObjectUsagelimiter extends Server {
       forceRefresh?: boolean
     }
   }): Promise<Result<CustomerEntitlementExtended, FetchError | UnPriceCustomerError>> {
-    // get entitlement from memory
+    // get entitlement from memory, it should be here if the DO is initialized
     let entitlement = this.featuresUsage.get(featureSlug)
+    let isOutsideOfCurrentBillingWindow = false
 
-    // if the entitlement is a placeholder, we need to refresh it given the TTL
-    const timeToRefresh =
-      entitlement && entitlement?.id === "placeholder"
-        ? entitlement?.updatedAtM + this.TTL_PLACEHOLDER_REVALIDATION - now < 0
-        : true
-
-    let mustRefresh = false
-
-    // if the entitlement is not a placeholder, we need to check if it's outside of the current cycle window
-    if (entitlement && entitlement.id !== "placeholder") {
-      const currentCycleWindow = getCurrentBillingWindow({
-        now: entitlement.resetedAt,
-        anchor: entitlement.activePhase.billingAnchor,
-        interval: entitlement.activePhase.billingConfig.billingInterval,
-        intervalCount: entitlement.activePhase.billingConfig.billingIntervalCount,
-        trialEndsAt: entitlement.activePhase.trialEndsAt,
-      })
-
-      mustRefresh = now > currentCycleWindow.end || now < currentCycleWindow.start
-    }
-
-    // we can force the refresh if the forceRefresh flag is set
-    const shouldRefresh = timeToRefresh ?? opts?.forceRefresh
-
-    // If we need to refresh but we have stale data, return the stale data
-    // and trigger the refresh in the background for speeding up the request
-    if (shouldRefresh && entitlement && entitlement?.id !== "placeholder" && !mustRefresh) {
-      this.ctx.waitUntil(
-        this.revalidateEntitlement({
-          customerId,
-          projectId,
-          featureSlug,
-          now,
-          opts: {
-            skipCache: false, // read from cache
-            withLastUsage: timeToRefresh, // if the entitlement is outside of the current cycle window, we need to get the last usage
-          },
-        })
-      )
-    } else if (shouldRefresh || !entitlement || mustRefresh) {
-      // If we must refresh (no data at all),
-      // then we have to block the request and wait for the result.
+    // if entitlement is not in memory, get it from cache
+    if (!entitlement) {
       const { err, val } = await this.revalidateEntitlement({
         customerId,
         projectId,
         featureSlug,
         now,
         opts: {
-          skipCache: true, // force the very first refresh
-          withLastUsage: true, // with the last usage
+          skipCache: false,
         },
       })
 
@@ -385,30 +386,53 @@ export class DurableObjectUsagelimiter extends Server {
       entitlement = val
     }
 
-    // if the entitlement doesn't need to be refreshed
-    // and the entitlement is not found, return an error
-    if (!entitlement?.id) {
-      return Err(
-        new UnPriceCustomerError({
-          message: "entitlement not found",
-          code: "ENTITLEMENT_NOT_FOUND",
-        })
-      )
+    // we have a push model where the entitlement is revalidaded on every important event
+    // although we also have a lazy revalidation to keep this in sync with the db
+    // if the last reset was outside of the current billing window we should refresh
+    const { start, end } = getCurrentBillingWindow({
+      now: entitlement.lastUsageUpdateAt,
+      anchor: entitlement.activePhase.billingAnchor,
+      interval: entitlement.activePhase.billingConfig.billingInterval,
+      intervalCount: entitlement.activePhase.billingConfig.billingIntervalCount,
+      trialEndsAt: entitlement.activePhase.trialEndsAt,
+    })
+
+    // the entitlement is outside of the current billing window
+    isOutsideOfCurrentBillingWindow = now < start || now > end
+
+    // we can force the refresh if the forceRefresh flag is set
+    const shouldRefresh = isOutsideOfCurrentBillingWindow ?? opts?.forceRefresh
+
+    if (shouldRefresh) {
+      if (isOutsideOfCurrentBillingWindow) {
+        this.logger.info(
+          "entitlement is outside of the current billing window, forcing revalidation",
+          {
+            customerId,
+            projectId,
+            featureSlug,
+            now,
+          }
+        )
+      }
+
+      const { err, val } = await this.revalidateEntitlement({
+        customerId,
+        projectId,
+        featureSlug,
+        now,
+        opts: {
+          skipCache: true, // skip cache to force revalidation
+        },
+      })
+
+      if (err) {
+        return Err(err)
+      }
+
+      entitlement = val
     }
 
-    // placeholder is used to avoid spamming the db with requests when entitlement is not found
-    if (entitlement?.id === "placeholder") {
-      return Err(
-        new UnPriceCustomerError({
-          message: `DO: Entitlement not found, entitlement will be refreshed in ${Math.round(
-            (entitlement.updatedAtM + this.TTL_PLACEHOLDER_REVALIDATION - now) / 1000
-          )} seconds`,
-          code: "ENTITLEMENT_NOT_FOUND",
-        })
-      )
-    }
-
-    // if the entitlement is found, return the entitlement
     return Ok(entitlement)
   }
 
@@ -425,17 +449,18 @@ export class DurableObjectUsagelimiter extends Server {
     now: number
     opts?: {
       skipCache?: boolean
-      withLastUsage?: boolean
     }
   }): Promise<Result<CustomerEntitlementExtended, FetchError | UnPriceCustomerError>> {
-    // if we need the last usage, we need to send the usage to tinybird
-    if (opts?.withLastUsage) {
-      this.logger.info("force refreshing entitlement", {
+    // if we need the last usage, we need to send the usage to tinybird first
+    if (opts?.skipCache) {
+      this.logger.debug("force refreshing to entitlement from DO", {
         customerId,
         projectId,
         featureSlug,
+        now,
       })
 
+      // we have to await these to make sure the usage is sent to tinybird first
       await this.sendUsageToTinybird()
       await this.sendVerificationsToTinybird()
     }
@@ -448,31 +473,87 @@ export class DurableObjectUsagelimiter extends Server {
       now,
       {
         skipCache: opts?.skipCache ?? false,
-        withLastUsage: opts?.withLastUsage ?? false,
       }
     )
 
     if (err) {
-      // if the entitlement is not found we want to keep a placeholder
-      // so in future request don't spam the db
-      const placeholderEntitlement = {
-        id: "placeholder",
-        featureSlug: featureSlug,
-        updatedAtM: Date.now(),
-      } as CustomerEntitlementExtended
-
-      await this.updateEntitlement(placeholderEntitlement)
-
+      // if error we have to delete the entitlement from the do state
+      await this.deleteEntitlement(featureSlug)
       return Err(err)
     }
 
-    // update the config but don't update usage if that flag is not set
-    await this.updateEntitlement({
-      ...val,
-      updatedAtM: Date.now(),
-    })
+    // update the config entitlement in the do state
+    await this.updateEntitlement(val)
 
     return Ok(val)
+  }
+
+  /**
+   * Schedules a debounced cache update for a feature slug,
+   * ensuring it flushes within a maximum interval even under continuous activity.
+   * @param featureSlug The identifier for the feature whose usage is being updated.
+   */
+  private scheduleCacheUpdateWithMaxInterval(featureSlug: string) {
+    let updateState = this.cacheWriteTimers.get(featureSlug)
+
+    // Initialize state if it's the first time for this feature
+    if (!updateState) {
+      updateState = { timerId: null, lastFlushTime: Date.now() }
+      this.cacheWriteTimers.set(featureSlug, updateState)
+    }
+
+    // Clear any existing debounce timer
+    if (updateState.timerId) {
+      clearTimeout(updateState.timerId)
+    }
+
+    // Determine the next target flush time
+    const now = Date.now()
+    const timeSinceLastFlush = now - updateState.lastFlushTime
+
+    let delayBeforeNextFlush: number
+
+    if (timeSinceLastFlush >= this.MAX_FLUSH_INTERVAL_MS) {
+      // If it's been longer than the max interval since the last flush,
+      // flush immediately (or as soon as possible).
+      delayBeforeNextFlush = 0
+    } else {
+      // Otherwise, use the debounce delay.
+      // But also ensure we don't exceed the MAX_FLUSH_INTERVAL_MS.
+      // The actual delay will be the debounce delay, unless that would make
+      // the total time since last flush exceed MAX_FLUSH_INTERVAL_MS.
+      const timeUntilMaxFlush = this.MAX_FLUSH_INTERVAL_MS - timeSinceLastFlush
+      delayBeforeNextFlush = Math.min(this.DEBOUNCE_DELAY_MS, timeUntilMaxFlush)
+    }
+
+    // Schedule the new timer
+    const timerId = setTimeout(async () => {
+      // Clear the timerId as this timer is about to execute
+      if (updateState) {
+        // Check if updateState still exists (should)
+        updateState.timerId = null
+      }
+      this.ctx.waitUntil(this.flushToCache(featureSlug))
+    }, delayBeforeNextFlush)
+
+    updateState.timerId = Number(timerId)
+  }
+
+  private async flushToCache(featureSlug: string) {
+    const entitlement = this.featuresUsage.get(featureSlug)
+
+    if (!entitlement) {
+      return
+    }
+
+    const cacheKey = this.customerService.getEntitlementCacheKey(entitlement)
+    const cache = this.cache.getCache()
+
+    this.logger.debug(
+      `DO ID: ${this.ctx.id.toString()} - Flushing feature '${featureSlug}' usage ${entitlement.currentCycleUsage} to cache key: ${cacheKey}`
+    )
+
+    await cache.customerEntitlement.set(cacheKey, entitlement)
   }
 
   async _migrate() {
@@ -622,10 +703,8 @@ export class DurableObjectUsagelimiter extends Server {
       // validate the entitlement
       const entitlementGuardResult = this.customerService.checkLimitEntitlement({
         entitlement,
-        now: data.timestamp,
         opts: {
           allowOverage: false,
-          autoReset: true,
         },
       })
 
@@ -735,10 +814,6 @@ export class DurableObjectUsagelimiter extends Server {
       const usageGuard = this.customerService.calculateEntitlementUsage({
         entitlement,
         usage: Number(data.usage),
-        now: data.timestamp,
-        opts: {
-          autoReset: true, // if usage is no longer valid we reset it
-        },
       })
 
       // if there is something wrong with the usage, we return an error
@@ -810,8 +885,11 @@ export class DurableObjectUsagelimiter extends Server {
         ...entitlement,
         currentCycleUsage: usageGuard.usage.toString(),
         accumulatedUsage: usageGuard.accumulatedUsage.toString(),
-        lastUsageUpdateAt: data.timestamp,
+        lastUsageUpdateAt: Date.now(),
       })
+
+      // schedule the cache update for updating usage
+      this.scheduleCacheUpdateWithMaxInterval(data.featureSlug)
 
       return {
         success: usageGuard.success,
@@ -862,15 +940,15 @@ export class DurableObjectUsagelimiter extends Server {
   }
 
   onStart(): void | Promise<void> {
-    console.info("onStart initializing do")
+    this.logger.debug("onStart initializing do")
   }
 
   onConnect(): void | Promise<void> {
-    console.info("onConnect")
+    this.logger.debug("onConnect")
   }
 
   onClose(): void | Promise<void> {
-    console.info("onClose flushing metrics and logs")
+    this.logger.debug("onClose flushing metrics and logs")
     // flush the metrics and logs
     this.flush()
   }
@@ -954,7 +1032,7 @@ export class DurableObjectUsagelimiter extends Server {
                   }
                 )
 
-                this.logger.warn(`Processed ${processedCount} verifications`, {
+                this.logger.info(`Processed ${processedCount} verifications`, {
                   customerId: transformedEvents[0]?.customerId,
                   projectId: transformedEvents[0]?.projectId,
                 })
@@ -1085,7 +1163,7 @@ export class DurableObjectUsagelimiter extends Server {
                 )
               }
 
-              this.logger.warn(`Processed ${processedCount} usage events`, {
+              this.logger.info(`Processed ${processedCount} usage events`, {
                 customerId: deduplicatedEvents[0]?.customerId,
                 projectId: deduplicatedEvents[0]?.projectId,
               })
@@ -1110,28 +1188,36 @@ export class DurableObjectUsagelimiter extends Server {
 
   // websocket message handler
   async onMessage(_conn: Connection, message: string) {
-    console.info("onMessage", message)
+    this.logger.debug(`onMessage ${message}`)
   }
 
-  public async syncEntitlementsUsageAlarmHandler() {
-    const config = await this.getConfig()
-    const now = Date.now()
-    const ttl = config.lastSyncUsageAt + this.TTL_SYNC_USAGE - now
-
-    if (ttl > 0) {
-      return
+  public async prewarmDO({
+    customerId,
+    projectId,
+    now,
+    opts,
+  }: {
+    customerId: string
+    projectId: string
+    now: number
+    opts?: {
+      force?: boolean
+    }
+  }) {
+    if (!this.initialized) {
+      await this.initialize()
     }
 
-    // project and customer id are the same for every entitlement
-    const projectId = config.entitlements[0]?.projectId
-    const customerId = config.entitlements[0]?.customerId
+    const config = await this.getConfig()
+    const ttl = config.lastSyncUsageAt + this.TTL_SYNC_USAGE - now
 
-    if (!projectId || !customerId) {
+    // force is used to prewarm the do even if the ttl is not expired
+    if (ttl > 0 && !opts?.force) {
       return
     }
 
     // update the entitlement usage in the db
-    await this.customerService.syncEntitlementsUsageDB({
+    const entitlements = await this.customerService.syncEntitlementsUsageDB({
       customerId,
       projectId,
       now,
@@ -1142,6 +1228,11 @@ export class DurableObjectUsagelimiter extends Server {
       ...config,
       lastSyncUsageAt: Date.now(),
     })
+
+    // update entitlements in the do
+    for (const entitlement of entitlements) {
+      await this.updateEntitlement(entitlement)
+    }
   }
 
   async onAlarm(): Promise<void> {
@@ -1149,8 +1240,6 @@ export class DurableObjectUsagelimiter extends Server {
     await this.sendUsageToTinybird()
     // send verifications to tinybird on alarm
     await this.sendVerificationsToTinybird()
-    // sync the entitlements usage in db and cache
-    await this.syncEntitlementsUsageAlarmHandler()
     // flush the metrics and logs
     this.flush()
   }

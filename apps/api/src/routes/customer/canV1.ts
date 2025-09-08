@@ -9,7 +9,7 @@ import { keyAuth } from "~/auth/key"
 import { canResponseSchema } from "~/entitlement/interface"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import { reportUsage } from "~/util/reportUsage"
+import { reportUsageEvents } from "~/util/reportUsageEvents"
 const tags = ["customer"]
 
 export const route = createRoute({
@@ -30,9 +30,9 @@ export const route = createRoute({
           description: "The feature slug",
           example: "tokens",
         }),
-        async: z.boolean().optional().openapi({
+        fromCache: z.boolean().optional().openapi({
           description:
-            "if true will check the entitlement from cache and revalidate asyncronously. This will reduce latency for the request but won't have 100% accuracy. If false, the entitlement will be validated synchronously 100% accurate but will have a higher latency",
+            "if true will check the entitlement from cache. This will reduce latency for the request but won't have 100% accuracy. If false, the entitlement will be validated synchronously 100% accurate but will have a higher latency",
           example: true,
           default: false,
         }),
@@ -69,7 +69,7 @@ export type CanResponse = z.infer<
 
 export const registerCanV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId, featureSlug, metadata, async } = c.req.valid("json")
+    const { customerId, featureSlug, metadata, fromCache } = c.req.valid("json")
     const { entitlement } = c.get("services")
     const stats = c.get("stats")
     const requestId = c.get("requestId")
@@ -78,19 +78,19 @@ export const registerCanV1 = (app: App) =>
     // validate the request
     const key = await keyAuth(c)
 
-    const canType = async ? "canAsync" : "canSync"
+    const canType = fromCache ? "canCache" : "can"
 
     // start a new timer
     startTime(c, canType)
 
     // validate usage from db
-    const result = await entitlement.can({
+    const { err, val: result } = await entitlement.can({
       customerId,
       featureSlug,
       projectId: key.projectId,
       requestId,
       performanceStart,
-      async,
+      fromCache,
       // short ttl for dev
       flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
       timestamp: Date.now(), // for now we report the usage at the time of the request
@@ -101,19 +101,23 @@ export const registerCanV1 = (app: App) =>
         region: stats.region,
         colo: stats.colo,
         city: stats.city,
-        latitude: stats.latitude,
-        longitude: stats.longitude,
         ua: stats.ua,
         continent: stats.continent,
         source: stats.source,
       },
     })
 
-    // send analytics event for the unprice customer
-    c.executionCtx.waitUntil(reportUsage(c, { action: "can" }))
-
     // end the timer
     endTime(c, canType)
+
+    // send analytics event for the unprice customer
+    c.executionCtx.waitUntil(
+      reportUsageEvents(c, { action: canType, status: err ? "error" : "success" })
+    )
+
+    if (err) {
+      throw err
+    }
 
     return c.json(result, HttpStatusCodes.OK)
   })

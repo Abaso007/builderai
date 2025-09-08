@@ -29,15 +29,15 @@ SQL >
     WHERE
         projectId = {{ String(projectId) }}
         AND customerId = {{ String(customerId) }}
+        {% if defined(start) & defined(end) %}
+            AND timestamp BETWEEN {{ Int64(start) }}
+            AND {{ Int64(end) }}
+        {% end %}
         {% if defined(entitlementIds) %}
             AND entitlementId IN {{ Array(entitlementIds, 'String') }}
         {% end %}
         {% if defined(subscriptionItemIds) %}
             AND subscriptionItemId IN {{ Array(subscriptionItemIds, 'String') }}
-        {% end %}
-        {% if defined(start) & defined(end) %}
-            AND timestamp BETWEEN {{ Int64(start) }}
-            AND {{ Int64(end) }}
         {% end %}
     {% if defined(entitlementIds) %}
         GROUP BY projectId, customerId, featureSlug, entitlementId

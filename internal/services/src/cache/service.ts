@@ -79,18 +79,21 @@ export class CacheService {
 
     this.cache = createCache({
       apiKeyByHash: new Namespace<CacheNamespaces["apiKeyByHash"]>(this.context, defaultOpts),
-      customerEntitlement: new Namespace<CacheNamespaces["customerEntitlement"]>(
-        this.context,
-        defaultOpts
-      ),
-      customerActivePhase: new Namespace<CacheNamespaces["customerActivePhase"]>(
-        this.context,
-        defaultOpts
-      ),
-      customerEntitlements: new Namespace<CacheNamespaces["customerEntitlements"]>(
-        this.context,
-        defaultOpts
-      ),
+      customerEntitlement: new Namespace<CacheNamespaces["customerEntitlement"]>(this.context, {
+        ...defaultOpts,
+        fresh: 1000 * 60 * 60 * 24, // 24 hours
+        stale: 1000 * 60 * 60 * 1, // 1 hour
+      }),
+      customerEntitlements: new Namespace<CacheNamespaces["customerEntitlements"]>(this.context, {
+        ...defaultOpts,
+        fresh: 1000 * 60 * 60 * 24, // 24 hours
+        stale: 1000 * 60 * 60 * 1, // 1 hour
+      }),
+      customerSubscription: new Namespace<CacheNamespaces["customerSubscription"]>(this.context, {
+        ...defaultOpts,
+        fresh: 1000 * 60 * 60 * 24, // 24 hours
+        stale: 1000 * 60 * 60 * 1, // 1 hour
+      }),
       customerPaymentMethods: new Namespace<CacheNamespaces["customerPaymentMethods"]>(
         this.context,
         defaultOpts
@@ -106,10 +109,6 @@ export class CacheService {
           fresh: 1000 * 30, // 30 seconds
           stale: 1000 * 60, // delete after 1 minute
         }
-      ),
-      customerSubscription: new Namespace<CacheNamespaces["customerSubscription"]>(
-        this.context,
-        defaultOpts
       ),
       pageCountryVisits: new Namespace<CacheNamespaces["pageCountryVisits"]>(this.context, {
         ...defaultOpts,

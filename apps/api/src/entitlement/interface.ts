@@ -23,11 +23,11 @@ export const canSchema = z.object({
   metadata: z.record(z.string(), z.any()).optional(),
   flushTime: z.number().optional(),
   performanceStart: z.number(),
-  async: z
+  fromCache: z
     .boolean()
     .optional()
     .describe(
-      "if true will check the entitlement from cache and revalidate asyncronously. This will reduce latency for the request but won't have 100% accuracy"
+      "if true will check the entitlement from cache. This will reduce latency for the request but won't have 100% accuracy. If false, the entitlement will be validated synchronously 100% accurate but will have a higher latency"
     ),
 })
 

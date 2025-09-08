@@ -2,7 +2,7 @@ import { FEATURE_SLUGS } from "@unprice/config"
 import type { Context } from "hono"
 import type { HonoEnv } from "~/hono/env"
 
-export const reportUsage = async (
+export const reportUsageEvents = async (
   c: Context<HonoEnv>,
   metadata: Record<string, string | undefined>
 ) => {
@@ -28,6 +28,11 @@ export const reportUsage = async (
 
     // if the unprice customer is internal or main, we don't need to report the usage
     if (shouldNotReportUsage) {
+      logger.debug("Skipping usage report for unprice customer", {
+        unPriceCustomerId,
+        shouldNotReportUsage,
+      })
+
       return
     }
 

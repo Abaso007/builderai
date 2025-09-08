@@ -459,12 +459,14 @@ export class Analytics {
   }
 
   // TODO: create analytics service interface in services/src/analytics/service.ts
+  // TODO: add telemtry for this endpoint to know how many times it's being called and the latency
   public async getUsageBillingEntitlements({
     customerId,
     projectId,
     entitlements,
     startAt,
     endAt,
+    includeAccumulatedUsage,
   }: {
     customerId: string
     projectId: string
@@ -475,6 +477,7 @@ export class Analytics {
     }[]
     startAt: number
     endAt: number
+    includeAccumulatedUsage: boolean
   }): Promise<{ entitlementId: string; usage: number; accumulatedUsage: number }[] | null> {
     // filter that only usage, package and tier features are being requested
     const entitlementsUsage = entitlements.filter((entitlement) =>
@@ -490,12 +493,14 @@ export class Analytics {
     // we use the same endpoint for billing usage as it's the
     // more accurate one
     const [totalAccumulatedUsages, totalPeriodUsages] = await Promise.all([
-      this.getBillingUsage({ customerId, projectId, entitlementIds: entitlementIdsArray })
-        .then((usage) => usage.data ?? [])
-        .catch((error) => {
-          console.info("error getting features usage total", error)
-          return null
-        }),
+      includeAccumulatedUsage
+        ? this.getBillingUsage({ customerId, projectId, entitlementIds: entitlementIdsArray })
+            .then((usage) => usage.data ?? [])
+            .catch((error) => {
+              console.error("error getting features usage total", error)
+              return null
+            })
+        : Promise.resolve([]),
       this.getBillingUsage({
         customerId,
         projectId,
@@ -505,7 +510,7 @@ export class Analytics {
       })
         .then((usage) => usage.data ?? [])
         .catch((error) => {
-          console.info("error getting features usage period", error)
+          console.error("error getting features usage period", error)
           return null
         }),
     ])

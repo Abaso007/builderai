@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers"
+import type { CacheError } from "@unkey/cache"
 import type { Analytics } from "@unprice/analytics"
 import type { Stats } from "@unprice/analytics/utils"
 import type { Database } from "@unprice/db"
@@ -15,7 +16,7 @@ import {
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import type { Cache } from "@unprice/services/cache"
-import type { CustomerService, DenyReason } from "@unprice/services/customers"
+import type { CustomerService } from "@unprice/services/customers"
 import { UnPriceCustomerError } from "@unprice/services/customers"
 import type { Metrics } from "@unprice/services/metrics"
 import type { DurableObjectProject } from "~/project/do"
@@ -76,6 +77,13 @@ export class EntitlementService {
     this.stats = opts.stats
     this.requestId = opts.requestId
     this.hashCache = opts.hashCache
+  }
+
+  // in memory cache
+  private async updateCache(key: string, result: CanResponse) {
+    if (env.VERCEL_ENV === "production" && !result.success) {
+      this.hashCache.set(key, JSON.stringify(result))
+    }
   }
 
   // for EU countries we have to keep the stub in the EU namespace
@@ -150,20 +158,6 @@ export class EntitlementService {
       FetchError | UnPriceCustomerError
     >
   > {
-    // get last subscription details before resetting the DO
-    const { err: subscriptionErr } = await this.validateSubscription(
-      data.customerId,
-      data.projectId,
-      data.timestamp,
-      {
-        skipCache: true,
-      }
-    )
-
-    if (subscriptionErr) {
-      return Err(subscriptionErr)
-    }
-
     // deduplicate calls if the same request is made and we hit the same isolate
     const key = `revalidateEntitlement:${data.customerId}:${data.featureSlug}:${data.projectId}`
     const cached = this.hashCache.get(key)
@@ -183,7 +177,6 @@ export class EntitlementService {
       now: data.timestamp,
       opts: {
         skipCache: true,
-        withLastUsage: true,
       },
     })
 
@@ -205,7 +198,6 @@ export class EntitlementService {
     return Ok(result)
   }
 
-  // TODO: all methods should return a result
   public async resetEntitlements(
     customerId: string,
     projectId: string
@@ -219,18 +211,12 @@ export class EntitlementService {
       FetchError | UnPriceCustomerError
     >
   > {
-    // get last subscription details before resetting the DO
-    const { err: subscriptionErr } = await this.validateSubscription(
-      customerId,
-      projectId,
-      Date.now(),
-      {
-        skipCache: true,
-      }
-    )
+    // deduplicate calls if the same request is made and we hit the same isolate
+    const key = `resetEntitlements:${customerId}:${projectId}`
+    const cached = this.hashCache.get(key)
 
-    if (subscriptionErr) {
-      return Err(subscriptionErr)
+    if (cached) {
+      return Ok(JSON.parse(cached))
     }
 
     const durableObject = this.getStub(this.getDurableObjectCustomerId(customerId))
@@ -252,25 +238,36 @@ export class EntitlementService {
     this.waitUntil(
       Promise.all([
         this.cache.customerEntitlement.remove(keys ?? []),
+        this.cache.customerEntitlements.remove(`${projectId}:${customerId}`),
         this.cache.customerSubscription.remove(`${projectId}:${customerId}`),
+        // pre warm DO and cache again after the reset
+        durableObject.prewarmDO({
+          customerId,
+          projectId,
+          now: Date.now(),
+          opts: {
+            force: true, // force the prewarm to avoid ttl issues
+          },
+        }),
       ])
     )
 
-    return Ok({
+    const resultCached = {
       success: true,
       message: "entitlements reseted",
       slugs: result.slugs ?? [],
-    })
-  }
-
-  private async updateCache(key: string, result: CanResponse) {
-    if (env.VERCEL_ENV === "production" && !result.success) {
-      this.hashCache.set(key, JSON.stringify(result))
     }
+
+    // cache the result
+    this.hashCache.set(key, JSON.stringify(resultCached))
+
+    return Ok(resultCached)
   }
 
-  public async can(data: CanRequest): Promise<CanResponse> {
-    const key = `can:${data.customerId}:${data.featureSlug}:${data.projectId}`
+  public async can(
+    data: CanRequest
+  ): Promise<Result<CanResponse, FetchError | UnPriceCustomerError>> {
+    const key = `can:${data.projectId}:${data.customerId}:${data.featureSlug}:`
     const cached = this.hashCache.get(key)
 
     // if we hit the same isolate we can return the cached result
@@ -280,13 +277,13 @@ export class EntitlementService {
     if (cached && env.VERCEL_ENV === "production") {
       const result = JSON.parse(cached) as CanResponse
 
-      return { ...result, cacheHit: true }
+      return Ok({ ...result, cacheHit: true })
     }
 
     const durableObject = this.getStub(this.getDurableObjectCustomerId(data.customerId))
 
     // if the request is async, we can validate entitlement from cache
-    if (data.async) {
+    if (data.fromCache) {
       const { err, val: entitlement } = await this.customerService.getActiveEntitlement(
         data.customerId,
         data.featureSlug,
@@ -295,24 +292,13 @@ export class EntitlementService {
       )
 
       if (err) {
-        const result = {
-          success: false,
-          message: err.message,
-          deniedReason: err.code as DenyReason,
-        }
-
-        // update cache
-        this.updateCache(key, result)
-
-        return result
+        return Err(err)
       }
 
       const entitlementGuard = this.customerService.checkLimitEntitlement({
         entitlement: entitlement,
-        now: data.timestamp,
         opts: {
           allowOverage: false,
-          autoReset: true,
         },
       })
 
@@ -334,12 +320,12 @@ export class EntitlementService {
             entitlement: entitlement,
             success: entitlementGuard.valid,
             deniedReason: entitlementGuard.deniedReason,
-            // add async to the metadata to keep track of the request
+            // add fromCache to the metadata to keep track of the request
             data: {
               ...data,
               metadata: {
                 ...data.metadata,
-                async: true,
+                fromCache: true,
               },
             },
             latency: latency,
@@ -355,7 +341,7 @@ export class EntitlementService {
       this.updateCache(key, result)
 
       // return the result
-      return result
+      return Ok(result)
     }
 
     // this is the most expensive call in terms of latency
@@ -367,10 +353,12 @@ export class EntitlementService {
       this.hashCache.set(key, JSON.stringify(result))
     }
 
-    return result
+    return Ok(result)
   }
 
-  public async reportUsage(data: ReportUsageRequest): Promise<ReportUsageResponse> {
+  public async reportUsage(
+    data: ReportUsageRequest
+  ): Promise<Result<ReportUsageResponse, FetchError | UnPriceCustomerError>> {
     // in dev we use the idempotence key and timestamp to deduplicate reuse the same key for the same request
     const idempotentKey =
       env.VERCEL_ENV === "production"
@@ -383,7 +371,7 @@ export class EntitlementService {
 
     // if the usage is already sent, return the result
     if (sent) {
-      return { ...sent, cacheHit: true }
+      return Ok({ ...sent, cacheHit: true })
     }
 
     const durableObject = this.getStub(this.getDurableObjectCustomerId(data.customerId))
@@ -402,19 +390,21 @@ export class EntitlementService {
       // cache the result for the next time
       // update the cache with the new usage so we can check limit in the next request
       // without calling the DO again
-      Promise.all([this.cache.idempotentRequestUsageByHash.set(cacheKey, result)])
+      this.cache.idempotentRequestUsageByHash.set(cacheKey, result)
     )
 
-    return result
+    return Ok(result)
   }
 
-  public async getEntitlements(req: GetEntitlementsRequest): Promise<GetEntitlementsResponse> {
+  public async getEntitlements(
+    req: GetEntitlementsRequest
+  ): Promise<Result<GetEntitlementsResponse, FetchError | UnPriceCustomerError>> {
     const { customerId, projectId, now } = req
 
     const { err: subscriptionErr } = await this.validateSubscription(customerId, projectId, now)
 
     if (subscriptionErr) {
-      throw subscriptionErr
+      return Err(subscriptionErr)
     }
 
     const { err: entitlementsErr, val: entitlements } =
@@ -425,22 +415,26 @@ export class EntitlementService {
       })
 
     if (entitlementsErr) {
-      throw entitlementsErr
+      return Err(entitlementsErr)
     }
 
     if (!entitlements || entitlements.length === 0) {
-      throw new UnPriceCustomerError({
-        code: "CUSTOMER_ENTITLEMENTS_NOT_FOUND",
-        message: "customer has no entitlements",
-      })
+      return Err(
+        new UnPriceCustomerError({
+          code: "CUSTOMER_ENTITLEMENTS_NOT_FOUND",
+          message: "customer has no entitlements",
+        })
+      )
     }
 
-    return {
+    return Ok({
       entitlements,
-    }
+    })
   }
 
-  public async getCurrentUsage(req: GetUsageRequest): Promise<GetCurrentUsage> {
+  public async getCurrentUsage(
+    req: GetUsageRequest
+  ): Promise<Result<GetCurrentUsage, FetchError | UnPriceCustomerError | CacheError>> {
     const { customerId, projectId, now } = req
     const cacheKey = `${projectId}:${customerId}`
 
@@ -451,16 +445,18 @@ export class EntitlementService {
     )
 
     if (subscriptionErr) {
-      throw subscriptionErr
+      return Err(subscriptionErr)
     }
 
     const phase = subscription.activePhase
 
     if (!phase) {
-      throw new UnPriceCustomerError({
-        code: "SUBSCRIPTION_NOT_FOUND",
-        message: "subscription doesn't have an active phase",
-      })
+      return Err(
+        new UnPriceCustomerError({
+          code: "SUBSCRIPTION_NOT_FOUND",
+          message: "subscription doesn't have an active phase",
+        })
+      )
     }
 
     const { err: entitlementsErr, val: entitlements } =
@@ -471,7 +467,7 @@ export class EntitlementService {
       })
 
     if (entitlementsErr) {
-      throw entitlementsErr
+      return Err(entitlementsErr)
     }
 
     const { err: resultErr, val: result } = await this.cache.getCurrentUsage.swr(
@@ -596,18 +592,20 @@ export class EntitlementService {
     )
 
     if (resultErr) {
-      throw resultErr
+      return Err(resultErr)
     }
 
     if (!result) {
-      throw new UnPriceCustomerError({
-        code: "ENTITLEMENT_NOT_FOUND",
-        message: "failed to get current usage",
-      })
+      return Err(
+        new UnPriceCustomerError({
+          code: "ENTITLEMENT_NOT_FOUND",
+          message: "failed to get current usage",
+        })
+      )
     }
 
     this.waitUntil(this.cache.getCurrentUsage.set(cacheKey, result))
 
-    return result
+    return Ok(result)
   }
 }

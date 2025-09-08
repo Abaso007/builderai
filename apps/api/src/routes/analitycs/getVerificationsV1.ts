@@ -13,7 +13,7 @@ import { keyAuth } from "~/auth/key"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import { reportUsage } from "~/util/reportUsage"
+import { reportUsageEvents } from "~/util/reportUsageEvents"
 
 const tags = ["analytics"]
 
@@ -67,7 +67,7 @@ export type GetAnalyticsVerificationsResponse = z.infer<
 export const registerGetAnalyticsVerificationsV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customerId, range, projectId } = c.req.valid("json")
-    const { analytics, logger } = c.get("services")
+    const { analytics, cache } = c.get("services")
 
     // validate the request
     const key = await keyAuth(c)
@@ -88,35 +88,36 @@ export const registerGetAnalyticsVerificationsV1 = (app: App) =>
       })
     }
 
-    // TODO: cache results
-    const data = await analytics
-      .getFeaturesVerifications({
-        customerId,
-        projectId: projectID,
-        intervalDays,
-      })
-      .catch((err) => {
-        logger.error(
-          JSON.stringify({
-            message: "Error getting verifications for customer",
-            error: err.message,
-          })
-        )
+    const cacheKey = `${projectID}:${customerId}:${intervalDays}`
 
-        return {
-          data: [],
-        }
-      })
+    const { err, val: data } = await cache.getVerifications.swr(cacheKey, async () => {
+      const result = analytics
+        .getFeaturesVerifications({
+          projectId,
+          intervalDays,
+          customerId,
+        })
+        .then((res) => res.data)
 
-    // send analytics event for the unprice customer
-    c.executionCtx.waitUntil(reportUsage(c, { action: "getVerifications" }))
+      return result
+    })
+
+    // throw error if there is an error
+    if (err) {
+      throw err
+    }
 
     // end the timer
     endTime(c, "getVerifications")
 
+    // send analytics event for the unprice customer
+    c.executionCtx.waitUntil(
+      reportUsageEvents(c, { action: "getVerifications", status: err ? "error" : "success" })
+    )
+
     return c.json(
       {
-        verifications: data.data,
+        verifications: data ?? [],
       },
       HttpStatusCodes.OK
     )

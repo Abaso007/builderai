@@ -20,7 +20,6 @@ import type {
   PlanVersionApi,
   Project,
   SubscriptionCache,
-  SubscriptionPhaseCache,
   Workspace,
 } from "@unprice/db/validators"
 import type { DenyReason } from "../customers/errors"
@@ -52,7 +51,6 @@ export type CacheNamespaces = {
   apiKeyByHash: ApiKeyExtended | null
   customerSubscription: SubscriptionCache | null
   customer: CustomerCache | null
-  customerActivePhase: SubscriptionPhaseCache | null
   customerEntitlement: CustomerEntitlementExtended | null
   customerEntitlements: CustomerEntitlementExtended[] | null
   customerPaymentMethods: CustomerPaymentMethod[] | null

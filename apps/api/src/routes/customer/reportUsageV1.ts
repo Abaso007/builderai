@@ -1,4 +1,5 @@
 import { createRoute } from "@hono/zod-openapi"
+import { endTime, startTime } from "hono/timing"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 
@@ -6,7 +7,7 @@ import { z } from "zod"
 import { keyAuth } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import { reportUsage } from "~/util/reportUsage"
+import { reportUsageEvents } from "~/util/reportUsageEvents"
 
 const tags = ["customer"]
 
@@ -85,8 +86,11 @@ export const registerReportUsageV1 = (app: App) =>
     // validate the request
     const key = await keyAuth(c)
 
+    // start a new timer
+    startTime(c, "reportUsage")
+
     // validate usage from db
-    const result = await entitlement.reportUsage({
+    const { err, val: result } = await entitlement.reportUsage({
       customerId,
       featureSlug,
       usage,
@@ -104,16 +108,23 @@ export const registerReportUsageV1 = (app: App) =>
         region: stats.region,
         colo: stats.colo,
         city: stats.city,
-        latitude: stats.latitude,
-        longitude: stats.longitude,
         ua: stats.ua,
         continent: stats.continent,
         source: stats.source,
       },
     })
 
+    // end the timer
+    endTime(c, "reportUsage")
+
     // send analytics event for the unprice customer
-    c.executionCtx.waitUntil(reportUsage(c, { action: "reportUsage" }))
+    c.executionCtx.waitUntil(
+      reportUsageEvents(c, { action: "reportUsage", status: err ? "error" : "success" })
+    )
+
+    if (err) {
+      throw err
+    }
 
     return c.json(result, HttpStatusCodes.OK)
   })

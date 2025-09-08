@@ -52,7 +52,7 @@ export const registerGetEntitlementsV1 = (app: App) =>
     startTime(c, "getEntitlements")
 
     // validate usage from db
-    const result = await entitlement.getEntitlements({
+    const { err, val: result } = await entitlement.getEntitlements({
       customerId,
       projectId: key.projectId,
       now: Date.now(),
@@ -60,6 +60,10 @@ export const registerGetEntitlementsV1 = (app: App) =>
 
     // end the timer
     endTime(c, "getEntitlements")
+
+    if (err) {
+      throw err
+    }
 
     return c.json(result, HttpStatusCodes.OK)
   })

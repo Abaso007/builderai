@@ -13,7 +13,7 @@ import { keyAuth } from "~/auth/key"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import { reportUsage } from "~/util/reportUsage"
+import { reportUsageEvents } from "~/util/reportUsageEvents"
 
 const tags = ["analytics"]
 
@@ -63,7 +63,7 @@ export type GetAnalyticsUsageResponse = z.infer<
 export const registerGetAnalyticsUsageV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customerId, range, projectId } = c.req.valid("json")
-    const { analytics, logger } = c.get("services")
+    const { analytics, cache } = c.get("services")
 
     // validate the request
     const key = await keyAuth(c)
@@ -84,35 +84,38 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
       })
     }
 
-    const data = await analytics
-      .getFeaturesUsagePeriod({
-        customerId,
-        projectId: projectID,
-        start,
-        end,
-      })
-      .catch((err) => {
-        logger.error(
-          JSON.stringify({
-            message: "Error getting usage for customer",
-            error: err.message,
-          })
-        )
+    const cacheKey = `${projectID}:${customerId}:${range}`
 
-        return {
-          data: [],
-        }
-      })
+    const { err, val: data } = await cache.getUsage.swr(cacheKey, async () => {
+      const result = analytics
+        .getFeaturesUsagePeriod({
+          customerId,
+          projectId: projectID,
+          start,
+          end,
+        })
+        .then((res) => res.data)
+
+      return result
+    })
+
+    const usage = data ?? []
 
     // send analytics event for the unprice customer
-    c.executionCtx.waitUntil(reportUsage(c, { action: "getUsage" }))
+    c.executionCtx.waitUntil(
+      reportUsageEvents(c, { action: "getUsage", status: err ? "error" : "success" })
+    )
 
     // end the timer
     endTime(c, "getUsage")
 
+    if (err) {
+      throw err
+    }
+
     return c.json(
       {
-        usage: data.data,
+        usage,
       },
       HttpStatusCodes.OK
     )
