@@ -12,7 +12,11 @@ export function newApp() {
     defaultHook: handleZodError,
   })
 
-  app.use(prettyJSON())
+  // TODO: rename vercel env to env (it's funny using it in cloudflare workers)
+  if (env.VERCEL_ENV !== "production") {
+    app.use(prettyJSON())
+  }
+
   app.onError(handleError)
 
   app.use("*", async (c, next) => {

@@ -44,7 +44,7 @@ app.use("*", metrics())
 
 // Handle websocket connections for Durable Objects
 app.use(
-  "*",
+  "/broadcast/**",
   partyserverMiddleware({
     onError: (error) => console.error(error),
     options: {

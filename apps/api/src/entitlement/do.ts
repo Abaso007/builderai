@@ -5,7 +5,7 @@ import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import migrations from "../../drizzle/migrations"
 
 import { Analytics } from "@unprice/analytics"
-import { count, sql } from "drizzle-orm"
+import { and, count, sql } from "drizzle-orm"
 import { usageRecords, verifications } from "~/db/schema"
 import type { schema } from "~/db/types"
 import type { Env } from "~/env"
@@ -394,7 +394,6 @@ export class DurableObjectUsagelimiter extends Server {
 
     // we have a push model where the entitlement is revalidaded on every important event
     // although we also have a lazy revalidation to keep this in sync with the db
-    // if the last reset was outside of the current billing window we should refresh
     const { err: validateEntitlementErr } = this.customerService.validateEntitlement({
       entitlement,
       now,
@@ -404,10 +403,7 @@ export class DurableObjectUsagelimiter extends Server {
       isValid = false
     }
 
-    // we can force the refresh if the forceRefresh flag is set
-    const shouldRefresh = Boolean(opts?.forceRefresh) || !isValid
-
-    if (shouldRefresh) {
+    if (Boolean(opts?.forceRefresh) || !isValid) {
       if (!isValid) {
         this.logger.info(
           `entitlement is not valid, forcing revalidation ${validateEntitlementErr?.message}`,
@@ -467,9 +463,16 @@ export class DurableObjectUsagelimiter extends Server {
         now,
       })
 
+      // INFO: if we can tolarate some staleness we can trigger this in background
       // we have to await these to make sure the usage is sent to tinybird first
-      await this.sendUsageToTinybird()
-      await this.sendVerificationsToTinybird()
+      // we make sure to send the usage and verifications to tinybird for the featureSlug
+      await this.sendUsageToTinybird({
+        featureSlug,
+      })
+
+      await this.sendVerificationsToTinybird({
+        featureSlug,
+      })
     }
 
     // get the entitlement from the db
@@ -479,7 +482,7 @@ export class DurableObjectUsagelimiter extends Server {
       projectId,
       now,
       {
-        skipCache: opts?.skipCache ?? false,
+        skipCache: Boolean(opts?.skipCache),
       }
     )
 
@@ -519,20 +522,20 @@ export class DurableObjectUsagelimiter extends Server {
     const now = Date.now()
     const timeSinceLastFlush = now - updateState.lastFlushTime
 
-    let delayBeforeNextFlush: number
-
     if (timeSinceLastFlush >= this.MAX_FLUSH_INTERVAL_MS) {
       // If it's been longer than the max interval since the last flush,
       // flush immediately (or as soon as possible).
-      delayBeforeNextFlush = 0
-    } else {
-      // Otherwise, use the debounce delay.
-      // But also ensure we don't exceed the MAX_FLUSH_INTERVAL_MS.
-      // The actual delay will be the debounce delay, unless that would make
-      // the total time since last flush exceed MAX_FLUSH_INTERVAL_MS.
-      const timeUntilMaxFlush = this.MAX_FLUSH_INTERVAL_MS - timeSinceLastFlush
-      delayBeforeNextFlush = Math.min(this.DEBOUNCE_DELAY_MS, timeUntilMaxFlush)
+      // Flush immediately instead of scheduling with delay=0
+      this.ctx.waitUntil(this.flushToCache(featureSlug))
+      return
     }
+
+    // Otherwise, use the debounce delay.
+    // But also ensure we don't exceed the MAX_FLUSH_INTERVAL_MS.
+    // The actual delay will be the debounce delay, unless that would make
+    // the total time since last flush exceed MAX_FLUSH_INTERVAL_MS.
+    const timeUntilMaxFlush = this.MAX_FLUSH_INTERVAL_MS - timeSinceLastFlush
+    const delayBeforeNextFlush = Math.min(this.DEBOUNCE_DELAY_MS, timeUntilMaxFlush)
 
     // Schedule the new timer
     const timerId = setTimeout(async () => {
@@ -718,7 +721,7 @@ export class DurableObjectUsagelimiter extends Server {
 
       const latency = performance.now() - data.performanceStart
 
-      // insert verification this is zero latency
+      // insert verification this is zero latency cuz insert to DO sqlite
       const verification = await this.insertVerification({
         entitlement,
         success: entitlementGuardResult.valid,
@@ -959,7 +962,11 @@ export class DurableObjectUsagelimiter extends Server {
     this.flush()
   }
 
-  private async sendVerificationsToTinybird() {
+  private async sendVerificationsToTinybird({
+    featureSlug,
+  }: {
+    featureSlug?: string
+  } = {}) {
     // Process events in batches to avoid memory issues
     const BATCH_SIZE = 500
     let processedCount = 0
@@ -970,7 +977,12 @@ export class DurableObjectUsagelimiter extends Server {
       const verificationEvents = await this.db
         .select()
         .from(verifications)
-        .where(lastProcessedId > 0 ? sql`id > ${lastProcessedId}` : undefined)
+        .where(
+          and(
+            lastProcessedId > 0 ? sql`id > ${lastProcessedId}` : undefined,
+            featureSlug ? sql`featureSlug = ${featureSlug}` : undefined
+          )
+        )
         .limit(BATCH_SIZE)
         .orderBy(verifications.id)
 
@@ -1072,7 +1084,11 @@ export class DurableObjectUsagelimiter extends Server {
     }
   }
 
-  private async sendUsageToTinybird() {
+  private async sendUsageToTinybird({
+    featureSlug,
+  }: {
+    featureSlug?: string
+  } = {}) {
     // Process events in batches to avoid memory issues
     const BATCH_SIZE = 500
     let processedCount = 0
@@ -1080,10 +1096,16 @@ export class DurableObjectUsagelimiter extends Server {
 
     while (true) {
       // Get a batch of events
+      // if featureSlug is provided, filter by featureSlug
       const events = await this.db
         .select()
         .from(usageRecords)
-        .where(lastProcessedId > 0 ? sql`id > ${lastProcessedId}` : undefined)
+        .where(
+          and(
+            lastProcessedId > 0 ? sql`id > ${lastProcessedId}` : undefined,
+            featureSlug ? sql`featureSlug = ${featureSlug}` : undefined
+          )
+        )
         .limit(BATCH_SIZE)
         .orderBy(usageRecords.id)
 

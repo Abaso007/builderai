@@ -29,9 +29,7 @@ export const usageRecords = pgTableProject(
   },
   (table) => [
     // Indexes for common queries
-    index("usage_records_customer_idx").on(table.customerId),
     index("usage_records_feature_idx").on(table.featureSlug),
-    index("usage_records_timestamp_idx").on(table.timestamp),
   ]
 )
 
@@ -58,10 +56,6 @@ export const verifications = pgTableProject(
   },
   (table) => [
     // Indexes for common queries
-    index("verifications_customer_idx").on(table.customerId),
     index("verifications_feature_idx").on(table.featureSlug),
-    index("verifications_timestamp_idx").on(table.timestamp),
-    index("verifications_request_id_idx").on(table.requestId),
-    index("verifications_entitlement_idx").on(table.entitlementId),
   ]
 )

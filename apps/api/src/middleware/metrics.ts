@@ -10,13 +10,6 @@ export function metrics(): MiddlewareHandler<HonoEnv> {
     const stats = c.get("stats")
     const start = c.get("performanceStart")
 
-    let requestBody = await c.req.raw.clone().text()
-    // secure the request body just in case
-    requestBody = requestBody.replaceAll(/"key":\s*"[a-zA-Z0-9_]+"/g, '"key": "<REDACTED>"')
-    requestBody = requestBody.replaceAll(
-      /"plaintext":\s*"[a-zA-Z0-9_]+"/g,
-      '"plaintext": "<REDACTED>"'
-    )
     const m = {
       isolateId: c.get("isolateId"),
       isolateLifetime: Date.now() - c.get("isolateCreatedAt"),
@@ -52,20 +45,15 @@ export function metrics(): MiddlewareHandler<HonoEnv> {
       c.res.headers.append("Unprice-Latency", `service=${m.duration}ms`)
       c.res.headers.append("Unprice-Version", c.env.VERSION)
 
-      const responseHeaders: Array<string> = []
-      c.res.headers.forEach((v, k) => {
-        responseHeaders.push(`${k}: ${v}`)
-      })
+      // Sample metrics to reduce overhead (default 1.0 -> 100%)
+      // TODO: inject METRICS_SAMPLE_RATE
+      // const sample = Number(c.env.METRICS_SAMPLE_RATE ?? "1")
+      const sample = 1 // change if needed
+      if (Math.random() < sample) {
+        metrics.emit(m)
+      }
 
-      let responseBody = await c.res.clone().text()
-      // secure the response body just in case
-      responseBody = responseBody.replaceAll(/"key":\s*"[a-zA-Z0-9_]+"/g, '"key": "<REDACTED>"')
-      responseBody = responseBody.replaceAll(
-        /"plaintext":\s*"[a-zA-Z0-9_]+"/g,
-        '"plaintext": "<REDACTED>"'
-      )
-
-      metrics.emit(m)
+      // flush metrics and logger
       c.executionCtx.waitUntil(Promise.all([metrics.flush(), logger.flush()]))
     }
   }

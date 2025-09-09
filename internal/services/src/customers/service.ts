@@ -966,9 +966,9 @@ export class CustomerService {
         trialEndsAt: entitlement.activePhase.trialEndsAt,
       })
 
-      // if it was reseted within the current billing window, then we don't need to include the accumulated usage
+      // if it was reset within current billing window, we don't include accumulated
       const includeAccumulatedUsage =
-        entitlement.resetedAt < startAt && entitlement.resetedAt > endAt
+        entitlement.resetedAt < startAt || entitlement.resetedAt > endAt
       const lastUsageUpdateIsInCurrentBillingWindow =
         entitlement.lastUsageUpdateAt >= startAt && entitlement.lastUsageUpdateAt < endAt
 
@@ -1335,9 +1335,8 @@ export class CustomerService {
       )
     }
 
-    // phase is not active
     if (
-      now < entitlement.activePhase.startAt &&
+      now < entitlement.activePhase.startAt ||
       now > (entitlement.activePhase.endAt ?? Number.POSITIVE_INFINITY)
     ) {
       return Err(
@@ -1359,7 +1358,7 @@ export class CustomerService {
     })
 
     const outsideOfCurrentBillingWindow =
-      now > currentCycleWindow.end || now < currentCycleWindow.start
+      now < currentCycleWindow.start || now > currentCycleWindow.end
 
     if (outsideOfCurrentBillingWindow) {
       return Err(

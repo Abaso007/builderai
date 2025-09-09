@@ -80,7 +80,7 @@ export class EntitlementService {
   }
 
   // in memory cache
-  private async updateCache(key: string, result: CanResponse) {
+  private updateCache(key: string, result: CanResponse) {
     if (env.VERCEL_ENV === "production" && !result.success) {
       this.hashCache.set(key, JSON.stringify(result))
     }
@@ -288,7 +288,10 @@ export class EntitlementService {
         data.customerId,
         data.featureSlug,
         data.projectId,
-        data.timestamp
+        data.timestamp,
+        {
+          skipCache: false,
+        }
       )
 
       if (err) {
@@ -335,26 +338,24 @@ export class EntitlementService {
 
       // report the verification event to the DO
       this.waitUntil(
-        Promise.all([
-          durableObject.insertVerification({
-            entitlement: entitlement,
-            success: entitlementGuard.valid,
-            deniedReason: entitlementGuard.deniedReason,
-            // add fromCache to the metadata to keep track of the request
-            data: {
-              ...data,
-              metadata: {
-                ...data.metadata,
-                fromCache: true,
-              },
+        durableObject.insertVerification({
+          entitlement: entitlement,
+          success: entitlementGuard.valid,
+          deniedReason: entitlementGuard.deniedReason,
+          // add fromCache to the metadata to keep track of the request
+          data: {
+            ...data,
+            metadata: {
+              ...data.metadata,
+              fromCache: true,
             },
-            latency: latency,
-            alarm: {
-              ensure: true,
-              flushTime: data.flushTime,
-            },
-          }),
-        ])
+          },
+          latency: latency,
+          alarm: {
+            ensure: true,
+            flushTime: data.flushTime,
+          },
+        })
       )
 
       // save in memory cache
@@ -369,9 +370,7 @@ export class EntitlementService {
     const result = await durableObject.can(data)
 
     // in extreme cases we hit in memory cache for the same isolate, speeding up the next request
-    if (!result.success) {
-      this.hashCache.set(key, JSON.stringify(result))
-    }
+    this.updateCache(key, result)
 
     return Ok(result)
   }

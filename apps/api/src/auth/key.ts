@@ -19,37 +19,28 @@ export async function keyAuth(c: Context<HonoEnv>) {
 
   const { apikey } = c.get("services")
 
-  // start a new timer
-  startTime(c, "rateLimitApiKey")
-
-  // rate limit the apikey
-  const result = await apikey.rateLimit({
-    key: authorization,
-    workspaceId: c.get("workspaceId") as string,
-    source: "cloudflare",
-    // TODO: we need to think how to rate limit per plan
-    limiter: c.env.RL_FREE_600_60s,
-  })
-
-  // end the timer
-  endTime(c, "rateLimitApiKey")
-
-  if (!result) {
-    throw new UnpriceApiError({
-      code: "RATE_LIMITED",
-      message: "apikey rate limit exceeded",
-    })
-  }
-
-  // start a new timer
+  // start timer
   startTime(c, "verifyApiKey")
 
-  const { val: key, err } = await apikey.verifyApiKey({
-    key: authorization,
-  })
+  // quick off in parallel (reducing p95 latency)
+  const [rateLimited, verifyRes] = await Promise.all([
+    apikey.rateLimit({
+      key: authorization,
+      workspaceId: c.get("workspaceId") as string,
+      source: "cloudflare",
+      limiter: c.env.RL_FREE_600_60s,
+    }),
+    apikey.verifyApiKey({ key: authorization }),
+  ])
 
-  // end the timer
+  // end timer
   endTime(c, "verifyApiKey")
+
+  if (!rateLimited) {
+    throw new UnpriceApiError({ code: "RATE_LIMITED", message: "apikey rate limit exceeded" })
+  }
+
+  const { val: key, err } = verifyRes
 
   if (err) {
     switch (true) {
