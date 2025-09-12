@@ -39,13 +39,15 @@ export const logTransition = ({
     })
   }
 
-  logger.info(`Subscription ${context.subscriptionId} state transition: ${event.type}`)
+  logger.info(
+    `Subscription ${context.subscriptionId} ${context.subscription.status} state transition: ${event.type}`
+  )
 }
 
 /**
  * Action: Send notification to customer
  */
-export const sendCustomerNotification = ({
+export default ({
   context,
   event,
   logger,

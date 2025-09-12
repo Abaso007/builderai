@@ -1,4 +1,4 @@
-import { eq, relations } from "drizzle-orm"
+import { relations } from "drizzle-orm"
 import {
   bigint,
   boolean,
@@ -9,7 +9,6 @@ import {
   numeric,
   primaryKey,
   text,
-  uniqueIndex,
   varchar,
 } from "drizzle-orm/pg-core"
 import type { z } from "zod"
@@ -19,7 +18,6 @@ import { projectID } from "../utils/sql"
 
 import { cuid, id, timestamps } from "../utils/fields"
 import type {
-  customerCreditMetadataSchema,
   customerMetadataSchema,
   customerSessionMetadataSchema,
   stripePlanVersionSchema,
@@ -27,9 +25,10 @@ import type {
 } from "../validators/customer"
 
 import { currencyEnum } from "./enums"
+import { invoices } from "./invoices"
 import { planVersionFeatures } from "./planVersionFeatures"
 import { projects } from "./projects"
-import { invoices, subscriptionItems, subscriptionPhases, subscriptions } from "./subscriptions"
+import { subscriptionItems, subscriptionPhases, subscriptions } from "./subscriptions"
 
 export const customers = pgTableProject(
   "customers",
@@ -152,7 +151,6 @@ export const customerEntitlements = pgTableProject(
       foreignColumns: [projects.id],
       name: "project_id_fkey",
     }),
-    // featureSlugIndex: index("feature_slug_index").on(table.featureSlug),
   })
 )
 
@@ -166,41 +164,6 @@ export const customerSessions = pgTableProject("customer_sessions", {
   planVersion: json("plan_version").notNull().$type<z.infer<typeof stripePlanVersionSchema>>(),
   metadata: json("metadata").$type<z.infer<typeof customerSessionMetadataSchema>>(),
 })
-
-// when there is an overdue charge, we need to create a credit for the customer
-// this is used to handle the credits for the invoices, normally due to cancel or downgrade mid cycle
-export const customerCredits = pgTableProject(
-  "customer_credits",
-  {
-    ...projectID,
-    ...timestamps,
-    totalAmount: integer("total_amount").notNull(),
-    metadata: json("metadata").$type<z.infer<typeof customerCreditMetadataSchema>>(),
-    customerId: cuid("customer_id").notNull(),
-    amountUsed: integer("amount_used").notNull(),
-    active: boolean("active").notNull().default(true),
-  },
-  (table) => ({
-    primary: primaryKey({
-      columns: [table.id, table.projectId],
-      name: "customer_credits_pkey",
-    }),
-    customerfk: foreignKey({
-      columns: [table.customerId, table.projectId],
-      foreignColumns: [customers.id, customers.projectId],
-      name: "customer_credits_customer_id_fkey",
-    }),
-    // only one active == true credit per customer
-    unique: uniqueIndex("customer_credits_customer_id_active_key")
-      .on(table.customerId, table.active)
-      .where(eq(table.active, true)),
-    projectfk: foreignKey({
-      columns: [table.projectId],
-      foreignColumns: [projects.id],
-      name: "project_id_fkey",
-    }),
-  })
-)
 
 export const customerEntitlementsRelations = relations(customerEntitlements, ({ one }) => ({
   subscriptionItem: one(subscriptionItems, {
@@ -238,15 +201,4 @@ export const customersRelations = relations(customers, ({ one, many }) => ({
   entitlements: many(customerEntitlements),
   invoices: many(invoices),
   // paymentMethods: many(customerPaymentMethods),
-}))
-
-export const customerCreditsRelations = relations(customerCredits, ({ one }) => ({
-  customer: one(customers, {
-    fields: [customerCredits.customerId, customerCredits.projectId],
-    references: [customers.id, customers.projectId],
-  }),
-  project: one(projects, {
-    fields: [customerCredits.projectId],
-    references: [projects.id],
-  }),
 }))

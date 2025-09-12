@@ -6,6 +6,7 @@ import { endTime } from "hono/timing"
 import { startTime } from "hono/timing"
 import { z } from "zod"
 import { keyAuth } from "~/auth/key"
+import { UnpriceApiError } from "~/errors/http"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 
@@ -25,6 +26,10 @@ export const route = createRoute({
           description: "The customer ID",
           example: "cus_1H7KQFLr7RepUyQBKdnvY",
         }),
+        projectId: z.string().openapi({
+          description: "The project ID",
+          example: "proj_1H7KQFLr7RepUyQBKdnvY",
+        }),
       }),
       "The customer ID"
     ),
@@ -42,26 +47,36 @@ export const route = createRoute({
   },
 })
 
-export type ResetEntitlementsRequest = z.infer<
+export type ResetEntitlementsV1Request = z.infer<
   (typeof route.request.body)["content"]["application/json"]["schema"]
 >
-export type ResetEntitlementsResponse = z.infer<
+export type ResetEntitlementsV1Response = z.infer<
   (typeof route.responses)[200]["content"]["application/json"]["schema"]
 >
 
 export const registerResetEntitlementsV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId } = c.req.valid("json")
+    const { customerId, projectId } = c.req.valid("json")
     const { entitlement } = c.get("services")
 
     // validate the request
     const key = await keyAuth(c)
 
+    const finalProjectId = key.project.workspace.isMain ? projectId : key.projectId
+
+    // only main keys can reset entitlements for other projects other than their own
+    if (key.project.workspace.isMain && projectId !== finalProjectId) {
+      throw new UnpriceApiError({
+        code: "FORBIDDEN",
+        message: "You are not allowed to reset entitlements for other projects.",
+      })
+    }
+
     // start a timer
     startTime(c, "resetEntitlements")
 
     // delete the customer from the DO
-    const { err, val: result } = await entitlement.resetEntitlements(customerId, key.projectId)
+    const { err, val: result } = await entitlement.resetEntitlements(customerId, finalProjectId)
 
     // end the timer
     endTime(c, "resetEntitlements")

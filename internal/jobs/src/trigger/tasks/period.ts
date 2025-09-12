@@ -2,22 +2,22 @@ import { task } from "@trigger.dev/sdk/v3"
 import { SubscriptionService } from "@unprice/services/subscriptions"
 import { createContext } from "./context"
 
-export const endTrialTask = task({
-  id: "subscription.endtrial",
+export const periodTask = task({
+  id: "subscription.phase.period",
   retry: {
     maxAttempts: 3,
   },
   run: async (
     {
-      subscriptionId,
       phaseId,
       projectId,
       now,
+      subscriptionId,
     }: {
-      subscriptionId: string
       phaseId: string
       projectId: string
       now: number
+      subscriptionId: string
     },
     { ctx }
   ) => {
@@ -25,11 +25,10 @@ export const endTrialTask = task({
       taskId: ctx.task.id,
       subscriptionId,
       projectId,
-      phaseId,
       defaultFields: {
         subscriptionId,
         projectId,
-        api: "jobs.subscription.endtrial",
+        api: "jobs.subscription.phase.period",
         phaseId,
         now: now.toString(),
       },
@@ -37,18 +36,20 @@ export const endTrialTask = task({
 
     const subscriptionService = new SubscriptionService(context)
 
-    const endTrialResult = await subscriptionService.endTrial({
+    // init phase machine
+    const periodResult = await subscriptionService.createPeriodsForSubscriptionItems({
+      phaseId,
       subscriptionId,
       projectId,
       now,
     })
 
-    if (endTrialResult.err) {
-      throw endTrialResult.err
+    if (periodResult.err) {
+      throw periodResult.err
     }
 
     return {
-      status: endTrialResult.val.status,
+      cyclesCreated: periodResult.val.cyclesCreated,
       subscriptionId,
       projectId,
       now,

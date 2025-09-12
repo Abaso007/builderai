@@ -17,6 +17,7 @@ import { registerGetEntitlementsV1 } from "./routes/customer/getEntitlementsV1"
 import { registerGetPaymentMethodsV1 } from "./routes/customer/getPaymentMethodsV1"
 import { registerGetSubscriptionV1 } from "./routes/customer/getSubscriptionV1"
 import { registerGetUsageV1 } from "./routes/customer/getUsageV1"
+import { registerPrewarmEntitlementsV1 } from "./routes/customer/prewarmEntitlementsV1"
 import { registerResetEntitlementsV1 } from "./routes/customer/resetEntitlementsV1"
 import { registerRevalidateEntitlementV1 } from "./routes/customer/revalidateEntitlementV1"
 import { registerSignUpV1 } from "./routes/customer/signUpV1"
@@ -97,6 +98,7 @@ registerGetPaymentMethodsV1(app)
 registerSignUpV1(app)
 registerCreatePaymentMethodV1(app)
 registerRevalidateEntitlementV1(app)
+registerPrewarmEntitlementsV1(app)
 
 // Project routes
 registerGetFeaturesV1(app)

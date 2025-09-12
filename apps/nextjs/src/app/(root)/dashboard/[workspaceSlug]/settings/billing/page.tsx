@@ -173,7 +173,13 @@ async function SubscriptionCard({
                 </Typography>
                 <Typography variant="p" affects="removePaddingMargin">
                   <span className="font-bold">Next billing date:</span>{" "}
-                  {formatDate(subscription.invoiceAt, subscription.timezone, "MMM d, yyyy")}
+                  {formatDate(
+                    activePhase.planVersion.whenToBill === "pay_in_advance"
+                      ? subscription.currentCycleStartAt
+                      : subscription.currentCycleEndAt,
+                    subscription.timezone,
+                    "MMM d, yyyy"
+                  )}
                 </Typography>
               </div>
             </div>

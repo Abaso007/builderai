@@ -10,6 +10,7 @@ import { FEATURE_TYPES_MAPS, USAGE_MODES_MAP } from "../utils"
 import { featureSelectBaseSchema } from "./features"
 import {
   aggregationMethodSchema,
+  billingConfigSchema,
   tierModeSchema,
   typeFeatureSchema,
   unitSchema,
@@ -330,6 +331,7 @@ export const planVersionFeatureSelectBaseSchema = createSelectSchema(planVersion
   aggregationMethod: aggregationMethodSchema,
   limit: z.coerce.number().int().optional(),
   featureType: typeFeatureSchema,
+  billingConfig: billingConfigSchema,
 })
 
 export const parseFeaturesConfig = (feature: PlanVersionFeature) => {
@@ -352,6 +354,7 @@ export const planVersionFeatureInsertBaseSchema = createInsertSchema(planVersion
   config: configFeatureSchema.optional(),
   metadata: planVersionFeatureMetadataSchema.optional(),
   aggregationMethod: aggregationMethodSchema.default("count"),
+  billingConfig: billingConfigSchema.optional(),
   defaultQuantity: z.coerce.number().int(),
   limit: z.coerce.number().int().optional(),
 })
@@ -364,6 +367,7 @@ export const planVersionFeatureInsertBaseSchema = createInsertSchema(planVersion
     id: true,
     config: true,
     metadata: true,
+    billingConfig: true,
   })
   .required({
     featureId: true,

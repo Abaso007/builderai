@@ -343,6 +343,20 @@ export class Unprice {
         })
       },
 
+      prewarmEntitlements: async (
+        req: paths["/v1/customer/prewarm-entitlements"]["post"]["requestBody"]["content"]["application/json"]
+      ): Promise<
+        Result<
+          paths["/v1/customer/prewarm-entitlements"]["post"]["responses"]["200"]["content"]["application/json"]
+        >
+      > => {
+        return await this.fetch({
+          path: ["v1", "customer", "prewarm-entitlements"],
+          method: "POST",
+          body: req,
+        })
+      },
+
       signUp: async (
         req: paths["/v1/customer/signUp"]["post"]["requestBody"]["content"]["application/json"]
       ): Promise<

@@ -156,14 +156,6 @@ export const STATUS_PLAN = ["draft", "published"] as const
 // for instance a phase was changed to new plan, we create a new phase with status as active
 // and we leave the old phase with status changed.
 export const SUBSCRIPTION_STATUS = [
-  "idle", // the subscription is idle
-  "renewing", // the subscription is renewing
-  "changing", // the subscription is changing
-  "canceling", // the subscription is canceling
-  "expiring", // the subscription is expiring
-  "invoicing", // the subscription is invoicing
-  "invoiced", // the subscription is invoiced, ready to be renewed
-  "ending_trial", // the subscription is ending trial
   "active", // the subscription is active
   "trialing", // the subscription is trialing
   "canceled", // the subscription is cancelled
@@ -177,8 +169,11 @@ export const WHEN_TO_BILLING = ["pay_in_advance", "pay_in_arrear"] as const
 export const DUE_BEHAVIOUR = ["cancel", "downgrade"] as const
 export const INVOICE_STATUS = ["unpaid", "paid", "waiting", "void", "draft", "failed"] as const
 export const INVOICE_TYPE = ["flat", "usage", "hybrid"] as const
+export const INVOICE_ITEM_KIND = ["period", "tax", "discount", "refund", "adjustment"] as const
 export const FEATURE_VERSION_TYPES = ["feature", "addon"] as const
 export const COLLECTION_METHODS = ["charge_automatically", "send_invoice"] as const
+export const BILLING_PERIOD_STATUS = ["pending", "processing", "invoiced", "voided"] as const
+export const BILLING_PERIOD_TYPE = ["normal", "trial"] as const
 
 export const TIER_MODES = Object.keys(TIER_MODES_MAP) as unknown as readonly [
   TierMode,

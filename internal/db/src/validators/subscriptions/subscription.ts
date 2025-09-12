@@ -222,7 +222,6 @@ export const subscriptionInsertSchema = createInsertSchema(subscriptions, {
     projectId: true,
     currentCycleStartAt: true,
     currentCycleEndAt: true,
-    invoiceAt: true,
   })
   .required({
     customerId: true,

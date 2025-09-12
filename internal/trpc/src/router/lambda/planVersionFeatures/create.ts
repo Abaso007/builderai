@@ -74,6 +74,8 @@ export const create = protectedProjectProcedure
         featureId: featureData.id,
         projectId: project.id,
         planVersionId: planVersionData.id,
+        // for now we use the same billing config as the plan version
+        billingConfig: planVersionData.billingConfig,
         featureType,
         config: config!,
         metadata,

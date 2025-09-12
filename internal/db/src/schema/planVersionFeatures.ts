@@ -18,6 +18,7 @@ import type {
   configFeatureSchema,
   planVersionFeatureMetadataSchema,
 } from "../validators/planVersionFeatures"
+import type { BillingConfig } from "../validators/shared"
 import { aggregationMethodEnum, typeFeatureEnum } from "./enums"
 import { features } from "./features"
 import { versions } from "./planVersions"
@@ -32,13 +33,14 @@ export const planVersionFeatures = pgTableProject(
     ...projectID,
     ...timestamps,
     // TODO: add type in order to support addons
-    // TODO: add entitlements so a feature can have multiple variations
     planVersionId: cuid("plan_version_id").notNull(),
     featureId: cuid("feature_id").notNull(),
     // type of the feature - flat, tier, usage, etc.
     featureType: typeFeatureEnum("feature_type").notNull(),
     // configuration of the feature
     config: json("features_config").$type<z.infer<typeof configFeatureSchema>>().notNull(),
+    // billing config for the feature usually the same as the plan version billing config
+    billingConfig: json("billing_config").default({}).notNull().$type<BillingConfig>(),
     // metadata probably will be useful to save external data, etc.
     metadata: json("metadata").$type<z.infer<typeof planVersionFeatureMetadataSchema>>(),
     // the method to aggregate the feature quantity - use for calculated the current usage of the feature

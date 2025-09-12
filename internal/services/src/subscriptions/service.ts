@@ -34,6 +34,7 @@ import { CustomerService } from "../customers/service"
 import type { Metrics } from "../metrics"
 import { UnPriceSubscriptionError } from "./errors"
 import { SubscriptionMachine } from "./machine"
+import { SubscriptionLock } from "./subscriptionLock"
 import type { SusbriptionMachineStatus } from "./types"
 import { collectInvoicePayment, finalizeInvoice } from "./utils"
 
@@ -209,10 +210,10 @@ export class SubscriptionService {
     }
 
     // don't allow to create phase when the subscription is not active
-    if (!subscriptionWithPhases.active && subscriptionWithPhases.status !== "idle") {
+    if (!subscriptionWithPhases.active && subscriptionWithPhases.status !== "active") {
       return Err(
         new UnPriceSubscriptionError({
-          message: "Subscription is not active",
+          message: "Subscription must be active to create a new phase. Please contact support.",
         })
       )
     }
@@ -402,6 +403,11 @@ export class SubscriptionService {
       ? calculatedBillingCycle.trialEndsAtMs
       : undefined
 
+    const renewAt =
+      versionData.whenToBill === "pay_in_advance"
+        ? calculatedBillingCycle.cycleStartMs
+        : calculatedBillingCycle.cycleEndMs
+
     const result = await (db ?? this.db).transaction(async (trx) => {
       // create the subscription phase
       const phase = await trx
@@ -414,8 +420,12 @@ export class SubscriptionService {
           paymentMethodId,
           trialEndsAt: trialDaysEndAt,
           trialDays: trialDaysToUse,
+          currentCycleStartAt: calculatedBillingCycle.cycleStartMs,
+          currentCycleEndAt: calculatedBillingCycle.cycleEndMs,
           startAt: startAtToUse,
           endAt: endAtToUse,
+          // if the trial days end at is defined, use it as the renew at
+          renewAt: renewAt,
           metadata,
           billingAnchor: billingAnchorToUse ?? 0,
         })
@@ -458,26 +468,14 @@ export class SubscriptionService {
         phase.startAt <= Date.now() && (phase.endAt ?? Number.POSITIVE_INFINITY) >= Date.now()
 
       if (isActivePhase) {
-        // set the next invoice at the end of the trial or the end of the billing cycle
-        const invoiceAt =
-          trialDaysToUse > 0
-            ? calculatedBillingCycle.cycleEndMs
-            : versionData.whenToBill === "pay_in_advance"
-              ? calculatedBillingCycle.cycleStartMs
-              : calculatedBillingCycle.cycleEndMs
-
         await trx
           .update(subscriptions)
           .set({
             active: true,
             status: trialDaysToUse > 0 ? "trialing" : "active",
-            // if there are trial days, we set the next invoice at to the end of the trial
-            invoiceAt,
             planSlug: versionData.plan.slug,
             currentCycleStartAt: calculatedBillingCycle.cycleStartMs,
             currentCycleEndAt: calculatedBillingCycle.cycleEndMs,
-            renewAt: invoiceAt + 1,
-            endAt: endAtToUse ?? undefined,
           })
           .where(and(eq(subscriptions.id, subscriptionId), eq(subscriptions.projectId, projectId)))
       }
@@ -834,11 +832,10 @@ export class SubscriptionService {
             projectId,
             customerId: customerData.id,
             active: false,
-            status: "idle",
+            status: "active",
             timezone: timezoneToUse,
             metadata: metadata,
             // provisional values
-            invoiceAt: Date.now(),
             currentCycleStartAt: Date.now(),
             currentCycleEndAt: Date.now(),
           })
@@ -903,69 +900,38 @@ export class SubscriptionService {
     return subscriptionData
   }
 
-  public async endTrial({
-    subscriptionId,
-    projectId,
-    now = Date.now(),
-  }: {
+  private async withSubscriptionMachine<T>(args: {
     subscriptionId: string
     projectId: string
-    now?: number
-  }): Promise<Result<{ status: SusbriptionMachineStatus }, UnPriceSubscriptionError>> {
+    now: number
+    run: (m: SubscriptionMachine) => Promise<T>
+  }): Promise<T> {
+    const { subscriptionId, projectId, now, run } = args
+    // acquire simple DB-backed lock per subscription to avoid cross-worker races
+    const lock = new SubscriptionLock({ db: this.db, projectId, subscriptionId })
+    const acquired = await lock.acquire({ ttlMs: 30_000, now })
+
+    if (!acquired) throw new UnPriceSubscriptionError({ message: "SUBSCRIPTION_BUSY" })
+
     const { err, val: machine } = await SubscriptionMachine.create({
+      now,
       subscriptionId,
       projectId,
       logger: this.logger,
       analytics: this.analytics,
       waitUntil: this.waitUntil,
-      now,
+      customer: this.customerService,
     })
-
     if (err) {
-      return Err(err)
+      await lock.release()
+      throw err
     }
 
-    const currentState = machine.getState()
-
-    switch (currentState) {
-      case "trialing":
-      case "ending_trial": {
-        const { err: errEndTrial } = await machine.endTrial()
-        if (errEndTrial) {
-          return Err(errEndTrial)
-        }
-
-        const { err: errRenew, val: resultRenew } = await machine.renew()
-        if (errRenew) {
-          return Err(errRenew)
-        }
-
-        await machine.shutdown()
-
-        return Ok({
-          status: resultRenew,
-        })
-      }
-      case "renewing":
-      case "past_due":
-      case "invoiced": {
-        const { err: errRenew, val: resultRenew } = await machine.renew()
-        if (errRenew) {
-          return Err(errRenew)
-        }
-
-        await machine.shutdown()
-
-        return Ok({
-          status: resultRenew,
-        })
-      }
-      default:
-        return Err(
-          new UnPriceSubscriptionError({
-            message: "Subscription is not in a valid state or not found",
-          })
-        )
+    try {
+      return await run(machine)
+    } finally {
+      await machine.shutdown()
+      await lock.release()
     }
   }
 
@@ -988,68 +954,35 @@ export class SubscriptionService {
       UnPriceSubscriptionError
     >
   > {
-    const { err, val: machine } = await SubscriptionMachine.create({
-      now,
-      subscriptionId,
-      projectId,
-      logger: this.logger,
-      analytics: this.analytics,
-      waitUntil: this.waitUntil,
-    })
-
-    if (err) {
-      return Err(err)
-    }
-
-    // lets try to finalize the invoice
-    const { err: errCollectInvoicePayment, val: resultCollectInvoicePayment } =
-      await collectInvoicePayment({
-        invoiceId,
+    try {
+      const res = await this.withSubscriptionMachine({
+        subscriptionId,
         projectId,
-        logger: this.logger,
         now,
+        run: async (machine) => {
+          const col = await collectInvoicePayment({
+            invoiceId,
+            projectId,
+            logger: this.logger,
+            now,
+          })
+          if (col.err) {
+            await machine.reportInvoiceFailure({ invoiceId, error: col.err.message })
+            throw col.err
+          }
+          const status = col.val.invoice.status
+          if (status === "paid" || status === "void") {
+            await machine.reportPaymentSuccess({ invoiceId })
+          } else if (status === "failed") {
+            await machine.reportPaymentFailure({ invoiceId, error: "Payment failed" })
+          }
+          return col.val
+        },
       })
-
-    if (errCollectInvoicePayment) {
-      // report fail to machine
-      await machine.reportInvoiceFailure({
-        invoiceId,
-        error: errCollectInvoicePayment.message,
-      })
-      // shutdown the machine
-      await machine.shutdown()
-      return Err(errCollectInvoicePayment)
+      return Ok({ total: res.invoice.total, status: res.invoice.status })
+    } catch (e) {
+      return Err(e as UnPriceSubscriptionError)
     }
-
-    const invoiceStatus = resultCollectInvoicePayment.invoice.status
-
-    switch (invoiceStatus) {
-      case "paid":
-      case "void":
-        // report payment success to machine
-        await machine.reportPaymentSuccess({
-          invoiceId,
-        })
-        break
-      case "failed":
-        // report payment failure to machine
-        await machine.reportPaymentFailure({
-          invoiceId,
-          error: "Payment failed",
-        })
-        break
-      // don't do anything if the invoice is not paid
-      default:
-        break
-    }
-
-    // shutdown the machine
-    await machine.shutdown()
-
-    return Ok({
-      total: resultCollectInvoicePayment.invoice.total,
-      status: resultCollectInvoicePayment.invoice.status,
-    })
   }
 
   public async finalizeInvoice({
@@ -1071,51 +1004,83 @@ export class SubscriptionService {
       UnPriceSubscriptionError
     >
   > {
-    const { err, val: machine } = await SubscriptionMachine.create({
-      now,
-      subscriptionId,
-      projectId,
-      logger: this.logger,
-      analytics: this.analytics,
-      waitUntil: this.waitUntil,
-    })
-
-    if (err) {
-      return Err(err)
-    }
-
-    // lets try to finalize the invoice
-    const { err: errFinalizeInvoice, val: resultFinalizeInvoice } = await finalizeInvoice({
-      invoiceId,
-      projectId,
-      logger: this.logger,
-      now,
-      analytics: this.analytics,
-    })
-
-    if (errFinalizeInvoice) {
-      // report fail to machine
-      await machine.reportInvoiceFailure({
-        invoiceId,
-        error: errFinalizeInvoice.message,
+    try {
+      const res = await this.withSubscriptionMachine({
+        subscriptionId,
+        projectId,
+        now,
+        run: async (machine) => {
+          const fin = await finalizeInvoice({
+            invoiceId,
+            projectId,
+            logger: this.logger,
+            now,
+            analytics: this.analytics,
+          })
+          if (fin.err) {
+            await machine.reportInvoiceFailure({ invoiceId, error: fin.err.message })
+            throw fin.err
+          }
+          await machine.reportInvoiceSuccess({ invoiceId })
+          return fin.val
+        },
       })
-      // shutdown the machine
-      await machine.shutdown()
-      return Err(errFinalizeInvoice)
+      return Ok({ total: res.invoice.total, status: res.invoice.status })
+    } catch (e) {
+      return Err(e as UnPriceSubscriptionError)
     }
+  }
 
-    // report success to machine
-    await machine.reportInvoiceSuccess({
-      invoiceId,
-    })
+  public async generateBillingPeriods({
+    subscriptionId,
+    projectId,
+    now = Date.now(),
+  }: {
+    subscriptionId: string
+    projectId: string
+    now?: number
+  }): Promise<Result<{ status: SusbriptionMachineStatus }, UnPriceSubscriptionError>> {
+    try {
+      const status = await this.withSubscriptionMachine({
+        subscriptionId,
+        projectId,
+        now,
+        run: async (machine) => {
+          const s1 = await machine.generateBillingPeriods()
+          if (s1.err) throw s1.err
+          return s1.val
+        },
+      })
+      return Ok({ status })
+    } catch (e) {
+      return Err(e as UnPriceSubscriptionError)
+    }
+  }
 
-    // shutdown the machine
-    await machine.shutdown()
-
-    return Ok({
-      total: resultFinalizeInvoice.invoice.total,
-      status: resultFinalizeInvoice.invoice.status,
-    })
+  public async renewSubscription({
+    subscriptionId,
+    projectId,
+    now = Date.now(),
+  }: {
+    subscriptionId: string
+    projectId: string
+    now?: number
+  }): Promise<Result<{ status: SusbriptionMachineStatus }, UnPriceSubscriptionError>> {
+    try {
+      const status = await this.withSubscriptionMachine({
+        subscriptionId,
+        projectId,
+        now,
+        run: async (machine) => {
+          const s1 = await machine.renew()
+          if (s1.err) throw s1.err
+          return s1.val
+        },
+      })
+      return Ok({ status })
+    } catch (e) {
+      return Err(e as UnPriceSubscriptionError)
+    }
   }
 
   public async invoiceSubscription({
@@ -1134,60 +1099,22 @@ export class SubscriptionService {
       UnPriceSubscriptionError
     >
   > {
-    const { err, val: machine } = await SubscriptionMachine.create({
-      now,
-      subscriptionId,
-      projectId,
-      logger: this.logger,
-      analytics: this.analytics,
-      waitUntil: this.waitUntil,
-    })
-
-    if (err) {
-      return Err(err)
-    }
-
-    const currentState = machine.getState()
-
-    switch (currentState) {
-      case "active":
-      case "renewing":
-      case "past_due": {
-        const { err: errInvoice } = await machine.invoice()
-
-        if (errInvoice) {
-          return Err(errInvoice)
-        }
-
-        const { err: errRenew, val: resultRenew } = await machine.renew()
-        if (errRenew) {
-          return Err(errRenew)
-        }
-
-        await machine.shutdown()
-
-        return Ok({
-          status: resultRenew,
-        })
-      }
-      case "invoiced": {
-        const { err: errRenew, val: resultRenew } = await machine.renew()
-        if (errRenew) {
-          return Err(errRenew)
-        }
-
-        await machine.shutdown()
-
-        return Ok({
-          status: resultRenew,
-        })
-      }
-      default:
-        return Err(
-          new UnPriceSubscriptionError({
-            message: "Subscription is not in a valid state or not found",
-          })
-        )
+    try {
+      const status = await this.withSubscriptionMachine({
+        subscriptionId,
+        projectId,
+        now,
+        run: async (machine) => {
+          const i = await machine.invoice()
+          if (i.err) throw i.err
+          const r = await machine.renew()
+          if (r.err) throw r.err
+          return r.val
+        },
+      })
+      return Ok({ status })
+    } catch (e) {
+      return Err(e as UnPriceSubscriptionError)
     }
   }
 }

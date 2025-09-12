@@ -240,15 +240,6 @@ export class EntitlementService {
         this.cache.customerEntitlement.remove(keys ?? []),
         this.cache.customerEntitlements.remove(`${projectId}:${customerId}`),
         this.cache.customerSubscription.remove(`${projectId}:${customerId}`),
-        // pre warm DO and cache again after the reset
-        durableObject.prewarmDO({
-          customerId,
-          projectId,
-          now: Date.now(),
-          opts: {
-            force: true, // force the prewarm to avoid ttl issues
-          },
-        }),
       ])
     )
 
@@ -260,6 +251,75 @@ export class EntitlementService {
 
     // cache the result
     this.hashCache.set(key, JSON.stringify(resultCached))
+
+    return Ok(resultCached)
+  }
+
+  public async prewarmEntitlements(
+    customerId: string,
+    projectId: string,
+    now: number
+  ): Promise<
+    Result<
+      {
+        success: boolean
+        message: string
+        slugs?: string[]
+      },
+      FetchError | UnPriceCustomerError
+    >
+  > {
+    const cacheKey = `prewarmEntitlements:${projectId}:${customerId}`
+    const cached = this.hashCache.get(cacheKey)
+
+    if (cached) {
+      return Ok(JSON.parse(cached))
+    }
+
+    const durableObject = this.getStub(this.getDurableObjectCustomerId(customerId))
+
+    const { err: entitlementsErr, val: entitlements } =
+      await this.customerService.getActiveEntitlements({
+        customerId,
+        projectId,
+        now,
+        opts: {
+          skipCache: false, // read from cache
+        },
+      })
+
+    if (entitlementsErr) {
+      return Err(entitlementsErr)
+    }
+
+    // do not prewarm if there are no entitlements
+    if (entitlements.length > 0) {
+      this.waitUntil(
+        Promise.all([
+          // pre warm DO
+          await durableObject.prewarmDO({
+            entitlements,
+            now,
+            opts: {
+              force: true, // force the prewarm to avoid ttl issues
+            },
+          }),
+          // sync entitlements usage cache
+          this.customerService.syncEntitlementsCache({
+            entitlements,
+          }),
+        ])
+      )
+    }
+
+    const resultCached = {
+      success: true,
+      message: "entitlements prewarmed",
+      slugs: entitlements.map((e) => e.featureSlug),
+    }
+
+    // update the cache
+    this.hashCache.set(cacheKey, JSON.stringify(resultCached))
 
     return Ok(resultCached)
   }

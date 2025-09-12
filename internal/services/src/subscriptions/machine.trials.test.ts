@@ -6,6 +6,7 @@ import { Ok } from "@unprice/error"
 import type { ConsoleLogger } from "@unprice/logging"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { CustomerService } from "../customers/service"
 import { db } from "../utils/db"
 import { SubscriptionMachine } from "./machine"
 
@@ -50,6 +51,7 @@ vi.mock("../payment-provider", () => ({
 
 describe("SubscriptionMachine", () => {
   let mockAnalytics: Analytics
+  let mockCustomerService: CustomerService
   let mockLogger: ConsoleLogger
   let mockSubscription: Subscription & { phases: SubscriptionPhaseExtended[]; customer: Customer }
   let mockDb: Database
@@ -79,6 +81,10 @@ describe("SubscriptionMachine", () => {
       info: vi.fn(),
       error: vi.fn(),
     } as unknown as ConsoleLogger
+
+    mockCustomerService = {
+      syncActiveEntitlementsLastUsage: vi.fn().mockResolvedValue(Ok({})),
+    } as unknown as CustomerService
 
     // Mock subscription data with all required relations
     mockSubscription = {
@@ -289,6 +295,7 @@ describe("SubscriptionMachine", () => {
       logger: mockLogger,
       now: Date.now(),
       waitUntil: vi.fn(),
+      customer: mockCustomerService,
     })
 
     expect(result.err).toBeUndefined()
@@ -300,7 +307,7 @@ describe("SubscriptionMachine", () => {
     expect(subscriptionMachine.getState()).toBe("trialing")
 
     // Trigger trial end
-    const trialEndResult = await subscriptionMachine.endTrial()
+    const trialEndResult = await subscriptionMachine.renew()
 
     expect(trialEndResult.err).toBeUndefined()
     if (trialEndResult.err) return
@@ -357,6 +364,7 @@ describe("SubscriptionMachine", () => {
       logger: mockLogger,
       now: Date.now(),
       waitUntil: vi.fn(),
+      customer: mockCustomerService,
     })
 
     expect(result.err).toBeUndefined()
@@ -368,13 +376,13 @@ describe("SubscriptionMachine", () => {
     expect(subscriptionMachine.getState()).toBe("trialing")
 
     // Trigger trial end
-    const trialEndResult = await subscriptionMachine.endTrial()
+    const trialEndResult = await subscriptionMachine.renew()
 
     expect(trialEndResult.err).toBeUndefined()
     if (trialEndResult.err) return
 
-    // Initial state should be invoiced
-    expect(subscriptionMachine.getState()).toBe("invoiced")
+    // Initial state should be active
+    expect(subscriptionMachine.getState()).toBe("active")
 
     // Verify invoice creation
     const invoiceInsert = dbMockData.find((insert) => insert.table === "invoices")

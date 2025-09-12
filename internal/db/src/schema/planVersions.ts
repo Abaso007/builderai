@@ -13,7 +13,8 @@ import {
 import { pgTableProject } from "../utils/_table"
 import { cuid, timestamps } from "../utils/fields"
 import { projectID } from "../utils/sql"
-import type { BillingConfig, PlanVersionMetadata } from "../validators/planVersions"
+import type { PlanVersionMetadata } from "../validators/planVersions"
+import type { BillingConfig } from "../validators/shared"
 import { users } from "./auth"
 import {
   collectionMethodEnum,
@@ -79,7 +80,7 @@ export const versions = pgTableProject(
     currency: currencyEnum("currency").notNull(),
 
     // billing config for the plan
-    billingConfig: json("billing_config").notNull().$type<BillingConfig>(),
+    billingConfig: json("billing_config").default({}).notNull().$type<BillingConfig>(),
 
     // ************ billing data defaults ************
     // whenToBill: pay_in_advance - pay_in_arrear

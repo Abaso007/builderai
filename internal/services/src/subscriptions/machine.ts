@@ -1,35 +1,39 @@
 import type { Analytics } from "@unprice/analytics"
-import { eq } from "@unprice/db"
+import { and as dbAnd, eq } from "@unprice/db"
 import { subscriptions } from "@unprice/db/schema"
 import type { Customer, Subscription, SubscriptionStatus } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import {
   type AnyActorRef,
-  type AnyMachineSnapshot,
   and,
   assign,
   createActor,
   fromPromise,
   not,
   setup,
+  waitFor,
 } from "xstate"
 
 import { db } from "../utils/db"
 import { UnPriceMachineError } from "./errors"
 
-import { logTransition, sendCustomerNotification, updateSubscription } from "./actions"
+import type { CustomerService } from "../customers/service"
+import sendCustomerNotification, { logTransition, updateSubscription } from "./actions"
 import {
-  canInvoice,
   canRenew,
+  hasDueBillingPeriods,
   hasValidPaymentMethod,
-  isAlreadyInvoiced,
-  isAlreadyRenewed,
   isAutoRenewEnabled,
   isCurrentPhaseNull,
   isTrialExpired,
 } from "./guards"
-import { invoiceSubscription, loadSubscription, renewSubscription } from "./invokes"
+import {
+  generateBillingPeriods,
+  invoiceSubscription,
+  loadSubscription,
+  renewSubscription,
+} from "./invokes"
 import type {
   MachineTags,
   SubscriptionActions,
@@ -61,11 +65,17 @@ export class SubscriptionMachine {
   private actor!: AnyActorRef
   private waitUntil: (p: Promise<unknown>) => void
   private now: number
+  private customerService: CustomerService
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private machine: any
-  // Add a promise to track pending state updates
-  private pendingStateUpdate: Promise<void> | null = null
-  private stateUpdateResolve: (() => void) | null = null
+  // Serializes event sends to this actor to avoid concurrent transitions/races.
+  // Each send chains onto this promise, so events are processed in order.
+  // This is per-instance (per-subscription) and prevents overlapping invokes.
+  // when i send multiple events at the same time, the events are processed in order
+  // like sendAndWait({ type: "RENEW" }, { states: ["active", "expired"], timeout: 15000 })
+  // and sendAndWait({ type: "INVOICE" }, { states: ["active"], timeout: 30000 })
+  // the events are processed in order so I don't need to await the first event to be processed before sending the second event
+  private sendQueue: Promise<unknown> = Promise.resolve()
 
   private constructor({
     subscriptionId,
@@ -73,12 +83,14 @@ export class SubscriptionMachine {
     analytics,
     logger,
     waitUntil,
+    customer,
     now,
   }: {
     subscriptionId: string
     projectId: string
     analytics: Analytics
     logger: Logger
+    customer: CustomerService
     waitUntil: (p: Promise<unknown>) => void
     now: number
   }) {
@@ -88,6 +100,7 @@ export class SubscriptionMachine {
     this.logger = logger
     this.waitUntil = waitUntil
     this.now = now
+    this.customerService = customer
     this.machine = this.createMachineSubscription()
   }
 
@@ -110,6 +123,16 @@ export class SubscriptionMachine {
         }
       },
       actors: {
+        generateBillingPeriods: fromPromise(
+          async ({ input }: { input: { context: SubscriptionContext; logger: Logger } }) => {
+            const result = await generateBillingPeriods({
+              context: input.context,
+              logger: input.logger,
+            })
+
+            return result
+          }
+        ),
         loadSubscription: fromPromise(
           async ({ input }: { input: { context: SubscriptionContext; logger: Logger } }) => {
             const result = await loadSubscription({
@@ -121,33 +144,42 @@ export class SubscriptionMachine {
           }
         ),
         invoiceSubscription: fromPromise(
-          async ({
-            input,
-          }: { input: { context: SubscriptionContext; isTrialEnding?: boolean } }) => {
+          async ({ input }: { input: { context: SubscriptionContext; logger: Logger } }) => {
             const result = await invoiceSubscription({
               context: input.context,
-              isTrialEnding: input.isTrialEnding,
+              logger: input.logger,
             })
 
             return result
           }
         ),
         renewSubscription: fromPromise(
-          async ({ input }: { input: { context: SubscriptionContext } }) => {
-            const result = await renewSubscription({ context: input.context, logger: this.logger })
+          async ({
+            input,
+          }: {
+            input: {
+              context: SubscriptionContext
+              logger: Logger
+              customerService: CustomerService
+            }
+          }) => {
+            const result = await renewSubscription({
+              context: input.context,
+              logger: input.logger,
+              customerService: input.customerService,
+            })
 
             return result
           }
         ),
       },
       guards: {
+        hasDueBillingPeriods: hasDueBillingPeriods,
         isTrialExpired: isTrialExpired,
         canRenew: canRenew,
-        hasValidPaymentMethod: hasValidPaymentMethod,
-        canInvoice: canInvoice,
-        isAlreadyRenewed: isAlreadyRenewed,
+        hasValidPaymentMethod: ({ context }) =>
+          hasValidPaymentMethod({ context, logger: this.logger }),
         isAutoRenewEnabled: isAutoRenewEnabled,
-        isAlreadyInvoiced: isAlreadyInvoiced,
         isCurrentPhaseNull: isCurrentPhaseNull,
       },
       actions: {
@@ -169,6 +201,8 @@ export class SubscriptionMachine {
           phases: [],
           currentPhase: null,
           openInvoices: [],
+          hasDueBillingPeriods: false,
+          hasOpenInvoices: false,
           subscription: {} as Subscription,
           customer: {} as Customer,
         }) as SubscriptionContext,
@@ -259,31 +293,6 @@ export class SubscriptionMachine {
               guard: ({ context }) => context.subscription.status === "expired",
               actions: "logStateTransition",
             },
-            {
-              target: "invoiced",
-              guard: ({ context }) => context.subscription.status === "invoiced",
-              actions: "logStateTransition",
-            },
-            {
-              target: "renewing",
-              guard: ({ context }) => context.subscription.status === "renewing",
-              actions: "logStateTransition",
-            },
-            {
-              target: "invoicing",
-              guard: ({ context }) => context.subscription.status === "invoicing",
-              actions: "logStateTransition",
-            },
-            {
-              target: "idle",
-              guard: ({ context }) => context.subscription.status === "idle",
-              actions: "logStateTransition",
-            },
-            {
-              target: "ending_trial",
-              guard: ({ context }) => context.subscription.status === "ending_trial",
-              actions: "logStateTransition",
-            },
             // if the subscription is in an unknown state, transition to error
             {
               target: "error",
@@ -299,11 +308,15 @@ export class SubscriptionMachine {
           ],
         },
         trialing: {
-          tags: ["subscription", "trialing"],
+          tags: ["subscription"],
           description: "Subscription is trialing, meaning is waiting for the trial to end",
           on: {
-            // first possible event is the trial ending
-            TRIAL_END: [
+            BILLING_PERIOD: {
+              target: "generating_billing_periods",
+              actions: "logStateTransition",
+            },
+            // first possible event is renew which will end the trial and update the phase
+            RENEW: [
               {
                 guard: "isCurrentPhaseNull", // verify that the subscription has a current phase
                 target: "error", // if the subscription has no current phase, throw an error
@@ -315,7 +328,7 @@ export class SubscriptionMachine {
               },
               {
                 guard: and(["isTrialExpired", "hasValidPaymentMethod"]), // verify that the trial has expired and the payment method is valid
-                target: "ending_trial", // if the trial has expired and the payment method is valid, transition to the ending_trial state
+                target: "renewing", // if the trial has expired and the payment method is valid, transition to the invoicing state
                 actions: "logStateTransition",
               },
               {
@@ -326,7 +339,10 @@ export class SubscriptionMachine {
                     const trialEndAtDate = new Date(trialEndAt).toLocaleString()
 
                     const isExpired = isTrialExpired({ context })
-                    const isPaymentMethodValid = hasValidPaymentMethod({ context })
+                    const isPaymentMethodValid = hasValidPaymentMethod({
+                      context,
+                      logger: this.logger,
+                    })
 
                     if (!isExpired) {
                       return {
@@ -347,62 +363,17 @@ export class SubscriptionMachine {
                 }),
               },
             ],
-            CANCEL: {
-              target: "canceled",
-              actions: "logStateTransition",
-            },
           },
         },
-        ending_trial: {
-          // ending trial is particular because we have to invoice the subscription depending on the whenToBill setting
-          tags: ["subscription", "trialing"],
-          description: "Ending the trial, invoice the subscription",
+        generating_billing_periods: {
+          tags: ["machine", "transition"],
+          description: "Generating billing periods for the subscription",
           invoke: {
-            id: "invoiceSubscription",
-            src: "invoiceSubscription",
-            input: ({ context }) => ({ context, isTrialEnding: true }),
+            id: "generateBillingPeriods",
+            src: "generateBillingPeriods",
+            input: ({ context }) => ({ context, logger: this.logger }),
             onDone: {
-              target: "invoiced",
-              actions: [
-                assign({
-                  // update the subscription in the machine context from the event output
-                  subscription: ({ event, context }) => {
-                    if (event.output.subscription) {
-                      return event.output.subscription
-                    }
-
-                    return context.subscription
-                  },
-                }),
-                "logStateTransition",
-                "notifyCustomer", // for important actions like this, we notify the customer
-              ],
-            },
-            onError: {
-              target: "past_due",
-              // update the metadata for the subscription to keep track of the reason
-              actions: ({ context }) =>
-                updateSubscription({
-                  context,
-                  subscription: {
-                    metadata: {
-                      reason: "invoice_failed",
-                      note: "Invoice failed after trial ended",
-                    },
-                  },
-                }),
-            },
-          },
-        },
-        invoicing: {
-          tags: ["subscription", "invoicing"],
-          description: "Invoicing the subscription depending on the whenToBill setting",
-          invoke: {
-            id: "invoiceSubscription",
-            src: "invoiceSubscription",
-            input: ({ context }) => ({ context, isTrialEnding: false }),
-            onDone: {
-              target: "invoiced",
+              target: "active",
               actions: [
                 assign({
                   subscription: ({ event, context }) => {
@@ -418,7 +389,7 @@ export class SubscriptionMachine {
               ],
             },
             onError: {
-              target: "past_due",
+              target: "error",
               actions: [
                 // update the metadata for the subscription to keep track of the reason
                 ({ context }) =>
@@ -431,78 +402,73 @@ export class SubscriptionMachine {
                       },
                     },
                   }),
+                assign({
+                  error: ({ event }) => ({
+                    message: `Invoice failed: ${(event.error as Error)?.message ?? "Unknown error"}`,
+                  }),
+                }),
                 "logStateTransition",
               ],
             },
           },
         },
-        invoiced: {
-          tags: ["subscription", "invoicing"],
-          description: "Subscription invoiced, ready to be renewed",
-          on: {
-            RENEW: [
-              {
-                guard: "isCurrentPhaseNull",
-                target: "error",
-                actions: assign({
-                  error: () => ({
-                    message: "Subscription has no active phase",
-                  }),
-                }),
-              },
-              {
-                guard: "isAlreadyRenewed",
-                target: "active",
-                actions: "logStateTransition",
-              },
-              {
-                guard: and(["canRenew", "isAutoRenewEnabled"]), // only renew if the subscription can be renewed and auto renew is enabled
-                target: "renewing",
-                actions: "logStateTransition",
-              },
-              {
-                guard: not("isAutoRenewEnabled"), // if auto renew is disabled, expire the subscription
-                target: "expired",
-                actions: "logStateTransition",
-              },
-              {
-                target: "error",
-                actions: assign({
-                  error: ({ context }) => {
-                    const renewAt = new Date(context.subscription.renewAt).toLocaleString()
-
-                    const renew = canRenew({ context })
-                    const autoRenew = isAutoRenewEnabled({ context })
-
-                    if (!autoRenew) {
-                      return {
-                        message: `Cannot renew subscription, auto renew is disabled at ${renewAt}`,
-                      }
+        invoicing: {
+          tags: ["machine", "transition"],
+          description: "Invoicing the subscription depending on the whenToBill setting",
+          invoke: {
+            id: "invoiceSubscription",
+            src: "invoiceSubscription",
+            input: ({ context }) => ({ context, logger: this.logger }),
+            onDone: {
+              target: "active",
+              actions: [
+                assign({
+                  subscription: ({ event, context }) => {
+                    if (event.output.subscription) {
+                      return event.output.subscription
                     }
 
-                    if (!renew) {
-                      return {
-                        message: `Cannot renew subscription, subscription is not due to be renewed at ${renewAt}`,
-                      }
-                    }
-
-                    return {
-                      message: `Cannot renew subscription, dates are not due yet at ${renewAt} and auto renew is disabled`,
-                    }
+                    return context.subscription
                   },
                 }),
-              },
-            ],
+                "logStateTransition",
+                "notifyCustomer",
+              ],
+            },
+            onError: {
+              target: "error",
+              actions: [
+                // update the metadata for the subscription to keep track of the reason
+                ({ context }) =>
+                  updateSubscription({
+                    context,
+                    subscription: {
+                      metadata: {
+                        reason: "invoice_failed",
+                        note: "Invoice failed after trying to invoice",
+                      },
+                    },
+                  }),
+                assign({
+                  error: ({ event }) => ({
+                    message: `Invoice failed: ${(event.error as Error)?.message ?? "Unknown error"}`,
+                  }),
+                }),
+                "logStateTransition",
+              ],
+            },
           },
         },
         renewing: {
-          tags: ["subscription", "renewing"],
+          tags: ["machine", "transition"],
           description: "Renewing the subscription, update billing dates for the next cycle",
           invoke: {
             id: "renewSubscription",
             src: "renewSubscription",
             input: ({ context }) => ({
               context,
+              customerService: this.customerService,
+              logger: this.logger,
             }),
             onDone: {
               target: "active",
@@ -534,11 +500,15 @@ export class SubscriptionMachine {
           },
         },
         active: {
-          tags: ["subscription", "active"],
+          tags: ["subscription"],
           description: "Subscription is active",
           on: {
             CANCEL: {
               target: "canceling",
+              actions: "logStateTransition",
+            },
+            BILLING_PERIOD: {
+              target: "generating_billing_periods",
               actions: "logStateTransition",
             },
             CHANGE: {
@@ -573,6 +543,53 @@ export class SubscriptionMachine {
                 },
               ],
             },
+            RENEW: [
+              {
+                guard: "isCurrentPhaseNull",
+                target: "error",
+                actions: assign({
+                  error: () => ({
+                    message: "Subscription has no active phase",
+                  }),
+                }),
+              },
+              {
+                guard: and(["canRenew", "isAutoRenewEnabled"]), // only renew if the subscription can be renewed and auto renew is enabled
+                target: "renewing",
+                actions: "logStateTransition",
+              },
+              {
+                guard: not("isAutoRenewEnabled"), // if auto renew is disabled, expire the subscription
+                target: "expired",
+                actions: "logStateTransition",
+              },
+              {
+                target: "error",
+                actions: assign({
+                  error: ({ context }) => {
+                    const renew = canRenew({ context })
+                    const autoRenew = isAutoRenewEnabled({ context })
+
+                    if (!autoRenew) {
+                      return {
+                        message: "Cannot renew subscription, auto renew is disabled",
+                      }
+                    }
+
+                    if (!renew) {
+                      return {
+                        message: "Cannot renew subscription, subscription is not due to be renewed",
+                      }
+                    }
+
+                    return {
+                      message:
+                        "Cannot renew subscription, dates are not due yet and auto renew is disabled",
+                    }
+                  },
+                }),
+              },
+            ],
             INVOICE: [
               {
                 guard: "isCurrentPhaseNull",
@@ -584,38 +601,16 @@ export class SubscriptionMachine {
                 }),
               },
               {
-                guard: "isAlreadyInvoiced",
-                target: "invoiced",
-                actions: "logStateTransition",
-              },
-              {
-                guard: and(["canInvoice", "hasValidPaymentMethod"]),
+                guard: and(["hasValidPaymentMethod", "hasDueBillingPeriods"]),
                 target: "invoicing",
                 actions: "logStateTransition",
               },
               {
                 target: "error",
                 actions: assign({
-                  error: ({ context }) => {
-                    const invoiceAt = new Date(context.subscription.invoiceAt).toLocaleString()
-
-                    const invoice = canInvoice({ context })
-                    const validPaymentMethod = hasValidPaymentMethod({ context })
-
-                    if (!invoice) {
-                      return {
-                        message: `Cannot invoice subscription, subscription is not due to be invoiced at ${invoiceAt}`,
-                      }
-                    }
-
-                    if (!validPaymentMethod) {
-                      return {
-                        message: `Cannot invoice subscription, payment method is invalid at ${invoiceAt}`,
-                      }
-                    }
-
+                  error: () => {
                     return {
-                      message: `Cannot invoice subscription, payment method is invalid or subscription is not due to be invoiced at ${invoiceAt}`,
+                      message: "Cannot invoice subscription, payment method is invalid",
                     }
                   },
                 }),
@@ -624,15 +619,19 @@ export class SubscriptionMachine {
           },
         },
         past_due: {
-          tags: ["subscription", "active"],
+          tags: ["subscription"],
           description: "Subscription is past due can retry payment or invoice",
           on: {
             PAYMENT_SUCCESS: {
               target: "active",
               actions: ["logStateTransition"],
             },
+            BILLING_PERIOD: {
+              target: "generating_billing_periods",
+              actions: "logStateTransition",
+            },
             PAYMENT_FAILURE: {
-              target: "active",
+              target: "past_due",
               actions: [
                 "logStateTransition",
                 ({ event }) => {
@@ -670,7 +669,7 @@ export class SubscriptionMachine {
                 }),
               },
               {
-                guard: and(["canInvoice", "hasValidPaymentMethod"]),
+                guard: and(["hasValidPaymentMethod", "hasDueBillingPeriods"]),
                 target: "invoicing",
                 actions: "logStateTransition",
               },
@@ -678,7 +677,7 @@ export class SubscriptionMachine {
                 target: "error",
                 actions: assign({
                   error: () => ({
-                    message: "Cannot invoice subscription yet or payment method is invalid",
+                    message: "Cannot invoice subscription yet, payment method is invalid",
                   }),
                 }),
               },
@@ -686,30 +685,26 @@ export class SubscriptionMachine {
           },
         },
         // TODO: implement the rest of the states as they become relevant
-        idle: {
-          tags: ["subscription", "loading"],
-          description: "Subscription is idle, meaning is waiting for an event to happen",
-        },
         canceling: {
-          tags: ["subscription", "ending"],
+          tags: ["machine", "transition"],
           description: "Canceling the subscription, update billing dates",
         },
         changing: {
-          tags: ["subscription", "ending"],
+          tags: ["machine", "transition"],
           description: "Changing the subscription, update billing dates",
         },
         expiring: {
-          tags: ["subscription", "ending"],
+          tags: ["machine", "transition"],
           description: "Subscription expired, no more payments will be made",
           type: "final",
         },
         canceled: {
-          tags: ["subscription"],
+          tags: ["subscription", "final"],
           type: "final",
           description: "Subscription canceled, no more payments will be made",
         },
         expired: {
-          tags: ["subscription"],
+          tags: ["subscription", "final"],
           description: "Subscription expired, no more payments will be made",
           type: "final",
         },
@@ -727,66 +722,38 @@ export class SubscriptionMachine {
     })
 
     // Subscribe to ALL state changes and persist them
+    let lastPersisted: SubscriptionStatus | null = null
+
     this.actor.subscribe({
       next: async (snapshot) => {
+        if (!snapshot.changed) return
+        if (!snapshot.hasTag("subscription")) return
+
         const currentState = snapshot.value as SusbriptionMachineStatus
+        if (currentState === lastPersisted) return
 
         try {
-          // Create a new promise for this state update
-          this.pendingStateUpdate = new Promise((resolve) => {
-            this.stateUpdateResolve = resolve
-          })
+          await db
+            .update(subscriptions)
+            .set({
+              status: currentState as SubscriptionStatus,
+              active: !["idle", "expired", "canceled"].includes(currentState),
+            })
+            .where(
+              dbAnd(
+                eq(subscriptions.id, this.subscriptionId),
+                eq(subscriptions.projectId, this.projectId)
+              )
+            )
 
-          // Record state change in the database
-          await db.transaction(async (tx) => {
-            // only update the status if it's a valid subscription status
-            if (snapshot.hasTag("subscription")) {
-              // Update subscription status
-              await tx
-                .update(subscriptions)
-                .set({
-                  status: currentState as SubscriptionStatus,
-                  active: !["idle", "expired", "canceled"].includes(currentState),
-                })
-                .where(eq(subscriptions.id, this.subscriptionId))
-                .returning() // Add returning to ensure the update completed
-                .then((result) => {
-                  if (!result.length) {
-                    this.logger.error("Failed to update subscription status", {
-                      subscriptionId: this.subscriptionId,
-                      projectId: this.projectId,
-                      now: this.now,
-                      currentState,
-                    })
-
-                    throw new Error("Failed to update subscription status")
-                  }
-                })
-            }
-          })
-
-          // Resolve the pending state update
-          if (this.stateUpdateResolve) {
-            this.stateUpdateResolve()
-            this.stateUpdateResolve = null
-          }
-        } catch (error) {
-          const err = error as Error
-          this.logger.error(err.message ?? "Failed to persist state change", {
-            code: "loadInitialState",
+          lastPersisted = currentState as SubscriptionStatus
+        } catch (err) {
+          this.logger.error("Failed to update subscription status", {
             subscriptionId: this.subscriptionId,
             projectId: this.projectId,
-            now: this.now,
-            currentState,
+            state: currentState,
+            error: (err as Error).message,
           })
-
-          // Make sure to resolve even on error
-          if (this.stateUpdateResolve) {
-            this.stateUpdateResolve()
-            this.stateUpdateResolve = null
-          }
-
-          throw err
         }
       },
     })
@@ -795,7 +762,7 @@ export class SubscriptionMachine {
     this.actor.start()
 
     // Wait for initialization to complete
-    const result = await this.waitForState({ timeout: 5000, tag: "subscription" })
+    const result = await this.waitFor({ timeout: 5000, tag: "subscription" })
 
     if (result.err) {
       return Err(result.err)
@@ -804,8 +771,8 @@ export class SubscriptionMachine {
     return Ok(result.val)
   }
 
-  private getNextEvents(snapshot: AnyMachineSnapshot) {
-    return [...new Set([...snapshot._nodes.flatMap((sn) => sn.ownEvents)])]
+  public getState(): SusbriptionMachineStatus {
+    return this.actor.getSnapshot().value as SusbriptionMachineStatus
   }
 
   public static async create(payload: {
@@ -813,6 +780,7 @@ export class SubscriptionMachine {
     projectId: string
     analytics: Analytics
     logger: Logger
+    customer: CustomerService
     now: number
     waitUntil: (p: Promise<unknown>) => void
   }): Promise<Result<SubscriptionMachine, UnPriceMachineError>> {
@@ -831,149 +799,66 @@ export class SubscriptionMachine {
     }
   }
 
-  public getState() {
-    return this.actor.getSnapshot().value as SusbriptionMachineStatus
-  }
-
-  private async sendEvent(
+  // Sends an event and waits until the machine reaches one of the target states or tag.
+  // Uses waitFor under the hood; set longer timeouts for I/O-heavy transitions (e.g., invoicing).
+  private async sendAndWait(
     event: SubscriptionEvent,
-    states?: SusbriptionMachineStatus[]
+    opts?: { states?: SusbriptionMachineStatus[]; tag?: MachineTags; timeout?: number }
   ): Promise<Result<SusbriptionMachineStatus, UnPriceMachineError>> {
-    const snapshot = this.actor.getSnapshot()
-    const nextEvents = this.getNextEvents(snapshot)
-
-    // Transition is not possible, return the current state
-    if (!nextEvents.includes(event.type)) {
-      return Err(
-        new UnPriceMachineError({
-          message: `Transition not possible from ${this.getState()} to ${event.type}`,
-        })
-      )
+    // serialize sends to this actor
+    const run = async () => {
+      const snapshot = this.actor.getSnapshot()
+      if (!snapshot.can(event)) {
+        return Err(
+          new UnPriceMachineError({
+            message: `Transition not allowed from ${snapshot.value} via ${event.type}`,
+          })
+        )
+      }
+      this.actor.send(event)
+      const res = await this.waitFor({
+        states: opts?.states,
+        tag: opts?.tag,
+        timeout: opts?.timeout,
+      })
+      return res
     }
 
-    // send the event to the actor
-    this.actor.send(event)
-
-    // wait for the event to be processed
-    const result = await this.waitForState({ event, states: states })
-
-    // Wait for any pending state update to complete
-    if (this.pendingStateUpdate) {
-      await this.pendingStateUpdate
-    }
-
-    return result
+    // chain onto queue to keep order; ignore previous rejection
+    this.sendQueue = this.sendQueue.then(run, run)
+    return this.sendQueue as Promise<Result<SusbriptionMachineStatus, UnPriceMachineError>>
   }
 
-  private async waitForState({
-    timeout = 5000,
-    event,
+  private async waitFor({
+    timeout = 10000,
     states,
     tag,
   }: {
     timeout?: number
-    event?: SubscriptionEvent
     states?: SusbriptionMachineStatus[]
     tag?: MachineTags
   }): Promise<Result<SusbriptionMachineStatus, UnPriceMachineError>> {
-    // First check if we're already in the desired state/tag
-    const currentSnapshot = this.actor.getSnapshot()
-    if (
-      states?.includes(currentSnapshot.value as SusbriptionMachineStatus) ||
-      (tag && currentSnapshot.hasTag(tag))
-    ) {
-      return Ok(currentSnapshot.value as SusbriptionMachineStatus)
+    try {
+      const snap = await waitFor(
+        this.actor,
+        (s) => Boolean(states?.some((st) => s.matches(st)) || (tag && s.hasTag(tag))),
+        { timeout }
+      )
+      return Ok(snap.value as SusbriptionMachineStatus)
+    } catch (e) {
+      return Err(new UnPriceMachineError({ message: (e as Error)?.message ?? "Timeout" }))
     }
-
-    return new Promise<Result<SusbriptionMachineStatus, UnPriceMachineError>>((resolve) => {
-      // biome-ignore lint/style/useConst: <explanation>
-      let timeoutId: NodeJS.Timeout | undefined
-      // biome-ignore lint/style/useConst: <explanation>
-      let subscription: { unsubscribe: () => void } | undefined
-
-      // Setup cleanup function
-      const cleanup = () => {
-        if (timeoutId) clearTimeout(timeoutId)
-        if (subscription) subscription.unsubscribe()
-      }
-
-      // Setup subscription first
-      subscription = this.actor.subscribe({
-        next: (snapshot) => {
-          // Check for error state first
-          if (snapshot.matches("error")) {
-            cleanup()
-            resolve(
-              Err(
-                new UnPriceMachineError({
-                  message: snapshot.context.error?.message ?? "Unknown state machine error",
-                })
-              )
-            )
-            return
-          }
-
-          // Check if we've reached the desired state or tag
-          if (
-            states?.includes(snapshot.value as SusbriptionMachineStatus) ||
-            (tag && snapshot.hasTag(tag))
-          ) {
-            cleanup()
-            resolve(Ok(snapshot.value as SusbriptionMachineStatus))
-          }
-        },
-        error: (error) => {
-          cleanup()
-          resolve(
-            Err(
-              new UnPriceMachineError({
-                message:
-                  error instanceof Error
-                    ? error.message
-                    : typeof error === "object" && error && "message" in error
-                      ? String(error.message)
-                      : "Unknown error in state machine",
-              })
-            )
-          )
-        },
-        complete: () => {
-          cleanup()
-        },
-      })
-
-      // Setup timeout after subscription
-      timeoutId = setTimeout(() => {
-        cleanup()
-        resolve(
-          Err(
-            new UnPriceMachineError({
-              message: `Timeout waiting for state ${states?.join(", ") ?? "unknown"} or tag ${
-                tag ?? "unknown"
-              } after ${timeout}ms${event ? ` (event: ${event.type})` : ""}`,
-            })
-          )
-        )
-      }, timeout)
-    })
-  }
-
-  /**
-   * Simplified endTrial method
-   */
-  public async endTrial(): Promise<Result<SusbriptionMachineStatus, UnPriceMachineError>> {
-    return await this.sendEvent({ type: "TRIAL_END" }, ["invoiced", "past_due", "active"])
   }
 
   /**
    * Renews the subscription for the next billing cycle
    */
   public async renew(): Promise<Result<SusbriptionMachineStatus, UnPriceMachineError>> {
-    return await this.sendEvent({ type: "RENEW" }, ["active", "expired"])
+    return this.sendAndWait({ type: "RENEW" }, { tag: "subscription", timeout: 15000 })
   }
 
   public async invoice(): Promise<Result<SusbriptionMachineStatus, UnPriceMachineError>> {
-    return await this.sendEvent({ type: "INVOICE" }, ["invoiced"])
+    return this.sendAndWait({ type: "INVOICE" }, { tag: "subscription", timeout: 30000 })
   }
 
   public async reportPaymentSuccess({
@@ -981,7 +866,7 @@ export class SubscriptionMachine {
   }: {
     invoiceId: string
   }): Promise<Result<SusbriptionMachineStatus, UnPriceMachineError>> {
-    return await this.sendEvent({ type: "PAYMENT_SUCCESS", invoiceId }, ["active"])
+    return await this.sendAndWait({ type: "PAYMENT_SUCCESS", invoiceId }, { states: ["active"] })
   }
 
   public async reportPaymentFailure({
@@ -991,7 +876,10 @@ export class SubscriptionMachine {
     invoiceId: string
     error: string
   }): Promise<Result<SusbriptionMachineStatus, UnPriceMachineError>> {
-    return await this.sendEvent({ type: "PAYMENT_FAILURE", invoiceId, error }, ["past_due"])
+    return await this.sendAndWait(
+      { type: "PAYMENT_FAILURE", invoiceId, error },
+      { states: ["past_due"] }
+    )
   }
 
   public async reportInvoiceSuccess({
@@ -999,12 +887,12 @@ export class SubscriptionMachine {
   }: {
     invoiceId: string
   }): Promise<Result<SusbriptionMachineStatus, UnPriceMachineError>> {
-    return await this.sendEvent(
+    return await this.sendAndWait(
       {
         type: "INVOICE_SUCCESS",
         invoiceId,
       },
-      ["active"]
+      { states: ["active"] }
     )
   }
 
@@ -1015,33 +903,31 @@ export class SubscriptionMachine {
     invoiceId: string
     error: string
   }): Promise<Result<SusbriptionMachineStatus, UnPriceMachineError>> {
-    return await this.sendEvent(
+    return await this.sendAndWait(
       {
         type: "INVOICE_FAILURE",
         invoiceId,
         error,
       },
-      ["past_due"]
+      { states: ["past_due"] }
     )
   }
 
+  public async generateBillingPeriods(): Promise<
+    Result<SusbriptionMachineStatus, UnPriceMachineError>
+  > {
+    return await this.sendAndWait({ type: "BILLING_PERIOD" }, { tag: "subscription" })
+  }
+
   public async shutdown(timeout = 5000): Promise<void> {
-    if (this.pendingStateUpdate) {
+    if (this.sendQueue) {
       try {
         await Promise.race([
-          this.pendingStateUpdate,
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("State update timeout")), timeout)
-          ),
+          this.sendQueue,
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), timeout)),
         ])
-      } catch (error) {
-        this.logger.error("Failed to complete state update during shutdown", {
-          error,
-          subscriptionId: this.subscriptionId,
-        })
-      }
+      } catch {}
     }
-
     this.actor.stop()
   }
 }

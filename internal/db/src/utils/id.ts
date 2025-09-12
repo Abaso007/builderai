@@ -27,9 +27,11 @@ export const prefixes = {
   usage: "usage",
   log: "log",
   invoice: "inv",
+  billing_period: "bp",
   payment_provider_config: "ppc",
   isolate: "iso",
   session: "sess",
+  subscription_lock: "slock",
 } as const
 
 // Thread-local counter for monotonicity within the same millisecond

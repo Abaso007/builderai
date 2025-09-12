@@ -1,59 +1,21 @@
-import { configureBillingCycleSubscription } from "@unprice/db/validators"
+import type { Logger } from "@unprice/logging"
 import type { SubscriptionContext } from "./types"
 
 /**
  * Guard: Check if subscription can be renewed using context data
  */
 export const canRenew = (input: { context: SubscriptionContext }): boolean => {
-  const subscription = input.context.subscription
+  const { currentPhase: p, now } = input.context
+  if (!p) return false
 
-  if (!input.context.currentPhase) return false
+  // cannot renew if the phase is scheduled to end
+  if (p.endAt && p.endAt < p.currentCycleEndAt) return false
 
-  const now = input.context.now
+  // cannot renew if the renew at is not set
+  if (!p.renewAt) return false
 
-  const billingCycle = configureBillingCycleSubscription({
-    currentCycleStartAt: subscription.currentCycleEndAt,
-    billingConfig: input.context.currentPhase.planVersion.billingConfig,
-    endAt: input.context.currentPhase.endAt ?? undefined,
-    alignStartToDay: false,
-    alignEndToDay: true,
-    alignToCalendar: true,
-  })
-
-  // if the next renewal period has already passed then we can't renew
-  if (subscription.renewAt && subscription.renewAt > now) {
-    return false
-  }
-
-  // if the next billing period interferes with a cancellation then we can't renew
-  if (
-    subscription.metadata?.dates?.cancelAt &&
-    billingCycle.cycleStartMs < subscription.metadata?.dates?.cancelAt
-  ) {
-    return false
-  }
-
-  // TODO: add more guards here for expiration, change, etc
-
-  return true
-}
-
-export const isAlreadyRenewed = (input: { context: SubscriptionContext }): boolean => {
-  const subscription = input.context.subscription
-  const currentPhase = input.context.currentPhase
-
-  if (!subscription || !currentPhase) return false
-
-  // meaning if the current phase last renew is in the current cycle
-  const lastRenewAt = subscription.lastRenewAt
-  const currentCycleEndAt = subscription.currentCycleEndAt
-  const currentCycleStartAt = subscription.currentCycleStartAt
-  const now = input.context.now
-
-  const isLastRenewInCurrentCycle =
-    lastRenewAt && lastRenewAt >= currentCycleStartAt && lastRenewAt <= currentCycleEndAt
-
-  return Boolean(!isLastRenewInCurrentCycle && subscription.renewAt >= now)
+  // cannot renew if the renew at is not due yet
+  return now >= p.renewAt
 }
 
 export const isAutoRenewEnabled = (input: { context: SubscriptionContext }): boolean => {
@@ -83,47 +45,25 @@ export const isTrialExpired = (input: { context: SubscriptionContext }): boolean
   return true
 }
 
-export const hasValidPaymentMethod = (input: { context: SubscriptionContext }): boolean => {
+export const hasDueBillingPeriods = (input: { context: SubscriptionContext }): boolean => {
+  return input.context.hasDueBillingPeriods
+}
+
+export const hasValidPaymentMethod = (input: {
+  context: SubscriptionContext
+  logger: Logger
+}): boolean => {
   const paymentMethodId = input.context.paymentMethodId
   const requiredPaymentMethod = input.context.requiredPaymentMethod
 
+  input.logger.info("hasValidPaymentMethod", { paymentMethodId, requiredPaymentMethod })
   if (!requiredPaymentMethod) return true
 
   return paymentMethodId !== null
-}
-
-export const canInvoice = (input: { context: SubscriptionContext }): boolean => {
-  const subscription = input.context.subscription
-  const now = input.context.now
-
-  // only invoice if the next invoice is in the future
-  if (subscription.invoiceAt && now > subscription.invoiceAt) {
-    return true
-  }
-
-  return false
 }
 
 export const isCurrentPhaseNull = (input: { context: SubscriptionContext }): boolean => {
   const currentPhase = input.context.currentPhase
 
   return !currentPhase?.id
-}
-
-export const isAlreadyInvoiced = (input: { context: SubscriptionContext }): boolean => {
-  const subscription = input.context.subscription
-  const currentPhase = input.context.currentPhase
-
-  if (!currentPhase) return false
-
-  // meaning if the current phase last invoice is in the current cycle
-  const lastInvoiceAt = subscription.lastInvoiceAt
-  const currentCycleEndAt = subscription.currentCycleEndAt
-  const currentCycleStartAt = subscription.currentCycleStartAt
-  const now = input.context.now
-
-  const isLastInvoiceInCurrentCycle =
-    lastInvoiceAt && lastInvoiceAt >= currentCycleStartAt && lastInvoiceAt <= currentCycleEndAt
-
-  return Boolean(!isLastInvoiceInCurrentCycle && subscription.invoiceAt >= now)
 }

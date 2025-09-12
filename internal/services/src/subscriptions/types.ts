@@ -7,10 +7,17 @@ import type {
 
 export type SusbriptionMachineStatus =
   | SubscriptionStatus
+  | "generating_billing_periods" // the subscription is generating billing periods
   | "loading"
   | "error"
   | "success"
   | "restored"
+  | "renewing" // the subscription is renewing
+  | "changing" // the subscription is changing
+  | "canceling" // the subscription is canceling
+  | "expiring" // the subscription is expiring
+  | "invoicing" // the subscription is invoicing
+  | "invoiced" // the subscription is invoiced, ready to be renewed
 
 // State machine types
 export interface SubscriptionContext {
@@ -25,6 +32,9 @@ export interface SubscriptionContext {
   requiredPaymentMethod: boolean
   // Current active phase for convenience
   currentPhase: SubscriptionPhaseExtended | null
+  // Open invoices for the current phase
+  hasOpenInvoices: boolean
+  hasDueBillingPeriods: boolean
   error?: {
     message: string
   }
@@ -32,7 +42,6 @@ export interface SubscriptionContext {
 
 // Update the SubscriptionEvent type to include these events
 export type SubscriptionEvent =
-  | { type: "TRIAL_END" }
   | { type: "RENEW" }
   | { type: "RESTORE" }
   | { type: "PAYMENT_FAILURE"; invoiceId: string; error: string }
@@ -42,6 +51,7 @@ export type SubscriptionEvent =
   | { type: "CANCEL" }
   | { type: "CHANGE" }
   | { type: "INVOICE" }
+  | { type: "BILLING_PERIOD" }
 
 export type SubscriptionGuards = {
   type:
@@ -53,19 +63,11 @@ export type SubscriptionGuards = {
     | "isAutoRenewEnabled"
     | "isAlreadyInvoiced"
     | "currentPhaseNull"
+    | "hasDueBillingPeriods"
 }
 
 export type SubscriptionActions = {
   type: "logStateTransition" | "notifyCustomer" | "updateSubscription"
 }
 
-export type MachineTags =
-  | "subscription"
-  | "machine"
-  | "loading"
-  | "error"
-  | "trialing"
-  | "invoicing"
-  | "ending"
-  | "active"
-  | "renewing"
+export type MachineTags = "subscription" | "machine" | "error" | "transition" | "loading" | "final"

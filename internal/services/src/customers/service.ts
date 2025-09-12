@@ -362,7 +362,7 @@ export class CustomerService {
     return Ok(val)
   }
 
-  public async syncEntitlementsUsageCache({
+  public async syncEntitlementsCache({
     entitlements,
   }: {
     entitlements: CustomerEntitlementExtended[]
@@ -373,18 +373,13 @@ export class CustomerService {
       promises.push(
         this.cache.customerEntitlement.set(
           `${entitlement.projectId}:${entitlement.customerId}:${entitlement.featureSlug}`,
-          {
-            ...entitlement,
-            currentCycleUsage: entitlement.currentCycleUsage,
-            accumulatedUsage: entitlement.accumulatedUsage,
-            lastUsageUpdateAt: Date.now(),
-          }
+          entitlement
         )
       )
     })
 
     // Execute with concurrency limit to avoid overwhelming the system
-    const BATCH_SIZE = 30
+    const BATCH_SIZE = 100
     for (let i = 0; i < promises.length; i += BATCH_SIZE) {
       const batch = promises.slice(i, i + BATCH_SIZE)
       await Promise.all(batch)
@@ -398,7 +393,7 @@ export class CustomerService {
     return
   }
 
-  public async syncEntitlementsUsageDB({
+  public async syncActiveEntitlementsLastUsage({
     customerId,
     projectId,
     now,
@@ -406,7 +401,7 @@ export class CustomerService {
     customerId: string
     projectId: string
     now: number
-  }): Promise<CustomerEntitlementExtended[]> {
+  }): Promise<Result<CustomerEntitlementExtended[], FetchError | UnPriceCustomerError>> {
     // get latest data from db
     const { err: subscriptionErr, val: subscription } = await this.getActiveSubscription({
       customerId,
@@ -418,13 +413,18 @@ export class CustomerService {
     })
 
     if (subscriptionErr) {
-      return []
+      return Err(subscriptionErr)
     }
 
     const currentPhase = subscription?.activePhase
 
     if (!currentPhase || !subscription) {
-      return []
+      return Err(
+        new UnPriceCustomerError({
+          code: "SUBSCRIPTION_NOT_FOUND",
+          message: "subscription not found or is not active for this customer",
+        })
+      )
     }
 
     const { customerEntitlements: entitlements } = currentPhase
@@ -436,13 +436,14 @@ export class CustomerService {
       }
     })
 
-    // get the billing window
+    // get the billing window on which now is
     const billingWindow = getCurrentBillingWindow({
       now,
       anchor: currentPhase.billingAnchor,
       interval: currentPhase.planVersion.billingConfig.billingInterval,
       intervalCount: currentPhase.planVersion.billingConfig.billingIntervalCount,
       trialEndsAt: currentPhase.trialEndsAt,
+      endAt: currentPhase.endAt,
     })
 
     // get the usage from analytics
@@ -497,9 +498,8 @@ export class CustomerService {
       sql.raw(" ")
     )
 
-    // all this updates are done in a single transaction
-    const entitlementsUpdatedMapped = await this.db.transaction(async (tx) => {
-      const entitlementsUpdated = await tx
+    try {
+      const entitlementsUpdated = await this.db
         .update(customerEntitlements)
         .set({
           currentCycleUsage: finalSqlEntitlementsUsage,
@@ -512,12 +512,16 @@ export class CustomerService {
         .returning()
         .then((res) => res)
         .catch((e) => {
-          this.logger.error(e.message)
           throw e
         })
 
       if (!entitlementsUpdated || entitlementsUpdated.length === 0) {
-        return
+        this.logger.info("no entitlements updated", {
+          customerId,
+          projectId,
+        })
+
+        return Ok([])
       }
 
       const result = entitlements
@@ -541,8 +545,6 @@ export class CustomerService {
               active: subscription.active,
               currentCycleStartAt: subscription.currentCycleStartAt,
               currentCycleEndAt: subscription.currentCycleEndAt,
-              previousCycleStartAt: subscription.previousCycleStartAt,
-              previousCycleEndAt: subscription.previousCycleEndAt,
             },
             activePhase: {
               billingConfig: currentPhase.planVersion.billingConfig,
@@ -556,15 +558,24 @@ export class CustomerService {
         })
         .filter((e) => e !== undefined)
 
-      // update cache
-      await this.syncEntitlementsUsageCache({
-        entitlements: result,
-      })
+      return Ok(result)
+    } catch (e) {
+      this.logger.error(
+        `error syncing entitlements last usage - ${e instanceof Error ? e.message : "unknown error"}`,
+        {
+          customerId,
+          projectId,
+          error: JSON.stringify(e),
+        }
+      )
 
-      return result
-    })
-
-    return entitlementsUpdatedMapped ?? []
+      return Err(
+        new UnPriceCustomerError({
+          code: "ERROR_SYNCING_ENTITLEMENTS_LAST_USAGE",
+          message: "error syncing entitlements last usage",
+        })
+      )
+    }
   }
 
   // get all active entitlements for this customer
@@ -606,8 +617,6 @@ export class CustomerService {
               active: true,
               currentCycleStartAt: true,
               currentCycleEndAt: true,
-              previousCycleStartAt: true,
-              previousCycleEndAt: true,
             },
             with: {
               customer: {
@@ -696,7 +705,6 @@ export class CustomerService {
     now: number
     opts?: {
       skipCache?: boolean // skip cache to force revalidation
-      withLastUsage?: boolean // if true, we will get the last usage from analytics
     }
   }): Promise<Result<CustomerEntitlementExtended[], FetchError | UnPriceCustomerError>> {
     const cacheKey = `${projectId}:${customerId}`
@@ -803,8 +811,6 @@ export class CustomerService {
           active: subscriptions.active,
           currentCycleStartAt: subscriptions.currentCycleStartAt,
           currentCycleEndAt: subscriptions.currentCycleEndAt,
-          previousCycleStartAt: subscriptions.previousCycleStartAt,
-          previousCycleEndAt: subscriptions.previousCycleEndAt,
         },
         activePhase: {
           startAt: subscriptionPhases.startAt,
@@ -964,6 +970,7 @@ export class CustomerService {
         interval: entitlement.activePhase.billingConfig.billingInterval,
         intervalCount: entitlement.activePhase.billingConfig.billingIntervalCount,
         trialEndsAt: entitlement.activePhase.trialEndsAt,
+        endAt: entitlement.activePhase.endAt,
       })
 
       // if it was reset within current billing window, we don't include accumulated
@@ -1355,6 +1362,7 @@ export class CustomerService {
       interval: entitlement.activePhase.billingConfig.billingInterval,
       intervalCount: entitlement.activePhase.billingConfig.billingIntervalCount,
       trialEndsAt: entitlement.activePhase.trialEndsAt,
+      endAt: entitlement.activePhase.endAt,
     })
 
     const outsideOfCurrentBillingWindow =
@@ -2248,6 +2256,8 @@ export class CustomerService {
             paymentMethodRequired: planVersion.paymentMethodRequired,
             customerId: newCustomer.id,
             subscriptionId: newSubscription.id,
+            currentCycleStartAt: Date.now(),
+            currentCycleEndAt: Date.now(),
           },
           projectId: projectId,
           db: trx,

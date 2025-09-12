@@ -4,6 +4,8 @@ import { extendZodWithOpenApi } from "zod-openapi"
 import {
   AGGREGATION_METHODS,
   BILLING_INTERVALS,
+  BILLING_PERIOD_STATUS,
+  BILLING_PERIOD_TYPE,
   COLLECTION_METHODS,
   CURRENCIES,
   DUE_BEHAVIOUR,
@@ -24,6 +26,8 @@ extendZodWithOpenApi(z)
 export const paymentProviderSchema = z.enum(PAYMENT_PROVIDERS)
 export const currencySchema = z.enum(CURRENCIES)
 export const typeFeatureSchema = z.enum(FEATURE_TYPES)
+export const billingPeriodStatusSchema = z.enum(BILLING_PERIOD_STATUS)
+export const billingPeriodTypeSchema = z.enum(BILLING_PERIOD_TYPE)
 export const usageModeSchema = z.enum(USAGE_MODES)
 export const aggregationMethodSchema = z.enum(AGGREGATION_METHODS)
 export const tierModeSchema = z.enum(TIER_MODES)
@@ -62,6 +66,7 @@ export const unpriceProjectErrorSchema = z.enum([
 export const unpricePlanErrorSchema = z.enum(["PLAN_VERSION_NOT_FOUND"])
 
 export const deniedReasonSchema = z.enum([
+  "ERROR_SYNCING_ENTITLEMENTS_LAST_USAGE",
   "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE",
   "ENTITLEMENT_OUTSIDE_OF_CURRENT_BILLING_WINDOW",
   "ERROR_RESETTING_DO",
@@ -177,3 +182,4 @@ export type InvoiceStatus = z.infer<typeof invoiceStatusSchema>
 export type InvoiceType = z.infer<typeof invoiceTypeSchema>
 export type BillingInterval = z.infer<typeof billingIntervalSchema>
 export type PlanType = z.infer<typeof planTypeSchema>
+export type BillingConfig = z.infer<typeof billingConfigSchema>

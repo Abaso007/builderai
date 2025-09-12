@@ -2,10 +2,19 @@ import { toDecimal } from "dinero.js"
 import { describe, expect, it } from "vitest"
 import type { Feature } from "../features"
 import type { PlanVersionExtended } from "../planVersions"
+import type { BillingConfig } from "../shared"
 import { calculateFlatPricePlan } from "./prices"
 
 describe("calculateFlatPricePlan", () => {
   it("should calculate flat price for a plan with flat features", () => {
+    const billingConfig = {
+      name: "test",
+      billingInterval: "month",
+      billingIntervalCount: 1,
+      planType: "recurring",
+      billingAnchor: 1,
+    } as BillingConfig
+
     const planVersion: PlanVersionExtended = {
       id: "pv_4Hs8cAjTgxCWUpFSjta8bDFEkqpF",
       currency: "USD",
@@ -19,13 +28,7 @@ describe("calculateFlatPricePlan", () => {
       trialDays: 0,
       autoRenew: true,
       paymentMethodRequired: false,
-      billingConfig: {
-        name: "test",
-        billingInterval: "month",
-        billingIntervalCount: 1,
-        planType: "recurring",
-        billingAnchor: 1,
-      },
+      billingConfig: billingConfig,
       planFeatures: [
         {
           id: "fv_4HsTVDfaaTtnAkq5sKB1Raj4tgaG",
@@ -61,6 +64,7 @@ describe("calculateFlatPricePlan", () => {
             id: "feature_4HryYvFLF7qeKUuVZtjfixTcXJ5y",
             slug: "feature-1",
           } as Feature,
+          billingConfig: billingConfig,
         },
         {
           id: "fv_4HsTVDfaaTtnAkq5sKB1Raj4tg23G",
@@ -96,6 +100,7 @@ describe("calculateFlatPricePlan", () => {
             id: "feature_4HryYvFLF7qeKUuVZtjfixTcXJ5y",
             slug: "feature-2",
           } as Feature,
+          billingConfig: billingConfig,
         },
       ],
       whenToBill: "pay_in_advance",

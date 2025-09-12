@@ -19,6 +19,7 @@
   "license": "AGPL-3.0",
   "scripts": {
     "test": "vitest run",
+    "test:file": "NODE_ENV=test SKIP_ENV_VALIDATION=true VERCEL_ENV=test vitest run 'src/**/$@'",
     "clean": "rm -rf .turbo node_modules",
     "generate": "pnpm exec drizzle-kit generate --config=drizzle.config.ts",
     "drop": "pnpm exec drizzle-kit drop --config=drizzle.config.ts",

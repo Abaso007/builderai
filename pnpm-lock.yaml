@@ -772,8 +772,8 @@ importers:
         specifier: ^3.1.3
         version: 3.2.0(date-fns@3.6.0)
       xstate:
-        specifier: ^5.19.2
-        version: 5.20.2
+        specifier: ^5.21.0
+        version: 5.21.0
       zod:
         specifier: ^3.24.2
         version: 3.25.76
@@ -21445,8 +21445,8 @@ packages:
     engines: {node: '>=0.4.0'}
     dev: false
 
-  /xstate@5.20.2:
-    resolution: {integrity: sha512-GZmLmc+WPKfFRxuTDAxCg0cUhS/ZnWaRD86DO8MKizeK4a050jd5k7UNnIQ2jJDWRig2/r0tmVXeezUNIhoz5Q==}
+  /xstate@5.21.0:
+    resolution: {integrity: sha512-y4wmqxjyAa0tgz4k3m/MgTF1kDOahE5+xLfWt5eh1sk+43DatLhKlI8lQDJZpvihZavjbD3TUgy2PRMphhhqgQ==}
     dev: false
 
   /y18n@5.0.8:

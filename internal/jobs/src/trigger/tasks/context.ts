@@ -15,7 +15,7 @@ export const createContext = async ({
   taskId: string
   subscriptionId: string
   projectId: string
-  phaseId: string
+  phaseId?: string
   defaultFields: Record<string, string> & {
     api: string
   }
@@ -41,6 +41,7 @@ export const createContext = async ({
     requestId: taskId,
     environment: env.NODE_ENV,
     service: "jobs",
+    logLevel: env.VERCEL_ENV === "production" ? "error" : "info",
     defaultFields: {
       ...defaultFields,
       subscriptionId,

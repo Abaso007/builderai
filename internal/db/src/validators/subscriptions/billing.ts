@@ -1,6 +1,5 @@
 import { addDays, addMinutes, addMonths, addYears, differenceInSeconds, endOfMonth } from "date-fns"
-import type { BillingConfig } from "../planVersions"
-import type { BillingAnchor, BillingInterval } from "../shared"
+import type { BillingConfig, BillingInterval } from "../shared"
 
 // map of the interval to the add function
 export const intervalMapFunction = {
@@ -27,6 +26,7 @@ interface BillingCycleResult {
  * @param opts Parameters for the calculation.
  * @param opts.now The current timestamp.
  * @param opts.trialEndsAt The timestamp when the trial ends (or null if no trial).
+ * @param opts.endAt The timestamp when the subscription ends (or null if no end date).
  * @param opts.anchor The timestamp or ordinal value of the billing cycle anchor.
  *               For daily/weekly intervals, it's a timestamp.
  *               For monthly intervals, it's the day of the month (1-31).
@@ -38,21 +38,35 @@ interface BillingCycleResult {
 export function getCurrentBillingWindow(opts: {
   now: number
   trialEndsAt: number | null
+  endAt: number | null
   anchor: number
   interval: BillingInterval
   intervalCount: number
+  startAt?: number // optional subscription start (UTC ms)
 }): {
   start: number
   end: number
 } {
-  const { now, trialEndsAt, anchor, interval, intervalCount } = opts
+  const { now, trialEndsAt, endAt, anchor, interval, intervalCount, startAt } = opts
 
-  // 1. Handle Trial Period
-  if (trialEndsAt && now < trialEndsAt) {
+  const effectiveEndAt = endAt ?? null
+
+  // 1. Handle Trial Period (only when trial is active)
+  if (trialEndsAt != null && now < trialEndsAt) {
+    const trialWindowEnd = endAt != null ? Math.min(trialEndsAt, endAt) : trialEndsAt
     return {
-      start: now, //Start using the service now
-      end: trialEndsAt, //It will end after the last trial day
+      start: startAt ?? now,
+      // inclusive end — last ms before the paid window starts at trialEndsAt
+      end: Math.max((trialWindowEnd ?? now) - 1, now),
     }
+  }
+
+  // Handle one-time interval explicitly: if startAt provided, window is [startAt, effectiveEndAt ?? now]
+  if (interval === "onetime") {
+    const windowStart = startAt ?? now
+    // one-time subscriptions never end; represent as a far-future max date
+    const windowEnd = new Date("9999-12-31T23:59:59.999Z").getTime()
+    return { start: windowStart, end: windowEnd }
   }
 
   // 2. Handle Recurring Billing Cycles
@@ -60,35 +74,65 @@ export function getCurrentBillingWindow(opts: {
   let windowStartDate: Date
 
   switch (interval) {
-    case "onetime":
+    case "minute": {
+      // floor to minute
       windowStartDate = new Date(nowUTCDate)
+      windowStartDate.setUTCSeconds(0, 0)
       break
-    case "minute":
-      windowStartDate = new Date(nowUTCDate)
-      windowStartDate.setUTCSeconds(0, 0) // Floor to the beginning of the current minute
+    }
+    case "day": {
+      // If startAt provided, align cycles from startAt every intervalCount days
+      if (startAt) {
+        const startDay = new Date(startAt)
+        startDay.setUTCHours(0, 0, 0, 0)
+        // compute how many full intervals have elapsed
+        const diffDays = Math.floor(
+          (nowUTCDate.getTime() - startDay.getTime()) / (24 * 60 * 60 * 1000)
+        )
+        const intervalsElapsed = Math.floor(diffDays / intervalCount)
+        windowStartDate = new Date(startDay)
+        windowStartDate.setUTCDate(startDay.getUTCDate() + intervalsElapsed * intervalCount)
+      } else {
+        // fallback: start of current UTC day
+        windowStartDate = new Date(nowUTCDate)
+        windowStartDate.setUTCHours(0, 0, 0, 0)
+      }
       break
-    case "day":
-      windowStartDate = new Date(anchor)
-      windowStartDate.setUTCHours(0, 0, 0, 0) // Normalize to midnight UTC
-      break
+    }
     case "month": {
       const nowYear = nowUTCDate.getUTCFullYear()
       const nowMonth = nowUTCDate.getUTCMonth()
-      const anchorDay = anchor
+      const anchorDay =
+        typeof anchor === "number"
+          ? Math.min(Math.max(1, anchor), 31)
+          : startAt
+            ? new Date(startAt).getUTCDate()
+            : 1
 
+      // seed at this month anchor
       windowStartDate = new Date(Date.UTC(nowYear, nowMonth, anchorDay))
-      if (windowStartDate.getTime() > now) {
-        windowStartDate.setUTCMonth(nowMonth - 1)
+      while (windowStartDate.getTime() > now) {
+        windowStartDate.setUTCMonth(windowStartDate.getUTCMonth() - intervalCount)
+      }
+      while (addMonths(windowStartDate, intervalCount).getTime() <= now) {
+        windowStartDate = addMonths(windowStartDate, intervalCount)
       }
       break
     }
     case "year": {
-      const nowYearForYearly = nowUTCDate.getUTCFullYear()
-      windowStartDate = new Date(Date.UTC(nowYearForYearly, 0, 1))
-      windowStartDate.setUTCDate(anchor - 1)
-
-      if (windowStartDate.getTime() > now) {
-        windowStartDate.setUTCFullYear(nowYearForYearly - 1)
+      const nowYear = nowUTCDate.getUTCFullYear()
+      const anchorMonth =
+        typeof anchor === "number"
+          ? Math.min(Math.max(1, anchor), 12)
+          : startAt
+            ? new Date(startAt).getUTCMonth() + 1
+            : 1
+      windowStartDate = new Date(Date.UTC(nowYear, anchorMonth - 1, 1))
+      while (windowStartDate.getTime() > now) {
+        windowStartDate.setUTCFullYear(windowStartDate.getUTCFullYear() - intervalCount)
+      }
+      while (addYears(windowStartDate, intervalCount).getTime() <= now) {
+        windowStartDate = addYears(windowStartDate, intervalCount)
       }
       break
     }
@@ -96,44 +140,36 @@ export function getCurrentBillingWindow(opts: {
       throw new Error(`Unsupported interval type: ${interval}`)
   }
 
-  // Make a copy of windowStartDate before the loop
-  let currentWindowStart = new Date(windowStartDate.getTime())
+  // Make a copy of windowStartDate before calculating end
+  const currentWindowStart = new Date(windowStartDate.getTime())
 
   // Now that we have windowStartDate, let's find the end of the billing window
   let windowEndDate: Date
-  while (true) {
-    const nextWindowStartDate = new Date(currentWindowStart) // Use copy of start date
-
-    switch (interval) {
-      case "onetime":
-        //If the interval is "onetime" it should last only for the current moment
-        windowEndDate = new Date(now)
-        break
-      case "year":
-        nextWindowStartDate.setUTCFullYear(nextWindowStartDate.getUTCFullYear() + intervalCount)
-        windowEndDate = nextWindowStartDate
-        break
-      case "month":
-        nextWindowStartDate.setUTCMonth(nextWindowStartDate.getUTCMonth() + intervalCount)
-        windowEndDate = nextWindowStartDate
-        break
-      case "minute":
-        nextWindowStartDate.setUTCMinutes(nextWindowStartDate.getUTCMinutes() + intervalCount)
-        windowEndDate = nextWindowStartDate
-        break
-      case "day":
-        nextWindowStartDate.setUTCDate(nextWindowStartDate.getUTCDate() + intervalCount)
-        windowEndDate = nextWindowStartDate
-        break
-      default:
-        throw new Error(`Unsupported interval type: ${interval}`)
-    }
-
-    // Once we determine the next possible period, we compare against 'now'
-    if (nextWindowStartDate.getTime() > now) {
+  const nextWindowStartDate = new Date(currentWindowStart)
+  switch (interval) {
+    case "year":
+      nextWindowStartDate.setUTCFullYear(nextWindowStartDate.getUTCFullYear() + intervalCount)
+      windowEndDate = new Date(nextWindowStartDate.getTime() - 1)
       break
-    }
-    currentWindowStart = new Date(nextWindowStartDate) // Copy for next period
+    case "month":
+      nextWindowStartDate.setUTCMonth(nextWindowStartDate.getUTCMonth() + intervalCount)
+      windowEndDate = new Date(nextWindowStartDate.getTime() - 1)
+      break
+    case "minute":
+      nextWindowStartDate.setUTCMinutes(nextWindowStartDate.getUTCMinutes() + intervalCount)
+      windowEndDate = new Date(nextWindowStartDate.getTime() - 1)
+      break
+    case "day":
+      nextWindowStartDate.setUTCDate(nextWindowStartDate.getUTCDate() + intervalCount)
+      windowEndDate = new Date(nextWindowStartDate.getTime() - 1)
+      break
+    default:
+      throw new Error(`Unsupported interval type: ${interval}`)
+  }
+
+  // If the window end date is after the effective end date, set it to the effective end date
+  if (effectiveEndAt && windowEndDate.getTime() > effectiveEndAt) {
+    windowEndDate = new Date(effectiveEndAt)
   }
 
   return {
@@ -231,6 +267,96 @@ export function getBillingCycleMessage(billingConfig: BillingConfig): {
   return { message: `billed every ${intervalCount} ${billingInterval}s` }
 }
 
+export function enumerateBillingWindows(opts: {
+  startAt: number
+  now: number
+  anchor: number
+  interval: BillingInterval
+  intervalCount: number
+  trialEndsAt?: number | null
+  endAt?: number | null
+  maxCycles?: number
+}): Array<{ start: number; end: number } | { start: number; end: number; isTrial: boolean }> {
+  const {
+    startAt,
+    now,
+    anchor,
+    interval,
+    intervalCount,
+    trialEndsAt = null,
+    endAt = null,
+    maxCycles = 1000,
+  } = opts
+
+  const windows: Array<
+    { start: number; end: number } | { start: number; end: number; isTrial: boolean }
+  > = []
+  // Determine hard stop: if endAt provided, cap there; otherwise, include the full
+  // billing window that contains "now" (do not end partial at now)
+  const hardStop = (() => {
+    if (endAt != null) return endAt
+    const currentWindow = getCurrentBillingWindow({
+      now,
+      trialEndsAt,
+      endAt: null,
+      anchor,
+      interval,
+      intervalCount,
+      startAt,
+    })
+    return currentWindow.end
+  })()
+
+  // 1) Trial window first (if applicable and intersects timeline)
+  let cursor = startAt
+  if (trialEndsAt != null && cursor <= trialEndsAt && cursor <= hardStop) {
+    const trialEndBoundary = Math.min(trialEndsAt, hardStop)
+    const trialEndInclusive = trialEndBoundary - 1
+    if (cursor <= trialEndInclusive) {
+      windows.push({ start: cursor, end: trialEndInclusive, isTrial: true })
+    }
+    cursor = trialEndInclusive + 1
+  }
+
+  if (cursor > hardStop) return windows
+
+  // 2) Onetime plan -> single window from start to far-future max date
+  if (interval === "onetime") {
+    windows.push({
+      start: cursor,
+      end: new Date("9999-12-31T23:59:59.999Z").getTime(),
+      isTrial: false,
+    })
+    return windows
+  }
+
+  // 3) Recurring cycles up to now/hardStop
+  let safety = 0
+  while (cursor <= hardStop && safety < maxCycles) {
+    safety += 1
+    const current = getCurrentBillingWindow({
+      now: cursor,
+      trialEndsAt: null,
+      endAt: endAt,
+      anchor,
+      interval,
+      intervalCount,
+      startAt,
+    })
+
+    const boundedStart = Math.max(current.start, cursor)
+    const boundedEnd = Math.min(current.end, hardStop)
+    if (boundedStart >= boundedEnd) break
+    // For recurring cycles, do not include isTrial flag
+    windows.push({ start: boundedStart, end: boundedEnd })
+
+    if (boundedEnd >= hardStop) break
+    cursor = boundedEnd + 1
+  }
+
+  return windows
+}
+
 export function configureBillingCycleSubscription({
   trialUnits = 0,
   currentCycleStartAt,
@@ -309,7 +435,7 @@ export function configureBillingCycleSubscription({
   }
 }
 
-function validateAnchor(interval: BillingInterval, anchor: BillingAnchor): number {
+function validateAnchor(interval: BillingInterval, anchor: number | "dayOfCreation"): number {
   if (anchor === "dayOfCreation") {
     // INFO: this will return the date in the UTC timezone
     return new Date().getUTCDate() // get the date the subscription was created

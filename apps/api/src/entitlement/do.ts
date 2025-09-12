@@ -524,8 +524,7 @@ export class DurableObjectUsagelimiter extends Server {
 
     if (timeSinceLastFlush >= this.MAX_FLUSH_INTERVAL_MS) {
       // If it's been longer than the max interval since the last flush,
-      // flush immediately (or as soon as possible).
-      // Flush immediately instead of scheduling with delay=0
+      // flush immediately instead of scheduling with delay=0
       this.ctx.waitUntil(this.flushToCache(featureSlug))
       return
     }
@@ -1220,13 +1219,11 @@ export class DurableObjectUsagelimiter extends Server {
   }
 
   public async prewarmDO({
-    customerId,
-    projectId,
+    entitlements,
     now,
     opts,
   }: {
-    customerId: string
-    projectId: string
+    entitlements: CustomerEntitlementExtended[]
     now: number
     opts?: {
       force?: boolean
@@ -1243,13 +1240,6 @@ export class DurableObjectUsagelimiter extends Server {
     if (ttl > 0 && !opts?.force) {
       return
     }
-
-    // update the entitlement usage in the db
-    const entitlements = await this.customerService.syncEntitlementsUsageDB({
-      customerId,
-      projectId,
-      now,
-    })
 
     // update the last sync usage at
     await this.updateConfig({

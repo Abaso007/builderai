@@ -162,6 +162,34 @@
       "when": 1757070788639,
       "tag": "0022_new_mandroid",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1757514021727,
+      "tag": "0023_curious_the_hood",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1757611500199,
+      "tag": "0024_dusty_warbird",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1757663075253,
+      "tag": "0025_thankful_frog_thor",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1757696636328,
+      "tag": "0026_handy_major_mapleleaf",
+      "breakpoints": true
     }
   ]
 }

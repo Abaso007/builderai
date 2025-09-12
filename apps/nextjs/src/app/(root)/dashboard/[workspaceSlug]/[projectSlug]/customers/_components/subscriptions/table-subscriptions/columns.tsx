@@ -204,54 +204,6 @@ export const columns: ColumnDef<Subscription>[] = [
     size: 40,
   },
   {
-    accessorKey: "invoiceAt",
-    header: ({ column }) => <DataTableColumnHeader column={column} title="Next invoice" />,
-    cell: ({ row }) => {
-      const invoiceDate = row.original.invoiceAt
-
-      if (invoiceDate === null || invoiceDate === undefined) {
-        return (
-          <Typography variant="p" affects="removePaddingMargin">
-            No defined yet
-          </Typography>
-        )
-      }
-
-      return (
-        <div className="flex items-center space-x-1 whitespace-nowrap">
-          <Typography variant="p" affects="removePaddingMargin">
-            {formatDate(invoiceDate, row.original.timezone)}
-          </Typography>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <AlertCircle className="size-4 font-light text-muted-foreground" />
-            </TooltipTrigger>
-            <TooltipContent align="start" side="right" sideOffset={10} alignOffset={-5}>
-              <div className="flex flex-col gap-1">
-                <Typography variant="p" affects="removePaddingMargin" className="font-semibold">
-                  Timezone: {row.original.timezone}
-                </Typography>
-                <Separator className="my-1" />
-                <Typography variant="p" affects="removePaddingMargin" className="text-xs">
-                  <span className="font-semibold">Local time: </span>
-                  {format(toZonedTime(invoiceDate, row.original.timezone), "PPpp")}
-                </Typography>
-
-                <Typography variant="p" affects="removePaddingMargin" className="text-xs">
-                  <span className="font-semibold">Customer time: </span>
-                  {format(new Date(invoiceDate), "PPpp")}
-                </Typography>
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      )
-    },
-    enableSorting: true,
-    enableHiding: true,
-    size: 40,
-  },
-  {
     id: "actions",
     cell: function Cell({ row }) {
       return <DataTableRowActions row={row} />

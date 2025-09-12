@@ -502,8 +502,9 @@ const calculateInvoiceItemsPrice = async (payload: {
   try {
     // when billing in advance we get the usage for the previous cycle if any
     // when billing in arrear we get the usage for the current cycle
-    const startAt = shouldBillInAdvance ? invoice.previousCycleStartAt : invoice.cycleStartAt
-    const endAt = shouldBillInAdvance ? invoice.previousCycleEndAt : invoice.cycleEndAt
+    // TODO: fix this
+    const startAt = shouldBillInAdvance ? invoice.cycleStartAt : invoice.cycleStartAt
+    const endAt = shouldBillInAdvance ? invoice.cycleEndAt : invoice.cycleEndAt
 
     let usages = null
 

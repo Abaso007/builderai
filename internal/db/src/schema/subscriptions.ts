@@ -3,10 +3,12 @@ import {
   bigint,
   boolean,
   foreignKey,
+  index,
   integer,
   json,
   primaryKey,
   text,
+  uniqueIndex,
   varchar,
 } from "drizzle-orm/pg-core"
 import type { z } from "zod"
@@ -15,20 +17,13 @@ import { pgTableProject } from "../utils/_table"
 import { cuid, timestamps } from "../utils/fields"
 import { projectID } from "../utils/sql"
 import type {
-  invoiceMetadataSchema,
   subscriptionMetadataSchema,
   subscriptionPhaseMetadataSchema,
 } from "../validators/subscriptions"
-import { customerCredits, customerEntitlements, customers } from "./customers"
-import {
-  collectionMethodEnum,
-  currencyEnum,
-  invoiceStatusEnum,
-  invoiceTypeEnum,
-  paymentProviderEnum,
-  subscriptionStatusEnum,
-  whenToBillEnum,
-} from "./enums"
+import { billingPeriods } from "./billingPeriods"
+import { customerEntitlements, customers } from "./customers"
+import { subscriptionStatusEnum } from "./enums"
+import { invoices } from "./invoices"
 import { planVersionFeatures } from "./planVersionFeatures"
 import { versions } from "./planVersions"
 import { projects } from "./projects"
@@ -46,7 +41,7 @@ export const subscriptions = pgTableProject(
     ...timestamps,
     // customer to get the payment info from that customer
     customerId: cuid("customers_id").notNull(),
-    status: subscriptionStatusEnum("status").notNull().default("idle"),
+    status: subscriptionStatusEnum("status").notNull().default("active"),
 
     // whether the subscription is active or not
     // normally is active if the status is active, trialing or past_due or changing
@@ -54,25 +49,11 @@ export const subscriptions = pgTableProject(
     active: boolean("active").default(false).notNull(),
     // slug of the plan only for ui purposes
     planSlug: text("plan_slug").default("FREE").notNull(),
-    timezone: varchar("timezone", { length: 32 }).notNull().default("UTC"),
-
-    // ************ subscription important dates ************
-    // current cycle dates for invoices purposes
+    // UI purposes only
     currentCycleStartAt: bigint("current_cycle_start_at_m", { mode: "number" }).notNull(),
     currentCycleEndAt: bigint("current_cycle_end_at_m", { mode: "number" }).notNull(),
-    previousCycleStartAt: bigint("previous_cycle_start_at_m", { mode: "number" }),
-    previousCycleEndAt: bigint("previous_cycle_end_at_m", { mode: "number" }),
-    // when the subscription is going to be billed next
-    invoiceAt: bigint("invoice_at_m", { mode: "number" }).notNull().default(0),
-    // renewAt indicates the next time the subscription will be renewed
-    renewAt: bigint("renew_at_m", { mode: "number" }).notNull().default(0),
-    // endAt is the date when the subscription will end
-    endAt: bigint("end_at_m", { mode: "number" }),
-    // when the subscription is going to be billed next
-    lastRenewAt: bigint("last_renew_at_m", { mode: "number" }).notNull().default(0),
-    // when the subscription is going to be billed next
-    lastInvoiceAt: bigint("last_invoice_at_m", { mode: "number" }).notNull().default(0),
-    // ************ subscription important dates ************
+
+    timezone: varchar("timezone", { length: 32 }).notNull().default("UTC"),
     // metadata for the subscription
     metadata: json("metadata").$type<z.infer<typeof subscriptionMetadataSchema>>(),
   },
@@ -104,6 +85,7 @@ export const subscriptionPhases = pgTableProject(
     ...projectID,
     ...timestamps,
     subscriptionId: cuid("subscription_id").notNull(),
+    // keep the plan here but we are subcripbing in reality to the features of the plan
     planVersionId: cuid("plan_version_id").notNull(),
     // payment method id of the customer - if not set, the first payment method will be used
     // payment method is tied to the phase because it's tied to the plan version payment provider
@@ -111,7 +93,7 @@ export const subscriptionPhases = pgTableProject(
     // trial days of the phase
     trialDays: integer("trial_days").notNull().default(0),
     // billing anchor of the phase
-    billingAnchor: integer("billing_anchor").notNull().default(0), // 0 means not applicable
+    billingAnchor: integer("billing_anchor").notNull().default(0),
     // ************ subscription important dates ************
     // when the trial ends
     trialEndsAt: bigint("trial_ends_at_m", { mode: "number" }),
@@ -119,6 +101,10 @@ export const subscriptionPhases = pgTableProject(
     startAt: bigint("start_at_m", { mode: "number" }).notNull(),
     // when the subscription ends if undefined the subscription is active and renewed every cycle depending on auto_renew flag
     endAt: bigint("end_at_m", { mode: "number" }),
+    currentCycleStartAt: bigint("current_cycle_start_at_m", { mode: "number" }).notNull(),
+    currentCycleEndAt: bigint("current_cycle_end_at_m", { mode: "number" }).notNull(),
+    // this will trigger the renewal of the subscription
+    renewAt: bigint("renew_at_m", { mode: "number" }),
     // ************ subscription important dates ************
     metadata: json("metadata").$type<z.infer<typeof subscriptionPhaseMetadataSchema>>(),
   },
@@ -142,6 +128,15 @@ export const subscriptionPhases = pgTableProject(
       foreignColumns: [subscriptions.id, subscriptions.projectId],
       name: "subscription_phases_subscription_id_fkey",
     }).onDelete("cascade"),
+    // phase can't overlap with other phases of the same subscription
+    uniqWindow: uniqueIndex("phase_sub_window_uq").on(
+      table.projectId,
+      table.subscriptionId,
+      table.startAt,
+      table.endAt
+    ),
+    // index on the renewAt
+    uniqRenew: index("phase_sub_renew_uq").on(table.projectId, table.renewAt),
   })
 )
 
@@ -185,98 +180,6 @@ export const subscriptionItems = pgTableProject(
   })
 )
 
-export const invoices = pgTableProject(
-  "invoices",
-  {
-    ...projectID,
-    ...timestamps,
-    // Is it necessary to have the subscription id?
-    subscriptionId: cuid("subscription_id").notNull(),
-    subscriptionPhaseId: cuid("subscription_phase_id").notNull(),
-    customerId: cuid("customer_id").notNull(),
-    requiredPaymentMethod: boolean("required_payment_method").notNull().default(false),
-    paymentMethodId: text("payment_method_id"),
-    status: invoiceStatusEnum("status").notNull().default("draft"),
-    // type of invoice charges (flat, usage, hybrid)
-    type: invoiceTypeEnum("type").notNull().default("hybrid"),
-    cycleStartAt: bigint("cycle_start_at_m", { mode: "number" }).notNull(),
-    cycleEndAt: bigint("cycle_end_at_m", { mode: "number" }).notNull(),
-    // previous cycle dates for invoices purposes
-    previousCycleStartAt: bigint("previous_cycle_start_at_m", { mode: "number" }),
-    previousCycleEndAt: bigint("previous_cycle_end_at_m", { mode: "number" }),
-    // sent at is the date when the invoice was sent to the customer
-    sentAt: bigint("sent_at_m", { mode: "number" }),
-    prorated: boolean("prorated").notNull().default(false),
-    whenToBill: whenToBillEnum("when_to_bill").notNull().default("pay_in_advance"),
-    paymentAttempts:
-      json("payment_attempts").$type<
-        {
-          status: string
-          createdAt: number
-        }[]
-      >(),
-    // when the invoice is due and ready to be billed
-    dueAt: bigint("due_at_m", { mode: "number" }).notNull(),
-    paidAt: bigint("paid_at_m", { mode: "number" }),
-    // ----------------- amounts --------------------------------
-    // amount in cents, these are not used for the calculations only to keep track of the amounts
-    // the invoice from the payment provider will have the calculations
-    // invoices can have credits applied to them
-    customerCreditId: cuid("customer_credit_id"),
-    // amount of the credit used to pay the invoice
-    amountCreditUsed: integer("amount_credit_used").default(0),
-    // subtotal of the invoice before the credit is applied
-    subtotal: integer("subtotal").default(0).notNull(),
-    // total amount of the invoice after the credit is applied
-    total: integer("total").default(0).notNull(),
-    // ----------------- amounts --------------------------------
-    collectionMethod: collectionMethodEnum("collection_method")
-      .notNull()
-      .default("charge_automatically"),
-    invoicePaymentProviderId: text("invoice_payment_provider_id"),
-    invoicePaymentProviderUrl: text("invoice_payment_provider_url"),
-    // payment provider for the plan - stripe, paypal, lemonsquezee etc.
-    paymentProvider: paymentProviderEnum("payment_providers").notNull(),
-    // currency of the plan
-    currency: currencyEnum("currency").notNull(),
-    // when the subscription is considered past due
-    pastDueAt: bigint("past_due_at_m", { mode: "number" }).notNull(),
-    metadata: json("metadata").$type<z.infer<typeof invoiceMetadataSchema>>(),
-  },
-  (table) => ({
-    primary: primaryKey({
-      columns: [table.id, table.projectId],
-      name: "invoices_pkey",
-    }),
-    subscriptionfk: foreignKey({
-      columns: [table.subscriptionId, table.projectId],
-      foreignColumns: [subscriptions.id, subscriptions.projectId],
-      name: "invoices_subscription_id_fkey",
-    }).onDelete("cascade"),
-    customerfk: foreignKey({
-      columns: [table.customerId, table.projectId],
-      foreignColumns: [customers.id, customers.projectId],
-      name: "invoices_customer_id_fkey",
-    }).onDelete("cascade"),
-    subscriptionPhasefk: foreignKey({
-      columns: [table.subscriptionPhaseId, table.projectId],
-      foreignColumns: [subscriptionPhases.id, subscriptionPhases.projectId],
-      name: "invoices_subscription_phase_id_fkey",
-    }).onDelete("cascade"),
-    // project fk
-    projectfk: foreignKey({
-      columns: [table.projectId],
-      foreignColumns: [projects.id],
-      name: "invoices_project_id_fkey",
-    }).onDelete("cascade"),
-    customerCreditfk: foreignKey({
-      columns: [table.customerCreditId, table.projectId],
-      foreignColumns: [customerCredits.id, customerCredits.projectId],
-      name: "invoices_customer_credit_id_fkey",
-    }).onDelete("cascade"),
-  })
-)
-
 export const subscriptionItemRelations = relations(subscriptionItems, ({ one }) => ({
   featurePlanVersion: one(planVersionFeatures, {
     fields: [subscriptionItems.featurePlanVersionId, subscriptionItems.projectId],
@@ -289,29 +192,6 @@ export const subscriptionItemRelations = relations(subscriptionItems, ({ one }) 
   subscription: one(subscriptions, {
     fields: [subscriptionItems.subscriptionId, subscriptionItems.projectId],
     references: [subscriptions.id, subscriptions.projectId],
-  }),
-}))
-
-export const invoiceRelations = relations(invoices, ({ one }) => ({
-  subscription: one(subscriptions, {
-    fields: [invoices.subscriptionId, invoices.projectId],
-    references: [subscriptions.id, subscriptions.projectId],
-  }),
-  project: one(projects, {
-    fields: [invoices.projectId],
-    references: [projects.id],
-  }),
-  subscriptionPhase: one(subscriptionPhases, {
-    fields: [invoices.subscriptionPhaseId, invoices.projectId],
-    references: [subscriptionPhases.id, subscriptionPhases.projectId],
-  }),
-  customerCredit: one(customerCredits, {
-    fields: [invoices.customerCreditId, invoices.projectId],
-    references: [customerCredits.id, customerCredits.projectId],
-  }),
-  customer: one(customers, {
-    fields: [invoices.customerId, invoices.projectId],
-    references: [customers.id, customers.projectId],
   }),
 }))
 
@@ -333,6 +213,8 @@ export const subscriptionPhaseRelations = relations(subscriptionPhases, ({ one, 
     fields: [subscriptionPhases.subscriptionId, subscriptionPhases.projectId],
     references: [subscriptions.id, subscriptions.projectId],
   }),
+  invoices: many(invoices),
+  periods: many(billingPeriods),
   project: one(projects, {
     fields: [subscriptionPhases.projectId],
     references: [projects.id],

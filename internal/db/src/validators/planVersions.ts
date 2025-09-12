@@ -147,7 +147,6 @@ export const getPlanVersionApiResponseSchema = planVersionSelectBaseSchema.exten
 export type InsertPlanVersion = z.infer<typeof versionInsertBaseSchema>
 export type PlanVersionMetadata = z.infer<typeof planVersionMetadataSchema>
 export type PlanVersion = z.infer<typeof planVersionSelectBaseSchema>
-export type BillingConfig = z.infer<typeof billingConfigSchema>
 export type InsertBillingConfig = z.infer<typeof insertBillingConfigSchema>
 export type PlanVersionApi = z.infer<typeof getPlanVersionApiResponseSchema>
 export type PlanVersionExtended = z.infer<typeof planVersionExtendedSchema>
