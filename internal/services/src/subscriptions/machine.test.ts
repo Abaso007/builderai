@@ -113,6 +113,7 @@ function buildMockSubscription({
               billingAnchor: 1,
             },
             title: "Pro",
+            plan: { id: "plan_123", slug: "pro" },
           },
           items: [
             {
@@ -164,9 +165,12 @@ describe("SubscriptionMachine - comprehensive", () => {
     } as unknown as Analytics
 
     mockLogger = {
+      debug: vi.fn(),
+      emit: vi.fn(),
       info: vi.fn(),
-      error: vi.fn(),
       warn: vi.fn?.() ?? vi.fn(),
+      error: vi.fn(),
+      flush: vi.fn().mockResolvedValue(undefined),
     } as unknown as ConsoleLogger
 
     mockCustomerService = {
@@ -181,7 +185,12 @@ describe("SubscriptionMachine - comprehensive", () => {
     dbMockData.push({ table: "subscriptions", data: subscription })
 
     mockDb = {
-      transaction: vi.fn().mockImplementation((callback) => callback(mockDb)),
+      transaction: vi.fn().mockImplementation(async (callback) => {
+        const tx = Object.assign({}, mockDb, {
+          rollback: vi.fn(),
+        })
+        return await callback(tx as unknown as Database)
+      }),
       update: vi.fn((table) => {
         if (table === subscriptions) {
           return {
@@ -245,8 +254,79 @@ describe("SubscriptionMachine - comprehensive", () => {
         },
         billingPeriods: {
           findFirst: vi.fn().mockResolvedValue(null),
+          findMany: vi.fn().mockImplementation(() =>
+            Promise.resolve([
+              {
+                id: "bp_1",
+                projectId: subscription.projectId,
+                subscriptionId: subscription.id,
+                subscriptionPhaseId: subscription.phases[0]!.id,
+                subscriptionItemId: subscription.phases[0]!.items[0]!.id,
+                cycleStartAt: subscription.currentCycleStartAt,
+                cycleEndAt: subscription.currentCycleEndAt,
+                prorationFactor: 1,
+                subscriptionItem: {
+                  id: subscription.phases[0]!.items[0]!.id,
+                  units: subscription.phases[0]!.items[0]!.units,
+                  featurePlanVersion: {
+                    id: subscription.phases[0]!.items[0]!.featurePlanVersion.id,
+                  },
+                },
+              },
+            ])
+          ),
+        },
+        subscriptionPhases: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: subscription.phases[0]!.id,
+            projectId: subscription.projectId,
+            subscriptionId: subscription.id,
+            paymentMethodId: subscription.phases[0]!.paymentMethodId,
+            planVersion: subscription.phases[0]!.planVersion,
+            subscription: {
+              id: subscription.id,
+              customerId: subscription.customerId,
+            },
+          }),
+          findMany: vi.fn().mockResolvedValue([
+            {
+              ...subscription.phases[0]!,
+              subscription: {
+                id: subscription.id,
+                customerId: subscription.customerId,
+              },
+              items: subscription.phases[0]!.items.map((i) => ({
+                ...i,
+                featurePlanVersion: {
+                  ...i.featurePlanVersion,
+                  billingConfig:
+                    i.featurePlanVersion.billingConfig ??
+                    subscription.phases[0]!.planVersion.billingConfig,
+                },
+              })),
+            },
+          ]),
         },
       },
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          groupBy: vi.fn(() => ({
+            where: vi.fn(() => ({
+              limit: vi.fn(() =>
+                Promise.resolve([
+                  {
+                    projectId: subscription.projectId,
+                    subscriptionId: subscription.id,
+                    subscriptionPhaseId: subscription.phases[0]!.id,
+                    cycleStartAt: subscription.currentCycleStartAt,
+                    cycleEndAt: subscription.currentCycleEndAt,
+                  },
+                ])
+              ),
+            })),
+          })),
+        })),
+      })),
       insert: vi.fn((table) => {
         return {
           values: vi.fn((data) => {
@@ -257,8 +337,9 @@ describe("SubscriptionMachine - comprehensive", () => {
                   ? "billingPeriods"
                   : "other"
             dbMockData.push({ table: tableName, data })
-            return {
-              returning: vi.fn().mockResolvedValue([
+
+            const makeReturning = () =>
+              vi.fn().mockResolvedValue([
                 {
                   id: tableName === "invoices" ? "inv_123" : "bp_123",
                   status: tableName === "invoices" ? "draft" : "pending",
@@ -268,17 +349,32 @@ describe("SubscriptionMachine - comprehensive", () => {
                   cycleEndAt: subscription.currentCycleEndAt,
                   ...data,
                 },
-              ]),
+              ])
+
+            // Support both patterns:
+            // - insert(...).values(...).returning()
+            // - insert(...).values(...).onConflictDoNothing(...).returning()
+            // - insert(invoiceItems).values(...).onConflictDoNothing(...).catch(...)
+            return {
+              onConflictDoNothing: vi.fn().mockReturnValue({
+                returning: makeReturning(),
+                catch: vi.fn().mockImplementation((handler) => Promise.resolve().catch(handler)),
+              }),
+              returning: makeReturning(),
             }
           }),
         }
       }),
     } as unknown as Database
 
-    vi.spyOn(db, "transaction").mockImplementation((callback) => mockDb.transaction(callback))
+    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+    vi.spyOn(db, "transaction").mockImplementation(mockDb.transaction as any)
     vi.spyOn(db, "update").mockImplementation(mockDb.update)
     vi.spyOn(db, "query", "get").mockReturnValue(mockDb.query)
     vi.spyOn(db, "insert").mockImplementation(mockDb.insert)
+    // select used by invoiceSubscription aggregation
+    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+    vi.spyOn(db, "select").mockImplementation(mockDb.select as any)
   }
 
   it("restores to correct state based on subscription.status", async () => {
@@ -291,8 +387,8 @@ describe("SubscriptionMachine - comprehensive", () => {
       analytics: mockAnalytics,
       logger: mockLogger,
       now: Date.now(),
-      waitUntil: vi.fn(),
       customer: mockCustomerService,
+      db: mockDb,
     })
 
     expect(result.err).toBeUndefined()
@@ -317,8 +413,8 @@ describe("SubscriptionMachine - comprehensive", () => {
       analytics: mockAnalytics,
       logger: mockLogger,
       now: Date.now(),
-      waitUntil: vi.fn(),
       customer: mockCustomerService,
+      db: mockDb,
     })
     expect(err).toBeUndefined()
     if (err) return
@@ -349,8 +445,8 @@ describe("SubscriptionMachine - comprehensive", () => {
       analytics: mockAnalytics,
       logger: mockLogger,
       now: Date.now(),
-      waitUntil: vi.fn(),
       customer: mockCustomerService,
+      db: mockDb,
     })
     expect(err).toBeUndefined()
     if (err) return
@@ -380,8 +476,8 @@ describe("SubscriptionMachine - comprehensive", () => {
       analytics: mockAnalytics,
       logger: mockLogger,
       now: Date.now(),
-      waitUntil: vi.fn(),
       customer: mockCustomerService,
+      db: mockDb,
     })
     expect(err).toBeUndefined()
     if (err) return
@@ -410,8 +506,8 @@ describe("SubscriptionMachine - comprehensive", () => {
       analytics: mockAnalytics,
       logger: mockLogger,
       now: Date.now(),
-      waitUntil: vi.fn(),
       customer: mockCustomerService,
+      db: mockDb,
     })
     expect(created1.err).toBeUndefined()
     if (created1.err) return
@@ -427,8 +523,8 @@ describe("SubscriptionMachine - comprehensive", () => {
       analytics: mockAnalytics,
       logger: mockLogger,
       now: Date.now(),
-      waitUntil: vi.fn(),
       customer: mockCustomerService,
+      db: mockDb,
     })
     expect(created2.err).toBeUndefined()
     if (created2.err) return
@@ -446,8 +542,8 @@ describe("SubscriptionMachine - comprehensive", () => {
       analytics: mockAnalytics,
       logger: mockLogger,
       now: Date.now(),
-      waitUntil: vi.fn(),
       customer: mockCustomerService,
+      db: mockDb,
     })
     expect(err).toBeUndefined()
     if (err) return
@@ -472,8 +568,8 @@ describe("SubscriptionMachine - comprehensive", () => {
       analytics: mockAnalytics,
       logger: mockLogger,
       now: Date.now(),
-      waitUntil: vi.fn(),
       customer: mockCustomerService,
+      db: mockDb,
     })
     expect(err).toBeUndefined()
     if (err) return
@@ -484,6 +580,62 @@ describe("SubscriptionMachine - comprehensive", () => {
     const s = await m.reportInvoiceSuccess({ invoiceId: "inv_test" })
     expect(s.err).toBeUndefined()
     expect(m.getState()).toBe("active")
+    await m.shutdown()
+  })
+
+  it("denies invoice when no due billing periods", async () => {
+    const { sub } = buildMockSubscription({ status: "active", autoRenew: true, trialEnded: true })
+    // keep payment method valid; test should fail due to no due billing periods
+    setupDbMocks(sub)
+
+    // no due billing periods
+    mockDb.query.billingPeriods.findFirst = vi.fn().mockResolvedValue(null)
+
+    const { err, val } = await SubscriptionMachine.create({
+      subscriptionId: sub.id,
+      projectId: sub.projectId,
+      analytics: mockAnalytics,
+      logger: mockLogger,
+      now: Date.now(),
+      customer: mockCustomerService,
+      db: mockDb,
+    })
+    expect(err).toBeUndefined()
+    if (err) return
+    const m = val
+    expect(m.getState()).toBe("active")
+
+    const res = await m.invoice()
+    expect(res.err).toBeDefined()
+    expect(res.err!.message).toContain("Cannot invoice subscription, no due billing periods")
+    await m.shutdown()
+  })
+
+  it("trialing renew before trial end returns error", async () => {
+    const { sub } = buildMockSubscription({
+      status: "trialing",
+      autoRenew: true,
+      trialEnded: false,
+    })
+    setupDbMocks(sub)
+
+    const { err, val } = await SubscriptionMachine.create({
+      subscriptionId: sub.id,
+      projectId: sub.projectId,
+      analytics: mockAnalytics,
+      logger: mockLogger,
+      now: Date.now(),
+      customer: mockCustomerService,
+      db: mockDb,
+    })
+    expect(err).toBeUndefined()
+    if (err) return
+    const m = val
+    expect(m.getState()).toBe("trialing")
+
+    const res = await m.renew()
+    expect(res.err).toBeDefined()
+    expect(res.err!.message).toContain("Cannot end trial, dates are not due yet")
     await m.shutdown()
   })
 })

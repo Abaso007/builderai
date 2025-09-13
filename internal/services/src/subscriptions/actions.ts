@@ -19,7 +19,7 @@ export const logTransition = ({
   logger: Logger
 }): void => {
   if (!context.currentPhase) {
-    logger.info(`Subscription ${context.subscriptionId} has no current phase`, {
+    logger.debug(`Subscription ${context.subscriptionId} has no current phase`, {
       subscriptionId: context.subscriptionId,
       customerId: context.customer.id,
       projectId: context.projectId,
@@ -29,7 +29,7 @@ export const logTransition = ({
   }
 
   if (context.error) {
-    logger.error(`Subscription ${context.subscriptionId} error: ${context.error.message}`, {
+    logger.debug(`Subscription ${context.subscriptionId} error: ${context.error.message}`, {
       subscriptionId: context.subscriptionId,
       customerId: context.customer.id,
       currentPhaseId: context.currentPhase?.id,
@@ -39,7 +39,7 @@ export const logTransition = ({
     })
   }
 
-  logger.info(
+  logger.debug(
     `Subscription ${context.subscriptionId} ${context.subscription.status} state transition: ${event.type}`
   )
 }
@@ -56,7 +56,7 @@ export default ({
   event: SubscriptionEvent
   logger: Logger
 }): void => {
-  logger.info(
+  logger.debug(
     `Notifying customer about subscription ${context.subscriptionId} event: ${event.type}`
   )
 }

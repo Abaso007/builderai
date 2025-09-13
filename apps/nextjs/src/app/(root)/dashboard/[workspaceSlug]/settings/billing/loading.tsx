@@ -1,7 +1,7 @@
 import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@unprice/ui/card"
 import { Skeleton } from "@unprice/ui/skeleton"
-import { PaymentMethodForm } from "~/components/forms/payment-method-form"
+import { PaymentMethodButton } from "~/components/forms/payment-method-form"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 
@@ -49,12 +49,11 @@ function PaymentMethodCardLoading() {
         <CardTitle>Default Payment Method</CardTitle>
       </CardHeader>
       <CardContent>
-        <PaymentMethodForm
+        <PaymentMethodButton
           customerId="customer_id"
           successUrl={""}
           cancelUrl={""}
-          readonly={true}
-          loading={true}
+          paymentProvider="stripe"
         />
       </CardContent>
     </Card>

@@ -111,12 +111,12 @@ export const createTRPCContext = async (opts: {
         dataset: env.AXIOM_DATASET,
         environment: env.NODE_ENV,
         service: "trpc",
-        logLevel: env.VERCEL_ENV === "production" ? "error" : "warn",
+        logLevel: env.VERCEL_ENV === "production" ? "error" : "info",
       })
     : new ConsoleLogger({
         requestId,
         environment: env.NODE_ENV,
-        logLevel: env.VERCEL_ENV === "production" ? "error" : "warn",
+        logLevel: env.VERCEL_ENV === "production" ? "error" : "info",
         service: "trpc",
         defaultFields: {
           userId,

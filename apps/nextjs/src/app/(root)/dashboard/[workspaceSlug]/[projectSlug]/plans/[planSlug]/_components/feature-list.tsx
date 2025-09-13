@@ -117,6 +117,7 @@ export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) 
                     },
                   },
                 },
+                billingConfig: planVersion.billingConfig,
               } as PlanVersionFeatureDragDrop
 
               return (

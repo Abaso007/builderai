@@ -354,7 +354,7 @@ export const planVersionFeatureInsertBaseSchema = createInsertSchema(planVersion
   config: configFeatureSchema.optional(),
   metadata: planVersionFeatureMetadataSchema.optional(),
   aggregationMethod: aggregationMethodSchema.default("count"),
-  billingConfig: billingConfigSchema.optional(),
+  billingConfig: billingConfigSchema,
   defaultQuantity: z.coerce.number().int(),
   limit: z.coerce.number().int().optional(),
 })
@@ -367,12 +367,12 @@ export const planVersionFeatureInsertBaseSchema = createInsertSchema(planVersion
     id: true,
     config: true,
     metadata: true,
-    billingConfig: true,
   })
   .required({
     featureId: true,
     planVersionId: true,
     featureType: true,
+    billingConfig: true,
   })
   .transform((data) => {
     if (data.config) {

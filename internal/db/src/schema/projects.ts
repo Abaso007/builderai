@@ -1,4 +1,4 @@
-import { eq, relations } from "drizzle-orm"
+import { relations, sql } from "drizzle-orm"
 
 import {
   boolean,
@@ -38,7 +38,8 @@ export const projects = pgTableProject(
     metadata: json("metadata").$type<z.infer<typeof projectMetadataSchema>>(),
   },
   (table) => ({
-    mainProject: uniqueIndex("main_project").on(table.isMain).where(eq(table.isMain, true)),
+    // there must be only one main project
+    mainProject: uniqueIndex("main_project").on(table.isMain).where(sql`${table.isMain} = true`),
     slug: index("slug_index").on(table.slug),
     unique: unique("unique_slug").on(table.slug),
     workspace: foreignKey({

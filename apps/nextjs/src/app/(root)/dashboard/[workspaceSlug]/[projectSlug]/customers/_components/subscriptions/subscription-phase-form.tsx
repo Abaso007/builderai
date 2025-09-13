@@ -131,12 +131,14 @@ export function SubscriptionPhaseForm({
           <TrialDaysFormField form={form} isDisabled={editMode} className="w-full" />
         </div>
 
-        <PaymentMethodsFormField
-          form={form}
-          withSeparator
-          paymentProvider={selectedPlanVersion?.paymentProvider}
-          paymentProviderRequired={selectedPlanVersion?.paymentMethodRequired}
-        />
+        {selectedPlanVersion?.paymentProvider && (
+          <PaymentMethodsFormField
+            form={form}
+            withSeparator
+            paymentProvider={selectedPlanVersion?.paymentProvider}
+            paymentProviderRequired={selectedPlanVersion?.paymentMethodRequired}
+          />
+        )}
 
         <ConfigItemsFormField
           form={form}

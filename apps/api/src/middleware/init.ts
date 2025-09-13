@@ -181,7 +181,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       read1DatabaseUrl: c.env.DATABASE_READ1_URL,
       read2DatabaseUrl: c.env.DATABASE_READ2_URL,
       logger: c.env.DRIZZLE_LOG.toString() === "true",
-      singleton: true, // use singleton to reuse the connection between requests on the same isolate
+      singleton: false,
     })
 
     endTime(c, "initDb")

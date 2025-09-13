@@ -3,7 +3,7 @@ import { SubscriptionService } from "@unprice/services/subscriptions"
 import { createContext } from "./context"
 
 export const finilizeTask = task({
-  id: "subscription.phase.finilize",
+  id: "invoice.finilize.task",
   retry: {
     maxAttempts: 1,
   },
@@ -31,7 +31,7 @@ export const finilizeTask = task({
       defaultFields: {
         subscriptionId,
         projectId,
-        api: "jobs.subscription.phase.billing",
+        api: "jobs.invoice.finilize",
         subscriptionPhaseId,
         invoiceId,
         now: now.toString(),

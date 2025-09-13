@@ -7,11 +7,11 @@ import {
   type CustomerEntitlementExtended,
   type GetCurrentUsage,
   type SubscriptionCache,
+  calculateCycleWindow,
   calculateFlatPricePlan,
   calculateFreeUnits,
   calculatePricePerFeature,
   calculateTotalPricePlan,
-  configureBillingCycleSubscription,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
@@ -563,15 +563,17 @@ export class EntitlementService {
           {} as Record<string, number>
         )
 
-        const calculatedBillingCycle = configureBillingCycleSubscription({
-          currentCycleStartAt: subscription.currentCycleStartAt,
+        const calculatedBillingCycle = calculateCycleWindow({
+          effectiveStartDate: phase.startAt,
+          effectiveEndDate: phase.endAt,
+          trialEndsAt: phase.trialEndsAt,
+          now: now,
           billingConfig: phase.planVersion.billingConfig,
-          trialUnits: phase.trialDays,
-          alignStartToDay: true,
-          alignEndToDay: true,
-          endAt: phase.endAt ?? undefined,
-          alignToCalendar: true,
         })
+
+        if (!calculatedBillingCycle) {
+          throw new Error("Failed to calculate billing cycle")
+        }
 
         const { val: totalPricePlan, err: totalPricePlanErr } = calculateTotalPricePlan({
           features: phase.customerEntitlements.map((e) => e.featurePlanVersion),

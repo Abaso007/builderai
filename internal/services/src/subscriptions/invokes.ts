@@ -1,19 +1,19 @@
-import { eq } from "@unprice/db"
-import { billingPeriods, invoices, subscriptionPhases, subscriptions } from "@unprice/db/schema"
+import { type Database, and, eq, inArray, lte, sql } from "@unprice/db"
+import { billingPeriods, invoiceItems, invoices, subscriptions } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
-import { enumerateBillingWindows, getCurrentBillingWindow } from "@unprice/db/validators"
+import { calculateCycleWindow, calculateDateAt, calculateNextNCycles } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logging"
-import { addDays, addMinutes } from "date-fns"
+import { addDays } from "date-fns"
 import type { CustomerService } from "../customers/service"
-import { db } from "../utils/db"
 import type { SubscriptionContext } from "./types"
 import { validatePaymentMethod } from "./utils"
 
 export async function loadSubscription(payload: {
   context: SubscriptionContext
   logger: Logger
+  db: Database
 }): Promise<SubscriptionContext> {
-  const { context, logger } = payload
+  const { context, logger, db } = payload
   const { subscriptionId, projectId, now } = context
 
   const result = await db.query.subscriptions.findFirst({
@@ -23,7 +23,11 @@ export async function loadSubscription(payload: {
           and(lte(phase.startAt, now), or(isNull(phase.endAt), gte(phase.endAt, now))),
         limit: 1, // we only need the active phase and there is only one at the time
         with: {
-          planVersion: true,
+          planVersion: {
+            with: {
+              plan: true,
+            },
+          },
           customerEntitlements: {
             with: {
               featurePlanVersion: {
@@ -122,33 +126,65 @@ export async function loadSubscription(payload: {
   }
 }
 
+// renew only takes care of the subscription
+// responsabilities:
+// manage subscription/phase lifecycle at term boundaries.
+// Apply scheduled plan changes, end trials, auto-renew or end phases, update subscriptions.currentCycleStartAt/EndAt.
+// Orchestrate phase transitions and invariants, not charges.
+// will pick up the current phase and appply the changes to the subscription
 export async function renewSubscription(opts: {
   context: SubscriptionContext
   logger: Logger
   customerService: CustomerService
+  db: Database
 }) {
-  const { context, logger } = opts
+  const { context, logger, db } = opts
   const { subscription, currentPhase } = context
 
   if (!currentPhase) throw new Error("No active phase found")
 
-  const currentCycle = getCurrentBillingWindow({
+  const current = calculateCycleWindow({
     now: context.now,
     trialEndsAt: currentPhase.trialEndsAt,
-    endAt: currentPhase.endAt,
-    anchor: currentPhase.billingAnchor,
-    interval: currentPhase.planVersion.billingConfig.billingInterval,
-    intervalCount: currentPhase.planVersion.billingConfig.billingIntervalCount,
+    effectiveEndDate: currentPhase.endAt ?? null,
+    billingConfig: {
+      ...currentPhase.planVersion.billingConfig,
+      // always align the billing anchor to the phase anchor
+      billingAnchor: currentPhase.billingAnchor,
+    },
+    effectiveStartDate: currentPhase.startAt,
   })
 
-  const renewAt =
-    currentPhase.planVersion.whenToBill === "pay_in_advance" ? currentCycle.start : currentCycle.end
+  if (!current) throw new Error("No current cycle window found")
 
-  // idempotent: if already at the next window, nothing to do
+  logger.debug(
+    `Current billing window: ${new Date(current.start).toUTCString()} - ${new Date(current.end).toUTCString()}`
+  )
+
+  // next window (advance boundary for both modes)
+  const next = calculateCycleWindow({
+    now: current.end + 1,
+    trialEndsAt: currentPhase.trialEndsAt,
+    effectiveEndDate: currentPhase.endAt ?? null,
+    billingConfig: {
+      ...currentPhase.planVersion.billingConfig,
+      // always align the billing anchor to the phase anchor
+      billingAnchor: currentPhase.billingAnchor,
+    },
+    effectiveStartDate: currentPhase.startAt,
+  })
+
+  if (!next) throw new Error("No next cycle window found")
+
+  logger.debug(
+    `Next billing window: ${new Date(next.start).toUTCString()} - ${new Date(next.end).toUTCString()}`
+  )
+
+  // idempotent no-op if already at the correct window
   if (
-    currentPhase.currentCycleStartAt === currentCycle.start &&
-    currentPhase.currentCycleEndAt === currentCycle.end &&
-    currentPhase.renewAt === renewAt
+    subscription.currentCycleStartAt === current.start &&
+    subscription.currentCycleEndAt === current.end &&
+    subscription.renewAt === next.start
   ) {
     return { subscription }
   }
@@ -182,33 +218,26 @@ export async function renewSubscription(opts: {
     const subscriptionUpdated = await db
       .update(subscriptions)
       .set({
-        planSlug: currentPhase.planVersion.title,
-        currentCycleStartAt: currentCycle.start,
-        currentCycleEndAt: currentCycle.end,
+        planSlug: currentPhase.planVersion.plan.slug, // consider slug
+        renewAt: next.start, // schedule next boundary
+        currentCycleStartAt: current.start,
+        currentCycleEndAt: current.end,
       })
-      .where(eq(subscriptions.id, subscription.id))
-      .returning()
-      .then((result) => result[0])
-
-    // update subscription phase cycle
-    const phaseUpdated = await db
-      .update(subscriptionPhases)
-      .set({
-        renewAt: renewAt,
-        currentCycleStartAt: currentCycle.start,
-        currentCycleEndAt: currentCycle.end,
-      })
-      .where(eq(subscriptionPhases.id, currentPhase.id))
+      .where(
+        and(
+          eq(subscriptions.id, subscription.id),
+          eq(subscriptions.projectId, subscription.projectId)
+        )
+      )
       .returning()
       .then((result) => result[0])
 
     if (!subscriptionUpdated) {
-      throw new Error("Subscription not found, or not updated")
+      throw new Error("Subscription not updated")
     }
 
     return {
       subscription: subscriptionUpdated,
-      currentPhase: phaseUpdated,
     }
   } catch (error) {
     logger.error(
@@ -229,104 +258,120 @@ export async function renewSubscription(opts: {
 export async function invoiceSubscription({
   context,
   logger,
+  db,
 }: {
   context: SubscriptionContext
   logger: Logger
+  db: Database
 }): Promise<
   Partial<SubscriptionContext> & {
     phasesProcessed: number
   }
 > {
   const { subscription, now } = context
-  const lookbackDays = 120 // lookback days to materialize the periods
-  const horizonCycles = 1 // materialize up to next 1 cycle in the future
-  const batch = 50 // process a max of 50 phases
 
-  // fetch phases that are active now OR ended recently
-  const phases = await db.query.subscriptionPhases.findMany({
-    with: {
-      planVersion: true,
-      subscription: true,
-    },
-    where: (phase, ops) =>
-      ops.and(
-        ops.eq(phase.projectId, subscription.projectId),
-        ops.eq(phase.subscriptionId, subscription.id),
-        ops.lte(phase.startAt, now),
-        ops.or(ops.isNull(phase.endAt), ops.gte(phase.endAt, addDays(now, -lookbackDays).getTime()))
-      ),
-    limit: batch, // limit to batch size to avoid overwhelming the system
-  })
+  // get pending periods items per phase
+  const periodItemsGroups = await db
+    .select({
+      projectId: billingPeriods.projectId,
+      subscriptionId: billingPeriods.subscriptionId,
+      subscriptionPhaseId: billingPeriods.subscriptionPhaseId,
+      cycleStartAt: billingPeriods.cycleStartAt,
+      cycleEndAt: billingPeriods.cycleEndAt,
+    })
+    .from(billingPeriods)
+    .groupBy(
+      billingPeriods.projectId,
+      billingPeriods.subscriptionId,
+      billingPeriods.subscriptionPhaseId,
+      billingPeriods.cycleStartAt,
+      billingPeriods.cycleEndAt
+    )
+    .where(
+      and(
+        eq(billingPeriods.status, "pending"),
+        lte(billingPeriods.cycleEndAt, now),
+        eq(billingPeriods.projectId, subscription.projectId),
+        eq(billingPeriods.subscriptionId, subscription.id)
+      )
+    )
+    .limit(500) // limit to 500 period items to avoid overwhelming the system
 
-  logger.info(`Materializing periods for ${phases.length} phases`)
+  logger.info(`Invoicing for ${periodItemsGroups.length} periodItemsGroups`)
 
-  // for each phase, materialize the periods
-  for (const phase of phases) {
-    // last known invoice for this phase
-    // doesn't matter if the invoice is draft, unpaid, waiting, etc.
-    // we just need to know the last invoice cycle end at to know
-    // if we need to backfill the periods
-    const last = await db.query.invoices.findFirst({
-      where: (inv, ops) =>
-        ops.and(
-          ops.eq(inv.subscriptionPhaseId, phase.id),
-          ops.eq(inv.projectId, phase.projectId),
-          ops.eq(inv.subscriptionId, phase.subscriptionId)
+  // for each phase, materialize the invoice and items
+  for (const periodItemGroup of periodItemsGroups) {
+    // create and invoice with the billing periods dates
+    const cycleStartAt = periodItemGroup.cycleStartAt
+    const cycleEndAt = periodItemGroup.cycleEndAt
+
+    // get the phase
+    const phase = await db.query.subscriptionPhases.findFirst({
+      with: {
+        planVersion: true,
+        subscription: true,
+      },
+      where: (table, { eq }) =>
+        and(
+          eq(table.projectId, periodItemGroup.projectId),
+          eq(table.subscriptionId, periodItemGroup.subscriptionId),
+          eq(table.id, periodItemGroup.subscriptionPhaseId)
         ),
-      orderBy: (inv, ops) => ops.desc(inv.cycleEndAt),
     })
 
-    // start from the last invoice cycle end at or
-    // the phase start at if there is no last invoice
-    let cursorStart = last ? last.cycleEndAt + 1 : phase.startAt
-
-    // compute a small future horizon (at most 1 cycle ahead)
-    let cyclesCreated = 0
-
-    while (true) {
-      // configure the billing cycle window
-      const bc = getCurrentBillingWindow({
-        now: cursorStart,
-        trialEndsAt: phase.trialEndsAt,
-        endAt: phase.endAt,
-        anchor: phase.billingAnchor,
-        interval: phase.planVersion.billingConfig.billingInterval,
-        intervalCount: phase.planVersion.billingConfig.billingIntervalCount,
+    if (!phase || !phase.planVersion || !phase.subscription) {
+      logger.warn("Phase not found or missing plan version or subscription", {
+        phaseId: periodItemGroup.subscriptionPhaseId,
+        projectId: periodItemGroup.projectId,
+        subscriptionId: periodItemGroup.subscriptionId,
       })
+      continue
+    }
 
-      const cycleStart = bc.start
-      const cycleEnd = bc.end
+    // get the billing periods to invoice every item in the phase
+    const billingPeriodsToInvoice = await db.query.billingPeriods.findMany({
+      with: {
+        subscriptionItem: {
+          with: {
+            featurePlanVersion: true,
+          },
+        },
+      },
+      where: (table, { eq }) =>
+        and(
+          eq(table.projectId, periodItemGroup.projectId),
+          eq(table.subscriptionId, periodItemGroup.subscriptionId),
+          eq(table.subscriptionPhaseId, periodItemGroup.subscriptionPhaseId),
+          eq(table.cycleStartAt, periodItemGroup.cycleStartAt),
+          eq(table.cycleEndAt, periodItemGroup.cycleEndAt)
+        ),
+    })
 
-      // stop if beyond end or we created enough future cycles
-      if (phase.endAt && cycleStart > phase.endAt) break
-      if (cycleStart > now && cyclesCreated >= horizonCycles) break
+    // if no billing periods to invoice, skip
+    if (!billingPeriodsToInvoice) {
+      logger.warn("Billing period to invoice not found", {
+        phaseId: periodItemGroup.subscriptionPhaseId,
+        projectId: periodItemGroup.projectId,
+        subscriptionId: periodItemGroup.subscriptionId,
+      })
+      continue
+    }
 
-      // calculate the due at
-      const dueAt = phase.planVersion.whenToBill === "pay_in_advance" ? cycleStart : cycleEnd
-
-      // Determines if this is the first invoice after a trial period for a subscription that bills in advance
-      // This is true when:
-      // 1. The subscription bills in advance
-      // 2. There was a trial period (trialEndsAt exists)
-      // 3. This cycle starts after the trial ended
-      // 4. Either there's no previous invoice, or the last invoice ended before trial ended
-      const isFirstPostTrialAdvance =
-        phase.planVersion.whenToBill === "pay_in_advance" &&
-        phase.trialEndsAt != null &&
-        cycleStart >= phase.trialEndsAt &&
-        (!last || last.cycleEndAt < phase.trialEndsAt)
-
-      // if so we only charge the flat charges cuz the usage during the trial period is not charged
-      const invoiceType = isFirstPostTrialAdvance ? "flat" : "hybrid"
-
-      // calculate the grace period
-      const graceFn =
-        phase.planVersion.billingConfig.billingInterval === "minute" ? addMinutes : addDays
-      // this is when the invoice will be considered past due after that if not paid we can end it, cancel it, etc.
-      const pastDueAt = graceFn(dueAt, phase.planVersion.gracePeriod).getTime()
-
+    // all of this happens in a single transaction
+    await db.transaction(async (tx) => {
       try {
-        await db
+        const dueAt = phase.planVersion.whenToBill === "pay_in_advance" ? cycleStartAt : cycleEndAt
+        // grace period depening on the interval
+        const pastDueAt = calculateDateAt({
+          startDate: dueAt,
+          config: {
+            interval: phase.planVersion.billingConfig.billingInterval,
+            units: phase.planVersion.gracePeriod,
+          },
+        })
+
+        // create invoice
+        const invoice = await tx
           .insert(invoices)
           .values({
             id: newId("invoice"),
@@ -337,24 +382,26 @@ export async function invoiceSubscription({
             requiredPaymentMethod: phase.planVersion.paymentMethodRequired,
             paymentMethodId: phase.paymentMethodId ?? null,
             status: "draft",
-            type: invoiceType,
-            cycleStartAt: cycleStart,
-            cycleEndAt: cycleEnd,
-            issueDate: last?.issueDate ?? null,
+            // important to have the same cycle this billing period
+            cycleStartAt: cycleStartAt,
+            cycleEndAt: cycleEndAt,
             whenToBill: phase.planVersion.whenToBill,
-            dueAt,
-            paidAt: null,
-            subtotal: 0,
-            total: 0,
-            amountCreditUsed: 0,
             collectionMethod: phase.planVersion.collectionMethod,
             invoicePaymentProviderId: "",
             invoicePaymentProviderUrl: "",
             paymentProvider: phase.planVersion.paymentProvider,
             currency: phase.planVersion.currency,
-            pastDueAt,
-            metadata: { note: "Materialized by scheduler" },
-          })
+            pastDueAt: pastDueAt,
+            dueAt: dueAt,
+            // all this is calculated in finalizeInvoice
+            paidAt: null,
+            subtotal: 0,
+            paymentAttempts: [],
+            total: 0,
+            amountCreditUsed: 0,
+            issueDate: null, // we don't have a issue date yet
+            metadata: { note: "Invoiced by scheduler" },
+          }) // idempotency protection
           .onConflictDoNothing({
             target: [
               invoices.projectId,
@@ -365,22 +412,93 @@ export async function invoiceSubscription({
               invoices.cycleEndAt,
             ],
           })
-      } catch (e) {
-        // ignore unique violations; the unique index prevents duplicates
-        logger.warn("Insert invoice skipped (likely exists)", {
+          .returning()
+          .catch((error) => {
+            logger.error("Error while creating invoice", {
+              phaseId: phase.id,
+              cycleStartAt: cycleStartAt,
+              cycleEndAt: cycleEndAt,
+              error: error instanceof Error ? error.message : "unknown error",
+            })
+            throw error
+          })
+          .then((result) => result[0])
+
+        if (!invoice) {
+          logger.error("Invoice not created", {
+            phaseId: phase.id,
+            cycleStartAt: cycleStartAt,
+            cycleEndAt: cycleEndAt,
+          })
+
+          return
+        }
+
+        // create invoice items
+        await tx
+          .insert(invoiceItems)
+          .values(
+            billingPeriodsToInvoice.map((period) => ({
+              id: newId("invoice_item"),
+              invoiceId: invoice.id,
+              featurePlanVersionId: period.subscriptionItem.featurePlanVersion.id,
+              subscriptionItemId: period.subscriptionItem.id,
+              billingPeriodId: period.id,
+              projectId: period.projectId,
+              quantity: period.subscriptionItem.units ?? 0,
+              cycleStartAt: period.cycleStartAt,
+              cycleEndAt: period.cycleEndAt,
+              kind: period.type === "trial" ? ("trial" as const) : ("period" as const),
+              unitAmountCents: 0,
+              amountSubtotal: 0,
+              amountTotal: 0,
+              prorationFactor: period.prorationFactor,
+              description: period.type === "trial" ? "Trial" : "Billing period",
+              itemProviderId: null,
+            }))
+          ) // idempotency protection
+          .onConflictDoNothing({
+            target: [invoiceItems.projectId, invoiceItems.invoiceId, invoiceItems.billingPeriodId],
+            where: sql`${invoiceItems.billingPeriodId} IS NOT NULL`,
+          })
+          .catch((error) => {
+            logger.error("Error while creating invoice items", {
+              phaseId: phase.id,
+              cycleStartAt: cycleStartAt,
+              cycleEndAt: cycleEndAt,
+              error: error instanceof Error ? error.message : "unknown error",
+            })
+            throw error
+          })
+
+        // update billing period to invoiced
+        await tx
+          .update(billingPeriods)
+          .set({
+            status: "invoiced",
+            invoiceId: invoice.id,
+          })
+          .where(
+            and(
+              inArray(
+                billingPeriods.id,
+                billingPeriodsToInvoice.map((item) => item.id)
+              ),
+              eq(billingPeriods.projectId, phase.projectId)
+            )
+          )
+      } catch (error) {
+        logger.error("Error while invoicing phase", {
           phaseId: phase.id,
-          cycleStart,
-          cycleEnd,
-          error: (e as Error)?.message,
+          cycleStartAt: cycleStartAt,
+          cycleEndAt: cycleEndAt,
+          error: error instanceof Error ? error.message : "unknown error",
         })
+
+        tx.rollback()
+        throw error
       }
-
-      cursorStart = cycleEnd + 1
-      cyclesCreated += cycleStart > now ? 1 : 0
-
-      // break if we reached now and the phase ended in the past
-      if ((!phase.endAt || phase.endAt <= now) && cycleEnd > now) break
-    }
+    })
   }
 
   // get the last open invoices to update the openInvoices
@@ -395,10 +513,23 @@ export async function invoiceSubscription({
     orderBy: (inv, { asc }) => asc(inv.dueAt),
   })
 
+  // get the last open billing periods to update the hasDueBillingPeriods
+  const lastDueBillingPeriods = await db.query.billingPeriods.findFirst({
+    where: (bp, { and, eq, inArray, lte }) =>
+      and(
+        eq(bp.projectId, subscription.projectId),
+        eq(bp.subscriptionId, subscription.id),
+        inArray(bp.status, ["pending"]),
+        lte(bp.cycleEndAt, now)
+      ),
+    orderBy: (bp, { asc }) => asc(bp.cycleEndAt),
+  })
+
   return {
-    phasesProcessed: phases.length,
+    phasesProcessed: periodItemsGroups.length,
     subscription,
     hasOpenInvoices: !!lastOpenInvoices,
+    hasDueBillingPeriods: !!lastDueBillingPeriods,
   }
 }
 
@@ -409,9 +540,11 @@ export async function invoiceSubscription({
 export async function generateBillingPeriods({
   context,
   logger,
+  db,
 }: {
   context: SubscriptionContext
   logger: Logger
+  db: Database
 }): Promise<
   Partial<SubscriptionContext> & {
     phasesProcessed: number
@@ -420,13 +553,6 @@ export async function generateBillingPeriods({
   const { subscription, now } = context
   const lookbackDays = 7 // lookback days to materialize the periods
   const batch = 100 // process a max of 100 phases per trigger run
-
-  if (!subscription.active) {
-    return {
-      phasesProcessed: 0,
-      subscription,
-    }
-  }
 
   // fetch phases that are active now OR ended recently
   const phases = await db.query.subscriptionPhases.findMany({
@@ -469,20 +595,23 @@ export async function generateBillingPeriods({
         orderBy: (bp, ops) => ops.desc(bp.cycleEndAt),
       })
 
-      const cursorStart = lastForItem ? lastForItem.cycleEndAt + 1 : phase.startAt
+      const cursorStart = lastForItem ? lastForItem.cycleEndAt : phase.startAt
       // INFO: this is a compatibility fix for the old data
       const itemBillingConfig = item.featurePlanVersion.billingConfig?.billingInterval
         ? item.featurePlanVersion.billingConfig
         : phase.planVersion.billingConfig
 
-      const windows = enumerateBillingWindows({
-        startAt: cursorStart,
-        now,
-        trialEndsAt: phase.trialEndsAt ?? null,
-        endAt: phase.endAt ?? null,
-        anchor: phase.billingAnchor,
-        interval: itemBillingConfig.billingInterval,
-        intervalCount: itemBillingConfig.billingIntervalCount,
+      const windows = calculateNextNCycles({
+        referenceDate: now, // we use the now to start the calculation
+        effectiveStartDate: cursorStart,
+        trialEndsAt: phase.trialEndsAt,
+        effectiveEndDate: phase.endAt,
+        billingConfig: {
+          ...itemBillingConfig,
+          // always align the billing anchor to the phase anchor
+          billingAnchor: phase.billingAnchor,
+        },
+        count: 1, // we only need to materialize the next cycle
       })
 
       if (windows.length === 0) continue
@@ -498,10 +627,9 @@ export async function generateBillingPeriods({
         type: "isTrial" in w && w.isTrial ? ("trial" as const) : ("normal" as const),
         cycleStartAt: w.start,
         cycleEndAt: w.end,
-        processingAt: null,
         invoiceId: null,
         amountEstimateCents: null,
-        prorationFactor: null,
+        prorationFactor: w.prorationFactor,
         reason: "isTrial" in w && w.isTrial ? "trial" : null,
         createdAt: now,
         updatedAt: now,
@@ -528,6 +656,7 @@ export async function generateBillingPeriods({
           phaseId: phase.id,
           subscriptionId: phase.subscriptionId,
           projectId: phase.projectId,
+          cycleStartAt: cursorStart,
           error: (e as Error)?.message,
         })
       }
@@ -536,7 +665,7 @@ export async function generateBillingPeriods({
 
   logger.info(`Created ${cyclesCreated} billing periods for ${phases.length} phases`)
 
-  // get the last open invoices to update the openInvoices
+  // get the last open billing periods to update the hasDueBillingPeriods
   const lastDueBillingPeriods = await db.query.billingPeriods.findFirst({
     where: (bp, { and, eq, inArray, lte }) =>
       and(

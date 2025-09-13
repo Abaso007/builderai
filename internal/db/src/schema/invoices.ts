@@ -25,7 +25,6 @@ import {
   currencyEnum,
   invoiceItemKindEnum,
   invoiceStatusEnum,
-  invoiceTypeEnum,
   paymentProviderEnum,
   whenToBillEnum,
 } from "./enums"
@@ -45,8 +44,6 @@ export const invoices = pgTableProject(
     status: invoiceStatusEnum("status").notNull().default("draft"),
     // date the invoice was issued
     issueDate: bigint("issue_date_m", { mode: "number" }),
-    // type of invoice charges (flat, usage, hybrid)
-    type: invoiceTypeEnum("type").notNull().default("hybrid"),
     requiredPaymentMethod: boolean("required_payment_method").notNull().default(false),
     paymentMethodId: text("payment_method_id"),
     // keeps date in here to enforce uniqueness and show a billing period in the UI
@@ -138,7 +135,6 @@ export const invoiceItems = pgTableProject(
     featurePlanVersionId: cuid("feature_plan_version_id"),
     // kind of the invoice item
     kind: invoiceItemKindEnum("kind").notNull().default("period"),
-
     // amounts in cents — totals at line level
     unitAmountCents: integer("unit_amount_cents"),
     quantity: integer("quantity").default(1).notNull(),
@@ -149,9 +145,6 @@ export const invoiceItems = pgTableProject(
     // period of the line (can differ per item even if invoice has a single window)
     cycleStartAt: bigint("cycle_start_at_m", { mode: "number" }).notNull(),
     cycleEndAt: bigint("cycle_end_at_m", { mode: "number" }).notNull(),
-
-    // flags and metadata
-    proration: boolean("proration").notNull().default(false),
     prorationFactor: doublePrecision("proration_factor"),
     description: varchar("description", { length: 200 }),
     // provider-level mapping for reconciliation
@@ -185,7 +178,7 @@ export const invoiceItems = pgTableProject(
     // avoid duplicate materialization of the same billing period into the same invoice
     uqByCycle: uniqueIndex("invoice_items_cycle_unique")
       .on(table.projectId, table.invoiceId, table.billingPeriodId)
-      .where(sql`${table.billingPeriodId} IS NOT NULL AND ${table.invoiceId} IS NOT NULL`),
+      .where(sql`${table.billingPeriodId} IS NOT NULL`),
     // avoid having the same external id multiple times in the same invoice
     uqByItemProviderId: uniqueIndex("invoice_items_item_provider_id_unique")
       .on(table.projectId, table.invoiceId, table.itemProviderId)

@@ -6,7 +6,10 @@ export const finilizingSchedule = schedules.task({
   id: "invoice.finilizing",
   // if dev then every 5 minutes in dev mode
   // cron: process.env.NODE_ENV === "development" ? "*/5 * * * *" : "0 */12 * * *",
-  cron: process.env.NODE_ENV === "development" ? "0 */2 * * *" : "0 */12 * * *",
+  cron: {
+    timezone: "UTC",
+    pattern: process.env.NODE_ENV === "development" ? "*/5 * * * *" : "0 */12 * * *",
+  },
   run: async (payload) => {
     const now = payload.timestamp.getTime()
 
@@ -24,6 +27,12 @@ export const finilizingSchedule = schedules.task({
       .then((invoices) => {
         return invoices.filter((inv) => inv.subscription.active)
       })
+
+    if (pendingInvoices.length === 0) {
+      return {
+        invoiceIds: [],
+      }
+    }
 
     // trigger handles concurrency
     await finilizeTask.batchTrigger(

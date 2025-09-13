@@ -125,7 +125,7 @@ export const customerEntitlements = pgTableProject(
       columns: [table.featurePlanVersionId, table.projectId],
       foreignColumns: [planVersionFeatures.id, planVersionFeatures.projectId],
       name: "feature_plan_version_id_fkey",
-    }),
+    }).onDelete("no action"),
     subscriptionItemfk: foreignKey({
       columns: [table.subscriptionItemId, table.projectId],
       foreignColumns: [subscriptionItems.id, subscriptionItems.projectId],
@@ -135,7 +135,7 @@ export const customerEntitlements = pgTableProject(
       columns: [table.customerId, table.projectId],
       foreignColumns: [customers.id, customers.projectId],
       name: "customer_id_fkey",
-    }),
+    }).onDelete("cascade"),
     subscriptionPhasefk: foreignKey({
       columns: [table.subscriptionPhaseId, table.projectId],
       foreignColumns: [subscriptionPhases.id, subscriptionPhases.projectId],
@@ -145,7 +145,7 @@ export const customerEntitlements = pgTableProject(
       columns: [table.subscriptionId, table.projectId],
       foreignColumns: [subscriptions.id, subscriptions.projectId],
       name: "subscription_id_fkey",
-    }),
+    }).onDelete("cascade"),
     projectfk: foreignKey({
       columns: [table.projectId],
       foreignColumns: [projects.id],

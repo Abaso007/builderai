@@ -6,7 +6,7 @@ import { Typography } from "@unprice/ui/typography"
 import { differenceInCalendarDays } from "date-fns"
 import { AlertCircle } from "lucide-react"
 import { Fragment } from "react"
-import { PaymentMethodForm } from "~/components/forms/payment-method-form"
+import { PaymentMethodButton } from "~/components/forms/payment-method-form"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 import { formatDate } from "~/lib/dates"
@@ -72,11 +72,11 @@ async function PaymentMethodCard({
         <CardTitle>Default Payment Method</CardTitle>
       </CardHeader>
       <CardContent>
-        <PaymentMethodForm
+        <PaymentMethodButton
           customerId={customerId}
           successUrl={`${APP_DOMAIN}${workspaceSlug}/settings/billing`}
           cancelUrl={`${APP_DOMAIN}${workspaceSlug}/settings/billing`}
-          readonly={true}
+          paymentProvider="stripe"
         />
       </CardContent>
     </Card>

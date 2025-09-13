@@ -1,136 +1,107 @@
 import { describe, expect, it } from "vitest"
-import { getCurrentBillingWindow } from "./billing"
+import { calculateDateAt, getBillingCycleMessage } from "./utils"
+import type { Config } from "./utils"
 
 const utcDate = (date: string, time = "00:00:00.000") => new Date(`${date}T${time}Z`).getTime()
 
-describe("getCurrentBillingWindow", () => {
-  describe("trial handling", () => {
-    it("returns now->trialEndsAt when in trial and no endAt", () => {
-      const now = utcDate("2024-01-01", "12:00:00.000")
-      const trialEndsAt = utcDate("2024-01-10", "00:00:00.000")
-
-      const result = getCurrentBillingWindow({
-        now,
-        trialEndsAt,
-        endAt: null,
-        // interval-related options are ignored during trial
-        anchor: 15,
-        interval: "month",
-        intervalCount: 1,
-      })
-
-      expect(result.start).toBe(now)
-      expect(result.end).toBe(trialEndsAt - 1)
-    })
-
-    it("uses the earlier of trialEndsAt and endAt as effective end", () => {
-      const now = utcDate("2024-01-01", "12:00:00.000")
-      const trialEndsAt = utcDate("2024-01-10", "00:00:00.000")
-      const endAt = utcDate("2024-01-05", "00:00:00.000")
-
-      const result = getCurrentBillingWindow({
-        now,
-        trialEndsAt,
-        endAt,
-        anchor: 15,
-        interval: "month",
-        intervalCount: 1,
-      })
-
-      expect(result.start).toBe(now)
-      expect(result.end).toBe(endAt - 1) // inclusive end, last ms before endAt
-    })
+describe("calculateDateAt", () => {
+  it("returns start date when no date is configured", () => {
+    const start = utcDate("2024-01-01", "12:00:00.000")
+    const end = calculateDateAt({ startDate: start, config: null })
+    expect(end).toBe(start)
   })
 
-  describe("recurring windows", () => {
-    it("monthly: anchors to the previous anchor day when now is after anchor", () => {
-      const now = utcDate("2024-01-20", "08:30:00.000")
-      // anchor on the 15th of the month
-      const expectedStart = utcDate("2024-01-15", "00:00:00.000")
-      const expectedEnd = utcDate("2024-02-15", "00:00:00.000") - 1
+  it("adds duration in days", () => {
+    const start = utcDate("2024-01-01", "12:00:00.000")
+    const end = calculateDateAt({
+      startDate: start,
+      config: { interval: "day", units: 7 } as unknown as Config,
+    })
+    expect(end).toBe(utcDate("2024-01-08", "12:00:00.000"))
+  })
 
-      const result = getCurrentBillingWindow({
-        now,
-        trialEndsAt: null,
-        endAt: null,
-        anchor: 15,
-        interval: "month",
-        intervalCount: 1,
-      })
+  it("adds duration in minutes", () => {
+    const start = utcDate("2024-01-01", "12:00:00.000")
+    const end = calculateDateAt({
+      startDate: start,
+      config: { interval: "minute", units: 5 } as unknown as Config,
+    })
+    expect(end).toBe(utcDate("2024-01-01", "12:05:00.000"))
+  })
 
-      expect(result.start).toBe(expectedStart)
-      expect(result.end).toBe(expectedEnd)
+  it("adds duration in weeks", () => {
+    const start = utcDate("2024-01-01", "12:00:00.000")
+    const end = calculateDateAt({
+      startDate: start,
+      config: { interval: "week", units: 2 } as unknown as Config,
     })
 
-    it("caps window end at endAt when endAt is before computed end", () => {
-      const now = utcDate("2024-01-20", "08:30:00.000")
-      const endAt = utcDate("2024-01-25", "00:00:00.000")
-      const expectedStart = utcDate("2024-01-15", "00:00:00.000")
+    expect(end).toBe(utcDate("2024-01-15", "12:00:00.000"))
+  })
 
-      const result = getCurrentBillingWindow({
-        now,
-        trialEndsAt: null,
-        endAt,
-        anchor: 15,
-        interval: "month",
-        intervalCount: 1,
-      })
-
-      expect(result.start).toBe(expectedStart)
-      expect(result.end).toBe(endAt)
+  it("adds duration in months", () => {
+    const start = utcDate("2024-01-01", "12:00:00.000")
+    const end = calculateDateAt({
+      startDate: start,
+      config: { interval: "month", units: 2 } as unknown as Config,
     })
 
-    it("minute: floors start to beginning of minute and ends at +intervalCount minutes", () => {
-      const now = utcDate("2024-01-01", "12:34:56.789")
-      const expectedStart = utcDate("2024-01-01", "12:34:00.000")
-      const expectedEnd = utcDate("2024-01-01", "12:39:00.000") - 1 // inclusive end of 5-min window
+    expect(end).toBe(utcDate("2024-03-01", "12:00:00.000"))
+  })
 
-      const result = getCurrentBillingWindow({
-        now,
-        trialEndsAt: null,
-        endAt: null,
-        anchor: 0,
-        interval: "minute",
-        intervalCount: 5,
-      })
-
-      expect(result.start).toBe(expectedStart)
-      expect(result.end).toBe(expectedEnd)
+  it("adds duration in years", () => {
+    const start = utcDate("2024-01-01", "12:00:00.000")
+    const end = calculateDateAt({
+      startDate: start,
+      config: { interval: "year", units: 2 } as unknown as Config,
     })
 
-    it("onetime: returns startAt->max date when not in trial", () => {
-      const now = utcDate("2024-01-01", "09:15:45.123")
+    expect(end).toBe(utcDate("2026-01-01", "12:00:00.000"))
+  })
+})
 
-      const result = getCurrentBillingWindow({
-        now,
-        trialEndsAt: null,
-        endAt: null,
-        anchor: 0,
-        interval: "onetime",
-        intervalCount: 1,
-      })
-
-      expect(result.start).toBe(now)
-      expect(result.end).toBe(new Date("9999-12-31T23:59:59.999Z").getTime())
+describe("getBillingCycleMessage", () => {
+  it("returns onetime message", () => {
+    const msg = getBillingCycleMessage({
+      name: "test",
+      billingInterval: "onetime",
+      billingIntervalCount: 1,
+      billingAnchor: "dayOfCreation",
+      planType: "onetime",
     })
+    expect(msg.message).toBe("billed once")
+  })
 
-    it("yearly: computes a yearly window based on month anchor", () => {
-      const now = utcDate("2024-02-01", "00:00:00.000")
-      // anchor=3 -> March as anchor month; window should start at Mar 1, 2023 and end Mar 1, 2024 when now is Feb 1, 2024
-      const expectedStart = utcDate("2023-03-01", "00:00:00.000")
-      const expectedEnd = utcDate("2024-03-01", "00:00:00.000") - 1
-
-      const result = getCurrentBillingWindow({
-        now,
-        trialEndsAt: null,
-        endAt: null,
-        anchor: 3,
-        interval: "year",
-        intervalCount: 1,
-      })
-
-      expect(result.start).toBe(expectedStart)
-      expect(result.end).toBe(expectedEnd)
+  it("returns monthly generic message when no anchor", () => {
+    const msg = getBillingCycleMessage({
+      name: "test",
+      billingInterval: "month",
+      billingIntervalCount: 1,
+      billingAnchor: "dayOfCreation",
+      planType: "recurring",
     })
+    expect(msg.message).toBe("billed once every month")
+  })
+
+  it("returns anchored monthly message", () => {
+    const msg = getBillingCycleMessage({
+      name: "test",
+      billingInterval: "month",
+      billingIntervalCount: 1,
+      billingAnchor: 15,
+      planType: "recurring",
+    })
+    expect(msg.message).toBe("billed monthly on the 15th of the month")
+  })
+
+  it("returns anchored yearly message", () => {
+    const msg = getBillingCycleMessage({
+      name: "test",
+      billingInterval: "year",
+      billingIntervalCount: 1,
+      billingAnchor: 3,
+      planType: "recurring",
+    })
+    expect(msg.message).toBe("billed yearly on the 1st of March")
   })
 })

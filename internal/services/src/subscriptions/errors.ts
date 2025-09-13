@@ -29,7 +29,7 @@ export class UnPriceMachineError extends BaseError {
 
   constructor({ message }: { message: string }) {
     super({
-      message: `Machine service error: ${message}`,
+      message,
     })
   }
 }

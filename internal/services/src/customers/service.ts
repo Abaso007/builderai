@@ -1,16 +1,4 @@
-import {
-  type Database,
-  type SQL,
-  type TransactionDatabase,
-  and,
-  eq,
-  gte,
-  inArray,
-  isNull,
-  lte,
-  or,
-  sql,
-} from "@unprice/db"
+import { type Database, type SQL, and, eq, gte, inArray, isNull, lte, or, sql } from "@unprice/db"
 
 import type { CacheError } from "@unkey/cache"
 import type { Analytics } from "@unprice/analytics"
@@ -36,7 +24,7 @@ import {
   type PlanVersion,
   type Project,
   type SubscriptionCache,
-  getCurrentBillingWindow,
+  calculateCycleWindow,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
@@ -50,7 +38,7 @@ import { retry } from "../utils/retry"
 import { type DenyReason, UnPriceCustomerError } from "./errors"
 
 export class CustomerService {
-  private readonly db: Database | TransactionDatabase
+  private readonly db: Database
   private readonly logger: Logger
   private readonly analytics: Analytics
   private readonly cache: Cache
@@ -66,7 +54,7 @@ export class CustomerService {
     cache,
     metrics,
   }: {
-    db: Database | TransactionDatabase
+    db: Database
     logger: Logger
     analytics: Analytics
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
@@ -380,6 +368,7 @@ export class CustomerService {
 
     // Execute with concurrency limit to avoid overwhelming the system
     const BATCH_SIZE = 100
+    // TODO: use p-limit to avoid overwhelming the system
     for (let i = 0; i < promises.length; i += BATCH_SIZE) {
       const batch = promises.slice(i, i + BATCH_SIZE)
       await Promise.all(batch)
@@ -437,14 +426,19 @@ export class CustomerService {
     })
 
     // get the billing window on which now is
-    const billingWindow = getCurrentBillingWindow({
-      now,
-      anchor: currentPhase.billingAnchor,
-      interval: currentPhase.planVersion.billingConfig.billingInterval,
-      intervalCount: currentPhase.planVersion.billingConfig.billingIntervalCount,
+    const billingWindow = calculateCycleWindow({
+      now: now,
+      billingConfig: {
+        ...currentPhase.planVersion.billingConfig,
+        // always align the billing anchor to the phase anchor
+        billingAnchor: currentPhase.billingAnchor,
+      },
+      effectiveStartDate: currentPhase.startAt,
+      effectiveEndDate: currentPhase.endAt ?? null,
       trialEndsAt: currentPhase.trialEndsAt,
-      endAt: currentPhase.endAt,
     })
+
+    if (!billingWindow) throw new Error("No billing window found")
 
     // get the usage from analytics
     const usages = await this.analytics.getUsageBillingEntitlements({
@@ -964,20 +958,26 @@ export class CustomerService {
 
     if (shouldRefreshUsage) {
       // calculate the start time of the current billing window so we can get the usage until now
-      const { start: startAt, end: endAt } = getCurrentBillingWindow({
-        now,
-        anchor: entitlement.activePhase.billingAnchor,
-        interval: entitlement.activePhase.billingConfig.billingInterval,
-        intervalCount: entitlement.activePhase.billingConfig.billingIntervalCount,
+      const billingWindow = calculateCycleWindow({
+        now: now,
+        billingConfig: {
+          ...entitlement.activePhase.billingConfig,
+          // always align the billing anchor to the phase anchor
+          billingAnchor: entitlement.activePhase.billingAnchor,
+        },
+        effectiveStartDate: entitlement.activePhase.startAt,
+        effectiveEndDate: entitlement.activePhase.endAt ?? null,
         trialEndsAt: entitlement.activePhase.trialEndsAt,
-        endAt: entitlement.activePhase.endAt,
       })
+
+      if (!billingWindow) throw new Error("No billing window found")
 
       // if it was reset within current billing window, we don't include accumulated
       const includeAccumulatedUsage =
-        entitlement.resetedAt < startAt || entitlement.resetedAt > endAt
+        entitlement.resetedAt < billingWindow.start || entitlement.resetedAt > billingWindow.end
       const lastUsageUpdateIsInCurrentBillingWindow =
-        entitlement.lastUsageUpdateAt >= startAt && entitlement.lastUsageUpdateAt < endAt
+        entitlement.lastUsageUpdateAt >= billingWindow.start &&
+        entitlement.lastUsageUpdateAt < billingWindow.end
 
       const result = await this.analytics.getUsageBillingEntitlements({
         customerId,
@@ -989,7 +989,7 @@ export class CustomerService {
             featureType: entitlement.featureType,
           },
         ],
-        startAt: startAt,
+        startAt: billingWindow.start,
         endAt: now, // get the usage until now
         includeAccumulatedUsage: includeAccumulatedUsage,
       })
@@ -1009,7 +1009,7 @@ export class CustomerService {
           customerId,
           projectId,
           entitlementId: entitlement.id,
-          startAt: new Date(startAt).toISOString(),
+          startAt: new Date(billingWindow.start).toISOString(),
           endAt: new Date(now).toISOString(),
         })
 
@@ -1356,14 +1356,19 @@ export class CustomerService {
 
     // last validation would be if the entitlemnt is outside of the current billing window
     // we have to retry without cache to update the usage
-    const currentCycleWindow = getCurrentBillingWindow({
+    const currentCycleWindow = calculateCycleWindow({
       now: entitlement.lastUsageUpdateAt,
-      anchor: entitlement.activePhase.billingAnchor,
-      interval: entitlement.activePhase.billingConfig.billingInterval,
-      intervalCount: entitlement.activePhase.billingConfig.billingIntervalCount,
+      billingConfig: {
+        ...entitlement.activePhase.billingConfig,
+        // always align the billing anchor to the phase anchor
+        billingAnchor: entitlement.activePhase.billingAnchor,
+      },
+      effectiveStartDate: entitlement.activePhase.startAt,
+      effectiveEndDate: entitlement.activePhase.endAt ?? null,
       trialEndsAt: entitlement.activePhase.trialEndsAt,
-      endAt: entitlement.activePhase.endAt,
     })
+
+    if (!currentCycleWindow) throw new Error("No current cycle window found")
 
     const outsideOfCurrentBillingWindow =
       now < currentCycleWindow.start || now > currentCycleWindow.end
@@ -2256,8 +2261,6 @@ export class CustomerService {
             paymentMethodRequired: planVersion.paymentMethodRequired,
             customerId: newCustomer.id,
             subscriptionId: newSubscription.id,
-            currentCycleStartAt: Date.now(),
-            currentCycleEndAt: Date.now(),
           },
           projectId: projectId,
           db: trx,

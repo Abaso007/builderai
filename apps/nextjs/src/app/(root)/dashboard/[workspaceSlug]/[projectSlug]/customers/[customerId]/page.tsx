@@ -1,17 +1,14 @@
-import { notFound } from "next/navigation"
-
-import { APP_DOMAIN } from "@unprice/config"
 import { INVOICE_STATUS, SUBSCRIPTION_STATUS } from "@unprice/db/utils"
 import { Button } from "@unprice/ui/button"
 import { Separator } from "@unprice/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@unprice/ui/tabs"
 import { Typography } from "@unprice/ui/typography"
 import { Code, Plus } from "lucide-react"
+import { notFound } from "next/navigation"
 import { Suspense } from "react"
 import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DataTable } from "~/components/data-table/data-table"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
-import { PaymentMethodForm } from "~/components/forms/payment-method-form"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 import { api } from "~/trpc/server"
@@ -29,7 +26,7 @@ export default async function CustomerPage({
     customerId: string
   }
 }) {
-  const { customerId, workspaceSlug, projectSlug } = params
+  const { customerId } = params
 
   const { customer } = await api.customers.getSubscriptions({
     customerId,
@@ -141,11 +138,7 @@ export default async function CustomerPage({
               All subscriptions of this customer
             </Typography>
           </div>
-          <PaymentMethodForm
-            customerId={customer.id}
-            successUrl={`${APP_DOMAIN}${workspaceSlug}/${projectSlug}/customers/${customerId}`}
-            cancelUrl={`${APP_DOMAIN}${workspaceSlug}/${projectSlug}/customers/${customerId}`}
-          />
+          {/* // TODO: fix this */}
         </TabsContent>
         <TabsContent value="invoices" className="mt-4">
           <div className="flex flex-col px-1 py-4">

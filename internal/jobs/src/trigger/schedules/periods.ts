@@ -1,52 +1,50 @@
 import { logger, schedules } from "@trigger.dev/sdk/v3"
 import { db } from "../db"
-import { periodTask } from "../tasks"
+import { periodTask } from "../tasks/period"
 
 export const periodsSchedule = schedules.task({
-  id: "subscription.phase.periods",
+  id: "subscription.periods",
   // every 12 hours (UTC timezone)
   // if dev then every 5 minutes in dev mode every 12 hours in prod
-  cron: process.env.NODE_ENV === "development" ? "*/5 * * * *" : "0 */12 * * *",
+  cron: {
+    timezone: "UTC",
+    pattern: process.env.NODE_ENV === "development" ? "*/5 * * * *" : "0 */12 * * *",
+  },
   run: async (payload) => {
     const now = payload.timestamp.getTime()
-    const lookbackDays = 7 // lookback days to create the periods
-    const lookbackDaysMs = lookbackDays * 24 * 60 * 60 * 1000
+    const lookaheadMs = 3 * 24 * 60 * 60 * 1000 // act slightly ahead of term end of cycle 3 days
 
-    // fetch phases that are active now OR ended recently
-    const phasesWithActiveSubscription = await db.query.subscriptionPhases
-      .findMany({
-        with: {
-          subscription: true,
-        },
-        where: (phase, ops) =>
-          ops.and(
-            ops.lte(phase.startAt, now),
-            ops.or(ops.isNull(phase.endAt), ops.gte(phase.endAt, now - lookbackDaysMs))
-          ),
-        limit: 100, // limit to batch size to avoid overwhelming the system
-      })
-      .then((phases) => {
-        return phases.filter((p) => p.subscription.active)
-      })
+    // fetch all active subscriptions
+    const subscriptions = await db.query.subscriptions.findMany({
+      where: (subscription, ops) =>
+        ops.and(
+          ops.eq(subscription.active, true),
+          ops.notInArray(subscription.status, ["canceled", "expired"]),
+          ops.lte(subscription.currentCycleEndAt, now + lookaheadMs)
+        ),
+    })
 
-    logger.info(
-      `Found ${phasesWithActiveSubscription.length} phases for creating periods with active subscription`
-    )
+    logger.info(`Found ${subscriptions.length} subscriptions for creating periods`)
 
-    // trigger handles concurrency
+    if (subscriptions.length === 0) {
+      return {
+        subscriptionIds: [],
+      }
+    }
+
+    // triggers handle concurrency
     await periodTask.batchTrigger(
-      phasesWithActiveSubscription.map((p) => ({
+      subscriptions.map((s) => ({
         payload: {
-          phaseId: p.id,
-          projectId: p.projectId,
+          subscriptionId: s.id,
+          projectId: s.projectId,
           now,
-          subscriptionId: p.subscriptionId,
         },
       }))
     )
 
     return {
-      phaseIds: phasesWithActiveSubscription.map((p) => p.id),
+      subscriptionIds: subscriptions.map((p) => p.id),
     }
   },
 })

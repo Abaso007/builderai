@@ -5,190 +5,29 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1744457431051,
-      "tag": "0000_freezing_tusk",
+      "when": 1757772893896,
+      "tag": "0000_mighty_wallow",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "7",
-      "when": 1744649718976,
-      "tag": "0001_faulty_harpoon",
+      "when": 1757924715713,
+      "tag": "0001_wet_jane_foster",
       "breakpoints": true
     },
     {
       "idx": 2,
       "version": "7",
-      "when": 1746978169668,
-      "tag": "0002_loving_hitman",
+      "when": 1757948402523,
+      "tag": "0002_colorful_enchantress",
       "breakpoints": true
     },
     {
       "idx": 3,
       "version": "7",
-      "when": 1747241725042,
-      "tag": "0003_black_bloodaxe",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1747499878863,
-      "tag": "0004_redundant_scalphunter",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1748016869661,
-      "tag": "0005_sweet_lorna_dane",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1749904615972,
-      "tag": "0006_empty_toxin",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "7",
-      "when": 1749987925393,
-      "tag": "0007_yellow_nicolaos",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "7",
-      "when": 1750773994507,
-      "tag": "0008_square_gambit",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "7",
-      "when": 1750774993679,
-      "tag": "0009_unusual_morlocks",
-      "breakpoints": true
-    },
-    {
-      "idx": 10,
-      "version": "7",
-      "when": 1751467151810,
-      "tag": "0010_odd_zeigeist",
-      "breakpoints": true
-    },
-    {
-      "idx": 11,
-      "version": "7",
-      "when": 1752410366670,
-      "tag": "0011_classy_roxanne_simpson",
-      "breakpoints": true
-    },
-    {
-      "idx": 12,
-      "version": "7",
-      "when": 1752847643903,
-      "tag": "0012_overconfident_puff_adder",
-      "breakpoints": true
-    },
-    {
-      "idx": 13,
-      "version": "7",
-      "when": 1752849210487,
-      "tag": "0013_nasty_zaran",
-      "breakpoints": true
-    },
-    {
-      "idx": 14,
-      "version": "7",
-      "when": 1753104737161,
-      "tag": "0014_dizzy_bulldozer",
-      "breakpoints": true
-    },
-    {
-      "idx": 15,
-      "version": "7",
-      "when": 1753390486395,
-      "tag": "0015_fancy_ezekiel_stane",
-      "breakpoints": true
-    },
-    {
-      "idx": 16,
-      "version": "7",
-      "when": 1754061343574,
-      "tag": "0016_high_chamber",
-      "breakpoints": true
-    },
-    {
-      "idx": 17,
-      "version": "7",
-      "when": 1754307967033,
-      "tag": "0017_far_the_fallen",
-      "breakpoints": true
-    },
-    {
-      "idx": 18,
-      "version": "7",
-      "when": 1756286693719,
-      "tag": "0018_green_smiling_tiger",
-      "breakpoints": true
-    },
-    {
-      "idx": 19,
-      "version": "7",
-      "when": 1756379119296,
-      "tag": "0019_amazing_norman_osborn",
-      "breakpoints": true
-    },
-    {
-      "idx": 20,
-      "version": "7",
-      "when": 1756385360081,
-      "tag": "0020_absurd_moira_mactaggert",
-      "breakpoints": true
-    },
-    {
-      "idx": 21,
-      "version": "7",
-      "when": 1756413313035,
-      "tag": "0021_powerful_rattler",
-      "breakpoints": true
-    },
-    {
-      "idx": 22,
-      "version": "7",
-      "when": 1757070788639,
-      "tag": "0022_new_mandroid",
-      "breakpoints": true
-    },
-    {
-      "idx": 23,
-      "version": "7",
-      "when": 1757514021727,
-      "tag": "0023_curious_the_hood",
-      "breakpoints": true
-    },
-    {
-      "idx": 24,
-      "version": "7",
-      "when": 1757611500199,
-      "tag": "0024_dusty_warbird",
-      "breakpoints": true
-    },
-    {
-      "idx": 25,
-      "version": "7",
-      "when": 1757663075253,
-      "tag": "0025_thankful_frog_thor",
-      "breakpoints": true
-    },
-    {
-      "idx": 26,
-      "version": "7",
-      "when": 1757696636328,
-      "tag": "0026_handy_major_mapleleaf",
+      "when": 1757955886675,
+      "tag": "0003_supreme_shard",
       "breakpoints": true
     }
   ]

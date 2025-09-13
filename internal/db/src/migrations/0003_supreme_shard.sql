@@ -1,0 +1,2 @@
+DROP INDEX "invoice_items_cycle_unique";--> statement-breakpoint
+CREATE UNIQUE INDEX "invoice_items_cycle_unique" ON "unprice_invoice_items" USING btree ("project_id","invoice_id","billing_period_id") WHERE "unprice_invoice_items"."billing_period_id" IS NOT NULL;

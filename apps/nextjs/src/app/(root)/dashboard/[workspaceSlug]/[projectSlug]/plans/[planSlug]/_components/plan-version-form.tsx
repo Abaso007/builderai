@@ -122,6 +122,10 @@ export function PlanVersionForm({
       await updatePlanVersion.mutateAsync({
         ...data,
         id: defaultValues.id,
+        billingConfig: {
+          ...data.billingConfig,
+          billingAnchor: data.billingConfig.billingAnchor ?? "dayOfCreation",
+        },
       })
     }
   }

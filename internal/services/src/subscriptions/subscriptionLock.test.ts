@@ -1,9 +1,20 @@
-import { beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { Database } from "@unprice/db"
 import { SubscriptionLock } from "./subscriptionLock"
 
 type Row = { ownerToken: string; expiresAt: number }
+
+// Ensure unique tokens per acquire in tests
+vi.mock("@unprice/db/utils", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@unprice/db/utils")>()
+  let seq = 0
+  return {
+    ...actual,
+    randomId: () => `tok_${++seq}`,
+    newId: (p: string) => `${p}_${seq}`,
+  }
+})
 
 function createFakeDb(projectId: string, subscriptionId: string) {
   const key = `${projectId}:${subscriptionId}`
@@ -15,6 +26,7 @@ function createFakeDb(projectId: string, subscriptionId: string) {
       values: async (v: Record<string, unknown>) => {
         const existing = rows.get(key)
         const createdAt = (v.createdAtM as number) ?? 0
+        // if a row exists and has not expired yet at creation time, simulate conflict
         if (existing && existing.expiresAt > createdAt) throw new Error("conflict")
         rows.set(key, {
           ownerToken: String(v.ownerToken),
@@ -30,6 +42,7 @@ function createFakeDb(projectId: string, subscriptionId: string) {
             returning: async (_sel?: unknown) => {
               const row = rows.get(key)
               const now = Number(lastSet.updatedAtM ?? 0)
+              // takeover path: only if row expired
               if (row && row.expiresAt < now) {
                 rows.set(key, {
                   ownerToken: String(lastSet.ownerToken ?? row.ownerToken),
@@ -37,8 +50,12 @@ function createFakeDb(projectId: string, subscriptionId: string) {
                 })
                 return [{}]
               }
-              // extend path: allow when still owner (expiresAt > now)
-              if (row && row.expiresAt > now) {
+              // extend path: only when still same owner and not expired
+              if (
+                row &&
+                row.expiresAt > now &&
+                String(lastSet.ownerToken ?? row.ownerToken) === row.ownerToken
+              ) {
                 rows.set(key, {
                   ownerToken: row.ownerToken,
                   expiresAt: Number(lastSet.expiresAt ?? row.expiresAt),

@@ -1,13 +1,5 @@
 import type { Analytics } from "@unprice/analytics"
-import {
-  type Database,
-  type SQL,
-  type TransactionDatabase,
-  and,
-  eq,
-  inArray,
-  sql,
-} from "@unprice/db"
+import { type Database, type SQL, and, eq, inArray, sql } from "@unprice/db"
 import {
   customerEntitlements,
   subscriptionItems,
@@ -22,7 +14,8 @@ import {
   type Subscription,
   type SubscriptionItemConfig,
   type SubscriptionPhase,
-  configureBillingCycleSubscription,
+  calculateCycleWindow,
+  calculateDateAt,
   createDefaultSubscriptionConfig,
 } from "@unprice/db/validators"
 import { Err, Ok, type Result, type SchemaError } from "@unprice/error"
@@ -39,7 +32,7 @@ import type { SusbriptionMachineStatus } from "./types"
 import { collectInvoicePayment, finalizeInvoice } from "./utils"
 
 export class SubscriptionService {
-  private readonly db: Database | TransactionDatabase
+  private readonly db: Database
   private readonly logger: Logger
   private readonly analytics: Analytics
   private readonly cache: Cache
@@ -56,7 +49,7 @@ export class SubscriptionService {
     cache,
     metrics,
   }: {
-    db: Database | TransactionDatabase
+    db: Database
     logger: Logger
     analytics: Analytics
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
@@ -90,7 +83,7 @@ export class SubscriptionService {
     phaseId: string
     projectId: string
     customerId: string
-    db?: Database | TransactionDatabase
+    db?: Database
   }): Promise<Result<void, UnPriceSubscriptionError>> {
     // get the active phase for the subscription with the customer entitlements
     const phase = await (db ?? this.db).query.subscriptionPhases.findFirst({
@@ -167,7 +160,7 @@ export class SubscriptionService {
   }: {
     input: InsertSubscriptionPhase
     projectId: string
-    db?: Database | TransactionDatabase
+    db?: Database
     now: number
   }): Promise<Result<SubscriptionPhase, UnPriceSubscriptionError | SchemaError>> {
     const {
@@ -385,28 +378,30 @@ export class SubscriptionService {
       configItemsSubscription = config
     }
 
-    // get the billing cycle for the subscription given the start date
-    const calculatedBillingCycle = configureBillingCycleSubscription({
-      currentCycleStartAt: startAtToUse,
-      trialUnits: trialDaysToUse,
-      billingConfig: {
-        ...versionData.billingConfig,
-        billingAnchor: billingAnchorToUse ?? 0,
+    const trialsEndAt = calculateDateAt({
+      startDate: startAtToUse,
+      config: {
+        interval: versionData.billingConfig.billingInterval,
+        units: trialDaysToUse,
       },
-      endAt: endAtToUse ?? undefined,
-      alignStartToDay: false,
-      alignEndToDay: true,
-      alignToCalendar: true,
     })
 
-    const trialDaysEndAt = calculatedBillingCycle.trialEndsAtMs
-      ? calculatedBillingCycle.trialEndsAtMs
-      : undefined
+    // get the billing cycle for the subscription given the start date
+    const calculatedBillingCycle = calculateCycleWindow({
+      effectiveStartDate: startAtToUse,
+      effectiveEndDate: endAtToUse ?? null,
+      trialEndsAt: trialsEndAt,
+      now: startAtToUse, // we use the start date to calculate the billing cycle
+      billingConfig: versionData.billingConfig,
+    })
 
-    const renewAt =
-      versionData.whenToBill === "pay_in_advance"
-        ? calculatedBillingCycle.cycleStartMs
-        : calculatedBillingCycle.cycleEndMs
+    if (!calculatedBillingCycle) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: "Failed to calculate billing cycle",
+        })
+      )
+    }
 
     const result = await (db ?? this.db).transaction(async (trx) => {
       // create the subscription phase
@@ -418,14 +413,10 @@ export class SubscriptionService {
           planVersionId,
           subscriptionId,
           paymentMethodId,
-          trialEndsAt: trialDaysEndAt,
+          trialEndsAt: trialsEndAt,
           trialDays: trialDaysToUse,
-          currentCycleStartAt: calculatedBillingCycle.cycleStartMs,
-          currentCycleEndAt: calculatedBillingCycle.cycleEndMs,
           startAt: startAtToUse,
           endAt: endAtToUse,
-          // if the trial days end at is defined, use it as the renew at
-          renewAt: renewAt,
           metadata,
           billingAnchor: billingAnchorToUse ?? 0,
         })
@@ -474,8 +465,9 @@ export class SubscriptionService {
             active: true,
             status: trialDaysToUse > 0 ? "trialing" : "active",
             planSlug: versionData.plan.slug,
-            currentCycleStartAt: calculatedBillingCycle.cycleStartMs,
-            currentCycleEndAt: calculatedBillingCycle.cycleEndMs,
+            currentCycleStartAt: calculatedBillingCycle.start,
+            currentCycleEndAt: calculatedBillingCycle.end,
+            renewAt: calculatedBillingCycle.start, // we schedule the renewal for the start of the cycle always
           })
           .where(and(eq(subscriptions.id, subscriptionId), eq(subscriptions.projectId, projectId)))
       }
@@ -566,7 +558,7 @@ export class SubscriptionService {
     input: SubscriptionPhase
     subscriptionId: string
     projectId: string
-    db?: Database | TransactionDatabase
+    db?: Database
     now: number
   }): Promise<Result<SubscriptionPhase, UnPriceSubscriptionError | SchemaError>> {
     const { startAt, endAt, items } = input
@@ -904,14 +896,68 @@ export class SubscriptionService {
     subscriptionId: string
     projectId: string
     now: number
+    // new options
+    lock?: boolean
+    ttlMs?: number
     run: (m: SubscriptionMachine) => Promise<T>
   }): Promise<T> {
-    const { subscriptionId, projectId, now, run } = args
-    // acquire simple DB-backed lock per subscription to avoid cross-worker races
-    const lock = new SubscriptionLock({ db: this.db, projectId, subscriptionId })
-    const acquired = await lock.acquire({ ttlMs: 30_000, now })
+    const { subscriptionId, projectId, now, run, lock: shouldLock = true, ttlMs = 30_000 } = args
 
-    if (!acquired) throw new UnPriceSubscriptionError({ message: "SUBSCRIPTION_BUSY" })
+    // create the lock if it should be locked
+    const lock = shouldLock
+      ? new SubscriptionLock({ db: this.db, projectId, subscriptionId })
+      : null
+
+    if (lock) {
+      const acquired = await lock.acquire({ ttlMs, now })
+      if (!acquired) throw new UnPriceSubscriptionError({ message: "SUBSCRIPTION_BUSY" })
+    }
+
+    // heartbeat to keep the lock alive for long transitions
+    const stopHeartbeat = lock
+      ? (() => {
+          let stopped = false
+          const startedAt = Date.now()
+          const renewEveryMs = Math.max(1_000, Math.floor(ttlMs / 2))
+          const maxHoldMs = Math.max(ttlMs * 10, 2 * 60_000) // cap renewals to avoid indefinite locks
+
+          const interval = setInterval(async () => {
+            if (stopped) return
+            const elapsed = Date.now() - startedAt
+            if (elapsed > maxHoldMs) {
+              this.logger.warn("subscription lock heartbeat maxHoldMs reached; stopping renew", {
+                subscriptionId,
+                projectId,
+                ttlMs,
+                maxHoldMs,
+              })
+              stopped = true
+              clearInterval(interval)
+              return
+            }
+            try {
+              const ok = await lock.extend({ ttlMs })
+              if (!ok) {
+                this.logger.warn("subscription lock extend returned false; lock may be lost", {
+                  subscriptionId,
+                  projectId,
+                })
+              }
+            } catch (e) {
+              this.logger.error("subscription lock heartbeat extend failed", {
+                error: e instanceof Error ? e.message : String(e),
+                subscriptionId,
+                projectId,
+              })
+            }
+          }, renewEveryMs)
+
+          return () => {
+            stopped = true
+            clearInterval(interval)
+          }
+        })()
+      : () => {}
 
     const { err, val: machine } = await SubscriptionMachine.create({
       now,
@@ -919,11 +965,13 @@ export class SubscriptionService {
       projectId,
       logger: this.logger,
       analytics: this.analytics,
-      waitUntil: this.waitUntil,
       customer: this.customerService,
+      db: this.db,
     })
+
     if (err) {
-      await lock.release()
+      stopHeartbeat()
+      if (lock) await lock.release()
       throw err
     }
 
@@ -931,7 +979,8 @@ export class SubscriptionService {
       return await run(machine)
     } finally {
       await machine.shutdown()
-      await lock.release()
+      stopHeartbeat()
+      if (lock) await lock.release()
     }
   }
 
@@ -959,6 +1008,7 @@ export class SubscriptionService {
         subscriptionId,
         projectId,
         now,
+        lock: true,
         run: async (machine) => {
           const col = await collectInvoicePayment({
             invoiceId,
@@ -970,10 +1020,10 @@ export class SubscriptionService {
             await machine.reportInvoiceFailure({ invoiceId, error: col.err.message })
             throw col.err
           }
-          const status = col.val.invoice.status
-          if (status === "paid" || status === "void") {
-            await machine.reportPaymentSuccess({ invoiceId })
-          } else if (status === "failed") {
+          const { invoice } = col.val
+          if (invoice.status === "paid" || invoice.status === "void") {
+            await machine.reportInvoiceSuccess({ invoiceId })
+          } else if (invoice.status === "failed") {
             await machine.reportPaymentFailure({ invoiceId, error: "Payment failed" })
           }
           return col.val
@@ -1009,6 +1059,7 @@ export class SubscriptionService {
         subscriptionId,
         projectId,
         now,
+        lock: true, // we need to lock the subscription to avoid cross-worker races
         run: async (machine) => {
           const fin = await finalizeInvoice({
             invoiceId,
@@ -1045,6 +1096,7 @@ export class SubscriptionService {
         subscriptionId,
         projectId,
         now,
+        lock: true, // we need to lock the subscription to avoid cross-worker races
         run: async (machine) => {
           const s1 = await machine.generateBillingPeriods()
           if (s1.err) throw s1.err
@@ -1074,7 +1126,10 @@ export class SubscriptionService {
         run: async (machine) => {
           const s1 = await machine.renew()
           if (s1.err) throw s1.err
-          return s1.val
+          // create the billing periods
+          const b1 = await machine.generateBillingPeriods()
+          if (b1.err) throw b1.err
+          return b1.val
         },
       })
       return Ok({ status })
@@ -1104,12 +1159,11 @@ export class SubscriptionService {
         subscriptionId,
         projectId,
         now,
+        lock: true, // we need to lock the subscription to avoid cross-worker races
         run: async (machine) => {
           const i = await machine.invoice()
           if (i.err) throw i.err
-          const r = await machine.renew()
-          if (r.err) throw r.err
-          return r.val
+          return i.val
         },
       })
       return Ok({ status })

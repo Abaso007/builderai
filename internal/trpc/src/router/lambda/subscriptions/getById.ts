@@ -21,7 +21,11 @@ export const getById = protectedProcedure
       with: {
         phases: {
           with: {
-            planVersion: true,
+            planVersion: {
+              with: {
+                plan: true,
+              },
+            },
             customerEntitlements: {
               with: {
                 featurePlanVersion: {

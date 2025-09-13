@@ -52,7 +52,10 @@ export const subscriptions = pgTableProject(
     // UI purposes only
     currentCycleStartAt: bigint("current_cycle_start_at_m", { mode: "number" }).notNull(),
     currentCycleEndAt: bigint("current_cycle_end_at_m", { mode: "number" }).notNull(),
-
+    // this will trigger the renewal of the subscription on every change made on the phase
+    renewAt: bigint("renew_at_m", { mode: "number" }),
+    // when subscription is ended
+    endAt: bigint("end_at_m", { mode: "number" }),
     timezone: varchar("timezone", { length: 32 }).notNull().default("UTC"),
     // metadata for the subscription
     metadata: json("metadata").$type<z.infer<typeof subscriptionMetadataSchema>>(),
@@ -73,6 +76,8 @@ export const subscriptions = pgTableProject(
       foreignColumns: [projects.id],
       name: "subscriptions_project_id_fkey",
     }).onDelete("cascade"),
+    // index on the renewAt
+    uniqRenew: index("subscriptions_sub_renew_uq").on(table.projectId, table.renewAt),
   })
 )
 
@@ -101,10 +106,6 @@ export const subscriptionPhases = pgTableProject(
     startAt: bigint("start_at_m", { mode: "number" }).notNull(),
     // when the subscription ends if undefined the subscription is active and renewed every cycle depending on auto_renew flag
     endAt: bigint("end_at_m", { mode: "number" }),
-    currentCycleStartAt: bigint("current_cycle_start_at_m", { mode: "number" }).notNull(),
-    currentCycleEndAt: bigint("current_cycle_end_at_m", { mode: "number" }).notNull(),
-    // this will trigger the renewal of the subscription
-    renewAt: bigint("renew_at_m", { mode: "number" }),
     // ************ subscription important dates ************
     metadata: json("metadata").$type<z.infer<typeof subscriptionPhaseMetadataSchema>>(),
   },
@@ -135,8 +136,6 @@ export const subscriptionPhases = pgTableProject(
       table.startAt,
       table.endAt
     ),
-    // index on the renewAt
-    uniqRenew: index("phase_sub_renew_uq").on(table.projectId, table.renewAt),
   })
 )
 

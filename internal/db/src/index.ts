@@ -6,11 +6,13 @@ import type * as schema from "./schema"
 export * from "drizzle-orm"
 export { pgTableProject as tableCreator } from "./utils"
 
-export type Database = PgWithReplicas<
+type NeonDB = PgWithReplicas<
   NeonDatabase<typeof schema> & {
     $client: Pool
   }
 >
+type NeonTransactionDatabase = Parameters<Parameters<NeonDB["transaction"]>[0]>[0]
 
-export type TransactionDatabase = Parameters<Parameters<Database["transaction"]>[0]>[0]
+export type Database = NeonDB | NeonTransactionDatabase
+
 export { createConnection } from "./createConnection"

@@ -1,5 +1,5 @@
 import type { Analytics } from "@unprice/analytics"
-import { and as dbAnd, eq } from "@unprice/db"
+import { type Database, and as dbAnd, eq } from "@unprice/db"
 import { subscriptions } from "@unprice/db/schema"
 import type { Customer, Subscription, SubscriptionStatus } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
@@ -24,8 +24,10 @@ import {
   canRenew,
   hasDueBillingPeriods,
   hasValidPaymentMethod,
+  isAdvanceBilling,
   isAutoRenewEnabled,
   isCurrentPhaseNull,
+  isSubscriptionActive,
   isTrialExpired,
 } from "./guards"
 import {
@@ -63,7 +65,7 @@ export class SubscriptionMachine {
   private analytics: Analytics
   private logger: Logger
   private actor!: AnyActorRef
-  private waitUntil: (p: Promise<unknown>) => void
+  private db: Database
   private now: number
   private customerService: CustomerService
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
@@ -72,9 +74,6 @@ export class SubscriptionMachine {
   // Each send chains onto this promise, so events are processed in order.
   // This is per-instance (per-subscription) and prevents overlapping invokes.
   // when i send multiple events at the same time, the events are processed in order
-  // like sendAndWait({ type: "RENEW" }, { states: ["active", "expired"], timeout: 15000 })
-  // and sendAndWait({ type: "INVOICE" }, { states: ["active"], timeout: 30000 })
-  // the events are processed in order so I don't need to await the first event to be processed before sending the second event
   private sendQueue: Promise<unknown> = Promise.resolve()
 
   private constructor({
@@ -82,25 +81,25 @@ export class SubscriptionMachine {
     projectId,
     analytics,
     logger,
-    waitUntil,
     customer,
     now,
+    db,
   }: {
     subscriptionId: string
     projectId: string
     analytics: Analytics
     logger: Logger
     customer: CustomerService
-    waitUntil: (p: Promise<unknown>) => void
     now: number
+    db: Database
   }) {
     this.subscriptionId = subscriptionId
     this.projectId = projectId
     this.analytics = analytics
     this.logger = logger
-    this.waitUntil = waitUntil
     this.now = now
     this.customerService = customer
+    this.db = db
     this.machine = this.createMachineSubscription()
   }
 
@@ -124,30 +123,39 @@ export class SubscriptionMachine {
       },
       actors: {
         generateBillingPeriods: fromPromise(
-          async ({ input }: { input: { context: SubscriptionContext; logger: Logger } }) => {
+          async ({
+            input,
+          }: { input: { context: SubscriptionContext; logger: Logger; db: Database } }) => {
             const result = await generateBillingPeriods({
               context: input.context,
               logger: input.logger,
+              db: input.db,
             })
 
             return result
           }
         ),
         loadSubscription: fromPromise(
-          async ({ input }: { input: { context: SubscriptionContext; logger: Logger } }) => {
+          async ({
+            input,
+          }: { input: { context: SubscriptionContext; logger: Logger; db: Database } }) => {
             const result = await loadSubscription({
               context: input.context,
               logger: input.logger,
+              db: input.db,
             })
 
             return result
           }
         ),
         invoiceSubscription: fromPromise(
-          async ({ input }: { input: { context: SubscriptionContext; logger: Logger } }) => {
+          async ({
+            input,
+          }: { input: { context: SubscriptionContext; logger: Logger; db: Database } }) => {
             const result = await invoiceSubscription({
               context: input.context,
               logger: input.logger,
+              db: db,
             })
 
             return result
@@ -161,12 +169,14 @@ export class SubscriptionMachine {
               context: SubscriptionContext
               logger: Logger
               customerService: CustomerService
+              db: Database
             }
           }) => {
             const result = await renewSubscription({
               context: input.context,
               logger: input.logger,
               customerService: input.customerService,
+              db: input.db,
             })
 
             return result
@@ -181,6 +191,8 @@ export class SubscriptionMachine {
           hasValidPaymentMethod({ context, logger: this.logger }),
         isAutoRenewEnabled: isAutoRenewEnabled,
         isCurrentPhaseNull: isCurrentPhaseNull,
+        isSubscriptionActive: isSubscriptionActive,
+        isAdvanceBilling: isAdvanceBilling,
       },
       actions: {
         logStateTransition: ({ context, event }) =>
@@ -221,6 +233,7 @@ export class SubscriptionMachine {
             input: ({ context }) => ({
               context,
               logger: this.logger,
+              db: this.db,
             }),
             onDone: {
               target: "restored", // transitional state that will be used to determine the next state
@@ -232,6 +245,8 @@ export class SubscriptionMachine {
                   customer: ({ event }) => event.output.customer,
                   paymentMethodId: ({ event }) => event.output.paymentMethodId,
                   requiredPaymentMethod: ({ event }) => event.output.requiredPaymentMethod,
+                  hasDueBillingPeriods: ({ event }) => event.output.hasDueBillingPeriods,
+                  hasOpenInvoices: ({ event }) => event.output.hasOpenInvoices,
                 }),
               ],
             },
@@ -246,11 +261,13 @@ export class SubscriptionMachine {
           },
         },
         error: {
+          //  it's often cleaner to treat the error state as a final state that contains the error information.
+          // The waitFor function can then inspect that final state and its context to return a Result.Err
           tags: ["machine", "error"],
           description: "Subscription error, it will throw an error as a final state",
           type: "final",
           entry: ({ context, event }) => {
-            // log the error
+            // log the error here, then it's propagated to the waitFor function
             this.logger.error(context.error?.message ?? "Unknown error", {
               subscriptionId: this.subscriptionId,
               customerId: context.customer.id,
@@ -259,9 +276,6 @@ export class SubscriptionMachine {
               now: this.now,
               event: JSON.stringify(event),
             })
-
-            // throw an error to be caught by the machine
-            throw context.error
           },
         },
         restored: {
@@ -311,10 +325,21 @@ export class SubscriptionMachine {
           tags: ["subscription"],
           description: "Subscription is trialing, meaning is waiting for the trial to end",
           on: {
-            BILLING_PERIOD: {
-              target: "generating_billing_periods",
-              actions: "logStateTransition",
-            },
+            BILLING_PERIOD: [
+              {
+                guard: not("isSubscriptionActive"), // verify that the subscription is active
+                target: "error", // if the subscription is not active, throw an error
+                actions: assign({
+                  error: () => ({
+                    message: "Subscription is not active",
+                  }),
+                }),
+              },
+              {
+                target: "generating_billing_periods",
+                actions: "logStateTransition",
+              },
+            ],
             // first possible event is renew which will end the trial and update the phase
             RENEW: [
               {
@@ -323,6 +348,15 @@ export class SubscriptionMachine {
                 actions: assign({
                   error: () => ({
                     message: "Subscription has no active phase",
+                  }),
+                }),
+              },
+              {
+                guard: not("isSubscriptionActive"), // verify that the subscription is active
+                target: "error", // if the subscription is not active, throw an error
+                actions: assign({
+                  error: () => ({
+                    message: "Subscription is not active",
                   }),
                 }),
               },
@@ -367,11 +401,11 @@ export class SubscriptionMachine {
         },
         generating_billing_periods: {
           tags: ["machine", "transition"],
-          description: "Generating billing periods for the subscription",
+          description: "Generating billing periods for the subscription items",
           invoke: {
             id: "generateBillingPeriods",
             src: "generateBillingPeriods",
-            input: ({ context }) => ({ context, logger: this.logger }),
+            input: ({ context }) => ({ context, logger: this.logger, db: this.db }),
             onDone: {
               target: "active",
               actions: [
@@ -382,6 +416,13 @@ export class SubscriptionMachine {
                     }
 
                     return context.subscription
+                  },
+                  hasDueBillingPeriods: ({ event, context }) => {
+                    if (event.output.hasDueBillingPeriods) {
+                      return event.output.hasDueBillingPeriods
+                    }
+
+                    return context.hasDueBillingPeriods
                   },
                 }),
                 "logStateTransition",
@@ -397,17 +438,28 @@ export class SubscriptionMachine {
                     context,
                     subscription: {
                       metadata: {
-                        reason: "invoice_failed",
-                        note: "Invoice failed after trying to invoice",
+                        reason: "generate_billing_periods_failed",
+                        note: "Generate billing periods failed after trying to generate",
                       },
                     },
                   }),
                 assign({
                   error: ({ event }) => ({
-                    message: `Invoice failed: ${(event.error as Error)?.message ?? "Unknown error"}`,
+                    message: `Generate billing periods failed: ${(event.error as Error)?.message ?? "Unknown error"}`,
                   }),
                 }),
                 "logStateTransition",
+                // notify the admin
+                ({ event, context }) => {
+                  // TODO: notify the admin
+                  this.logger.error("Generate billing periods failed", {
+                    subscriptionId: context.subscriptionId,
+                    customerId: context.customer.id,
+                    projectId: context.projectId,
+                    now: context.now,
+                    event: JSON.stringify(event),
+                  })
+                },
               ],
             },
           },
@@ -418,7 +470,7 @@ export class SubscriptionMachine {
           invoke: {
             id: "invoiceSubscription",
             src: "invoiceSubscription",
-            input: ({ context }) => ({ context, logger: this.logger }),
+            input: ({ context }) => ({ context, logger: this.logger, db: this.db }),
             onDone: {
               target: "active",
               actions: [
@@ -469,6 +521,7 @@ export class SubscriptionMachine {
               context,
               customerService: this.customerService,
               logger: this.logger,
+              db: this.db,
             }),
             onDone: {
               target: "active",
@@ -507,18 +560,34 @@ export class SubscriptionMachine {
               target: "canceling",
               actions: "logStateTransition",
             },
-            BILLING_PERIOD: {
-              target: "generating_billing_periods",
-              actions: "logStateTransition",
-            },
+            BILLING_PERIOD: [
+              {
+                guard: not("isSubscriptionActive"), // verify that the subscription is active
+                target: "error", // if the subscription is not active, throw an error
+                actions: assign({
+                  error: () => ({
+                    message: "Subscription is not active",
+                  }),
+                }),
+              },
+              {
+                target: "generating_billing_periods",
+                actions: "logStateTransition",
+              },
+            ],
             CHANGE: {
               target: "changing",
               actions: "logStateTransition",
             },
-            PAYMENT_SUCCESS: {
-              target: "active",
-              actions: ["logStateTransition"],
-            },
+            // if the subscription is on advance billing and can be renewed, renew the subscription
+            PAYMENT_SUCCESS: [
+              {
+                guard: and(["isAdvanceBilling", "canRenew"]),
+                target: "renewing",
+                actions: ["logStateTransition"],
+              },
+              { target: "active", actions: ["logStateTransition"] },
+            ],
             PAYMENT_FAILURE: {
               target: "past_due",
               actions: [
@@ -529,10 +598,15 @@ export class SubscriptionMachine {
                 },
               ],
             },
-            INVOICE_SUCCESS: {
-              target: "active",
-              actions: ["logStateTransition"],
-            },
+            // if the subscription is on advance billing and can be renewed, renew the subscription
+            INVOICE_SUCCESS: [
+              {
+                guard: and(["isAdvanceBilling", "canRenew"]),
+                target: "renewing",
+                actions: ["logStateTransition"],
+              },
+              { target: "active", actions: ["logStateTransition"] },
+            ],
             INVOICE_FAILURE: {
               target: "past_due",
               actions: [
@@ -545,11 +619,20 @@ export class SubscriptionMachine {
             },
             RENEW: [
               {
-                guard: "isCurrentPhaseNull",
-                target: "error",
+                guard: "isCurrentPhaseNull", // verify that the subscription has a current phase
+                target: "error", // if the subscription has no current phase, throw an error
                 actions: assign({
                   error: () => ({
                     message: "Subscription has no active phase",
+                  }),
+                }),
+              },
+              {
+                guard: not("isSubscriptionActive"), // verify that the subscription is active
+                target: "error", // if the subscription is not active, throw an error
+                actions: assign({
+                  error: () => ({
+                    message: "Subscription is not active",
                   }),
                 }),
               },
@@ -592,15 +675,6 @@ export class SubscriptionMachine {
             ],
             INVOICE: [
               {
-                guard: "isCurrentPhaseNull",
-                target: "error",
-                actions: assign({
-                  error: () => ({
-                    message: "Subscription has no active phase",
-                  }),
-                }),
-              },
-              {
                 guard: and(["hasValidPaymentMethod", "hasDueBillingPeriods"]),
                 target: "invoicing",
                 actions: "logStateTransition",
@@ -608,7 +682,28 @@ export class SubscriptionMachine {
               {
                 target: "error",
                 actions: assign({
-                  error: () => {
+                  error: ({ context }) => {
+                    const isPaymentMethodValid = hasValidPaymentMethod({
+                      context,
+                      logger: this.logger,
+                    })
+
+                    if (!isPaymentMethodValid) {
+                      return {
+                        message: "Cannot invoice subscription, payment method is invalid",
+                      }
+                    }
+
+                    const dueBillingPeriods = hasDueBillingPeriods({
+                      context,
+                    })
+
+                    if (!dueBillingPeriods) {
+                      return {
+                        message: "Cannot invoice subscription, no due billing periods",
+                      }
+                    }
+
                     return {
                       message: "Cannot invoice subscription, payment method is invalid",
                     }
@@ -622,14 +717,29 @@ export class SubscriptionMachine {
           tags: ["subscription"],
           description: "Subscription is past due can retry payment or invoice",
           on: {
-            PAYMENT_SUCCESS: {
-              target: "active",
-              actions: ["logStateTransition"],
-            },
-            BILLING_PERIOD: {
-              target: "generating_billing_periods",
-              actions: "logStateTransition",
-            },
+            PAYMENT_SUCCESS: [
+              {
+                guard: and(["isAdvanceBilling", "canRenew"]),
+                target: "renewing",
+                actions: ["logStateTransition"],
+              },
+              { target: "active", actions: ["logStateTransition"] },
+            ],
+            BILLING_PERIOD: [
+              {
+                guard: not("isSubscriptionActive"), // verify that the subscription is active
+                target: "error", // if the subscription is not active, throw an error
+                actions: assign({
+                  error: () => ({
+                    message: "Subscription is not active",
+                  }),
+                }),
+              },
+              {
+                target: "generating_billing_periods",
+                actions: "logStateTransition",
+              },
+            ],
             PAYMENT_FAILURE: {
               target: "past_due",
               actions: [
@@ -650,24 +760,19 @@ export class SubscriptionMachine {
                 },
               ],
             },
-            INVOICE_SUCCESS: {
-              target: "active",
-              actions: ["logStateTransition"],
-            },
+            INVOICE_SUCCESS: [
+              {
+                guard: and(["isAdvanceBilling", "canRenew"]),
+                target: "renewing",
+                actions: ["logStateTransition"],
+              },
+              { target: "active", actions: ["logStateTransition"] },
+            ],
             CANCEL: {
               target: "canceled",
               actions: "logStateTransition",
             },
             INVOICE: [
-              {
-                guard: "isCurrentPhaseNull",
-                target: "error",
-                actions: assign({
-                  error: () => ({
-                    message: "Subscription has no active phase",
-                  }),
-                }),
-              },
               {
                 guard: and(["hasValidPaymentMethod", "hasDueBillingPeriods"]),
                 target: "invoicing",
@@ -696,7 +801,6 @@ export class SubscriptionMachine {
         expiring: {
           tags: ["machine", "transition"],
           description: "Subscription expired, no more payments will be made",
-          type: "final",
         },
         canceled: {
           tags: ["subscription", "final"],
@@ -726,7 +830,7 @@ export class SubscriptionMachine {
 
     this.actor.subscribe({
       next: async (snapshot) => {
-        if (!snapshot.changed) return
+        // only persist the subscription status
         if (!snapshot.hasTag("subscription")) return
 
         const currentState = snapshot.value as SusbriptionMachineStatus
@@ -737,7 +841,7 @@ export class SubscriptionMachine {
             .update(subscriptions)
             .set({
               status: currentState as SubscriptionStatus,
-              active: !["idle", "expired", "canceled"].includes(currentState),
+              active: !["expired", "canceled"].includes(currentState),
             })
             .where(
               dbAnd(
@@ -782,7 +886,7 @@ export class SubscriptionMachine {
     logger: Logger
     customer: CustomerService
     now: number
-    waitUntil: (p: Promise<unknown>) => void
+    db: Database
   }): Promise<Result<SubscriptionMachine, UnPriceMachineError>> {
     const subscription = new SubscriptionMachine(payload)
 
@@ -815,7 +919,9 @@ export class SubscriptionMachine {
           })
         )
       }
+
       this.actor.send(event)
+
       const res = await this.waitFor({
         states: opts?.states,
         tag: opts?.tag,
@@ -839,11 +945,25 @@ export class SubscriptionMachine {
     tag?: MachineTags
   }): Promise<Result<SusbriptionMachineStatus, UnPriceMachineError>> {
     try {
+      // Wait for the desired tag OR the error tag OR final state
       const snap = await waitFor(
         this.actor,
-        (s) => Boolean(states?.some((st) => s.matches(st)) || (tag && s.hasTag(tag))),
+        (s) =>
+          Boolean(
+            states?.some((st) => s.matches(st)) ||
+              (tag && s.hasTag(tag)) ||
+              s.hasTag("error") ||
+              s.hasTag("final")
+          ),
         { timeout }
       )
+      if (snap.hasTag("error")) {
+        // Correctly access the error from the context
+        return Err(
+          new UnPriceMachineError({ message: snap.context.error?.message ?? "Unknown error" })
+        )
+      }
+
       return Ok(snap.value as SusbriptionMachineStatus)
     } catch (e) {
       return Err(new UnPriceMachineError({ message: (e as Error)?.message ?? "Timeout" }))
@@ -920,6 +1040,7 @@ export class SubscriptionMachine {
   }
 
   public async shutdown(timeout = 5000): Promise<void> {
+    // if there are previous events in the queue, wait for them to complete
     if (this.sendQueue) {
       try {
         await Promise.race([

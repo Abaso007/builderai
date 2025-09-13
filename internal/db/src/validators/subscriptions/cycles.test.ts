@@ -1,238 +1,244 @@
 import { describe, expect, it } from "vitest"
-import { enumerateBillingWindows } from "./billing"
+import type { BillingConfig } from "../shared"
+import { calculateCycleWindow, calculateNextNCycles } from "./billing"
 
 const utcDate = (date: string, time = "00:00:00.000") => new Date(`${date}T${time}Z`).getTime()
 
-describe("enumerateBillingWindows", () => {
-  it("enumerates monthly cycles from startAt until now", () => {
+describe("cycles using calculateCycleWindow", () => {
+  it("monthly windows are contiguous across cycles for anchor 15", () => {
     const startAt = utcDate("2024-01-10", "00:00:00.000")
-    const now = utcDate("2024-04-05", "00:00:00.000")
-    const anchor = 15
 
-    const windows = enumerateBillingWindows({
-      startAt,
-      now,
-      anchor,
-      interval: "month",
-      intervalCount: 1,
+    const billingConfig = {
+      name: "test",
+      billingInterval: "month",
+      billingIntervalCount: 1,
+      billingAnchor: 15,
+      planType: "recurring",
+    } as BillingConfig
+
+    // first window: startAt -> first anchor-bound end
+    const first = calculateCycleWindow({
+      effectiveStartDate: startAt,
+      effectiveEndDate: null,
+      trialEndsAt: null,
+      now: startAt,
+      billingConfig,
+    })
+    expect(first).not.toBeNull()
+    expect(first!.start).toBe(startAt)
+    expect(first!.end).toBe(utcDate("2024-01-15", "00:00:00.000"))
+
+    // next window should start at previous end when now advances into next cycle
+    const second = calculateCycleWindow({
+      effectiveStartDate: startAt,
+      effectiveEndDate: null,
+      trialEndsAt: null,
+      now: first!.end,
+      billingConfig,
     })
 
-    expect(windows).toEqual([
-      // first partial: Jan 10 -> Jan 15
-      {
-        start: utcDate("2024-01-10", "00:00:00.000"),
-        end: utcDate("2024-01-15", "00:00:00.000") - 1,
-      },
-      // full: Jan 15 -> Feb 15
-      {
-        start: utcDate("2024-01-15", "00:00:00.000"),
-        end: utcDate("2024-02-15", "00:00:00.000") - 1,
-      },
-      // full: Feb 15 -> Mar 15
-      {
-        start: utcDate("2024-02-15", "00:00:00.000"),
-        end: utcDate("2024-03-15", "00:00:00.000") - 1,
-      },
-      // last window should end at cycle end (Apr 15) since no endAt
-      {
-        start: utcDate("2024-03-15", "00:00:00.000"),
-        end: utcDate("2024-04-15", "00:00:00.000") - 1,
-      },
-    ])
+    expect(second).not.toBeNull()
+    expect(second!.start).toBe(first!.end)
+    expect(second!.end).toBe(utcDate("2024-02-15", "00:00:00.000"))
   })
 
-  it("caps at endAt if provided", () => {
-    const startAt = utcDate("2024-01-10", "00:00:00.000")
-    const now = utcDate("2024-04-20", "00:00:00.000")
-    const endAt = utcDate("2024-03-10", "00:00:00.000")
-
-    const windows = enumerateBillingWindows({
-      startAt,
-      now,
-      endAt,
-      anchor: 15,
-      interval: "month",
-      intervalCount: 1,
-    })
-
-    const last = windows.at(-1)
-    expect(last?.end).toBe(endAt)
-  })
-
-  it("includes trial window before recurring cycles", () => {
-    const startAt = utcDate("2024-01-01", "00:00:00.000")
-    const trialEndsAt = utcDate("2024-01-07", "00:00:00.000")
-    const now = utcDate("2024-01-20", "00:00:00.000")
-
-    const windows = enumerateBillingWindows({
-      startAt,
-      now,
-      trialEndsAt,
-      anchor: 15,
-      interval: "month",
-      intervalCount: 1,
-    })
-
-    expect(windows[0]).toEqual({ start: startAt, end: trialEndsAt - 1, isTrial: true })
-    expect(windows[1]?.start).toBeGreaterThanOrEqual(trialEndsAt)
-  })
-
-  it("onetime: single window from startAt to max date", () => {
-    const startAt = utcDate("2024-01-01", "00:00:00.000")
-    const now = utcDate("2024-02-01", "00:00:00.000")
-
-    const windows = enumerateBillingWindows({
-      startAt,
-      now,
-      anchor: 0,
-      interval: "onetime",
-      intervalCount: 1,
-    })
-
-    expect(windows).toEqual([
-      { start: startAt, end: new Date("9999-12-31T23:59:59.999Z").getTime(), isTrial: false },
-    ])
-  })
-
-  it("daily cycles without endAt end at current cycle end", () => {
-    const startAt = utcDate("2024-01-10", "06:30:00.000")
-    const now = utcDate("2024-01-12", "03:00:00.000")
-
-    const windows = enumerateBillingWindows({
-      startAt,
-      now,
-      anchor: 0,
-      interval: "day",
-      intervalCount: 1,
-    })
-
-    // Expect: [Jan10 06:30 -> Jan11 00:00], [Jan11 00:00 -> Jan12 00:00], [Jan12 00:00 -> Jan13 00:00]
-    expect(windows.at(-1)?.end).toBe(utcDate("2024-01-13", "00:00:00.000") - 1)
-  })
-
-  it("minute cycles without endAt end at current cycle end", () => {
-    const startAt = utcDate("2024-01-01", "12:34:20.000")
-    const now = utcDate("2024-01-01", "12:36:10.000")
-
-    const windows = enumerateBillingWindows({
-      startAt,
-      now,
-      anchor: 0,
-      interval: "minute",
-      intervalCount: 5, // 5-minute cycles
-    })
-
-    // With 5-minute cycles aligned by minute floor, the current cycle containing now (12:36:10)
-    // ends at 12:41
-    expect(windows.at(-1)?.end).toBe(utcDate("2024-01-01", "12:41:00.000") - 1)
-  })
-
-  it("trial window capped by endAt before recurring cycles", () => {
+  it("trial-only window when endAt caps before paid period", () => {
     const startAt = utcDate("2024-01-01", "00:00:00.000")
     const trialEndsAt = utcDate("2024-01-10", "00:00:00.000")
     const endAt = utcDate("2024-01-07", "00:00:00.000")
-    const now = utcDate("2024-01-20", "00:00:00.000")
 
-    const windows = enumerateBillingWindows({
-      startAt,
-      now,
+    const result = calculateCycleWindow({
+      effectiveStartDate: startAt,
+      effectiveEndDate: endAt,
       trialEndsAt,
-      endAt,
-      anchor: 15,
-      interval: "month",
-      intervalCount: 1,
+      now: utcDate("2024-01-05", "00:00:00.000"),
+      billingConfig: {
+        name: "test",
+        billingInterval: "month",
+        billingIntervalCount: 1,
+        billingAnchor: 15,
+        planType: "recurring",
+      },
     })
 
-    // Only the trial window should appear and be capped at endAt (inclusive end)
-    expect(windows).toEqual([{ start: startAt, end: endAt - 1, isTrial: true }])
+    expect(result).not.toBeNull()
+    expect(result!.start).toBe(startAt)
+    expect(result!.end).toBe(endAt)
   })
+})
 
-  it("yearly cycles without endAt end at current cycle end (anchor month)", () => {
-    const startAt = utcDate("2023-04-10", "00:00:00.000")
-    const now = utcDate("2024-02-01", "00:00:00.000")
+describe("calculateCycleWindow (utility coverage)", () => {
+  it("respects window", () => {
+    const start = utcDate("2024-01-01", "12:00:00.000")
+    const trialEnd = utcDate("2024-01-10", "12:00:00.000")
+    const now = utcDate("2024-01-05", "12:00:00.000")
 
-    const windows = enumerateBillingWindows({
-      startAt,
+    const result = calculateCycleWindow({
+      effectiveStartDate: start,
+      effectiveEndDate: null,
+      trialEndsAt: trialEnd,
       now,
-      anchor: 3, // March
-      interval: "year",
-      intervalCount: 1,
+      billingConfig: {
+        name: "test",
+        billingInterval: "month",
+        billingIntervalCount: 1,
+        billingAnchor: 1,
+        planType: "recurring",
+      },
     })
 
-    // The current yearly window should end Mar 1, 2024
-    expect(windows.at(-1)?.end).toBe(utcDate("2024-03-01", "00:00:00.000") - 1)
+    expect(result).not.toBeNull()
+    expect(result!.start).toBe(start)
+    expect(result!.end).toBe(trialEnd)
   })
+})
 
-  it("windows are contiguous for monthly with trial", () => {
-    const startAt = utcDate("2024-01-01", "00:00:00.000")
-    const trialEndsAt = utcDate("2024-01-07", "00:00:00.000")
-    const now = utcDate("2024-03-20", "00:00:00.000")
+describe("calculateNextNCycles sequences", () => {
+  const utc = (d: string, t = "00:00:00.000") => new Date(`${d}T${t}Z`).getTime()
 
-    const windows = enumerateBillingWindows({
-      startAt,
-      now,
-      trialEndsAt,
-      anchor: 15,
-      interval: "month",
-      intervalCount: 1,
+  function monthlyCfg(anchor: number) {
+    return {
+      name: "test",
+      billingInterval: "month" as const,
+      billingIntervalCount: 1,
+      billingAnchor: anchor,
+      planType: "recurring" as const,
+    }
+  }
+
+  it("includes all windows from effective start through reference, then appends count", () => {
+    const start = utc("2024-01-10")
+    const reference = utc("2024-02-20")
+    const cfg = monthlyCfg(15)
+
+    const windows = calculateNextNCycles({
+      referenceDate: reference,
+      effectiveStartDate: start,
+      effectiveEndDate: null,
+      trialEndsAt: null,
+      billingConfig: cfg,
+      count: 2,
     })
 
-    for (let i = 1; i < windows.length; i++) {
-      expect(windows[i]?.start).toBe((windows[i - 1]?.end ?? 0) + 1)
+    const expected = [
+      [utc("2024-01-10"), utc("2024-01-15")],
+      [utc("2024-01-15"), utc("2024-02-15")],
+      [utc("2024-02-15"), utc("2024-03-15")],
+      [utc("2024-03-15"), utc("2024-04-15")],
+      [utc("2024-04-15"), utc("2024-05-15")],
+    ]
+
+    expect(windows.length).toBe(expected.length)
+    for (let i = 0; i < expected.length; i++) {
+      const w = windows[i]!
+      expect(w.start).toBe(expected[i]![0])
+      expect(w.end).toBe(expected[i]![1])
     }
   })
 
-  it("windows are contiguous for daily cycles", () => {
-    const startAt = utcDate("2024-01-10", "06:30:00.000")
-    const now = utcDate("2024-01-12", "03:00:00.000")
+  it("reference at exact boundary uses next window; count=0 stops at containing window", () => {
+    const start = utc("2024-01-01")
+    const cfg = monthlyCfg(15)
+    const reference = utc("2024-01-15")
 
-    const windows = enumerateBillingWindows({
-      startAt,
-      now,
-      anchor: 0,
-      interval: "day",
-      intervalCount: 1,
+    const windows = calculateNextNCycles({
+      referenceDate: reference,
+      effectiveStartDate: start,
+      effectiveEndDate: null,
+      trialEndsAt: null,
+      billingConfig: cfg,
+      count: 0,
     })
 
-    for (let i = 1; i < windows.length; i++) {
-      expect(windows[i]?.start).toBe((windows[i - 1]?.end ?? 0) + 1)
+    const expected = [
+      [utc("2024-01-01"), utc("2024-01-15")],
+      [utc("2024-01-15"), utc("2024-02-15")],
+    ]
+
+    expect(windows.length).toBe(expected.length)
+    for (let i = 0; i < expected.length; i++) {
+      const w = windows[i]!
+      expect(w.start).toBe(expected[i]![0])
+      expect(w.end).toBe(expected[i]![1])
     }
   })
 
-  it("windows are contiguous for minute cycles", () => {
-    const startAt = utcDate("2024-01-01", "12:34:20.000")
-    const now = utcDate("2024-01-01", "12:36:10.000")
+  it("returns empty when reference is before effective start", () => {
+    const start = utc("2024-01-10")
+    const reference = utc("2024-01-09")
+    const cfg = monthlyCfg(15)
 
-    const windows = enumerateBillingWindows({
-      startAt,
-      now,
-      anchor: 0,
-      interval: "minute",
-      intervalCount: 5,
+    const windows = calculateNextNCycles({
+      referenceDate: reference,
+      effectiveStartDate: start,
+      effectiveEndDate: null,
+      trialEndsAt: null,
+      billingConfig: cfg,
+      count: 3,
     })
 
-    for (let i = 1; i < windows.length; i++) {
-      expect(windows[i]?.start).toBe((windows[i - 1]?.end ?? 0) + 1)
+    expect(windows).toEqual([])
+  })
+
+  it("caps by effectiveEndDate and does not exceed it even with extra count", () => {
+    const start = utc("2024-01-10")
+    const cfg = monthlyCfg(15)
+    const reference = utc("2024-02-10")
+    const endAt = utc("2024-03-01")
+
+    const windows = calculateNextNCycles({
+      referenceDate: reference,
+      effectiveStartDate: start,
+      effectiveEndDate: endAt,
+      trialEndsAt: null,
+      billingConfig: cfg,
+      count: 5,
+    })
+
+    // Expected:
+    // [2024-01-10, 2024-01-15)
+    // [2024-01-15, 2024-02-15)
+    // [2024-02-15, 2024-03-01) // capped by effectiveEndDate
+    const expected = [
+      [utc("2024-01-10"), utc("2024-01-15")],
+      [utc("2024-01-15"), utc("2024-02-15")],
+      [utc("2024-02-15"), endAt],
+    ]
+
+    expect(windows.length).toBe(expected.length)
+    for (let i = 0; i < expected.length; i++) {
+      const w = windows[i]!
+      expect(w.start).toBe(expected[i]![0])
+      expect(w.end).toBe(expected[i]![1])
     }
   })
 
-  it("windows are contiguous when endAt caps monthly cycles", () => {
-    const startAt = utcDate("2024-01-10", "00:00:00.000")
-    const now = utcDate("2024-04-20", "00:00:00.000")
-    const endAt = utcDate("2024-03-10", "00:00:00.000")
+  it("includes trial window then paid windows up to reference plus count", () => {
+    const start = utc("2024-01-01")
+    const trialEnd = utc("2024-01-07")
+    const cfg = monthlyCfg(15)
+    const reference = utc("2024-01-10")
 
-    const windows = enumerateBillingWindows({
-      startAt,
-      now,
-      endAt,
-      anchor: 15,
-      interval: "month",
-      intervalCount: 1,
+    const windows = calculateNextNCycles({
+      referenceDate: reference,
+      effectiveStartDate: start,
+      effectiveEndDate: null,
+      trialEndsAt: trialEnd,
+      billingConfig: cfg,
+      count: 1,
     })
 
-    for (let i = 1; i < windows.length; i++) {
-      expect(windows[i]?.start).toBe((windows[i - 1]?.end ?? 0) + 1)
+    const expected = [
+      [utc("2024-01-01"), utc("2024-01-07")], // trial
+      [utc("2024-01-07"), utc("2024-01-15")], // stub paid until first anchor
+      [utc("2024-01-15"), utc("2024-02-15")], // +1 future cycle
+    ]
+
+    expect(windows.length).toBe(expected.length)
+    for (let i = 0; i < expected.length; i++) {
+      const w = windows[i]!
+      expect(w.start).toBe(expected[i]![0])
+      expect(w.end).toBe(expected[i]![1])
     }
-    expect(windows.at(-1)?.end).toBe(endAt)
   })
 })

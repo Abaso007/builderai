@@ -5,17 +5,16 @@ import type { SubscriptionContext } from "./types"
  * Guard: Check if subscription can be renewed using context data
  */
 export const canRenew = (input: { context: SubscriptionContext }): boolean => {
-  const { currentPhase: p, now } = input.context
-  if (!p) return false
+  const { subscription, now } = input.context
 
   // cannot renew if the phase is scheduled to end
-  if (p.endAt && p.endAt < p.currentCycleEndAt) return false
+  if (subscription.endAt && subscription.endAt < now) return false
 
   // cannot renew if the renew at is not set
-  if (!p.renewAt) return false
+  if (!subscription.renewAt) return false
 
   // cannot renew if the renew at is not due yet
-  return now >= p.renewAt
+  return now >= subscription.renewAt
 }
 
 export const isAutoRenewEnabled = (input: { context: SubscriptionContext }): boolean => {
@@ -24,6 +23,16 @@ export const isAutoRenewEnabled = (input: { context: SubscriptionContext }): boo
   if (!currentPhase) return false
 
   return currentPhase.planVersion.autoRenew
+}
+
+export const isAdvanceBilling = (input: { context: SubscriptionContext }): boolean => {
+  const currentPhase = input.context.currentPhase
+  if (!currentPhase) return false
+  return currentPhase.planVersion.whenToBill === "pay_in_advance"
+}
+
+export const isSubscriptionActive = (input: { context: SubscriptionContext }): boolean => {
+  return input.context.subscription.active
 }
 
 /**
@@ -56,7 +65,6 @@ export const hasValidPaymentMethod = (input: {
   const paymentMethodId = input.context.paymentMethodId
   const requiredPaymentMethod = input.context.requiredPaymentMethod
 
-  input.logger.info("hasValidPaymentMethod", { paymentMethodId, requiredPaymentMethod })
   if (!requiredPaymentMethod) return true
 
   return paymentMethodId !== null

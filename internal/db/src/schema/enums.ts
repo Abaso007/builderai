@@ -12,7 +12,6 @@ import {
   FEATURE_VERSION_TYPES,
   INVOICE_ITEM_KIND,
   INVOICE_STATUS,
-  INVOICE_TYPE,
   PAYMENT_PROVIDERS,
   PLAN_TYPES,
   ROLES_APP,
@@ -25,10 +24,9 @@ import {
 } from "../utils"
 
 export const subscriptionStatusEnum = pgEnum("subscription_status_v3", SUBSCRIPTION_STATUS)
-export const billingPeriodStatusEnum = pgEnum("billing_period_status", BILLING_PERIOD_STATUS)
+export const billingPeriodStatusEnum = pgEnum("billing_period_status_v1", BILLING_PERIOD_STATUS)
 export const billingPeriodTypeEnum = pgEnum("billing_period_type", BILLING_PERIOD_TYPE)
 export const invoiceStatusEnum = pgEnum("invoice_status", INVOICE_STATUS)
-export const invoiceTypeEnum = pgEnum("invoice_type", INVOICE_TYPE)
 export const statusPlanEnum = pgEnum("plan_version_status", STATUS_PLAN)
 export const typeFeatureEnum = pgEnum("feature_types", FEATURE_TYPES)
 export const typeFeatureVersionEnum = pgEnum("feature_version_types", FEATURE_VERSION_TYPES)

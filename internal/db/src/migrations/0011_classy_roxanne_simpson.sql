@@ -1,1 +1,0 @@
-ALTER TABLE "unprice_pages" ADD COLUMN "cta_link" text DEFAULT '' NOT NULL;

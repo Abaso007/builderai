@@ -12,6 +12,7 @@ import {
   planVersionExtendedSchema,
   planVersionSelectBaseSchema,
 } from "../planVersions"
+import { planSelectBaseSchema } from "../plans"
 import { projectSelectBaseSchema } from "../project"
 import { UnPriceCalculationError } from "./../errors"
 import { configPackageSchema, planVersionFeatureSelectBaseSchema } from "./../planVersionFeatures"
@@ -44,6 +45,7 @@ const reasonSchema = z.enum([
   "cancelled",
   "auto_renew_disabled",
   "customer_signout",
+  "generate_billing_periods_failed",
 ])
 
 // schema for entitlements this is repeated but avoid circular dependencies
@@ -108,7 +110,9 @@ export const subscriptionPhaseSelectSchema = createSelectSchema(subscriptionPhas
 export const subscriptionPhaseExtendedSchema = subscriptionPhaseSelectSchema.extend({
   items: subscriptionItemExtendedSchema.array(),
   entitlements: entitlementsExtendedSchema.array(),
-  planVersion: planVersionSelectBaseSchema,
+  planVersion: planVersionSelectBaseSchema.extend({
+    plan: planSelectBaseSchema,
+  }),
 })
 
 export const subscriptionPhaseInsertSchema = createInsertSchema(subscriptionPhases, {

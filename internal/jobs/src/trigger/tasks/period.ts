@@ -3,18 +3,16 @@ import { SubscriptionService } from "@unprice/services/subscriptions"
 import { createContext } from "./context"
 
 export const periodTask = task({
-  id: "subscription.phase.period",
+  id: "subscription.period.task",
   retry: {
     maxAttempts: 3,
   },
   run: async (
     {
-      phaseId,
       projectId,
       now,
       subscriptionId,
     }: {
-      phaseId: string
       projectId: string
       now: number
       subscriptionId: string
@@ -28,8 +26,7 @@ export const periodTask = task({
       defaultFields: {
         subscriptionId,
         projectId,
-        api: "jobs.subscription.phase.period",
-        phaseId,
+        api: "jobs.subscription.period.task",
         now: now.toString(),
       },
     })
@@ -37,8 +34,7 @@ export const periodTask = task({
     const subscriptionService = new SubscriptionService(context)
 
     // init phase machine
-    const periodResult = await subscriptionService.createPeriodsForSubscriptionItems({
-      phaseId,
+    const periodResult = await subscriptionService.generateBillingPeriods({
       subscriptionId,
       projectId,
       now,
@@ -49,11 +45,10 @@ export const periodTask = task({
     }
 
     return {
-      cyclesCreated: periodResult.val.cyclesCreated,
+      status: periodResult.val.status,
       subscriptionId,
       projectId,
       now,
-      phaseId,
     }
   },
 })

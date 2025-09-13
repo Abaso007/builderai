@@ -82,20 +82,6 @@ export const columns: ColumnDef<InvoiceCustomer>[] = [
     },
   },
   {
-    accessorKey: "type",
-    enableResizing: true,
-    header: ({ column }) => <DataTableColumnHeader column={column} title="Plan" />,
-    cell: ({ row }) => <Badge className="text-xs">{row.original.type}</Badge>,
-    size: 20,
-  },
-  {
-    accessorKey: "prorated",
-    enableResizing: true,
-    header: ({ column }) => <DataTableColumnHeader column={column} title="Prorated" />,
-    cell: ({ row }) => <Badge className="text-xs">{row.original.prorated ? "Yes" : "No"}</Badge>,
-    size: 20,
-  },
-  {
     accessorKey: "provider",
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Provider" />,

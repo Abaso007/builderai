@@ -1,11 +1,9 @@
-import { randomUUID } from "node:crypto"
-
-import { type Database, type TransactionDatabase, and, eq, lt, sql } from "@unprice/db"
+import { type Database, and, eq, lt, sql } from "@unprice/db"
 import { subscriptionLocks } from "@unprice/db/schema"
-import { newId } from "@unprice/db/utils"
+import { newId, randomId } from "@unprice/db/utils"
 
 export class SubscriptionLock {
-  private readonly db: Database | TransactionDatabase
+  private readonly db: Database
   private readonly projectId: string
   private readonly subscriptionId: string
   private token: string | null = null
@@ -14,7 +12,7 @@ export class SubscriptionLock {
     db,
     projectId,
     subscriptionId,
-  }: { db: Database | TransactionDatabase; projectId: string; subscriptionId: string }) {
+  }: { db: Database; projectId: string; subscriptionId: string }) {
     this.db = db
     this.projectId = projectId
     this.subscriptionId = subscriptionId
@@ -24,7 +22,7 @@ export class SubscriptionLock {
     ttlMs = 30_000,
     now = Date.now(),
   }: { ttlMs?: number; now?: number } = {}): Promise<boolean> {
-    const token = randomUUID()
+    const token = randomId()
     const expiresAt = now + ttlMs
 
     try {

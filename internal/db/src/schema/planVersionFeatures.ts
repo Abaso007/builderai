@@ -40,7 +40,7 @@ export const planVersionFeatures = pgTableProject(
     // configuration of the feature
     config: json("features_config").$type<z.infer<typeof configFeatureSchema>>().notNull(),
     // billing config for the feature usually the same as the plan version billing config
-    billingConfig: json("billing_config").default({}).notNull().$type<BillingConfig>(),
+    billingConfig: json("billing_config").$type<BillingConfig>().notNull(),
     // metadata probably will be useful to save external data, etc.
     metadata: json("metadata").$type<z.infer<typeof planVersionFeatureMetadataSchema>>(),
     // the method to aggregate the feature quantity - use for calculated the current usage of the feature

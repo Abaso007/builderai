@@ -29,6 +29,7 @@ export const update = protectedProjectProcedure
       defaultQuantity,
       aggregationMethod,
       limit,
+      billingConfig,
       hidden,
     } = opts.input
 
@@ -59,6 +60,10 @@ export const update = protectedProjectProcedure
       })
     }
 
+    // only usage items can have a different billing config but the billing anchor should be the same as the plan version billing config
+    const billingConfigUpdate =
+      featureType === "usage" ? billingConfig : planVersionData.billingConfig
+
     const planVersionFeatureUpdated = await opts.ctx.db
       .update(schema.planVersionFeatures)
       .set({
@@ -74,6 +79,12 @@ export const update = protectedProjectProcedure
         ...(limit !== undefined && { limit: limit === 0 ? null : limit }),
         ...(hidden !== undefined && { hidden }),
         ...(aggregationMethod && { aggregationMethod }),
+        ...(billingConfigUpdate && {
+          billingConfig: {
+            ...billingConfigUpdate,
+            billingAnchor: planVersionData.billingConfig.billingAnchor,
+          },
+        }),
         updatedAtM: Date.now(),
       })
       .where(

@@ -1,4 +1,4 @@
-import { and, eq } from "@unprice/db"
+import { and, eq, inArray } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
 import { AesGCM } from "@unprice/db/utils"
 import { calculateFlatPricePlan, planVersionSelectBaseSchema } from "@unprice/db/validators"
@@ -167,6 +167,35 @@ export const publish = protectedProjectProcedure
     // we need to create each product on the payment provider
     const planVersionDataUpdated = await opts.ctx.db.transaction(async (tx) => {
       try {
+        const flatFeaturesIds = planVersionData.planFeatures
+          .filter((feature) => ["flat", "package", "tier"].includes(feature.featureType))
+          .map((feature) => feature.id)
+
+        if (flatFeaturesIds.length > 0) {
+          // make sure the billing config for flat features in this plan is the same
+          const planVersionFeaturesUpdated = await tx
+            .update(schema.planVersionFeatures)
+            .set({
+              billingConfig: planVersionData.billingConfig,
+            })
+            .where(
+              and(
+                inArray(schema.planVersionFeatures.id, flatFeaturesIds),
+                eq(schema.planVersionFeatures.projectId, project.id),
+                inArray(schema.planVersionFeatures.featureType, ["flat", "package", "tier"])
+              )
+            )
+            .returning()
+            .then((re) => re[0])
+
+          if (!planVersionFeaturesUpdated) {
+            throw new TRPCError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: "Error publishing version",
+            })
+          }
+        }
+
         // set the latest version to false if there is a latest version for this plan
         await tx
           .update(schema.versions)

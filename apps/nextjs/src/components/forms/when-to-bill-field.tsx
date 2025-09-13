@@ -43,8 +43,7 @@ export default function WhenToBillFormField<TFieldValues extends FormValues>({
               </SelectTrigger>
             </FormControl>
             <SelectContent>
-              {/* // TODO: add pay_in_arrear to the when to bill */}
-              {WHEN_TO_BILLING.filter((type) => type !== "pay_in_advance").map((type) => (
+              {WHEN_TO_BILLING.map((type) => (
                 <SelectItem key={type} value={type}>
                   {type}
                 </SelectItem>

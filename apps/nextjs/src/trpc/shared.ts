@@ -1,4 +1,9 @@
-import { QueryClient, defaultShouldDehydrateQuery } from "@tanstack/react-query"
+import {
+  MutationCache,
+  type MutationMeta,
+  QueryClient,
+  defaultShouldDehydrateQuery,
+} from "@tanstack/react-query"
 import { TRPCClientError, type TRPCLink } from "@trpc/client"
 import { httpBatchStreamLink } from "@trpc/client"
 import { newId } from "@unprice/db/utils"
@@ -18,31 +23,31 @@ export const ANALYTICS_STALE_TIME = 1000 * 30 // 30 seconds
 
 export const createQueryClient = () =>
   new QueryClient({
+    mutationCache: new MutationCache({
+      onError: (err, _vars, _ctx, mutation) => {
+        const meta = (mutation.options?.meta ?? {}) as MutationMeta
+        if (meta.suppressGlobalError) return
+
+        if (typeof window === "undefined") {
+          console.error(err)
+          return
+        }
+
+        const msg =
+          meta.mapMessage instanceof Function ? meta.mapMessage(err) : getErrorMessage(err)
+        if (err instanceof TRPCClientError) {
+          toastAction("error", err.message)
+        } else {
+          toastAction("error-contact", msg)
+        }
+      },
+    }),
     defaultOptions: {
       queries: {
         // Since queries are prefetched on the server, we set a stale time so that
         // queries aren't immediately refetched on the client
         staleTime: 60 * 1000,
       },
-      mutations:
-        typeof window !== "undefined"
-          ? {
-              onError: (err) => {
-                // TODO: log this error
-                console.error(err)
-              },
-            }
-          : {
-              onError: (err) => {
-                const error = getErrorMessage(err)
-
-                if (err instanceof TRPCClientError) {
-                  toastAction("error", err.message)
-                } else {
-                  toastAction("error-contact", error)
-                }
-              },
-            },
       dehydrate: {
         // include pending queries in dehydration
         // this allows us to prefetch in RSC and

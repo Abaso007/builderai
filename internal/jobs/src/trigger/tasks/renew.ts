@@ -3,19 +3,17 @@ import { SubscriptionService } from "@unprice/services/subscriptions"
 import { createContext } from "./context"
 
 export const renewTask = task({
-  id: "subscription.phase.renew",
+  id: "subscription.renew.task",
   retry: {
     maxAttempts: 3,
   },
   run: async (
     {
       subscriptionId,
-      phaseId,
       projectId,
       now,
     }: {
       subscriptionId: string
-      phaseId: string
       projectId: string
       now: number
     },
@@ -25,19 +23,17 @@ export const renewTask = task({
       taskId: ctx.task.id,
       subscriptionId,
       projectId,
-      phaseId,
       defaultFields: {
         subscriptionId,
         projectId,
-        api: "jobs.subscription.phase.renew",
-        phaseId,
+        api: "jobs.subscription.renew.task",
         now: now.toString(),
       },
     })
 
     const subscriptionService = new SubscriptionService(context)
 
-    const renewResult = await subscriptionService.endTrial({
+    const renewResult = await subscriptionService.renewSubscription({
       subscriptionId,
       projectId,
       now,
@@ -52,7 +48,6 @@ export const renewTask = task({
       subscriptionId,
       projectId,
       now,
-      phaseId,
     }
   },
 })

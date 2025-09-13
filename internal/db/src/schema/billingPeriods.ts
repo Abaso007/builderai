@@ -27,11 +27,9 @@ export const billingPeriods = pgTableProject(
     subscriptionPhaseId: cuid("subscription_phase_id").notNull(),
     subscriptionItemId: cuid("subscription_item_id").notNull(),
     status: billingPeriodStatusEnum("status").notNull().default("pending"),
-    // type of invoice charges (flat, usage, hybrid)
     type: billingPeriodTypeEnum("type").notNull().default("normal"),
     cycleStartAt: bigint("cycle_start_at_m", { mode: "number" }).notNull(),
     cycleEndAt: bigint("cycle_end_at_m", { mode: "number" }).notNull(),
-    processingAt: bigint("processing_at_m", { mode: "number" }),
     // invoice id is the invoice that is associated with the billing period can be null if the billing period is not invoiced yet
     invoiceId: cuid("invoice_id"),
     amountEstimateCents: integer("amount_estimate_cents"),

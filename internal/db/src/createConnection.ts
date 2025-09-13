@@ -1,4 +1,5 @@
 import { Pool, neonConfig } from "@neondatabase/serverless"
+import type { Logger } from "drizzle-orm"
 import { drizzle as drizzleNeon } from "drizzle-orm/neon-serverless"
 import { withReplicas } from "drizzle-orm/pg-core"
 import ws from "ws"
@@ -14,15 +15,17 @@ export type ConnectionDatabaseOptions = {
   singleton?: boolean
 }
 
-const loggerQuery = (query: string, params?: unknown[]) => {
-  console.info("=".repeat(40))
-  console.info("\n\x1b[36m[Drizzle]\x1b[0m\n")
-  console.info(`Query:\n${query}\n`)
+class MyLogger implements Logger {
+  logQuery(query: string, params?: unknown[]): void {
+    console.info("=".repeat(40))
+    console.info("\n\x1b[36m[Drizzle]\x1b[0m\n")
+    console.info(`Query:\n${query}\n`)
 
-  if (params && params.length > 0) {
-    console.info(`Params:\n${JSON.stringify(params, null, 2)}\n`)
+    if (params && params.length > 0) {
+      console.info(`Params:\n${JSON.stringify(params, null, 2)}\n`)
+    }
+    console.info("=".repeat(40))
   }
-  console.info("=".repeat(40))
 }
 
 // only for development when using node 20
@@ -81,11 +84,7 @@ export function createConnection(opts: ConnectionDatabaseOptions): Database {
     }),
     {
       schema: schema,
-      logger: opts.logger
-        ? {
-            logQuery: loggerQuery,
-          }
-        : undefined,
+      logger: opts.logger ? new MyLogger() : undefined,
     }
   )
 

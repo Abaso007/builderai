@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server"
-import type { Database, TransactionDatabase } from "@unprice/db"
+import type { Database } from "@unprice/db"
 import { members, workspaces } from "@unprice/db/schema"
 import { createSlug, newId } from "@unprice/db/utils"
 import type { WorkspaceInsert } from "@unprice/db/validators"
@@ -61,7 +61,7 @@ export const createWorkspace = async ({
   userId,
 }: {
   input: WorkspaceInsert
-  db: Database | TransactionDatabase
+  db: Database
   userId: string
 }) => {
   const { name, unPriceCustomerId, isInternal, id, isPersonal } = input

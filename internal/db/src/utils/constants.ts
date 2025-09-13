@@ -83,7 +83,7 @@ export const AGGREGATION_METHODS_MAP = {
   },
 } as const
 
-export const BILLING_INTERVALS = ["month", "year", "day", "minute", "onetime"] as const
+export const BILLING_INTERVALS = ["month", "year", "week", "day", "minute", "onetime"] as const
 
 export const BILLING_CONFIG: Record<
   string,
@@ -118,7 +118,7 @@ export const BILLING_CONFIG: Record<
     description: "Billed every 5 minutes",
     billingInterval: "minute",
     billingIntervalCount: 5,
-    billingAnchorOptions: [],
+    billingAnchorOptions: ["dayOfCreation"],
     dev: true,
     planType: "recurring",
   },
@@ -127,7 +127,16 @@ export const BILLING_CONFIG: Record<
     description: "Billed every 10 minutes",
     billingInterval: "minute",
     billingIntervalCount: 10,
-    billingAnchorOptions: [],
+    billingAnchorOptions: ["dayOfCreation"],
+    dev: true,
+    planType: "recurring",
+  },
+  "every-15-minutes": {
+    label: "Every 15 minutes",
+    description: "Billed every 15 minutes",
+    billingInterval: "minute",
+    billingIntervalCount: 15,
+    billingAnchorOptions: ["dayOfCreation"],
     dev: true,
     planType: "recurring",
   },
@@ -136,7 +145,7 @@ export const BILLING_CONFIG: Record<
     description: "Billed once",
     billingInterval: "onetime",
     billingIntervalCount: 1,
-    billingAnchorOptions: [],
+    billingAnchorOptions: ["dayOfCreation"],
     planType: "onetime",
   },
 }
@@ -168,11 +177,17 @@ export const ROLES_APP = ["OWNER", "ADMIN", "MEMBER"] as const
 export const WHEN_TO_BILLING = ["pay_in_advance", "pay_in_arrear"] as const
 export const DUE_BEHAVIOUR = ["cancel", "downgrade"] as const
 export const INVOICE_STATUS = ["unpaid", "paid", "waiting", "void", "draft", "failed"] as const
-export const INVOICE_TYPE = ["flat", "usage", "hybrid"] as const
-export const INVOICE_ITEM_KIND = ["period", "tax", "discount", "refund", "adjustment"] as const
+export const INVOICE_ITEM_KIND = [
+  "period",
+  "tax",
+  "discount",
+  "refund",
+  "adjustment",
+  "trial",
+] as const
 export const FEATURE_VERSION_TYPES = ["feature", "addon"] as const
 export const COLLECTION_METHODS = ["charge_automatically", "send_invoice"] as const
-export const BILLING_PERIOD_STATUS = ["pending", "processing", "invoiced", "voided"] as const
+export const BILLING_PERIOD_STATUS = ["pending", "invoiced", "voided"] as const
 export const BILLING_PERIOD_TYPE = ["normal", "trial"] as const
 
 export const TIER_MODES = Object.keys(TIER_MODES_MAP) as unknown as readonly [

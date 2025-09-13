@@ -4,11 +4,11 @@ import { useForm } from "react-hook-form"
 import type { ZodType } from "zod"
 
 export function useZodForm<TSchema extends ZodType>(
-  props: Omit<UseFormProps<TSchema["_input"]>, "resolver"> & {
+  props: Omit<UseFormProps<TSchema["_output"]>, "resolver"> & {
     schema: TSchema
   }
 ) {
-  const form = useForm<TSchema["_input"]>({
+  const form = useForm<TSchema["_output"]>({
     ...props,
     shouldFocusError: true,
     delayError: 100,

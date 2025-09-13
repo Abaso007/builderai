@@ -485,9 +485,9 @@ const calculateInvoiceItemsPrice = async (payload: {
 
   // depending on the invoice type we filter the items to bill
   const billableItems =
-    invoice.type === "hybrid"
+    invoice.whenToBill === "pay_in_advance"
       ? items
-      : invoice.type === "flat"
+      : invoice.whenToBill === "pay_in_arrear"
         ? // flat charges are those when the quantity is defined in the subscription item
           items.filter((item) =>
             ["flat", "tier", "package"].includes(item.featurePlanVersion.featureType)

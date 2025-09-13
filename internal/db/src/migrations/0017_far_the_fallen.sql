@@ -1,1 +1,0 @@
-ALTER TABLE "unprice_apikeys" ADD COLUMN "is_root" boolean DEFAULT false NOT NULL;
