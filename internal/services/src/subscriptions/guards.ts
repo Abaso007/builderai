@@ -35,6 +35,10 @@ export const isSubscriptionActive = (input: { context: SubscriptionContext }): b
   return input.context.subscription.active
 }
 
+export const hasOpenInvoices = (input: { context: SubscriptionContext }): boolean => {
+  return input.context.hasOpenInvoices
+}
+
 /**
  * Guard: Check if trial period has expired
  */

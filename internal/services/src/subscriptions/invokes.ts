@@ -3,10 +3,11 @@ import { billingPeriods, invoiceItems, invoices, subscriptions } from "@unprice/
 import { newId } from "@unprice/db/utils"
 import { calculateCycleWindow, calculateDateAt, calculateNextNCycles } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logging"
-import { addDays } from "date-fns"
+import { addDays, format } from "date-fns"
+import { toZonedTime } from "date-fns-tz"
 import type { CustomerService } from "../customers/service"
 import type { SubscriptionContext } from "./types"
-import { validatePaymentMethod } from "./utils"
+import { computeStatementKey, validatePaymentMethod } from "./utils"
 
 export async function loadSubscription(payload: {
   context: SubscriptionContext
@@ -95,7 +96,7 @@ export async function loadSubscription(payload: {
       and(
         eq(inv.projectId, subscription.projectId),
         eq(inv.subscriptionId, subscription.id),
-        inArray(inv.status, ["draft", "unpaid", "waiting"]),
+        inArray(inv.status, ["draft"]),
         lte(inv.dueAt, now)
       ),
     orderBy: (inv, { asc }) => asc(inv.dueAt),
@@ -107,9 +108,9 @@ export async function loadSubscription(payload: {
         eq(bp.projectId, subscription.projectId),
         eq(bp.subscriptionId, subscription.id),
         inArray(bp.status, ["pending"]),
-        lte(bp.cycleEndAt, now)
+        lte(bp.invoiceAt, now)
       ),
-    orderBy: (bp, { asc }) => asc(bp.cycleEndAt),
+    orderBy: (bp, { asc }) => asc(bp.invoiceAt),
   })
 
   return {
@@ -270,27 +271,28 @@ export async function invoiceSubscription({
 > {
   const { subscription, now } = context
 
-  // get pending periods items per phase
+  // get pending periods items per subscription
+  // can have multiple phases as long as they have the same statement key
   const periodItemsGroups = await db
     .select({
       projectId: billingPeriods.projectId,
       subscriptionId: billingPeriods.subscriptionId,
       subscriptionPhaseId: billingPeriods.subscriptionPhaseId,
-      cycleStartAt: billingPeriods.cycleStartAt,
-      cycleEndAt: billingPeriods.cycleEndAt,
+      statementKey: billingPeriods.statementKey,
+      invoiceAt: billingPeriods.invoiceAt,
     })
     .from(billingPeriods)
     .groupBy(
       billingPeriods.projectId,
       billingPeriods.subscriptionId,
       billingPeriods.subscriptionPhaseId,
-      billingPeriods.cycleStartAt,
-      billingPeriods.cycleEndAt
+      billingPeriods.statementKey,
+      billingPeriods.invoiceAt
     )
     .where(
       and(
         eq(billingPeriods.status, "pending"),
-        lte(billingPeriods.cycleEndAt, now),
+        lte(billingPeriods.invoiceAt, now),
         eq(billingPeriods.projectId, subscription.projectId),
         eq(billingPeriods.subscriptionId, subscription.id)
       )
@@ -301,10 +303,6 @@ export async function invoiceSubscription({
 
   // for each phase, materialize the invoice and items
   for (const periodItemGroup of periodItemsGroups) {
-    // create and invoice with the billing periods dates
-    const cycleStartAt = periodItemGroup.cycleStartAt
-    const cycleEndAt = periodItemGroup.cycleEndAt
-
     // get the phase
     const phase = await db.query.subscriptionPhases.findFirst({
       with: {
@@ -342,8 +340,7 @@ export async function invoiceSubscription({
           eq(table.projectId, periodItemGroup.projectId),
           eq(table.subscriptionId, periodItemGroup.subscriptionId),
           eq(table.subscriptionPhaseId, periodItemGroup.subscriptionPhaseId),
-          eq(table.cycleStartAt, periodItemGroup.cycleStartAt),
-          eq(table.cycleEndAt, periodItemGroup.cycleEndAt)
+          eq(table.statementKey, periodItemGroup.statementKey)
         ),
     })
 
@@ -357,11 +354,32 @@ export async function invoiceSubscription({
       continue
     }
 
+    // statement start and end at is min and max of the billing periods
+    const statementStartAt = Math.min(...billingPeriodsToInvoice.map((bp) => bp.cycleStartAt))
+    const statementEndAt = Math.max(...billingPeriodsToInvoice.map((bp) => bp.cycleEndAt))
+
     // all of this happens in a single transaction
     await db.transaction(async (tx) => {
       try {
-        const dueAt = phase.planVersion.whenToBill === "pay_in_advance" ? cycleStartAt : cycleEndAt
+        const invoiceAt = periodItemGroup.invoiceAt
+        // wait so we can aovid late usage records being flushed from analytics system
+        const waitPeriodAdvance = 1000 * 60 * 15 // 15 minutes
+        const waitPeriodArrear = 1000 * 60 * 60 // 1 hour
+
+        // statement date string is the date that is shown on the invoice
+        // take the timezone from the subscription
+        const timezone = phase.subscription.timezone
+        const date = toZonedTime(new Date(invoiceAt), timezone)
+        const statementDateString = format(date, "MMMM d, yyyy")
+
+        // pay in advance have smaller grace period
+        const dueAt =
+          phase.planVersion.whenToBill === "pay_in_advance"
+            ? invoiceAt + waitPeriodAdvance
+            : invoiceAt + waitPeriodArrear
+
         // grace period depening on the interval
+        // this handles failed payments or other issues
         const pastDueAt = calculateDateAt({
           startDate: dueAt,
           config: {
@@ -371,20 +389,20 @@ export async function invoiceSubscription({
         })
 
         // create invoice
-        const invoice = await tx
+        let invoice = await tx
           .insert(invoices)
           .values({
             id: newId("invoice"),
             projectId: phase.projectId,
             subscriptionId: phase.subscriptionId,
-            subscriptionPhaseId: phase.id,
             customerId: phase.subscription.customerId,
             requiredPaymentMethod: phase.planVersion.paymentMethodRequired,
             paymentMethodId: phase.paymentMethodId ?? null,
             status: "draft",
-            // important to have the same cycle this billing period
-            cycleStartAt: cycleStartAt,
-            cycleEndAt: cycleEndAt,
+            statementDateString: statementDateString,
+            statementKey: periodItemGroup.statementKey,
+            statementStartAt: statementStartAt,
+            statementEndAt: statementEndAt,
             whenToBill: phase.planVersion.whenToBill,
             collectionMethod: phase.planVersion.collectionMethod,
             invoicePaymentProviderId: "",
@@ -406,57 +424,69 @@ export async function invoiceSubscription({
             target: [
               invoices.projectId,
               invoices.subscriptionId,
-              invoices.subscriptionPhaseId,
               invoices.customerId,
-              invoices.cycleStartAt,
-              invoices.cycleEndAt,
+              invoices.statementKey,
             ],
           })
           .returning()
           .catch((error) => {
             logger.error("Error while creating invoice", {
               phaseId: phase.id,
-              cycleStartAt: cycleStartAt,
-              cycleEndAt: cycleEndAt,
+              statementStartAt: statementStartAt,
+              statementEndAt: statementEndAt,
               error: error instanceof Error ? error.message : "unknown error",
             })
             throw error
           })
           .then((result) => result[0])
 
+        // if invoice is not created, try to retrieve it
+        if (!invoice) {
+          invoice = await tx.query.invoices.findFirst({
+            where: (inv, { eq, and }) =>
+              and(
+                eq(inv.statementKey, periodItemGroup.statementKey),
+                eq(inv.projectId, phase.projectId),
+                eq(inv.subscriptionId, phase.subscriptionId),
+                eq(inv.customerId, phase.subscription.customerId)
+              ),
+          })
+        }
+
         if (!invoice) {
           logger.error("Invoice not created", {
             phaseId: phase.id,
-            cycleStartAt: cycleStartAt,
-            cycleEndAt: cycleEndAt,
+            statementStartAt: statementStartAt,
+            statementEndAt: statementEndAt,
           })
 
           return
         }
 
+        const invoiceItemsData = billingPeriodsToInvoice.map((period) => ({
+          id: newId("invoice_item"),
+          invoiceId: invoice.id,
+          featurePlanVersionId: period.subscriptionItem.featurePlanVersion.id,
+          subscriptionItemId: period.subscriptionItem.id,
+          billingPeriodId: period.id,
+          projectId: period.projectId,
+          quantity: period.subscriptionItem.units ?? 0,
+          cycleStartAt: period.cycleStartAt,
+          cycleEndAt: period.cycleEndAt,
+          kind: period.type === "trial" ? ("trial" as const) : ("period" as const),
+          unitAmountCents: 0,
+          amountSubtotal: 0,
+          amountTotal: 0,
+          prorationFactor: period.prorationFactor,
+          description: period.type === "trial" ? "Trial" : "Billing period",
+          itemProviderId: null,
+        }))
+
         // create invoice items
         await tx
           .insert(invoiceItems)
-          .values(
-            billingPeriodsToInvoice.map((period) => ({
-              id: newId("invoice_item"),
-              invoiceId: invoice.id,
-              featurePlanVersionId: period.subscriptionItem.featurePlanVersion.id,
-              subscriptionItemId: period.subscriptionItem.id,
-              billingPeriodId: period.id,
-              projectId: period.projectId,
-              quantity: period.subscriptionItem.units ?? 0,
-              cycleStartAt: period.cycleStartAt,
-              cycleEndAt: period.cycleEndAt,
-              kind: period.type === "trial" ? ("trial" as const) : ("period" as const),
-              unitAmountCents: 0,
-              amountSubtotal: 0,
-              amountTotal: 0,
-              prorationFactor: period.prorationFactor,
-              description: period.type === "trial" ? "Trial" : "Billing period",
-              itemProviderId: null,
-            }))
-          ) // idempotency protection
+          .values(invoiceItemsData)
+          // idempotency protection
           .onConflictDoNothing({
             target: [invoiceItems.projectId, invoiceItems.invoiceId, invoiceItems.billingPeriodId],
             where: sql`${invoiceItems.billingPeriodId} IS NOT NULL`,
@@ -464,12 +494,21 @@ export async function invoiceSubscription({
           .catch((error) => {
             logger.error("Error while creating invoice items", {
               phaseId: phase.id,
-              cycleStartAt: cycleStartAt,
-              cycleEndAt: cycleEndAt,
+              statementStartAt: statementStartAt,
+              statementEndAt: statementEndAt,
               error: error instanceof Error ? error.message : "unknown error",
             })
             throw error
           })
+
+        // get the invoice items that were inserted
+        const invoiceItemsInserted = await tx.query.invoiceItems.findMany({
+          columns: {
+            billingPeriodId: true,
+          },
+          where: (item, { eq, and }) =>
+            and(eq(item.invoiceId, invoice.id), eq(item.projectId, phase.projectId)),
+        })
 
         // update billing period to invoiced
         await tx
@@ -482,16 +521,19 @@ export async function invoiceSubscription({
             and(
               inArray(
                 billingPeriods.id,
-                billingPeriodsToInvoice.map((item) => item.id)
+                invoiceItemsInserted
+                  .map((period) => period.billingPeriodId)
+                  .filter((id) => id !== null)
               ),
-              eq(billingPeriods.projectId, phase.projectId)
+              eq(billingPeriods.projectId, phase.projectId),
+              eq(billingPeriods.subscriptionId, phase.subscriptionId)
             )
           )
       } catch (error) {
         logger.error("Error while invoicing phase", {
           phaseId: phase.id,
-          cycleStartAt: cycleStartAt,
-          cycleEndAt: cycleEndAt,
+          statementStartAt: statementStartAt,
+          statementEndAt: statementEndAt,
           error: error instanceof Error ? error.message : "unknown error",
         })
 
@@ -617,23 +659,45 @@ export async function generateBillingPeriods({
       if (windows.length === 0) continue
 
       // Insert periods idempotently with unique index protection
-      const values = windows.map((w) => ({
-        id: newId("billing_period"),
-        projectId: phase.projectId,
-        subscriptionId: phase.subscriptionId,
-        subscriptionPhaseId: phase.id,
-        subscriptionItemId: item.id,
-        status: "pending" as const,
-        type: "isTrial" in w && w.isTrial ? ("trial" as const) : ("normal" as const),
-        cycleStartAt: w.start,
-        cycleEndAt: w.end,
-        invoiceId: null,
-        amountEstimateCents: null,
-        prorationFactor: w.prorationFactor,
-        reason: "isTrial" in w && w.isTrial ? "trial" : null,
-        createdAt: now,
-        updatedAt: now,
-      }))
+      const values = await Promise.all(
+        windows.map(async (w) => {
+          const whenToBill = phase.planVersion.whenToBill
+          // handles when to invoice this way pay in advance aligns with the cycle start
+          // and pay in arrear aligns with the cycle end
+          const invoiceAt = whenToBill === "pay_in_advance" ? w.start : w.end
+          const statementKey = await computeStatementKey({
+            projectId: phase.projectId,
+            customerId: phase.subscription.customerId,
+            subscriptionId: phase.subscriptionId,
+            invoiceAt: invoiceAt,
+            currency: phase.planVersion.currency,
+            paymentProvider: phase.planVersion.paymentProvider,
+            collectionMethod: phase.planVersion.collectionMethod,
+          })
+
+          return {
+            id: newId("billing_period"),
+            projectId: phase.projectId,
+            subscriptionId: phase.subscriptionId,
+            subscriptionPhaseId: phase.id,
+            subscriptionItemId: item.id,
+            status: "pending" as const,
+            type: w.isTrial ? ("trial" as const) : ("normal" as const),
+            cycleStartAt: w.start,
+            cycleEndAt: w.end,
+            statementKey: statementKey,
+            // if trial, we invoice at the end always
+            invoiceAt: w.isTrial ? w.end : invoiceAt,
+            whenToBill: whenToBill,
+            invoiceId: null,
+            amountEstimateCents: null,
+            prorationFactor: w.prorationFactor,
+            reason: w.isTrial ? ("trial" as const) : ("normal" as const),
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          }
+        })
+      )
 
       cyclesCreated += values.length
 
@@ -656,7 +720,6 @@ export async function generateBillingPeriods({
           phaseId: phase.id,
           subscriptionId: phase.subscriptionId,
           projectId: phase.projectId,
-          cycleStartAt: cursorStart,
           error: (e as Error)?.message,
         })
       }
@@ -677,9 +740,13 @@ export async function generateBillingPeriods({
     orderBy: (bp, { asc }) => asc(bp.cycleEndAt),
   })
 
+  const updatedCurrentPhase = phases.find(
+    (p) => p.startAt <= now && (p.endAt === null || p.endAt >= now)
+  )
+
   return {
     phasesProcessed: phases.length,
-    subscription,
     hasDueBillingPeriods: !!lastDueBillingPeriods,
+    subscription: updatedCurrentPhase?.subscription,
   }
 }

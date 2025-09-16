@@ -613,7 +613,7 @@ export class EntitlementService {
           phase: {
             trialEndsAt: phase.trialEndsAt,
             endAt: phase.endAt,
-            trialDays: phase.trialDays,
+            trialUnits: phase.trialUnits,
             isTrial: phase.trialEndsAt ? Date.now() < phase.trialEndsAt : false,
           },
           entitlement: entitlements.map((e) => {

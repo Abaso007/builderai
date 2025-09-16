@@ -9,15 +9,11 @@ export const billingTask = task({
   },
   run: async (
     {
-      subscriptionPhaseId,
-      invoiceId,
+      subscriptionId,
       projectId,
       now,
-      subscriptionId,
     }: {
-      subscriptionPhaseId: string
       projectId: string
-      invoiceId: string
       now: number
       subscriptionId: string
     },
@@ -27,13 +23,10 @@ export const billingTask = task({
       taskId: ctx.task.id,
       subscriptionId,
       projectId,
-      phaseId: subscriptionPhaseId,
       defaultFields: {
         subscriptionId,
         projectId,
         api: "jobs.invoice.billing",
-        subscriptionPhaseId,
-        invoiceId,
         now: now.toString(),
       },
     })
@@ -41,7 +34,6 @@ export const billingTask = task({
     const subscriptionService = new SubscriptionService(context)
 
     const billingResult = await subscriptionService.billingInvoice({
-      invoiceId,
       projectId,
       subscriptionId,
       now,
@@ -56,7 +48,6 @@ export const billingTask = task({
       subscriptionId,
       projectId,
       now,
-      subscriptionPhaseId,
     }
   },
 })

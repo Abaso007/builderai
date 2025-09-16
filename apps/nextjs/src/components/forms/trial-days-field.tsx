@@ -12,10 +12,10 @@ import type { FieldPath, FieldValues, UseFormReturn } from "react-hook-form"
 import { InputWithAddons } from "~/components/input-addons"
 
 interface FormValues extends FieldValues {
-  trialDays?: number
+  trialUnits?: number
 }
 
-export default function TrialDaysFormField<TFieldValues extends FormValues>({
+export default function TrialUnitsFormField<TFieldValues extends FormValues>({
   form,
   isDisabled,
   className,
@@ -27,15 +27,15 @@ export default function TrialDaysFormField<TFieldValues extends FormValues>({
   return (
     <FormField
       control={form.control}
-      name={"trialDays" as FieldPath<TFieldValues>}
+      name={"trialUnits" as FieldPath<TFieldValues>}
       render={({ field }) => (
         <FormItem className={cn("flex w-full flex-col", className)}>
-          <FormLabel>Trial Days</FormLabel>
-          <FormDescription>The number of days trial for the phase.</FormDescription>
+          <FormLabel>Trial Units</FormLabel>
+          <FormDescription>The number of units trial for the phase.</FormDescription>
           <FormControl className="w-full">
             <InputWithAddons
               {...field}
-              trailing={"days"}
+              trailing={"units"}
               value={field.value ?? 0}
               disabled={isDisabled}
             />

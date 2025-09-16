@@ -1,6 +1,6 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import { billingPeriods, invoices, subscriptions } from "@unprice/db/schema"
+import { billingPeriods, invoiceItems, invoices, subscriptions } from "@unprice/db/schema"
 import type {
   Customer,
   Subscription,
@@ -57,14 +57,14 @@ vi.mock("../payment-provider", () => ({
 function buildMockSubscription({
   status = "trialing" as SubscriptionStatus,
   autoRenew = false,
-  trialDays = 1,
+  trialUnits = 1,
   trialEnded = true,
   whenToBill = "pay_in_advance" as const,
   collectionMethod = "charge_automatically" as const,
 }: Partial<{
   status: SubscriptionStatus
   autoRenew: boolean
-  trialDays: number
+  trialUnits: number
   trialEnded: boolean
   whenToBill: "pay_in_advance" | "pay_in_arrear"
   collectionMethod: "charge_automatically" | "send_invoice"
@@ -79,9 +79,13 @@ function buildMockSubscription({
       status,
       active: status !== "expired" && status !== "canceled",
       trialEndsAt: trialEndsAt,
+      // add subscription-level renewAt for canRenew guard
+      renewAt: whenToBill === "pay_in_advance" ? now - 100 : now + 24 * 60 * 60 * 1000,
+      // ensure timezone is defined for invoicing date formatting
+      timezone: "UTC",
       currentPhase: {
         id: "phase_123",
-        trialDays,
+        trialUnits,
         trialEndsAt,
       },
       paymentMethodId: "pm_123",
@@ -90,7 +94,7 @@ function buildMockSubscription({
           id: "phase_123",
           startAt: now - 2 * 24 * 60 * 60 * 1000,
           endAt: null,
-          trialDays,
+          trialUnits,
           trialEndsAt,
           currentCycleStartAt: now - 24 * 60 * 60 * 1000,
           currentCycleEndAt: now + 24 * 60 * 60 * 1000,
@@ -235,6 +239,68 @@ describe("SubscriptionMachine - comprehensive", () => {
           })),
         }
       }),
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          groupBy: vi.fn(() => ({
+            where: vi.fn(() => ({
+              limit: vi.fn(() =>
+                Promise.resolve([
+                  {
+                    projectId: subscription.projectId,
+                    subscriptionId: subscription.id,
+                    subscriptionPhaseId: subscription.phases[0]!.id,
+                    cycleStartAt: subscription.currentCycleStartAt,
+                    cycleEndAt: subscription.currentCycleEndAt,
+                    invoiceAt: subscription.currentCycleStartAt,
+                    statementKey: "test_statement_key",
+                  },
+                ])
+              ),
+            })),
+          })),
+        })),
+      })),
+      insert: vi.fn((table) => {
+        return {
+          values: vi.fn((data) => {
+            const tableName =
+              table === invoices
+                ? "invoices"
+                : table === billingPeriods
+                  ? "billingPeriods"
+                  : table === invoiceItems
+                    ? "invoiceItems"
+                    : "other"
+            dbMockData.push({ table: tableName, data })
+
+            const makeReturning = () =>
+              vi.fn().mockResolvedValue([
+                {
+                  id: tableName === "invoices" ? "inv_123" : "bp_123",
+                  status: tableName === "invoices" ? "draft" : "pending",
+                  subscriptionId: subscription.id,
+                  subscriptionPhaseId: subscription.phases[0]!.id,
+                  cycleStartAt: subscription.currentCycleStartAt,
+                  cycleEndAt: subscription.currentCycleEndAt,
+                  ...data,
+                },
+              ])
+
+            // Support both patterns:
+            // - insert(...).values(...).returning()
+            // - insert(...).values(...).onConflictDoNothing(...).returning()
+            // - insert(invoiceItems).values(...).onConflictDoNothing(...).catch(...)
+            return {
+              onConflictDoNothing: vi.fn().mockReturnValue({
+                returning: makeReturning(),
+                catch: vi.fn().mockImplementation((handler) => Promise.resolve().catch(handler)),
+              }),
+              returning: makeReturning(),
+            }
+          }),
+        }
+      }),
+      // extend query with invoiceItems.findMany used inside invoiceSubscription
       query: {
         subscriptions: {
           findFirst: vi.fn().mockResolvedValue(subscription),
@@ -307,64 +373,20 @@ describe("SubscriptionMachine - comprehensive", () => {
             },
           ]),
         },
-      },
-      select: vi.fn(() => ({
-        from: vi.fn(() => ({
-          groupBy: vi.fn(() => ({
-            where: vi.fn(() => ({
-              limit: vi.fn(() =>
-                Promise.resolve([
-                  {
-                    projectId: subscription.projectId,
-                    subscriptionId: subscription.id,
-                    subscriptionPhaseId: subscription.phases[0]!.id,
-                    cycleStartAt: subscription.currentCycleStartAt,
-                    cycleEndAt: subscription.currentCycleEndAt,
-                  },
-                ])
-              ),
-            })),
-          })),
-        })),
-      })),
-      insert: vi.fn((table) => {
-        return {
-          values: vi.fn((data) => {
-            const tableName =
-              table === invoices
-                ? "invoices"
-                : table === billingPeriods
-                  ? "billingPeriods"
-                  : "other"
-            dbMockData.push({ table: tableName, data })
-
-            const makeReturning = () =>
-              vi.fn().mockResolvedValue([
-                {
-                  id: tableName === "invoices" ? "inv_123" : "bp_123",
-                  status: tableName === "invoices" ? "draft" : "pending",
-                  subscriptionId: subscription.id,
-                  subscriptionPhaseId: subscription.phases[0]!.id,
-                  cycleStartAt: subscription.currentCycleStartAt,
-                  cycleEndAt: subscription.currentCycleEndAt,
-                  ...data,
-                },
-              ])
-
-            // Support both patterns:
-            // - insert(...).values(...).returning()
-            // - insert(...).values(...).onConflictDoNothing(...).returning()
-            // - insert(invoiceItems).values(...).onConflictDoNothing(...).catch(...)
-            return {
-              onConflictDoNothing: vi.fn().mockReturnValue({
-                returning: makeReturning(),
-                catch: vi.fn().mockImplementation((handler) => Promise.resolve().catch(handler)),
-              }),
-              returning: makeReturning(),
-            }
+        invoiceItems: {
+          findMany: vi.fn().mockImplementation(() => {
+            const entry = dbMockData.find((i) => i.table === "invoiceItems")
+            const rows = Array.isArray(entry?.data) ? entry?.data : entry ? [entry.data] : []
+            // return only columns requested in code path (billingPeriodId)
+            return Promise.resolve(
+              (rows as Array<{ billingPeriodId: string | null }>).map((r) => ({
+                // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+                billingPeriodId: (r as any).billingPeriodId ?? null,
+              }))
+            )
           }),
-        }
-      }),
+        },
+      },
     } as unknown as Database
 
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>

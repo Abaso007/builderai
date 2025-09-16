@@ -13,7 +13,7 @@ import { CopyButton } from "~/components/copy-button"
 import AutoRenewFormField from "~/components/forms/autorenew-field"
 import BillingConfigFormField from "~/components/forms/billing-config-field"
 import CollectionMethodFormField from "~/components/forms/collection-method-field"
-import TrialDaysFormField from "~/components/forms/trial-days-field"
+import TrialUnitsFormField from "~/components/forms/trial-days-field"
 import WhenToBillFormField from "~/components/forms/when-to-bill-field"
 import { SubmitButton } from "~/components/submit-button"
 import { toastAction } from "~/lib/toast"
@@ -34,7 +34,7 @@ const isPublishedSchema = planVersionSelectBaseSchema
     id: true,
     projectId: true,
     billingConfig: true,
-    trialDays: true,
+    trialUnits: true,
   })
   .extend({
     isDefault: z.boolean().optional(),
@@ -169,7 +169,7 @@ export function PlanVersionForm({
 
           <BillingConfigFormField form={form} isDisabled={isPublished} />
 
-          <TrialDaysFormField form={form} isDisabled={isPublished} />
+          <TrialUnitsFormField form={form} isDisabled={isPublished} />
 
           <WhenToBillFormField form={form} isDisabled={isPublished} />
 

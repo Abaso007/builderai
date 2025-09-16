@@ -247,7 +247,7 @@ export const schemaPlanVersion = z.object({
   billing_interval_count: z.number(),
   billing_anchor: z.string(),
   plan_type: z.string(),
-  trial_days: z.number(),
+  trial_units: z.number(),
   payment_method_required: z.boolean(),
   timestamp: z.string().datetime(),
 })

@@ -448,3 +448,59 @@ describe("edge cases - months, leap years, boundaries", () => {
     })
   })
 })
+
+describe("minute interval with intervalCount > 1", () => {
+  const utc = (d: string, t = "00:00:00.000") => new Date(`${d}T${t}Z`).getTime()
+
+  it("returns full aligned window before first boundary and prorates from paid start", () => {
+    // Every 15 minutes, anchored at second=20. Creation at :10.
+    const start = utc("2024-01-01", "00:00:10.000")
+    const now = utc("2024-01-01", "00:00:15.000")
+    const res = calculateCycleWindow({
+      effectiveStartDate: start,
+      effectiveEndDate: null,
+      trialEndsAt: null,
+      now,
+      billingConfig: {
+        name: "test",
+        billingInterval: "minute",
+        billingIntervalCount: 15,
+        planType: "recurring",
+        billingAnchor: 20,
+      },
+    })!
+    // Aligned windows: [..., 23:45:20, 00:00:20), [00:00:20, 00:15:20), ...
+    expect(res.start).toBe(utc("2023-12-31", "23:45:20.000"))
+    expect(res.end).toBe(utc("2024-01-01", "00:00:20.000"))
+    // Billable begins at paid start (00:00:10) inside this full window
+    const totalMs = res.end - res.start
+    const elapsedMs = now - start
+    expect(res.billableSeconds).toBe(Math.floor(elapsedMs / 1000))
+    expect(res.prorationFactor).toBeCloseTo(elapsedMs / totalMs, 6)
+  })
+
+  it("aligns to grid after boundary and computes correct next window", () => {
+    const start = utc("2024-01-01", "00:00:10.000")
+    const now = utc("2024-01-01", "00:00:25.000")
+    const res = calculateCycleWindow({
+      effectiveStartDate: start,
+      effectiveEndDate: null,
+      trialEndsAt: null,
+      now,
+      billingConfig: {
+        name: "test",
+        billingInterval: "minute",
+        billingIntervalCount: 15,
+        planType: "recurring",
+        billingAnchor: 20,
+      },
+    })!
+    // Now >= first boundary -> window [00:00:20, 00:15:20)
+    expect(res.start).toBe(utc("2024-01-01", "00:00:20.000"))
+    expect(res.end).toBe(utc("2024-01-01", "00:15:20.000"))
+    const totalMs = res.end - res.start
+    const elapsedMs = now - res.start
+    expect(res.billableSeconds).toBe(Math.floor(elapsedMs / 1000))
+    expect(res.prorationFactor).toBeCloseTo(elapsedMs / totalMs, 6)
+  })
+})

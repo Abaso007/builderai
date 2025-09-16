@@ -53,7 +53,7 @@ export default function SubscriptionPhaseFormField({
     startAt: Date.now(),
     subscriptionId,
     paymentMethodRequired: false,
-    trialDays: 0,
+    trialUnits: 0,
   } as InsertSubscriptionPhase
 
   const [selectedPhase, setSelectedPhase] = useState<InsertSubscriptionPhase>(defaultValuesPhase)
@@ -194,8 +194,8 @@ export default function SubscriptionPhaseFormField({
                           <Typography variant="h5">
                             {index + 1}. {selectedPlanVersion.title} v{selectedPlanVersion.version}{" "}
                             - {selectedPlanVersion.billingConfig.name}
-                            {phase.trialDays && phase.trialDays > 0 ? (
-                              <Badge className="ml-2">{phase.trialDays} days trial</Badge>
+                            {phase.trialUnits && phase.trialUnits > 0 ? (
+                              <Badge className="ml-2">{phase.trialUnits} units trial</Badge>
                             ) : (
                               <Badge className="ml-2">no trial</Badge>
                             )}
@@ -228,7 +228,7 @@ export default function SubscriptionPhaseFormField({
                                 paymentMethodRequired:
                                   selectedPlanVersion.paymentMethodRequired ?? false,
                                 planVersionId: selectedPlanVersion.id,
-                                trialDays: selectedPlanVersion.trialDays,
+                                trialUnits: selectedPlanVersion.trialUnits,
                               })
                               setDialogOpen(true)
                             }}

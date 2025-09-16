@@ -31,7 +31,7 @@ export const create = protectedProjectProcedure
       whenToBill,
       status,
       paymentProvider,
-      trialDays,
+      trialUnits,
       autoRenew,
     } = opts.input
     const project = opts.ctx.project
@@ -108,7 +108,7 @@ export const create = protectedProjectProcedure
               ...billingConfig,
               billingAnchor: billingConfig.billingAnchor ?? "dayOfCreation",
             },
-            trialDays: trialDays ?? 0,
+            trialUnits: trialUnits ?? 0,
             gracePeriod: gracePeriod ?? 0,
             whenToBill: whenToBill,
             metadata,

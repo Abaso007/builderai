@@ -13,7 +13,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@unprice/ui/dropdown-menu"
-import { LoadingAnimation } from "@unprice/ui/loading-animation"
 import { MoreVertical } from "lucide-react"
 import { useParams } from "next/navigation"
 import { startTransition, useState } from "react"
@@ -37,17 +36,14 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
   const trpc = useTRPC()
   const subscriptionId = subscription.id
 
-  const generateInvoice = useMutation(trpc.subscriptions.invoice.mutationOptions({}))
-
-  const renewSubscription = useMutation(trpc.subscriptions.machine.mutationOptions({}))
-
-  const generateBillingPeriods = useMutation(trpc.subscriptions.machine.mutationOptions({}))
+  const machine = useMutation(trpc.subscriptions.machine.mutationOptions({}))
 
   function onGenerateInvoice() {
     startTransition(() => {
       toast.promise(
-        generateInvoice.mutateAsync({
+        machine.mutateAsync({
           subscriptionId: subscriptionId,
+          event: "invoice",
         }),
         {
           loading: "Generating invoice...",
@@ -60,7 +56,7 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
   function onRenewSubscription() {
     startTransition(() => {
       toast.promise(
-        renewSubscription.mutateAsync({
+        machine.mutateAsync({
           subscriptionId: subscriptionId,
           event: "renew",
         }),
@@ -75,13 +71,28 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
   function onGenerateBillingPeriods() {
     startTransition(() => {
       toast.promise(
-        generateBillingPeriods.mutateAsync({
+        machine.mutateAsync({
           subscriptionId: subscriptionId,
           event: "billing_period",
         }),
         {
           loading: "Generating billing periods...",
           success: "Billing periods generated",
+        }
+      )
+    })
+  }
+
+  function onFinalizeInvoice() {
+    startTransition(() => {
+      toast.promise(
+        machine.mutateAsync({
+          subscriptionId: subscriptionId,
+          event: "finalize_invoice",
+        }),
+        {
+          loading: "Finalizing invoice...",
+          success: "Invoice finalized",
         }
       )
     })
@@ -112,10 +123,9 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
               onGenerateInvoice()
               setOpen(false)
             }}
-            disabled={generateInvoice.isPending}
+            disabled={machine.isPending}
           >
             Generate Invoice
-            {generateInvoice.isPending && <LoadingAnimation className={"ml-2"} />}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={(e) => {
@@ -123,10 +133,9 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
               onRenewSubscription()
               setOpen(false)
             }}
-            disabled={renewSubscription.isPending}
+            disabled={machine.isPending}
           >
             Renew Subscription
-            {renewSubscription.isPending && <LoadingAnimation className={"ml-2"} />}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={(e) => {
@@ -134,8 +143,19 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
               onGenerateBillingPeriods()
               setOpen(false)
             }}
+            disabled={machine.isPending}
           >
             Generate Billing Periods
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={(e) => {
+              e.preventDefault()
+              onFinalizeInvoice()
+              setOpen(false)
+            }}
+            disabled={machine.isPending}
+          >
+            Finalize Invoice
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

@@ -943,12 +943,12 @@ export interface operations {
                 endAt: number | null
                 billingAnchor: number
                 /** @default 0 */
-                trialDays: number | null
+                trialUnits: number | null
                 trialEndsAt: number | null
                 billingConfig: {
                   name: string
                   /** @enum {string} */
-                  billingInterval: "month" | "year" | "day" | "minute" | "onetime"
+                  billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
                   billingIntervalCount: number
                   billingAnchor: number | "dayOfCreation"
                   /** @enum {string} */
@@ -1409,7 +1409,7 @@ export interface operations {
               planVersionId: string
               paymentMethodId: string | null
               /** @default 0 */
-              trialDays: number | null
+              trialUnits: number | null
               billingAnchor: number
               trialEndsAt: number | null
               startAt: number
@@ -1481,7 +1481,7 @@ export interface operations {
                 billingConfig: {
                   name: string
                   /** @enum {string} */
-                  billingInterval: "month" | "year" | "day" | "minute" | "onetime"
+                  billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
                   billingIntervalCount: number
                   billingAnchor: number | "dayOfCreation"
                   /** @enum {string} */
@@ -1492,7 +1492,7 @@ export interface operations {
                 gracePeriod: number
                 /** @enum {string} */
                 collectionMethod: "charge_automatically" | "send_invoice"
-                trialDays: number
+                trialUnits: number
                 autoRenew: boolean
                 metadata: {
                   externalId?: string
@@ -1784,7 +1784,7 @@ export interface operations {
                   billingConfig: {
                     name: string
                     /** @enum {string} */
-                    billingInterval: "month" | "year" | "day" | "minute" | "onetime"
+                    billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
                     billingIntervalCount: number
                     billingAnchor: number | "dayOfCreation"
                     /** @enum {string} */
@@ -1923,7 +1923,7 @@ export interface operations {
               billingConfig: {
                 name: string
                 /** @enum {string} */
-                billingInterval: "month" | "year" | "day" | "minute" | "onetime"
+                billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
                 billingIntervalCount: number
                 billingAnchor: number | "dayOfCreation"
                 /** @enum {string} */
@@ -1943,7 +1943,7 @@ export interface operations {
             phase: {
               trialEndsAt: number | null
               endAt: number | null
-              trialDays: number
+              trialUnits: number
               isTrial: boolean
             }
             entitlement: {
@@ -2219,7 +2219,7 @@ export interface operations {
                 billingConfig: {
                   name: string
                   /** @enum {string} */
-                  billingInterval: "month" | "year" | "day" | "minute" | "onetime"
+                  billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
                   billingIntervalCount: number
                   billingAnchor: number | "dayOfCreation"
                   /** @enum {string} */
@@ -2487,7 +2487,7 @@ export interface operations {
            * @example month
            * @enum {string}
            */
-          billingInterval?: "month" | "year" | "day" | "minute" | "onetime"
+          billingInterval?: "month" | "year" | "week" | "day" | "minute" | "onetime"
           /**
            * @description If the plan id is not provided, you can pass a plan slug and the system will intelligently pick the lastest plan for that slug and sign up the customer for it
            * @example PRO
@@ -2901,12 +2901,12 @@ export interface operations {
                 endAt: number | null
                 billingAnchor: number
                 /** @default 0 */
-                trialDays: number | null
+                trialUnits: number | null
                 trialEndsAt: number | null
                 billingConfig: {
                   name: string
                   /** @enum {string} */
-                  billingInterval: "month" | "year" | "day" | "minute" | "onetime"
+                  billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
                   billingIntervalCount: number
                   billingAnchor: number | "dayOfCreation"
                   /** @enum {string} */
@@ -3250,7 +3250,7 @@ export interface operations {
               billingConfig: {
                 name: string
                 /** @enum {string} */
-                billingInterval: "month" | "year" | "day" | "minute" | "onetime"
+                billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
                 billingIntervalCount: number
                 billingAnchor: number | "dayOfCreation"
                 /** @enum {string} */
@@ -3261,7 +3261,7 @@ export interface operations {
               gracePeriod: number
               /** @enum {string} */
               collectionMethod: "charge_automatically" | "send_invoice"
-              trialDays: number
+              trialUnits: number
               autoRenew: boolean
               metadata: {
                 externalId?: string
@@ -3545,7 +3545,7 @@ export interface operations {
                 billingConfig: {
                   name: string
                   /** @enum {string} */
-                  billingInterval: "month" | "year" | "day" | "minute" | "onetime"
+                  billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
                   billingIntervalCount: number
                   billingAnchor: number | "dayOfCreation"
                   /** @enum {string} */
@@ -3694,7 +3694,7 @@ export interface operations {
            * @example month
            * @enum {string}
            */
-          billingInterval?: "month" | "year" | "day" | "minute" | "onetime"
+          billingInterval?: "month" | "year" | "week" | "day" | "minute" | "onetime"
           /**
            * @description The currency to filter the plan versions
            * @example USD
@@ -3740,7 +3740,7 @@ export interface operations {
               billingConfig: {
                 name: string
                 /** @enum {string} */
-                billingInterval: "month" | "year" | "day" | "minute" | "onetime"
+                billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
                 billingIntervalCount: number
                 billingAnchor: number | "dayOfCreation"
                 /** @enum {string} */
@@ -3751,7 +3751,7 @@ export interface operations {
               gracePeriod: number
               /** @enum {string} */
               collectionMethod: "charge_automatically" | "send_invoice"
-              trialDays: number
+              trialUnits: number
               autoRenew: boolean
               metadata: {
                 externalId?: string
@@ -4035,7 +4035,7 @@ export interface operations {
                 billingConfig: {
                   name: string
                   /** @enum {string} */
-                  billingInterval: "month" | "year" | "day" | "minute" | "onetime"
+                  billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
                   billingIntervalCount: number
                   billingAnchor: number | "dayOfCreation"
                   /** @enum {string} */

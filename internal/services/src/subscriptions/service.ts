@@ -17,11 +17,10 @@ import {
   calculateCycleWindow,
   calculateDateAt,
   createDefaultSubscriptionConfig,
+  getAnchor,
 } from "@unprice/db/validators"
 import { Err, Ok, type Result, type SchemaError } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
-import { getDate } from "date-fns"
-import { toZonedTime } from "date-fns-tz"
 import type { Cache } from "../cache"
 import { CustomerService } from "../customers/service"
 import type { Metrics } from "../metrics"
@@ -165,7 +164,7 @@ export class SubscriptionService {
   }): Promise<Result<SubscriptionPhase, UnPriceSubscriptionError | SchemaError>> {
     const {
       planVersionId,
-      trialDays,
+      trialUnits,
       metadata,
       config,
       paymentMethodId,
@@ -331,21 +330,20 @@ export class SubscriptionService {
 
     // check if payment method is required for the plan version
     const paymentMethodRequired = versionData.paymentMethodRequired
-    const trialDaysToUse = trialDays ?? versionData.trialDays ?? 0
-    let billingAnchorToUse = versionData.billingConfig.billingAnchor
-    const billingIntervalToUse = versionData.billingConfig.billingInterval
-    const subscriptionTimezone = subscriptionWithPhases.timezone
-
-    if (!["year", "month", "day"].includes(billingIntervalToUse)) {
-      // don't apply billing anchor if the interval is not day, month or year
-      billingAnchorToUse = 0
-    }
+    const trialUnitsToUse = trialUnits ?? versionData.trialUnits ?? 0
+    const billingAnchorToUse = getAnchor(
+      startAtToUse,
+      versionData.billingConfig.billingInterval,
+      versionData.billingConfig.billingAnchor
+    )
+    // const billingIntervalToUse = versionData.billingConfig.billingInterval
+    // const subscriptionTimezone = subscriptionWithPhases.timezone
 
     // calculate the day of creation of the subscription
     // important to keep in mind the timezone of the project
-    if (billingAnchorToUse === "dayOfCreation") {
-      billingAnchorToUse = getDate(toZonedTime(startAtToUse, subscriptionTimezone))
-    }
+    // if (billingAnchorToUse === "dayOfCreation") {
+    //   billingAnchorToUse = getDate(toZonedTime(startAtToUse, subscriptionTimezone))
+    // }
 
     // validate payment method is required and if not provided
     if (paymentMethodRequired && (!paymentMethodId || paymentMethodId === "")) {
@@ -378,13 +376,16 @@ export class SubscriptionService {
       configItemsSubscription = config
     }
 
-    const trialsEndAt = calculateDateAt({
-      startDate: startAtToUse,
-      config: {
-        interval: versionData.billingConfig.billingInterval,
-        units: trialDaysToUse,
-      },
-    })
+    const trialsEndAt =
+      trialUnitsToUse > 0
+        ? calculateDateAt({
+            startDate: startAtToUse,
+            config: {
+              interval: versionData.billingConfig.billingInterval,
+              units: trialUnitsToUse,
+            },
+          })
+        : null
 
     // get the billing cycle for the subscription given the start date
     const calculatedBillingCycle = calculateCycleWindow({
@@ -414,7 +415,7 @@ export class SubscriptionService {
           subscriptionId,
           paymentMethodId,
           trialEndsAt: trialsEndAt,
-          trialDays: trialDaysToUse,
+          trialUnits: trialUnitsToUse,
           startAt: startAtToUse,
           endAt: endAtToUse,
           metadata,
@@ -463,7 +464,7 @@ export class SubscriptionService {
           .update(subscriptions)
           .set({
             active: true,
-            status: trialDaysToUse > 0 ? "trialing" : "active",
+            status: trialUnitsToUse > 0 ? "trialing" : "active",
             planSlug: versionData.plan.slug,
             currentCycleStartAt: calculatedBillingCycle.start,
             currentCycleEndAt: calculatedBillingCycle.end,
@@ -488,6 +489,16 @@ export class SubscriptionService {
 
       return Ok(phase)
     })
+
+    // generate the billing periods for the new phase on background
+    // this can fail but background jobs can retry
+    this.waitUntil(
+      this.generateBillingPeriods({
+        subscriptionId,
+        projectId,
+        now,
+      })
+    )
 
     return result
   }
@@ -909,7 +920,12 @@ export class SubscriptionService {
       : null
 
     if (lock) {
-      const acquired = await lock.acquire({ ttlMs, now })
+      const acquired = await lock.acquire({
+        ttlMs,
+        now,
+        staleTakeoverMs: 120_000,
+        ownerStaleMs: ttlMs,
+      })
       if (!acquired) throw new UnPriceSubscriptionError({ message: "SUBSCRIPTION_BUSY" })
     }
 
@@ -985,12 +1001,10 @@ export class SubscriptionService {
   }
 
   public async billingInvoice({
-    invoiceId,
     projectId,
     subscriptionId,
     now = Date.now(),
   }: {
-    invoiceId: string
     projectId: string
     subscriptionId: string
     now?: number
@@ -1011,20 +1025,20 @@ export class SubscriptionService {
         lock: true,
         run: async (machine) => {
           const col = await collectInvoicePayment({
-            invoiceId,
+            invoiceId: "current",
             projectId,
             logger: this.logger,
             now,
           })
           if (col.err) {
-            await machine.reportInvoiceFailure({ invoiceId, error: col.err.message })
+            await machine.reportInvoiceFailure({ invoiceId: "current", error: col.err.message })
             throw col.err
           }
           const { invoice } = col.val
           if (invoice.status === "paid" || invoice.status === "void") {
-            await machine.reportInvoiceSuccess({ invoiceId })
+            await machine.reportInvoiceSuccess({ invoiceId: "current" })
           } else if (invoice.status === "failed") {
-            await machine.reportPaymentFailure({ invoiceId, error: "Payment failed" })
+            await machine.reportPaymentFailure({ invoiceId: "current", error: "Payment failed" })
           }
           return col.val
         },
@@ -1036,12 +1050,10 @@ export class SubscriptionService {
   }
 
   public async finalizeInvoice({
-    invoiceId,
     projectId,
     subscriptionId,
     now = Date.now(),
   }: {
-    invoiceId: string
     projectId: string
     subscriptionId: string
     now?: number
@@ -1050,7 +1062,7 @@ export class SubscriptionService {
       {
         total: number
         status: InvoiceStatus
-      },
+      }[],
       UnPriceSubscriptionError
     >
   > {
@@ -1059,24 +1071,28 @@ export class SubscriptionService {
         subscriptionId,
         projectId,
         now,
-        lock: true, // we need to lock the subscription to avoid cross-worker races
+        // TODO: test this lock it's getting stuck
+        lock: false, // no need to lock it here
         run: async (machine) => {
           const fin = await finalizeInvoice({
-            invoiceId,
+            subscriptionId,
             projectId,
             logger: this.logger,
             now,
             analytics: this.analytics,
+            customerService: this.customerService,
+            db: this.db,
           })
           if (fin.err) {
-            await machine.reportInvoiceFailure({ invoiceId, error: fin.err.message })
+            await machine.reportInvoiceFailure({ invoiceId: "current", error: fin.err.message })
             throw fin.err
           }
-          await machine.reportInvoiceSuccess({ invoiceId })
+          await machine.reportInvoiceSuccess({ invoiceId: "current" })
           return fin.val
         },
       })
-      return Ok({ total: res.invoice.total, status: res.invoice.status })
+
+      return Ok(res.map((r) => ({ total: r.invoice.total, status: r.invoice.status })))
     } catch (e) {
       return Err(e as UnPriceSubscriptionError)
     }

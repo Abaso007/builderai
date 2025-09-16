@@ -82,7 +82,7 @@ export const migrate = protectedProjectProcedure
         billing_interval_count: version.billingConfig.billingIntervalCount,
         billing_anchor: version.billingConfig.billingAnchor.toString(),
         plan_type: version.billingConfig.planType,
-        trial_days: version.trialDays,
+        trial_units: version.trialUnits,
         payment_method_required: version.paymentMethodRequired,
         timestamp: new Date(version.publishedAt ?? Date.now()).toISOString(),
       })

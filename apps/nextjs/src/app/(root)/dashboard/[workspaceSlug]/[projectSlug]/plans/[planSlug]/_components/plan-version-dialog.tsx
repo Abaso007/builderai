@@ -47,7 +47,7 @@ export function PlanVersionDialog({
               whenToBill: "pay_in_advance",
               autoRenew: true,
               paymentMethodRequired: false,
-              trialDays: 0,
+              trialUnits: 0,
               dueBehaviour: "cancel",
               gracePeriod: 0,
               billingConfig: {

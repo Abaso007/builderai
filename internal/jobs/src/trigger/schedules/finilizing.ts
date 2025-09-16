@@ -14,43 +14,36 @@ export const finilizingSchedule = schedules.task({
     const now = payload.timestamp.getTime()
 
     // find all subscriptions phases that are currently in trial and the trial ends at is in the past
-    const pendingInvoices = await db.query.invoices
-      .findMany({
-        where: (table, { inArray, and, lte }) =>
-          and(inArray(table.status, ["draft"]), lte(table.dueAt, now)),
-        limit: 100, // limit to 100 invoices to avoid overwhelming the system
-        with: {
-          subscriptionPhase: true,
-          subscription: true,
-        },
-      })
-      .then((invoices) => {
-        return invoices.filter((inv) => inv.subscription.active)
-      })
+    const subscriptions = await db.query.subscriptions.findMany({
+      where: (subscription, ops) =>
+        ops.and(
+          ops.eq(subscription.active, true),
+          ops.notInArray(subscription.status, ["canceled", "expired"]),
+          ops.lte(subscription.currentCycleEndAt, now)
+        ),
+    })
 
-    if (pendingInvoices.length === 0) {
+    if (subscriptions.length === 0) {
       return {
-        invoiceIds: [],
+        subscriptionIds: [],
       }
     }
 
     // trigger handles concurrency
     await finilizeTask.batchTrigger(
-      pendingInvoices.map((inv) => ({
+      subscriptions.map((s) => ({
         payload: {
-          invoiceId: inv.id,
-          subscriptionPhaseId: inv.subscriptionPhaseId,
-          projectId: inv.projectId,
-          subscriptionId: inv.subscriptionPhase.subscriptionId,
+          projectId: s.projectId,
+          subscriptionId: s.id,
           now,
         },
       }))
     )
 
-    logger.info(`Found ${pendingInvoices.length} pending invoices for finilizing`)
+    logger.info(`Found ${subscriptions.length} subscriptions for finilizing`)
 
     return {
-      invoiceIds: pendingInvoices.map((i) => i.id),
+      subscriptionIds: subscriptions.map((s) => s.id),
     }
   },
 })

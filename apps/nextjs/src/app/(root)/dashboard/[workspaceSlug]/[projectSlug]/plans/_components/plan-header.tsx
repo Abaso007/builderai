@@ -64,7 +64,7 @@ export default function PlanHeader(props: {
                   paymentProvider: "stripe",
                   collectionMethod: "charge_automatically",
                   whenToBill: "pay_in_arrear",
-                  trialDays: 0,
+                  trialUnits: 0,
                   autoRenew: true,
                   paymentMethodRequired: false,
                   billingConfig: {

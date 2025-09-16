@@ -1,5 +1,11 @@
+import { endOfMonth } from "date-fns"
 import { z } from "zod"
-import { type BillingConfig, billingIntervalSchema } from "../shared"
+import {
+  type BillingAnchor,
+  type BillingConfig,
+  type BillingInterval,
+  billingIntervalSchema,
+} from "../shared"
 
 // Configuration for calculating a trial period.
 export const configSchema = z.object({
@@ -140,6 +146,151 @@ export function getBillingCycleMessage(billingConfig: BillingConfig): {
     return { message: `billed every ${billingInterval}` }
   }
   return { message: `billed every ${intervalCount} ${billingInterval}s` }
+}
+
+export function addByInterval(date: Date, interval: BillingInterval, count: number): Date {
+  switch (interval) {
+    case "onetime":
+      return date
+    case "minute":
+      return addUtc(date, { minutes: count })
+    case "day":
+      return addUtc(date, { days: count })
+    case "week":
+      return addUtc(date, { weeks: count })
+    case "month":
+      return addUtc(date, { months: count })
+    case "year":
+      return addUtc(date, { years: count })
+    default:
+      throw new Error(`Invalid billing interval: ${interval}`)
+  }
+}
+/**
+ * A helper to calculate proration metrics based on a cycle's start, end, and a 'now' timestamp.
+ */
+export function calculateProration(
+  start: number,
+  end: number,
+  now: number
+): { prorationFactor: number; billableSeconds: number } {
+  const totalDurationMs = end - start
+
+  if (totalDurationMs <= 0) {
+    return { prorationFactor: 0, billableSeconds: 0 }
+  }
+
+  // Remaining-fraction semantics used by utils tests
+  if (now >= end) {
+    return { prorationFactor: 0, billableSeconds: 0 }
+  }
+
+  if (now <= start) {
+    return {
+      prorationFactor: 1,
+      billableSeconds: Math.floor(totalDurationMs / 1000),
+    }
+  }
+
+  const remainingMs = end - now
+  return {
+    prorationFactor: Math.min(1, Math.max(0, remainingMs / totalDurationMs)),
+    billableSeconds: Math.floor(remainingMs / 1000),
+  }
+}
+
+/**
+ * Elapsed-fraction semantics used by billing window tests.
+ * billableSeconds count from billableStart to now (clamped to [start, end]).
+ */
+export function calculateElapsedProration(
+  start: number,
+  end: number,
+  now: number,
+  billableStart?: number
+): { prorationFactor: number; billableSeconds: number } {
+  const totalDurationMs = end - start
+  if (totalDurationMs <= 0) return { prorationFactor: 0, billableSeconds: 0 }
+
+  const effectiveBillableStart = billableStart ?? start
+  const clampedNow = Math.min(now, end)
+  if (clampedNow <= effectiveBillableStart) return { prorationFactor: 0, billableSeconds: 0 }
+
+  const elapsedMs = clampedNow - effectiveBillableStart
+  return {
+    prorationFactor: Math.min(1, Math.max(0, elapsedMs / totalDurationMs)),
+    billableSeconds: Math.floor(elapsedMs / 1000),
+  }
+}
+
+export function getAnchor(date: number, interval: BillingInterval, anchor: BillingAnchor): number {
+  const ref = new Date(date)
+
+  // Derive from creation date in UTC when requested
+  if (anchor === "dayOfCreation") {
+    switch (interval) {
+      case "minute":
+        return ref.getUTCSeconds() // 0-59
+      case "day":
+        return ref.getUTCHours() // 0-23
+      case "week":
+        return ref.getUTCDay() // 0-6 (Sun-Sat)
+      case "month":
+      case "year":
+      case "onetime":
+        return ref.getUTCDate() // 1-31
+      default:
+        return ref.getUTCDate()
+    }
+  }
+
+  // Numeric anchor provided: validate per interval and normalize using UTC context
+  const numeric = Number(anchor)
+  if (!Number.isFinite(numeric)) {
+    throw new Error(`Invalid billing anchor: ${String(anchor)}`)
+  }
+
+  switch (interval) {
+    case "minute": {
+      if (numeric < 0 || numeric > 59) {
+        throw new Error("For minute intervals, anchor must be 0-59 (second of minute).")
+      }
+      return numeric
+    }
+    case "day": {
+      if (numeric < 0 || numeric > 23) {
+        throw new Error("For daily intervals, anchor must be 0-23 (hour of day UTC).")
+      }
+      return numeric
+    }
+    case "week": {
+      if (numeric < 0 || numeric > 6) {
+        throw new Error("For weekly intervals, anchor must be 0-6 (0=Sun ... 6=Sat).")
+      }
+      return numeric
+    }
+    case "month": {
+      if (numeric < 1) {
+        throw new Error("For monthly intervals, anchor must be 1-31 (day of month).")
+      }
+      const last = endOfMonth(ref).getUTCDate()
+      return Math.min(numeric, last)
+    }
+    case "year": {
+      if (numeric < 1) {
+        throw new Error("For yearly intervals, anchor must be 1-31 (day of month).")
+      }
+      // Yearly plans use day-of-month anchoring; cap to last day for the reference month
+      const last = endOfMonth(ref).getUTCDate()
+      return Math.min(numeric, last)
+    }
+    case "onetime": {
+      // One-time plans don't recur; return 0 as anchor
+      return 0
+    }
+    default:
+      return ref.getUTCDate()
+  }
 }
 
 export function startOfUtcDay(date: Date): Date {

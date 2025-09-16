@@ -25,7 +25,7 @@ describe("calculateFlatPricePlan", () => {
       status: "published",
       paymentProvider: "stripe",
       collectionMethod: "charge_automatically",
-      trialDays: 0,
+      trialUnits: 0,
       autoRenew: true,
       paymentMethodRequired: false,
       billingConfig: billingConfig,

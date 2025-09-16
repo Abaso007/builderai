@@ -243,7 +243,7 @@ export const getCurrentUsageSchema = z.object({
   phase: z.object({
     trialEndsAt: z.number().nullable(),
     endAt: z.number().nullable(),
-    trialDays: z.number(),
+    trialUnits: z.number(),
     isTrial: z.boolean(),
   }),
   entitlement: z.array(

@@ -3,6 +3,7 @@ import {
   bigint,
   doublePrecision,
   foreignKey,
+  index,
   integer,
   primaryKey,
   uniqueIndex,
@@ -12,7 +13,7 @@ import {
 import { pgTableProject } from "../utils/_table"
 import { cuid, timestamps } from "../utils/fields"
 import { projectID } from "../utils/sql"
-import { billingPeriodStatusEnum, billingPeriodTypeEnum } from "./enums"
+import { billingPeriodStatusEnum, billingPeriodTypeEnum, whenToBillEnum } from "./enums"
 import { invoices } from "./invoices"
 import { projects } from "./projects"
 import { subscriptionItems, subscriptionPhases, subscriptions } from "./subscriptions"
@@ -30,11 +31,22 @@ export const billingPeriods = pgTableProject(
     type: billingPeriodTypeEnum("type").notNull().default("normal"),
     cycleStartAt: bigint("cycle_start_at_m", { mode: "number" }).notNull(),
     cycleEndAt: bigint("cycle_end_at_m", { mode: "number" }).notNull(),
+    amountEstimateCents: integer("amount_estimate_cents"),
+    prorationFactor: doublePrecision("proration_factor").notNull().default(1),
+    reason: varchar("reason", { length: 64 }).$type<"normal" | "mid_cycle_change" | "trial">(), // annual_renewal|monthly_usage|mid_cycle_change|trial
     // invoice id is the invoice that is associated with the billing period can be null if the billing period is not invoiced yet
     invoiceId: cuid("invoice_id"),
-    amountEstimateCents: integer("amount_estimate_cents"),
-    prorationFactor: doublePrecision("proration_factor"),
-    reason: varchar("reason", { length: 64 }), // annual_renewal|monthly_usage|mid_cycle_change|trial
+    // handles when the invoice is generated (prepaid or postpaid)
+    whenToBill: whenToBillEnum("when_to_bill").notNull().default("pay_in_advance"),
+    invoiceAt: bigint("invoice_at_m", { mode: "number" }).notNull(),
+    // statementKey is a deliberate grouping key so multiple billing_periods
+    // with different service windows can be billed together on one invoice
+    // Purpose: co-bill:
+    // Prepaid base for [nextStart, nextEnd]
+    // Arrears usage for [prevStart, prevEnd]
+    // on a single invoice, even though the line windows differ
+    // subscriptionId + invoiceAt
+    statementKey: varchar("statement_key", { length: 64 }).notNull(),
   },
   (table) => ({
     primary: primaryKey({
@@ -74,6 +86,16 @@ export const billingPeriods = pgTableProject(
       table.subscriptionItemId,
       table.cycleStartAt,
       table.cycleEndAt
+    ),
+    idxBillAt: index("billing_periods_bill_at_idx").on(
+      table.projectId,
+      table.status,
+      table.invoiceAt
+    ),
+    idxStatement: index("billing_periods_statement_idx").on(
+      table.projectId,
+      table.subscriptionId,
+      table.statementKey
     ),
   })
 )

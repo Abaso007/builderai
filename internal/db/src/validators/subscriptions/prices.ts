@@ -33,6 +33,7 @@ const unitsSchema = z.coerce.number().int().min(0)
 
 export interface CalculatedPrice {
   unitPrice: z.infer<typeof calculatePriceSchema>
+  subtotalPrice: z.infer<typeof calculatePriceSchema>
   totalPrice: z.infer<typeof calculatePriceSchema>
 }
 
@@ -317,6 +318,12 @@ export const calculateTierPrice = ({
           return `${formatMoney(value, currency.code)} per unit`
         }),
       },
+      subtotalPrice: {
+        dinero: total,
+        displayAmount: toDecimal(total, ({ value, currency }) => {
+          return `${formatMoney(value, currency.code)}`
+        }),
+      },
       totalPrice: {
         dinero: total,
         displayAmount: toDecimal(
@@ -345,6 +352,12 @@ export const calculateTierPrice = ({
         ? trimScale(calculatePercentage(dinero(tier.unitPrice.dinero), prorate))
         : trimScale(dinero(tier.unitPrice.dinero))
 
+    // subtotal is the price per unit multiplied by the quantity without proration
+    const dineroSubtotalPrice =
+      prorate !== undefined
+        ? trimScale(calculatePercentage(dinero(tier.unitPrice.dinero), prorate))
+        : trimScale(dinero(tier.unitPrice.dinero))
+
     const dineroTotalPrice = !isZero(dineroFlatPrice)
       ? trimScale(add(multiply(dinero(tier.unitPrice.dinero), quantity), dineroFlatPrice))
       : trimScale(multiply(dinero(tier.unitPrice.dinero), quantity))
@@ -362,6 +375,12 @@ export const calculateTierPrice = ({
             toDecimal(dineroFlatPrice),
             currency.code
           )} + ${formatMoney(value, currency.code)} per unit`
+        }),
+      },
+      subtotalPrice: {
+        dinero: dineroSubtotalPrice,
+        displayAmount: toDecimal(dineroSubtotalPrice, ({ value, currency }) => {
+          return `${formatMoney(value, currency.code)}`
         }),
       },
       totalPrice: {
@@ -391,6 +410,11 @@ export const calculateTierPrice = ({
       currency: currencies[defaultCurrency],
     })
 
+    let subtotal: Dinero<number> = dinero({
+      amount: 0,
+      currency: currencies[defaultCurrency],
+    })
+
     // iterate through the tiers and calculate the total price
     // for tiered graduated, we need to calculate the price for each tier the quantity falls into
     // and sum them up to get the total price
@@ -411,6 +435,8 @@ export const calculateTierPrice = ({
 
     // add the flat price of the tier the quantity falls into if it exists
     if (tier?.flatPrice) {
+      // subtotal is the price per unit multiplied by the quantity without proration
+      subtotal = trimScale(add(total, trimScale(dinero(tier.flatPrice.dinero))))
       // flat price needs to be prorated as well
       const dineroFlatPrice =
         prorate !== undefined
@@ -436,6 +462,12 @@ export const calculateTierPrice = ({
           total,
           ({ value, currency }) => `${formatMoney(value, currency.code)}`
         ),
+      },
+      subtotalPrice: {
+        dinero: subtotal,
+        displayAmount: toDecimal(subtotal, ({ value, currency }) => {
+          return `${formatMoney(value, currency.code)}`
+        }),
       },
     })
   }
@@ -482,11 +514,18 @@ export const calculatePackagePrice = ({
           ({ value, currency }) => `${formatMoney(value, currency.code)}`
         ),
       },
+      subtotalPrice: {
+        dinero: total,
+        displayAmount: toDecimal(total, ({ value, currency }) => {
+          return `${formatMoney(value, currency.code)}`
+        }),
+      },
     })
   }
 
   const packageCount = Math.ceil(quantity / units)
   const dineroPrice = dinero(price.dinero)
+  const dineroSubtotalPrice = trimScale(multiply(dineroPrice, packageCount))
   const total =
     prorate !== undefined
       ? trimScale(calculatePercentage(multiply(dineroPrice, packageCount), prorate))
@@ -514,6 +553,12 @@ export const calculatePackagePrice = ({
         ({ value, currency }) => `${formatMoney(value, currency.code)}`
       ),
     },
+    subtotalPrice: {
+      dinero: dineroSubtotalPrice,
+      displayAmount: toDecimal(dineroSubtotalPrice, ({ value, currency }) => {
+        return `${formatMoney(value, currency.code)}`
+      }),
+    },
   })
 }
 
@@ -531,6 +576,7 @@ export const calculateUnitPrice = ({
   isFlat?: boolean
 }): Result<CalculatedPrice, UnPriceCalculationError> => {
   const dineroPrice = trimScale(dinero(price.dinero))
+  const dineroSubtotalPrice = trimScale(multiply(dineroPrice, quantity))
   const total =
     prorate !== undefined
       ? trimScale(calculatePercentage(multiply(dineroPrice, quantity), prorate))
@@ -552,6 +598,12 @@ export const calculateUnitPrice = ({
     totalPrice: {
       dinero: total,
       displayAmount: toDecimal(total, ({ value, currency }) => {
+        return `${formatMoney(value, currency.code)}`
+      }),
+    },
+    subtotalPrice: {
+      dinero: dineroSubtotalPrice,
+      displayAmount: toDecimal(dineroSubtotalPrice, ({ value, currency }) => {
         return `${formatMoney(value, currency.code)}`
       }),
     },

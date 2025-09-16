@@ -95,7 +95,7 @@ export const subscriptionSelectSchema = createSelectSchema(subscriptions, {
 
 export const subscriptionPhaseSelectSchema = createSelectSchema(subscriptionPhases, {
   planVersionId: z.string().min(1, { message: "Plan version is required" }),
-  trialDays: z.coerce.number().int().min(0).default(0),
+  trialUnits: z.coerce.number().int().min(0).default(0),
   metadata: subscriptionPhaseMetadataSchema,
 })
   .extend({
@@ -118,7 +118,7 @@ export const subscriptionPhaseExtendedSchema = subscriptionPhaseSelectSchema.ext
 export const subscriptionPhaseInsertSchema = createInsertSchema(subscriptionPhases, {
   planVersionId: z.string().min(1, { message: "Plan version is required" }),
   metadata: subscriptionPhaseMetadataSchema,
-  trialDays: z.coerce.number().int().min(0).default(0),
+  trialUnits: z.coerce.number().int().min(0).default(0),
 })
   .extend({
     config: subscriptionItemsConfigSchema,
@@ -133,7 +133,7 @@ export const subscriptionPhaseInsertSchema = createInsertSchema(subscriptionPhas
     config: true,
     items: true,
     metadata: true,
-    trialDays: true,
+    trialUnits: true,
   })
   .omit({
     createdAtM: true,
@@ -173,12 +173,12 @@ export const subscriptionInsertSchema = createInsertSchema(subscriptions, {
             }
           }
 
-          if (phase.trialDays) {
-            if (phase.trialDays < 0) {
+          if (phase.trialUnits) {
+            if (phase.trialUnits < 0) {
               return ctx.addIssue({
                 code: z.ZodIssueCode.custom,
                 message: "Trial days must be greater than 0",
-                path: [index, "trialDays"],
+                path: [index, "trialUnits"],
               })
             }
           }

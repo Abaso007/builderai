@@ -3,7 +3,6 @@ import { APP_DOMAIN } from "@unprice/config"
 import { Alert, AlertDescription, AlertTitle } from "@unprice/ui/alert"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@unprice/ui/card"
 import { Typography } from "@unprice/ui/typography"
-import { differenceInCalendarDays } from "date-fns"
 import { AlertCircle } from "lucide-react"
 import { Fragment } from "react"
 import { PaymentMethodButton } from "~/components/forms/payment-method-form"
@@ -114,9 +113,7 @@ async function SubscriptionCard({
   }
 
   const { planSlug } = subscription
-  const currentTrialDays = activePhase.trialEndsAt
-    ? differenceInCalendarDays(activePhase.trialEndsAt, Date.now())
-    : 0
+  const currentTrialUnits = activePhase.trialEndsAt ? activePhase.trialEndsAt - Date.now() : 0
 
   /**
    * if the customer is in trial days, we need to show the trial days left and when the trial ends
@@ -134,7 +131,7 @@ async function SubscriptionCard({
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="font-semibold text-md">
-                {currentTrialDays > 0 ? "Trial" : "Subscription"} Plan:{" "}
+                {currentTrialUnits > 0 ? "Trial" : "Subscription"} Plan:{" "}
                 <span className="inline-flex items-center gap-1">
                   <span className="font-bold">{planSlug}</span>
                 </span>
@@ -183,11 +180,11 @@ async function SubscriptionCard({
                 </Typography>
               </div>
             </div>
-            {currentTrialDays > 0 && activePhase.trialEndsAt && (
+            {currentTrialUnits > 0 && activePhase.trialEndsAt && (
               <Alert>
                 <AlertTitle>Trial Period</AlertTitle>
                 <AlertDescription>
-                  {activePhase.trialDays} days trial ends on{" "}
+                  {activePhase.trialUnits} units trial ends on{" "}
                   {formatDate(activePhase.trialEndsAt, subscription.timezone, "MMM d, yyyy")}
                 </AlertDescription>
               </Alert>

@@ -1,16 +1,16 @@
 import type { Analytics } from "@unprice/analytics"
-import { and, eq } from "@unprice/db"
-import { invoices } from "@unprice/db/schema"
-import { AesGCM } from "@unprice/db/utils"
+import { type Database, and, eq, inArray, sql } from "@unprice/db"
+import { invoiceItems, invoices } from "@unprice/db/schema"
+import { AesGCM, hashStringSHA256 } from "@unprice/db/utils"
 import {
-  type BillingConfig,
-  type CalculatedPrice,
+  type CollectionMethod,
+  type Currency,
   type Customer,
   type FeatureType,
+  type InvoiceItemExtended,
   type InvoiceStatus,
   type PaymentProvider,
   type SubscriptionInvoice,
-  type SubscriptionItemExtended,
   calculatePricePerFeature,
 } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
@@ -18,6 +18,7 @@ import type { Logger } from "@unprice/logging"
 import { env } from "../../env"
 import { PaymentProviderService } from "../payment-provider"
 
+import type { CustomerService } from "../customers"
 import { db } from "../utils/db"
 import { UnPriceSubscriptionError } from "./errors"
 
@@ -114,529 +115,470 @@ interface FinalizeInvoiceResult {
   invoice: SubscriptionInvoice
 }
 
-/**
- * Finalizes an invoice by calculating prices and updating its status
- * @param payload - Invoice finalization parameters
- * @returns Finalized invoice result
- */
-export async function finalizeInvoice(payload: {
-  invoiceId: string
+// TODO: re evaludate if this should be inside the machine
+// this is here and not inside the machine because it doesn't neccesarilly concern the status of the subscription
+// if there is an error finilizing we report it to the machine
+// takes the invoice that are due and in draft status and finilizes them
+// basically sets up the usage per invoice items and updates the invoice status
+export async function finalizeInvoice({
+  subscriptionId,
+  projectId,
+  now,
+  logger,
+  db,
+  analytics,
+  customerService,
+}: {
+  subscriptionId: string
   projectId: string
-  logger: Logger
   now: number
+  logger: Logger
+  db: Database
   analytics: Analytics
-}): Promise<Result<FinalizeInvoiceResult, UnPriceSubscriptionError>> {
-  const { invoiceId, projectId, logger, now, analytics } = payload
-
-  // Get invoice details
-  const invoice = await db.query.invoices.findFirst({
-    where: (table, { eq, and }) => and(eq(table.id, invoiceId), eq(table.projectId, projectId)),
-  })
-
-  if (!invoice) {
-    return Err(new UnPriceSubscriptionError({ message: "Invoice not found" }))
-  }
-
-  // Check if invoice can be finalized
-  if (invoice.dueAt && invoice.dueAt > now) {
-    return Err(
-      new UnPriceSubscriptionError({
-        message: "Invoice is not due yet, cannot finalize",
-      })
-    )
-  }
-
-  // Return early if invoice is already finalized
-  if (!["draft"].includes(invoice.status)) {
-    return Ok({ invoice })
-  }
-
-  const { paymentProvider, subscriptionId } = invoice
-
-  // Get subscription data with related entities
-  const subscriptionData = await db.query.subscriptions.findFirst({
-    where: (table, { eq, and }) =>
-      and(eq(table.id, subscriptionId), eq(table.projectId, projectId)),
+  customerService: CustomerService
+}): Promise<Result<FinalizeInvoiceResult[], UnPriceSubscriptionError>> {
+  const openInvoices = await db.query.invoices.findMany({
     with: {
-      customer: true,
-      phases: {
-        where(fields, operators) {
-          return operators.and(
-            operators.eq(fields.id, invoice.subscriptionPhaseId),
-            operators.eq(fields.projectId, projectId)
-          )
-        },
+      invoiceItems: {
         with: {
-          planVersion: true,
-          items: {
+          featurePlanVersion: {
             with: {
-              featurePlanVersion: {
-                with: {
-                  feature: true,
-                },
-              },
+              feature: true,
             },
           },
         },
       },
     },
-  })
-
-  if (!subscriptionData) {
-    return Err(new UnPriceSubscriptionError({ message: "Subscription not found" }))
-  }
-
-  const { phases, customer } = subscriptionData
-  const phase = phases[0]
-
-  if (!phase) {
-    return Err(
-      new UnPriceSubscriptionError({
-        message: `Subscription phase ${invoice.subscriptionPhaseId} not found`,
-      })
-    )
-  }
-
-  // Get payment provider config
-  const config = await db.query.paymentProviderConfig.findFirst({
-    where: (config, { and, eq }) =>
+    where: (inv, { and, eq, inArray, lte }) =>
       and(
-        eq(config.projectId, customer.projectId),
-        eq(config.paymentProvider, paymentProvider),
-        eq(config.active, true)
+        eq(inv.projectId, projectId),
+        eq(inv.subscriptionId, subscriptionId),
+        inArray(inv.status, ["draft"]),
+        lte(inv.dueAt, now)
       ),
+    orderBy: (inv, { asc }) => asc(inv.dueAt),
   })
 
-  if (!config) {
-    return Err(
-      new UnPriceSubscriptionError({
-        message: "Payment provider config not found or not active",
-      })
-    )
+  if (openInvoices.length === 0) {
+    return Ok([])
   }
 
-  // Initialize payment provider
-  const aesGCM = await AesGCM.withBase64Key(env.ENCRYPTION_KEY)
-  const decryptedKey = await aesGCM.decrypt({
-    iv: config.keyIv,
-    ciphertext: config.key,
-  })
+  const results = [] as FinalizeInvoiceResult[]
 
-  const paymentProviderService = new PaymentProviderService({
-    customer,
-    paymentProvider,
-    logger,
-    token: decryptedKey,
-  })
+  for (const invoice of openInvoices) {
+    // only kind period or trial are supported
+    // for getting the quantity and price
+    const invoiceItemsToUpdate = invoice.invoiceItems
+      .filter((item) => item.featurePlanVersionId !== null)
+      .filter((item) => item.subscriptionItemId !== null)
+      .filter((item) => item.kind === "period" || item.kind === "trial")
 
-  // Initialize invoice data
-  const paymentProviderInvoiceData = {
-    invoiceId: "",
-    invoiceUrl: "",
-    total: 0,
-    subtotal: 0,
-    amountCreditUsed: 0,
-    customerCreditId: "",
-    status: "unpaid" as InvoiceStatus,
-  }
-
-  // Calculate invoice items prices for the current phase
-  const invoiceItemsPrice = await calculateInvoiceItemsPrice({
-    invoice,
-    items: phase.items,
-    billingConfig: phase.planVersion.billingConfig,
-    analytics,
-    customer,
-    logger,
-  })
-
-  if (invoiceItemsPrice.err) {
-    return Err(invoiceItemsPrice.err)
-  }
-
-  // Calculate invoice totals
-  for (const item of invoiceItemsPrice.val.items) {
-    const formattedTotalAmount = paymentProviderService.formatAmount(item.price.totalPrice.dinero)
-    const formattedUnitAmount = paymentProviderService.formatAmount(item.price.unitPrice.dinero)
-
-    if (formattedTotalAmount.err || formattedUnitAmount.err) {
-      return Err(
-        new UnPriceSubscriptionError({
-          message: `Error formatting amount: ${
-            formattedTotalAmount.err?.message ?? formattedUnitAmount.err?.message
-          }`,
-        })
-      )
+    if (invoiceItemsToUpdate.length === 0) {
+      continue
     }
 
-    paymentProviderInvoiceData.subtotal += formattedUnitAmount.val.amount * item.quantity
-  }
+    const paymentProviderService = await customerService.getPaymentProvider({
+      projectId,
+      provider: invoice.paymentProvider,
+    })
 
-  // Handle zero-amount invoices without payment method no need to create an invoice in the payment provider
-  const isZeroAmountInvoice = paymentProviderInvoiceData.subtotal === 0
-  const noPaymentMethod =
-    invoice.requiredPaymentMethod === false &&
-    (!invoice.paymentMethodId || invoice.paymentMethodId === "")
+    if (paymentProviderService.err) {
+      logger.error("Error getting payment provider", {
+        invoiceId: invoice.id,
+        projectId: invoice.projectId,
+      })
 
-  if (isZeroAmountInvoice || noPaymentMethod) {
-    paymentProviderInvoiceData.status = "void"
+      throw paymentProviderService.err
+    }
 
-    // Update invoice in database
-    return await db.transaction(async (tx) => {
-      try {
-        const updatedInvoice = await tx
-          .update(invoices)
-          .set({
-            invoicePaymentProviderId: "",
-            invoicePaymentProviderUrl: "",
-            subtotal: paymentProviderInvoiceData.subtotal,
-            total: paymentProviderInvoiceData.total,
-            status: paymentProviderInvoiceData.status,
-            amountCreditUsed: 0,
-            metadata: {
-              ...(invoice.metadata?.note && { note: invoice.metadata.note }),
-              reason: "invoice_voided",
-              note: `Invoice for subscription ${subscriptionData.planSlug}, setting status to void`,
-            },
-          })
-          .where(and(eq(invoices.id, invoice.id), eq(invoices.projectId, projectId)))
-          .returning()
-          .then((res) => res[0])
+    // compute the invoice items
+    const { val: billableItems, err: billableItemsErr } = await computeInvoiceItems({
+      invoice,
+      items: invoiceItemsToUpdate as InvoiceItemExtended[],
+      analytics,
+      logger,
+      paymentProviderService: paymentProviderService.val,
+    })
 
-        if (!updatedInvoice) {
-          return Err(new UnPriceSubscriptionError({ message: "Error finalizing invoice" }))
-        }
+    if (billableItemsErr) {
+      logger.error("Error computing invoice items", {
+        statementKey: invoice.statementKey,
+        subscriptionId: invoice.subscriptionId,
+        projectId: invoice.projectId,
+        customerId: invoice.customerId,
+      })
 
-        return Ok({ invoice: updatedInvoice })
-      } catch (e) {
-        const error = e as Error
-        return Err(
-          new UnPriceSubscriptionError({
-            message: `Error finalizing invoice: ${error.message}`,
-          })
+      throw billableItemsErr
+    }
+
+    // all this happends in a transaction
+    await db.transaction(async (tx) => {
+      const invoiceItemsIds = billableItems.items.map((item) => item.id)
+
+      // we update in a single query
+      const quantityChunks = []
+      const totalAmountChunks = []
+      const unitAmountChunks = []
+      const subtotalAmountChunks = []
+      const descriptionChunks = []
+
+      quantityChunks.push(sql`(case`)
+      totalAmountChunks.push(sql`(case`)
+      unitAmountChunks.push(sql`(case`)
+      subtotalAmountChunks.push(sql`(case`)
+      descriptionChunks.push(sql`(case`)
+
+      for (const item of billableItems.items) {
+        quantityChunks.push(
+          sql`when ${invoiceItems.id} = ${item.id} then cast(${item.quantity} as int)`
         )
+        totalAmountChunks.push(
+          sql`when ${invoiceItems.id} = ${item.id} then cast(${item.totalAmount} as int)`
+        )
+        unitAmountChunks.push(
+          sql`when ${invoiceItems.id} = ${item.id} then cast(${item.unitAmount} as int)`
+        )
+        subtotalAmountChunks.push(
+          sql`when ${invoiceItems.id} = ${item.id} then cast(${item.subtotalAmount} as int)`
+        )
+        descriptionChunks.push(sql`when ${invoiceItems.id} = ${item.id} then ${item.description}`)
       }
-    })
-  }
 
-  // Handle invoice creation/update in payment provider with amount > 0
-  if (!invoice.paymentMethodId) {
-    return Err(
-      new UnPriceSubscriptionError({
-        message: "Invoice requires a payment method, please set a payment method first",
-      })
-    )
-  }
+      // add end) to the chunks
+      quantityChunks.push(sql`end)`)
+      totalAmountChunks.push(sql`end)`)
+      unitAmountChunks.push(sql`end)`)
+      subtotalAmountChunks.push(sql`end)`)
+      descriptionChunks.push(sql`end)`)
 
-  // create the invoice in the payment provider
-  // Calculate final invoice totals
-  paymentProviderInvoiceData.status = "unpaid"
+      const sqlQueryQuantity = sql.join(quantityChunks, sql.raw(" "))
+      const sqlQueryTotalAmount = sql.join(totalAmountChunks, sql.raw(" "))
+      const sqlQueryUnitAmount = sql.join(unitAmountChunks, sql.raw(" "))
+      const sqlQuerySubtotalAmount = sql.join(subtotalAmountChunks, sql.raw(" "))
+      const sqlQueryDescription = sql.join(descriptionChunks, sql.raw(" "))
 
-  // show the correct billing period with the correct timezone
-  const timezone = subscriptionData.timezone
-  const billingPeriod = `${new Date(invoice.cycleStartAt).toLocaleString("en-US", { timeZone: timezone })} to ${new Date(
-    invoice.cycleEndAt
-  ).toLocaleString("en-US", { timeZone: timezone })}`
-
-  // Create new invoice
-  const paymentProviderInvoice = await paymentProviderService.createInvoice({
-    currency: invoice.currency,
-    customerName: customer.name,
-    email: customer.email,
-    collectionMethod: invoice.collectionMethod,
-    description: invoice.metadata?.note ?? "",
-    dueDate: invoice.pastDueAt,
-    customFields: [
-      {
-        name: "Billing Period",
-        value: billingPeriod,
-      },
-    ],
-  })
-
-  if (paymentProviderInvoice.err) {
-    return Err(
-      new UnPriceSubscriptionError({
-        message: `Error creating ${paymentProvider} invoice: ${paymentProviderInvoice.err.message}`,
-      })
-    )
-  }
-
-  // create invoice items
-  // upsert the invoice items in the payment provider
-  for (const item of invoiceItemsPrice.val.items) {
-    // depending on the payment provider, the amount is in different unit
-    // get the total amount of the invoice item given the quantity and proration
-    const formattedTotalAmountItem = paymentProviderService.formatAmount(
-      item.price.totalPrice.dinero
-    )
-
-    const formattedUnitAmountItem = paymentProviderService.formatAmount(item.price.unitPrice.dinero)
-
-    if (formattedTotalAmountItem.err || formattedUnitAmountItem.err) {
-      return Err(
-        new UnPriceSubscriptionError({
-          message: `Error formatting amount: ${
-            formattedTotalAmountItem.err?.message ?? formattedUnitAmountItem.err?.message
-          }`,
+      // for every invoice item we update the invoice item
+      await tx
+        .update(invoiceItems)
+        .set({
+          quantity: sqlQueryQuantity,
+          unitAmountCents: sqlQueryUnitAmount,
+          amountTotal: sqlQueryTotalAmount,
+          amountSubtotal: sqlQuerySubtotalAmount,
+          description: sqlQueryDescription,
         })
-      )
-    }
+        .where(
+          and(
+            eq(invoiceItems.invoiceId, invoice.id),
+            eq(invoiceItems.projectId, projectId),
+            inArray(invoiceItems.id, invoiceItemsIds)
+          )
+        )
 
-    const itemInvoice = await paymentProviderService.addInvoiceItem({
-      invoiceId: paymentProviderInvoice.val.invoiceId,
-      name: item.productSlug,
-      // TODO: uncomment when ready
-      // for testing we don't send the product id so we can create the
-      // invoice item without having to create the product in the payment provider
-      // ...(this.isTest ? {} : { productId: item.productId }),
-      // productId: item.productId.startsWith("feature-") ? undefined : item.productId,
-      isProrated: item.prorate !== 1,
-      totalAmount: formattedTotalAmountItem.val.amount,
-      unitAmount: formattedUnitAmountItem.val.amount,
-      description: item.description,
-      quantity: item.quantity,
-      currency: invoice.currency,
-      metadata: item.metadata,
-    })
+      // update the billing period to invoiced
+      let totalAmount = 0
 
-    if (itemInvoice.err) {
-      return Err(
-        new UnPriceSubscriptionError({
-          message: `Error adding invoice item: ${itemInvoice.err.message}`,
-        })
-      )
-    }
-  }
+      for (const item of billableItems.items) {
+        totalAmount += item.totalAmount
+      }
 
-  // this will change when supporting proration
-  paymentProviderInvoiceData.total = paymentProviderInvoiceData.subtotal
+      // TODO: should I add the credits, invoice url and id from provider, etc? HERE??
 
-  // Update final invoice state
-  return await db.transaction(async (tx) => {
-    try {
+      // void the billing period if the total amount is 0 or proration factor is 0
+      const statusInvoice = totalAmount === 0 ? ("void" as const) : ("unpaid" as const)
+
       const updatedInvoice = await tx
         .update(invoices)
-        .set({
-          invoicePaymentProviderId: paymentProviderInvoice.val.invoiceId,
-          invoicePaymentProviderUrl: paymentProviderInvoice.val.invoiceUrl,
-          subtotal: paymentProviderInvoiceData.subtotal,
-          total: paymentProviderInvoiceData.total,
-          status: paymentProviderInvoiceData.status,
-          amountCreditUsed: 0,
-          ...(paymentProviderInvoiceData.customerCreditId && {
-            customerCreditId: paymentProviderInvoiceData.customerCreditId,
-          }),
-        })
-        .where(and(eq(invoices.id, invoice.id), eq(invoices.projectId, projectId)))
+        .set({ subtotal: totalAmount, total: totalAmount, status: statusInvoice, issueDate: now })
+        .where(
+          and(
+            eq(invoices.id, invoice.id),
+            eq(invoices.projectId, projectId),
+            eq(invoices.subscriptionId, subscriptionId)
+          )
+        )
         .returning()
         .then((res) => res[0])
 
       if (!updatedInvoice) {
-        return Err(new UnPriceSubscriptionError({ message: "Error finalizing invoice" }))
+        return Err(new UnPriceSubscriptionError({ message: "Error updating invoice" }))
       }
 
-      return Ok({ invoice: updatedInvoice })
-    } catch (e) {
-      const error = e as Error
-      return Err(
-        new UnPriceSubscriptionError({
-          message: `Error finalizing invoice: ${error.message}`,
-        })
-      )
-    }
-  })
+      results.push({ invoice: updatedInvoice })
+    })
+  }
+
+  // create the invoice in the payment provider
+
+  // create the invoice items in the payment provider
+
+  // set the status of the invoice as unpaid or void
+  // set estimated amount and subtotal
+  // apply credits
+  // set the invoice payment provider id and url
+
+  // get the last open invoice
+
+  return Ok(results)
 }
 
-const calculateInvoiceItemsPrice = async (payload: {
+// all variables that affect the invoice should be included in the statement key
+// this way we can group invoices together and bill them together
+// this is useful for co-billing and for the invoice scheduler
+// also helps us invoice phases changes when they share the same variables,
+// or split them into multiple invoices we things like currency and payment provider changes
+export async function computeStatementKey(input: {
+  projectId: string
+  customerId: string
+  subscriptionId: string
+  invoiceAt: number // epoch ms
+  currency: Currency
+  paymentProvider: PaymentProvider
+  collectionMethod: CollectionMethod
+}): Promise<string> {
+  const raw = [
+    input.projectId,
+    input.customerId,
+    input.subscriptionId,
+    String(input.invoiceAt),
+    input.currency,
+    input.paymentProvider,
+    input.collectionMethod,
+  ].join("|")
+  return hashStringSHA256(raw)
+}
+
+interface ComputeInvoiceItemsResult {
+  id: string
+  featureType: FeatureType
+  productId: string
+  totalAmount: number
+  unitAmount: number
+  subtotalAmount: number
+  quantity: number
+  prorate: number
+  productSlug: string
+  type: FeatureType
+  description?: string
+  metadata: {
+    subscriptionItemId: string
+  }
+  cycleStartAt: number
+  cycleEndAt: number
+}
+
+export const computeInvoiceItems = async (payload: {
   invoice: SubscriptionInvoice
-  items: SubscriptionItemExtended[]
-  billingConfig: BillingConfig
+  items: InvoiceItemExtended[]
   analytics: Analytics
-  customer: Customer
   logger: Logger
+  paymentProviderService: PaymentProviderService
 }): Promise<
   Result<
     {
-      items: {
-        featureType: FeatureType
-        productId: string
-        price: CalculatedPrice
-        quantity: number
-        prorate: number
-        productSlug: string
-        type: FeatureType
-        description?: string
-        metadata: {
-          subscriptionItemId: string
-        }
-      }[]
+      items: ComputeInvoiceItemsResult[]
     },
     UnPriceSubscriptionError
   >
 > => {
-  const { invoice, items, analytics, logger } = payload
+  const { invoice, items, analytics, logger, paymentProviderService } = payload
 
-  // when billing in advance we calculate flat price for the current cycle + usage from the past cycles
-  // when billing in arrear we calculate usage for the current cycle + flat price current cycle
-  const shouldBillInAdvance = invoice.whenToBill === "pay_in_advance"
-  const proration = 1 // for now we assumte the whole cycle is billed
-  const invoiceItems = []
+  // from the invoice items we can get different cycle groups
+  // lets group them by cycle start at and end at
+  // for instance when we have a change in midcycle we have different periods for every item
+  const cycleGroups = items.reduce(
+    (acc, item) => {
+      const key = `${item.cycleStartAt}-${item.cycleEndAt}`
+      if (!acc[key]) {
+        acc[key] = []
+      }
+      acc[key].push(item)
+      return acc
+    },
+    {} as Record<string, InvoiceItemExtended[]>
+  )
 
-  // depending on the invoice type we filter the items to bill
-  const billableItems =
-    invoice.whenToBill === "pay_in_advance"
-      ? items
-      : invoice.whenToBill === "pay_in_arrear"
-        ? // flat charges are those when the quantity is defined in the subscription item
-          items.filter((item) =>
-            ["flat", "tier", "package"].includes(item.featurePlanVersion.featureType)
-          )
-        : items.filter((item) => item.featurePlanVersion.featureType === "usage")
-
-  // we bill the subscriptions items attached to the phase, that way if the customer changes the plan,
-  // we create a new phase and bill the new plan and there are no double charges for the same feature in past cycles
-  // also this give us the flexibility to add new features to the plan without affecting the past invoices
-  // we called that custom entitlements (outside of the subscription items, meaning they are not billed)
+  const updatedItems = [] as ComputeInvoiceItemsResult[]
 
   try {
-    // when billing in advance we get the usage for the previous cycle if any
-    // when billing in arrear we get the usage for the current cycle
-    // TODO: fix this
-    const startAt = shouldBillInAdvance ? invoice.cycleStartAt : invoice.cycleStartAt
-    const endAt = shouldBillInAdvance ? invoice.cycleEndAt : invoice.cycleEndAt
+    for (const cycleKey of Object.keys(cycleGroups)) {
+      const [cycleStartAt, cycleEndAt] = cycleKey.split("-").map(Number) as [number, number]
+      const cycleGroup = cycleGroups[cycleKey]!
 
-    let usages = null
-
-    // if not usage then usages is null
-    if (startAt && endAt) {
-      usages = await analytics.getUsageBillingSubscriptionItems({
-        customerId: invoice.customerId,
-        projectId: invoice.projectId,
-        subscriptionItems: billableItems.map((item) => ({
-          subscriptionItemId: item.id,
+      const usageItems = cycleGroup
+        .filter(
+          (item) => item.subscriptionItemId && item.featurePlanVersion.featureType === "usage"
+        )
+        .map((item) => ({
+          // subscriptionItemId is not null because we filter the items to bill
+          subscriptionItemId: item.subscriptionItemId!,
           aggregationMethod: item.featurePlanVersion.aggregationMethod,
           featureType: item.featurePlanVersion.featureType,
-        })),
-        startAt: startAt,
-        endAt: endAt,
+        }))
+
+      // get the usage for the cycle in one call
+      const usages = await analytics.getUsageBillingSubscriptionItems({
+        customerId: invoice.customerId,
+        projectId: invoice.projectId,
+        subscriptionItems: usageItems,
+        startAt: cycleStartAt,
+        endAt: cycleEndAt,
       })
-    }
 
-    // create a item for each feature
-    for (const item of billableItems) {
-      let prorate = proration
-
-      // proration is supported for fixed cost items - not for usage
-      if (item.featurePlanVersion.featureType === "usage") {
-        prorate = 1 // bill usage as full price
+      // if usages failed, return an error
+      if (!usages) {
+        return Err(new UnPriceSubscriptionError({ message: "Error getting usages" }))
       }
 
-      // calculate the quantity of the feature
       let quantity = 0
 
-      // get the usage depending on the billing type
-      // tier and package are not unit based, the customer bought the whole feature units and we billed that
-      if (["flat", "tier", "package"].includes(item.featurePlanVersion.featureType)) {
-        quantity = item.units ?? 1 // all non usage features have a quantity the customer bought in the subscription
-      } else {
-        // find the usage for the feature
-        const usage = usages?.find((usage) => usage.subscriptionItemId === item.id)
-        // if the aggregation method is _all we get the usage for all time
-        quantity = item.featurePlanVersion.aggregationMethod.endsWith("_all")
-          ? (usage?.accumulatedUsage ?? 0)
-          : (usage?.usage ?? 0)
-      }
+      // iterate on every item in the cycle group
+      for (const item of cycleGroup) {
+        if (item.subscriptionItemId && item.featurePlanVersion.featureType === "usage") {
+          const usage = usages?.find(
+            (usage) => usage.subscriptionItemId === item.subscriptionItemId
+          )
 
-      // this should never happen but we add a check anyway just in case
-      if (quantity < 0) {
-        logger.error("quantity is negative", {
-          itemId: item.id,
-          featureSlug: item.featurePlanVersion.feature.slug,
-          quantity,
+          // TODO: how can I be sure that the usage is not null?
+          if (!usage) {
+            logger.warn("usage not found", {
+              itemId: item.subscriptionItemId,
+              featureType: item.featurePlanVersion.featureType,
+            })
+          }
+
+          // if the aggregation method is _all we get the usage for all time
+          quantity = item.featurePlanVersion.aggregationMethod.endsWith("_all")
+            ? (usage?.accumulatedUsage ?? 0)
+            : (usage?.usage ?? 0)
+        } else {
+          // non usage features have the same quantity for the whole cycle
+          quantity = item.quantity
+        }
+
+        // this should never happen but we add a check anyway just in case
+        if (quantity < 0) {
+          logger.error("quantity is negative", {
+            itemId: item.subscriptionItemId,
+            featureType: item.featurePlanVersion.featureType,
+            quantity,
+          })
+
+          // throw and cancel execution
+          return Err(
+            new UnPriceSubscriptionError({
+              message: `quantity is negative ${item.subscriptionItemId} ${item.featurePlanVersion.featureType} ${quantity}`,
+            })
+          )
+        }
+
+        let totalAmount = 0
+        let unitAmount = 0
+        let subtotalAmount = 0
+        // calculate the price depending on the type of feature
+        const { val: priceCalculation, err: priceCalculationErr } = calculatePricePerFeature({
+          config: item.featurePlanVersion.config,
+          featureType: item.featurePlanVersion.featureType,
+          quantity: quantity,
+          prorate: item.prorationFactor,
         })
 
-        // throw and cancel execution
-        throw new Error(
-          `quantity is negative ${item.id} ${item.featurePlanVersion.feature.slug} ${quantity}`
-        )
-      }
+        if (priceCalculationErr) {
+          logger.error("error calculating price", {
+            itemId: item.id,
+            featureSlug: item.featurePlanVersion.feature.slug,
+            error: priceCalculationErr.message,
+          })
 
-      // calculate the price depending on the type of feature
-      const priceCalculation = calculatePricePerFeature({
-        config: item.featurePlanVersion.config!,
-        featureType: item.featurePlanVersion.featureType,
-        quantity: quantity,
-        prorate: prorate,
-      })
+          return Err(
+            new UnPriceSubscriptionError({
+              message: `Error calculating price for item ${item.subscriptionItemId}`,
+            })
+          )
+        }
 
-      if (priceCalculation.err) {
-        logger.error("error calculating price", {
-          itemId: item.id,
-          featureSlug: item.featurePlanVersion.feature.slug,
-          priceCalculationErr: priceCalculation.err,
+        const { val: formattedTotalAmount, err: formattedTotalAmountErr } =
+          paymentProviderService.formatAmount(priceCalculation.totalPrice.dinero)
+        const { val: formattedUnitAmount, err: formattedUnitAmountErr } =
+          paymentProviderService.formatAmount(priceCalculation.unitPrice.dinero)
+        const { val: formattedSubtotalAmount, err: formattedSubtotalAmountErr } =
+          paymentProviderService.formatAmount(priceCalculation.subtotalPrice.dinero)
+
+        if (formattedTotalAmountErr || formattedUnitAmountErr || formattedSubtotalAmountErr) {
+          return Err(
+            new UnPriceSubscriptionError({
+              message: `Error formatting amount: ${
+                formattedTotalAmountErr?.message ?? formattedUnitAmountErr?.message
+              }`,
+            })
+          )
+        }
+
+        // the totals takes into account the proration factor
+        unitAmount = formattedUnitAmount.amount
+        subtotalAmount = formattedSubtotalAmount.amount
+        totalAmount = formattedTotalAmount.amount
+
+        // give good description per item type so the customer can identify the charge
+        // take into account if the charge is prorated or not
+        // add the period of the charge if prorated
+        let description = undefined
+
+        if (item.featurePlanVersion.featureType === "usage") {
+          description = `${item.featurePlanVersion.feature.title.toUpperCase()} - usage`
+        } else if (item.featurePlanVersion.featureType === "flat") {
+          description = `${item.featurePlanVersion.feature.title.toUpperCase()} - flat`
+        } else if (item.featurePlanVersion.featureType === "tier") {
+          description = `${item.featurePlanVersion.feature.title.toUpperCase()} - tier`
+        } else if (item.featurePlanVersion.featureType === "package") {
+          // package is a special case, we need to calculate the quantity of packages the customer bought
+          // we do it after the price calculation because we pass the package units to the payment provider
+          const quantityPackages = Math.ceil(quantity / item.featurePlanVersion.config?.units!)
+          quantity = quantityPackages
+          description = `${item.featurePlanVersion.feature.title.toUpperCase()} - ${quantityPackages} package of ${item
+            .featurePlanVersion.config?.units!} units`
+        }
+
+        if (item.prorationFactor !== 1) {
+          const billingPeriod = `${new Date(item.cycleStartAt).toISOString().split("T")[0]} to ${
+            new Date(item.cycleEndAt).toISOString().split("T")[0]
+          }`
+
+          description +=
+            item.kind === "trial" ? ` trial (${billingPeriod})` : ` prorated (${billingPeriod})`
+        }
+
+        updatedItems.push({
+          id: item.id,
+          totalAmount: totalAmount,
+          unitAmount: unitAmount,
+          subtotalAmount: subtotalAmount,
+          featureType: item.featurePlanVersion.featureType,
+          productId: item.featurePlanVersion.feature.id,
+          productSlug: item.featurePlanVersion.feature.slug,
+          prorate: item.prorationFactor,
+          type: item.featurePlanVersion.featureType,
+          description: description ?? "",
+          metadata: {
+            subscriptionItemId: item.subscriptionItemId ?? "",
+          },
+          cycleStartAt: item.cycleStartAt,
+          cycleEndAt: item.cycleEndAt,
+          quantity: quantity,
         })
-
-        throw new Error(
-          `Error calculating price for ${item.featurePlanVersion.feature.slug} ${JSON.stringify(
-            priceCalculation.err
-          )}`
-        )
       }
-
-      // give good description per item type so the customer can identify the charge
-      // take into account if the charge is prorated or not
-      // add the period of the charge if prorated
-      let description = undefined
-
-      if (item.featurePlanVersion.featureType === "usage") {
-        description = `${item.featurePlanVersion.feature.title.toUpperCase()} - usage`
-      } else if (item.featurePlanVersion.featureType === "flat") {
-        description = `${item.featurePlanVersion.feature.title.toUpperCase()} - flat`
-      } else if (item.featurePlanVersion.featureType === "tier") {
-        description = `${item.featurePlanVersion.feature.title.toUpperCase()} - tier`
-      } else if (item.featurePlanVersion.featureType === "package") {
-        // package is a special case, we need to calculate the quantity of packages the customer bought
-        // we do it after the price calculation because we pass the package units to the payment provider
-        const quantityPackages = Math.ceil(quantity / item.featurePlanVersion.config?.units!)
-        quantity = quantityPackages
-        description = `${item.featurePlanVersion.feature.title.toUpperCase()} - ${quantityPackages} package of ${item
-          .featurePlanVersion.config?.units!} units`
-      }
-
-      if (prorate !== 1) {
-        const startDate = new Date(invoice.cycleStartAt)
-        const endDate = new Date(invoice.cycleEndAt)
-        const billingPeriod = `${startDate.toLocaleString("default", {
-          month: "short",
-        })} ${startDate.getDate()} - ${endDate.toLocaleString("default", {
-          month: "short",
-        })} ${endDate.getDate()}`
-
-        description += ` prorated (${billingPeriod})`
-      }
-
-      // create an invoice item for each feature
-      invoiceItems.push({
-        featureType: item.featurePlanVersion.featureType,
-        quantity,
-        productId: item.featurePlanVersion.feature.id,
-        price: priceCalculation.val,
-        productSlug: item.featurePlanVersion.feature.slug,
-        prorate: prorate,
-        type: item.featurePlanVersion.featureType,
-        description: description,
-        metadata: {
-          subscriptionItemId: item.id,
-        },
-      })
-
-      // order invoice items by feature type
-      invoiceItems.sort((a, b) => a.featureType.localeCompare(b.featureType))
     }
 
+    // order by feature type and cycle start at
+    updatedItems.sort((a, b) => {
+      if (a.featureType === b.featureType) {
+        return a.cycleStartAt - b.cycleStartAt
+      }
+      return a.featureType.localeCompare(b.featureType)
+    })
+
     return Ok({
-      items: invoiceItems,
+      items: updatedItems,
     })
   } catch (e) {
     const error = e as Error
@@ -718,10 +660,7 @@ export const collectInvoicePayment = async (payload: {
       customer: true,
       phases: {
         where(fields, operators) {
-          return operators.and(
-            operators.eq(fields.id, invoice.subscriptionPhaseId),
-            operators.eq(fields.projectId, projectId)
-          )
+          return operators.and(operators.eq(fields.projectId, projectId))
         },
         with: {
           planVersion: true,
@@ -749,7 +688,7 @@ export const collectInvoicePayment = async (payload: {
   if (!phase) {
     return Err(
       new UnPriceSubscriptionError({
-        message: `Subscription phase ${invoice.subscriptionPhaseId} not found`,
+        message: "Subscription phase not found",
       })
     )
   }

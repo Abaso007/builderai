@@ -5,7 +5,10 @@ import { protectedProjectProcedure } from "#trpc"
 
 export const machine = protectedProjectProcedure
   .input(
-    z.object({ event: z.enum(["invoice", "renew", "billing_period"]), subscriptionId: z.string() })
+    z.object({
+      event: z.enum(["invoice", "renew", "billing_period", "finalize_invoice"]),
+      subscriptionId: z.string(),
+    })
   )
   .output(z.object({ status: z.string() }))
   .mutation(async ({ input, ctx }) => {
@@ -14,6 +17,23 @@ export const machine = protectedProjectProcedure
     const subscriptionService = new SubscriptionService(ctx)
 
     switch (input.event) {
+      case "finalize_invoice": {
+        const { err, val } = await subscriptionService.finalizeInvoice({
+          subscriptionId: input.subscriptionId,
+          projectId,
+          now: Date.now(),
+        })
+
+        if (err) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: err.message,
+          })
+        }
+        return {
+          status: val.map((r) => r.status).join(","),
+        }
+      }
       case "invoice": {
         const { err, val } = await subscriptionService.invoiceSubscription({
           subscriptionId: input.subscriptionId,

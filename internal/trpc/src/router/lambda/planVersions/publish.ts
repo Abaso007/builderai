@@ -268,7 +268,7 @@ export const publish = protectedProjectProcedure
           billing_interval_count: planVersionDataUpdated.billingConfig.billingIntervalCount,
           billing_anchor: planVersionDataUpdated.billingConfig.billingAnchor.toString(),
           plan_type: planVersionDataUpdated.billingConfig.planType,
-          trial_days: planVersionDataUpdated.trialDays,
+          trial_units: planVersionDataUpdated.trialUnits,
           payment_method_required: planVersionDataUpdated.paymentMethodRequired,
           timestamp: new Date(planVersionDataUpdated.publishedAt ?? Date.now()).toISOString(),
         }),

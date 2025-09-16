@@ -44,7 +44,7 @@ export const customerEntitlementExtendedSchema = customerEntitlementSchema.exten
       startAt: true,
       endAt: true,
       billingAnchor: true,
-      trialDays: true,
+      trialUnits: true,
       trialEndsAt: true,
     })
     .extend({

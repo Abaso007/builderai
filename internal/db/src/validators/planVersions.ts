@@ -71,7 +71,7 @@ export const versionInsertBaseSchema = createInsertSchema(versions, {
   metadata: planVersionMetadataSchema,
   currency: currencySchema,
   billingConfig: insertBillingConfigSchema,
-  trialDays: z.coerce.number().int().min(0).default(0),
+  trialUnits: z.coerce.number().int().min(0).default(0),
 })
   .required({
     planId: true,

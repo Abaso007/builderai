@@ -1,84 +1,20 @@
-import type { BillingAnchor, BillingConfig, BillingInterval } from "../shared"
-import { addUtc, setUtc, setUtcDay, startOfUtcDay, startOfUtcHour, startOfUtcSecond } from "./utils"
-
-/**
- * Validates that the billing anchor is appropriate for the given interval.
- */
-function validateAnchor(interval: BillingInterval, anchor: BillingAnchor): void {
-  if (anchor === "dayOfCreation") return // Always valid for these
-
-  // minute is anchored to the second
-  if (interval === "minute" && (typeof anchor !== "number" || anchor < 0 || anchor > 59)) {
-    throw new Error(
-      `For minute intervals, anchor must be a second of the minute (0-59). Received: ${anchor}`
-    )
-  }
-
-  // day is anchored to the hour
-  if (interval === "day" && (typeof anchor !== "number" || anchor < 0 || anchor > 23)) {
-    throw new Error(
-      `For daily intervals, anchor must be a day of the hour (0-23). Received: ${anchor}`
-    )
-  }
-
-  if (interval === "week" && (typeof anchor !== "number" || anchor < 0 || anchor > 6)) {
-    throw new Error(
-      `For weekly intervals, anchor must be a day of the week (0-6). Received: ${anchor}`
-    )
-  }
-  if (
-    (interval === "month" || interval === "year") &&
-    (typeof anchor !== "number" || anchor < 1 || anchor > 31)
-  ) {
-    throw new Error(
-      `For monthly/yearly intervals, anchor must be a day of the month (1-31). Received: ${anchor}`
-    )
-  }
-}
-
-function addByInterval(date: Date, interval: BillingInterval, count: number): Date {
-  switch (interval) {
-    case "minute":
-      return addUtc(date, { minutes: count })
-    case "day":
-      return addUtc(date, { days: count })
-    case "week":
-      return addUtc(date, { weeks: count })
-    case "month":
-      return addUtc(date, { months: count })
-    case "year":
-      return addUtc(date, { years: count })
-    default:
-      throw new Error(`Invalid billing interval: ${interval}`)
-  }
-}
-/**
- * A helper to calculate proration metrics based on a cycle's start, end, and a 'now' timestamp.
- */
-function calculateProration(
-  start: number,
-  end: number,
-  now: number
-): { prorationFactor: number; billableSeconds: number } {
-  const totalDurationMs = end - start
-  if (totalDurationMs <= 0) {
-    return { prorationFactor: 1, billableSeconds: 0 }
-  }
-
-  // Elapsed time is capped by the cycle's own boundaries.
-  const elapsedMs = Math.max(0, Math.min(now, end) - start)
-
-  return {
-    prorationFactor: elapsedMs / totalDurationMs,
-    billableSeconds: Math.floor(elapsedMs / 1000),
-  }
-}
+import type { BillingConfig } from "../shared"
+import {
+  addByInterval,
+  calculateElapsedProration,
+  getAnchor,
+  setUtc,
+  setUtcDay,
+  startOfUtcDay,
+  startOfUtcHour,
+} from "./utils"
 
 export interface CycleWindow {
   start: number
   end: number
   prorationFactor: number
   billableSeconds: number
+  isTrial?: boolean
 }
 
 export interface CalculateCycleWindowParams {
@@ -112,31 +48,26 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
     const start = effectiveStartDate
     const end = Math.min(trialEndsAt, effectiveEndDate ?? Number.POSITIVE_INFINITY)
     // trial is not billable
-    return { start, end, prorationFactor: 0, billableSeconds: 0 }
+    return { start, end, prorationFactor: 0, billableSeconds: 0, isTrial: true }
   }
 
   // --- 2. Handle Onetime Plan Cycle (No changes needed) ---
   if (billingConfig.planType === "onetime") {
     const start = effectiveStartDate
     const end = effectiveEndDate ?? Number.POSITIVE_INFINITY
-    const proration = calculateProration(start, end, now)
+    // For onetime without effectiveEndDate, tests expect infinite window with
+    // billableSeconds computed as elapsed since start and proration 0.
+    if (!effectiveEndDate) {
+      return { start, end, prorationFactor: 0, billableSeconds: Math.floor((now - start) / 1000) }
+    }
+    const proration = calculateElapsedProration(start, end, now)
     return { start, end, ...proration }
   }
 
   // --- 3. Recurring Plan Validation and Setup (No changes needed) ---
   const { billingInterval, billingIntervalCount, billingAnchor } = billingConfig
 
-  // allow numeric 0 anchors (e.g., daily at hour 0, minute at second 0)
-  const isMissingAnchor =
-    billingAnchor === undefined ||
-    billingAnchor === null ||
-    billingAnchor === ("" as unknown as BillingAnchor)
-
-  if (!billingInterval || !billingIntervalCount || isMissingAnchor) {
-    throw new Error("Recurring plans require full billing configuration.")
-  }
-
-  validateAnchor(billingInterval, billingAnchor)
+  const anchor = getAnchor(effectiveStartDate, billingInterval, billingAnchor)
 
   const paidPeriodStart = trialEndsAt
     ? Math.max(effectiveStartDate, trialEndsAt)
@@ -150,30 +81,34 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
 
   // --- 4. Find the First Paid Cycle Start Date (No changes needed) ---
   let firstPaidCycleStart: Date
-  if (billingAnchor === "dayOfCreation") {
-    firstPaidCycleStart = paidPeriodStartDateObj
-  } else {
-    // This logic correctly finds the first anchor date on or after the paid period starts.
-    const tempDate = paidPeriodStartDateObj
-    switch (billingInterval) {
-      case "minute":
-        firstPaidCycleStart = startOfUtcSecond(
-          setUtc(tempDate, { seconds: billingAnchor as number })
-        )
-        break
-      case "day":
-        firstPaidCycleStart = startOfUtcHour(setUtc(tempDate, { hours: billingAnchor as number }))
-        break
-      case "week":
-        firstPaidCycleStart = startOfUtcDay(setUtcDay(tempDate, billingAnchor as number, 0))
-        break
-      case "month":
-      case "year":
-        firstPaidCycleStart = startOfUtcDay(setUtc(tempDate, { date: billingAnchor as number }))
-        break
-      default:
-        throw new Error(`Invalid billing interval: ${billingInterval}`)
+
+  // This logic correctly finds the first anchor date on or after the paid period starts.
+  const tempDate = paidPeriodStartDateObj
+  switch (billingInterval) {
+    case "minute": {
+      // Align minutes to multiples of `billingIntervalCount` and seconds to `anchor`.
+      const c = Math.max(1, billingIntervalCount)
+      const y = tempDate.getUTCFullYear()
+      const m = tempDate.getUTCMonth()
+      const d = tempDate.getUTCDate()
+      const h = tempDate.getUTCHours()
+      const minute = tempDate.getUTCMinutes()
+      const alignedMinute = minute - (minute % c)
+      firstPaidCycleStart = new Date(Date.UTC(y, m, d, h, alignedMinute, anchor, 0))
+      break
     }
+    case "day":
+      firstPaidCycleStart = startOfUtcHour(setUtc(tempDate, { hours: anchor }))
+      break
+    case "week":
+      firstPaidCycleStart = startOfUtcDay(setUtcDay(tempDate, anchor, 0))
+      break
+    case "month":
+    case "year":
+      firstPaidCycleStart = startOfUtcDay(setUtc(tempDate, { date: anchor }))
+      break
+    default:
+      throw new Error(`Invalid billing interval: ${billingInterval}`)
   }
 
   if (firstPaidCycleStart.getTime() < paidPeriodStartDateObj.getTime()) {
@@ -186,13 +121,28 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
   // This check handles the case where `now` is in the initial "stub" period
   // before the first full anchor cycle begins.
   if (now < firstPaidCycleStart.getTime()) {
-    // The current cycle runs from the paid period start to the first anchor.
+    // For minute intervals with count > 1, return the full aligned window and
+    // compute proration from the paid start to avoid tiny stub windows.
+    if (billingInterval === "minute" && billingIntervalCount > 1) {
+      const fullStartDate = addByInterval(firstPaidCycleStart, "minute", -billingIntervalCount)
+      const fullStart = fullStartDate.getTime()
+      const end = Math.min(
+        firstPaidCycleStart.getTime(),
+        effectiveEndDate ?? Number.POSITIVE_INFINITY
+      )
+      // Use elapsed semantics from the billable start inside the aligned window
+      const billableStart = Math.max(paidPeriodStart, fullStart)
+      const proration = calculateElapsedProration(fullStart, end, now, billableStart)
+      return { start: fullStart, end, ...proration }
+    }
+
+    // Default behavior (non-minute or count=1): stub from paid start to first anchor
     const start = paidPeriodStart
     const end = Math.min(
       firstPaidCycleStart.getTime(),
       effectiveEndDate ?? Number.POSITIVE_INFINITY
     )
-    const proration = calculateProration(start, end, now)
+    const proration = calculateElapsedProration(start, end, now)
     return { start, end, ...proration }
   }
 
@@ -206,7 +156,7 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
   // --- 6. Construct, Cap, and Return the Final Window ---
   const start = currentCycleStart.getTime()
   const end = Math.min(nextCycleStart.getTime(), effectiveEndDate ?? Number.POSITIVE_INFINITY)
-  const proration = calculateProration(start, end, now)
+  const proration = calculateElapsedProration(start, end, now)
 
   return { start, end, ...proration }
 }

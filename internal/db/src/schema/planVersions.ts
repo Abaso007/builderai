@@ -91,7 +91,7 @@ export const versions = pgTableProject(
     collectionMethod: collectionMethodEnum("collection_method")
       .notNull()
       .default("charge_automatically"),
-    trialDays: integer("trial_days").notNull().default(0),
+    trialUnits: integer("trial_units").notNull().default(0),
     // auto renew the subscription every billing period
     autoRenew: boolean("auto_renew").notNull().default(true),
     // ************ billing data defaults ************

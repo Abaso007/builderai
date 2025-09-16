@@ -543,7 +543,7 @@ export class CustomerService {
             activePhase: {
               billingConfig: currentPhase.planVersion.billingConfig,
               endAt: currentPhase.endAt,
-              trialDays: currentPhase.trialDays,
+              trialUnits: currentPhase.trialUnits,
               trialEndsAt: currentPhase.trialEndsAt,
               billingAnchor: currentPhase.billingAnchor,
               startAt: currentPhase.startAt,
@@ -592,7 +592,7 @@ export class CustomerService {
           startAt: true,
           endAt: true,
           billingAnchor: true,
-          trialDays: true,
+          trialUnits: true,
           trialEndsAt: true,
         },
         with: {
@@ -810,7 +810,7 @@ export class CustomerService {
           startAt: subscriptionPhases.startAt,
           endAt: subscriptionPhases.endAt,
           billingAnchor: subscriptionPhases.billingAnchor,
-          trialDays: subscriptionPhases.trialDays,
+          trialUnits: subscriptionPhases.trialUnits,
           trialEndsAt: subscriptionPhases.trialEndsAt,
           billingConfig: versions.billingConfig,
         },

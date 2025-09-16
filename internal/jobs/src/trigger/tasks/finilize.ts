@@ -9,15 +9,11 @@ export const finilizeTask = task({
   },
   run: async (
     {
-      subscriptionPhaseId,
-      invoiceId,
       projectId,
       now,
       subscriptionId,
     }: {
-      subscriptionPhaseId: string
       projectId: string
-      invoiceId: string
       now: number
       subscriptionId: string
     },
@@ -27,13 +23,10 @@ export const finilizeTask = task({
       taskId: ctx.task.id,
       subscriptionId,
       projectId,
-      phaseId: subscriptionPhaseId,
       defaultFields: {
         subscriptionId,
         projectId,
         api: "jobs.invoice.finilize",
-        subscriptionPhaseId,
-        invoiceId,
         now: now.toString(),
       },
     })
@@ -41,7 +34,6 @@ export const finilizeTask = task({
     const subscriptionService = new SubscriptionService(context)
 
     const finalizeInvoiceResult = await subscriptionService.finalizeInvoice({
-      invoiceId,
       projectId,
       subscriptionId,
       now,
@@ -52,12 +44,10 @@ export const finilizeTask = task({
     }
 
     return {
-      status: finalizeInvoiceResult.val.status,
-      invoiceId,
+      status: finalizeInvoiceResult.val.map((r) => r.status).join(","),
       subscriptionId,
       projectId,
       now,
-      subscriptionPhaseId,
     }
   },
 })

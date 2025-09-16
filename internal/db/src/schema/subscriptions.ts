@@ -95,8 +95,8 @@ export const subscriptionPhases = pgTableProject(
     // payment method id of the customer - if not set, the first payment method will be used
     // payment method is tied to the phase because it's tied to the plan version payment provider
     paymentMethodId: text("payment_method_id"),
-    // trial days of the phase
-    trialDays: integer("trial_days").notNull().default(0),
+    // trial units of the phase
+    trialUnits: integer("trial_units").notNull().default(0),
     // billing anchor of the phase
     billingAnchor: integer("billing_anchor").notNull().default(0),
     // ************ subscription important dates ************

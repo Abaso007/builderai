@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { calculateDateAt, getBillingCycleMessage } from "./utils"
+import { calculateDateAt, calculateProration, getAnchor, getBillingCycleMessage } from "./utils"
 import type { Config } from "./utils"
 
 const utcDate = (date: string, time = "00:00:00.000") => new Date(`${date}T${time}Z`).getTime()
@@ -103,5 +103,77 @@ describe("getBillingCycleMessage", () => {
       planType: "recurring",
     })
     expect(msg.message).toBe("billed yearly on the 1st of March")
+  })
+})
+
+describe("calculateProration (remaining fraction semantics)", () => {
+  const ms = (s: number) => s * 1000
+
+  it("returns 0 when start is greater than or equal to end", () => {
+    expect(calculateProration(ms(10), ms(10), ms(10))).toEqual({
+      prorationFactor: 0,
+      billableSeconds: 0,
+    })
+    expect(calculateProration(ms(10), ms(9), ms(10))).toEqual({
+      prorationFactor: 0,
+      billableSeconds: 0,
+    })
+  })
+
+  it("returns 1 when now is at or before start (bill full window)", () => {
+    const start = ms(10)
+    const end = ms(20)
+    const atStart = calculateProration(start, end, start)
+    const beforeStart = calculateProration(start, end, ms(5))
+    expect(atStart.prorationFactor).toBe(1)
+    expect(atStart.billableSeconds).toBe(Math.floor((end - start) / 1000))
+    expect(beforeStart.prorationFactor).toBe(1)
+    expect(beforeStart.billableSeconds).toBe(Math.floor((end - start) / 1000))
+  })
+
+  it("returns 0 when now is at or after end (nothing to bill)", () => {
+    const start = ms(10)
+    const end = ms(20)
+    const result = calculateProration(start, end, ms(21))
+    expect(result.prorationFactor).toBe(0)
+    expect(result.billableSeconds).toBe(0)
+  })
+
+  it("returns ~0.5 when now is in the middle (bill remaining)", () => {
+    const start = ms(10)
+    const end = ms(20)
+    const now = ms(15)
+    const result = calculateProration(start, end, now)
+    expect(result.prorationFactor).toBeCloseTo(0.5, 6)
+    expect(result.billableSeconds).toBe(Math.floor((end - now) / 1000))
+  })
+})
+
+describe("getAnchor", () => {
+  const utc = (d: string, t = "00:00:00.000") => new Date(`${d}T${t}Z`).getTime()
+
+  it("dayOfCreation for month/year returns day of month (UTC)", () => {
+    const date = utc("2024-01-31")
+    expect(getAnchor(date, "month", "dayOfCreation")).toBe(31)
+    expect(getAnchor(date, "year", "dayOfCreation")).toBe(31)
+  })
+
+  it("validates minute/day/week numeric anchors and returns as-is", () => {
+    const date = utc("2024-01-01")
+    expect(getAnchor(date, "minute", 30)).toBe(30)
+    expect(() => getAnchor(date, "minute", 60)).toThrow()
+    expect(getAnchor(date, "day", 23)).toBe(23)
+    expect(() => getAnchor(date, "day", 24)).toThrow()
+    expect(getAnchor(date, "week", 6)).toBe(6)
+    expect(() => getAnchor(date, "week", 7)).toThrow()
+  })
+
+  it("caps monthly anchor to the last day of the target month", () => {
+    const jan31 = utc("2024-01-31")
+    // February 2024 has 29 days
+    expect(getAnchor(jan31, "month", 31)).toBe(31) // for ref month cap is done in window alignment
+    // when aligning, the month end cap is applied (tested in billing tests)
+    const apr30 = utc("2024-04-30")
+    expect(getAnchor(apr30, "month", 31)).toBe(30)
   })
 })

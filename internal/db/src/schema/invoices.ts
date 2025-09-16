@@ -30,7 +30,7 @@ import {
 } from "./enums"
 import { planVersionFeatures } from "./planVersionFeatures"
 import { projects } from "./projects"
-import { subscriptionItems, subscriptionPhases, subscriptions } from "./subscriptions"
+import { subscriptionItems, subscriptions } from "./subscriptions"
 
 export const invoices = pgTableProject(
   "invoices",
@@ -39,16 +39,20 @@ export const invoices = pgTableProject(
     ...timestamps,
     // Is it necessary to have the subscription id?
     subscriptionId: cuid("subscription_id").notNull(),
-    subscriptionPhaseId: cuid("subscription_phase_id").notNull(),
     customerId: cuid("customer_id").notNull(),
     status: invoiceStatusEnum("status").notNull().default("draft"),
     // date the invoice was issued
     issueDate: bigint("issue_date_m", { mode: "number" }),
     requiredPaymentMethod: boolean("required_payment_method").notNull().default(false),
     paymentMethodId: text("payment_method_id"),
-    // keeps date in here to enforce uniqueness and show a billing period in the UI
-    cycleStartAt: bigint("cycle_start_at_m", { mode: "number" }).notNull(),
-    cycleEndAt: bigint("cycle_end_at_m", { mode: "number" }).notNull(),
+    // date statement (the date that is shown on the invoice)
+    // like September 01, 2025 in the customer's timezone
+    statementDateString: varchar("statement_date_string", { length: 255 }).notNull(),
+    // statementKey is a deliberate grouping key to enforce uniqueness
+    statementKey: varchar("statement_key", { length: 64 }).notNull(),
+    // UI display purposes
+    statementStartAt: bigint("statement_start_at_m", { mode: "number" }).notNull(),
+    statementEndAt: bigint("statement_end_at_m", { mode: "number" }).notNull(),
     whenToBill: whenToBillEnum("when_to_bill").notNull().default("pay_in_advance"),
     collectionMethod: collectionMethodEnum("collection_method")
       .notNull()
@@ -68,6 +72,8 @@ export const invoices = pgTableProject(
         }[]
       >(),
     // when the invoice is due and ready to be billed
+    // usually is the same as the cycleEndAt + a small grace period to wait some time
+    // for usage records to be processed
     dueAt: bigint("due_at_m", { mode: "number" }).notNull(),
     paidAt: bigint("paid_at_m", { mode: "number" }),
     // ----------------- amounts --------------------------------
@@ -99,24 +105,26 @@ export const invoices = pgTableProject(
       foreignColumns: [customers.id, customers.projectId],
       name: "invoices_customer_id_fkey",
     }).onDelete("cascade"),
-    subscriptionPhasefk: foreignKey({
-      columns: [table.subscriptionPhaseId, table.projectId],
-      foreignColumns: [subscriptionPhases.id, subscriptionPhases.projectId],
-      name: "invoices_subscription_phase_id_fkey",
-    }).onDelete("cascade"),
     // project fk
     projectfk: foreignKey({
       columns: [table.projectId],
       foreignColumns: [projects.id],
       name: "invoices_project_id_fkey",
     }).onDelete("cascade"),
-    periodUnique: uniqueIndex("invoices_period_unique").on(
+    // fast lookup for invoices per period statement
+    period: index("invoices_period_idx").on(
       table.projectId,
       table.subscriptionId,
-      table.subscriptionPhaseId,
       table.customerId,
-      table.cycleStartAt,
-      table.cycleEndAt
+      table.statementStartAt,
+      table.statementEndAt
+    ),
+    // force only one invoice per statement key
+    statementKey: uniqueIndex("invoices_statement_key_idx").on(
+      table.projectId,
+      table.subscriptionId,
+      table.customerId,
+      table.statementKey
     ),
   })
 )
@@ -145,7 +153,7 @@ export const invoiceItems = pgTableProject(
     // period of the line (can differ per item even if invoice has a single window)
     cycleStartAt: bigint("cycle_start_at_m", { mode: "number" }).notNull(),
     cycleEndAt: bigint("cycle_end_at_m", { mode: "number" }).notNull(),
-    prorationFactor: doublePrecision("proration_factor"),
+    prorationFactor: doublePrecision("proration_factor").notNull().default(1),
     description: varchar("description", { length: 200 }),
     // provider-level mapping for reconciliation
     itemProviderId: text("item_provider_id"),
@@ -164,17 +172,22 @@ export const invoiceItems = pgTableProject(
       columns: [table.billingPeriodId, table.projectId],
       foreignColumns: [billingPeriods.id, billingPeriods.projectId],
       name: "invoice_items_billing_period_id_fkey",
-    }).onDelete("set null"),
+    }).onDelete("cascade"),
     subscriptionItemfk: foreignKey({
       columns: [table.subscriptionItemId, table.projectId],
       foreignColumns: [subscriptionItems.id, subscriptionItems.projectId],
       name: "invoice_items_subscription_item_id_fkey",
-    }).onDelete("set null"),
+    }).onDelete("cascade"),
     featurePlanVersionfk: foreignKey({
       columns: [table.featurePlanVersionId, table.projectId],
       foreignColumns: [planVersionFeatures.id, planVersionFeatures.projectId],
       name: "invoice_items_feature_plan_version_id_fkey",
-    }).onDelete("set null"),
+    }).onDelete("cascade"),
+    projectfk: foreignKey({
+      columns: [table.projectId],
+      foreignColumns: [projects.id],
+      name: "invoice_items_project_id_fkey",
+    }).onDelete("cascade"),
     // avoid duplicate materialization of the same billing period into the same invoice
     uqByCycle: uniqueIndex("invoice_items_cycle_unique")
       .on(table.projectId, table.invoiceId, table.billingPeriodId)
@@ -211,6 +224,11 @@ export const creditGrants = pgTableProject(
       foreignColumns: [customers.id, customers.projectId],
       name: "credit_grants_customer_id_fkey",
     }),
+    projectfk: foreignKey({
+      columns: [table.projectId],
+      foreignColumns: [projects.id],
+      name: "credit_grants_project_id_fkey",
+    }).onDelete("cascade"),
   })
 )
 
@@ -277,10 +295,7 @@ export const invoiceRelations = relations(invoices, ({ one, many }) => ({
     fields: [invoices.projectId],
     references: [projects.id],
   }),
-  subscriptionPhase: one(subscriptionPhases, {
-    fields: [invoices.subscriptionPhaseId, invoices.projectId],
-    references: [subscriptionPhases.id, subscriptionPhases.projectId],
-  }),
+  invoiceItems: many(invoiceItems),
   creditGrants: many(creditGrants),
   customer: one(customers, {
     fields: [invoices.customerId, invoices.projectId],

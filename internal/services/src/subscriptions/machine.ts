@@ -23,6 +23,7 @@ import sendCustomerNotification, { logTransition, updateSubscription } from "./a
 import {
   canRenew,
   hasDueBillingPeriods,
+  hasOpenInvoices,
   hasValidPaymentMethod,
   isAdvanceBilling,
   isAutoRenewEnabled,
@@ -193,6 +194,7 @@ export class SubscriptionMachine {
         isCurrentPhaseNull: isCurrentPhaseNull,
         isSubscriptionActive: isSubscriptionActive,
         isAdvanceBilling: isAdvanceBilling,
+        hasOpenInvoices: hasOpenInvoices,
       },
       actions: {
         logStateTransition: ({ context, event }) =>
@@ -222,6 +224,7 @@ export class SubscriptionMachine {
         error: context.error,
         status: context.subscription?.status,
       }),
+      // TODO: add global states here
       states: {
         loading: {
           tags: ["machine", "loading"],
@@ -361,7 +364,7 @@ export class SubscriptionMachine {
                 }),
               },
               {
-                guard: and(["isTrialExpired", "hasValidPaymentMethod"]), // verify that the trial has expired and the payment method is valid
+                guard: and(["isTrialExpired", "hasValidPaymentMethod", "canRenew"]), // verify that the trial has expired and the payment method is valid
                 target: "renewing", // if the trial has expired and the payment method is valid, transition to the invoicing state
                 actions: "logStateTransition",
               },
@@ -372,6 +375,7 @@ export class SubscriptionMachine {
                     const trialEndAt = context.currentPhase?.trialEndsAt! // the state machine already verified that the subscription has a current phase
                     const trialEndAtDate = new Date(trialEndAt).toLocaleString()
 
+                    const canRenewResult = canRenew({ context })
                     const isExpired = isTrialExpired({ context })
                     const isPaymentMethodValid = hasValidPaymentMethod({
                       context,
@@ -381,6 +385,12 @@ export class SubscriptionMachine {
                     if (!isExpired) {
                       return {
                         message: `Cannot end trial, dates are not due yet at ${trialEndAtDate}`,
+                      }
+                    }
+
+                    if (!canRenewResult) {
+                      return {
+                        message: `Cannot end trial, subscription is not due to be renewed at ${trialEndAtDate}`,
                       }
                     }
 
@@ -399,6 +409,7 @@ export class SubscriptionMachine {
             ],
           },
         },
+        // TODO: Separate this from the machine
         generating_billing_periods: {
           tags: ["machine", "transition"],
           description: "Generating billing periods for the subscription items",
@@ -406,29 +417,78 @@ export class SubscriptionMachine {
             id: "generateBillingPeriods",
             src: "generateBillingPeriods",
             input: ({ context }) => ({ context, logger: this.logger, db: this.db }),
-            onDone: {
-              target: "active",
-              actions: [
-                assign({
-                  subscription: ({ event, context }) => {
-                    if (event.output.subscription) {
-                      return event.output.subscription
-                    }
+            onDone: [
+              {
+                target: "trialing",
+                guard: not("isTrialExpired"),
+                actions: [
+                  assign({
+                    subscription: ({ event, context }) => {
+                      if (event.output.subscription) {
+                        return event.output.subscription
+                      }
 
-                    return context.subscription
-                  },
-                  hasDueBillingPeriods: ({ event, context }) => {
-                    if (event.output.hasDueBillingPeriods) {
-                      return event.output.hasDueBillingPeriods
-                    }
+                      return context.subscription
+                    },
+                    hasDueBillingPeriods: ({ event, context }) => {
+                      if (event.output.hasDueBillingPeriods) {
+                        return event.output.hasDueBillingPeriods
+                      }
 
-                    return context.hasDueBillingPeriods
-                  },
+                      return context.hasDueBillingPeriods
+                    },
+                    hasOpenInvoices: ({ event, context }) => {
+                      if (event.output.hasOpenInvoices) {
+                        return event.output.hasOpenInvoices
+                      }
+
+                      return context.hasOpenInvoices
+                    },
+                  }),
+                  "logStateTransition",
+                  "notifyCustomer",
+                ],
+              },
+              {
+                target: "active",
+                guard: "isTrialExpired",
+                actions: [
+                  assign({
+                    subscription: ({ event, context }) => {
+                      if (event.output.subscription) {
+                        return event.output.subscription
+                      }
+
+                      return context.subscription
+                    },
+                    hasDueBillingPeriods: ({ event, context }) => {
+                      if (event.output.hasDueBillingPeriods) {
+                        return event.output.hasDueBillingPeriods
+                      }
+
+                      return context.hasDueBillingPeriods
+                    },
+                    hasOpenInvoices: ({ event, context }) => {
+                      if (event.output.hasOpenInvoices) {
+                        return event.output.hasOpenInvoices
+                      }
+
+                      return context.hasOpenInvoices
+                    },
+                  }),
+                  "logStateTransition",
+                  "notifyCustomer",
+                ],
+              },
+              {
+                target: "error",
+                actions: assign({
+                  error: () => ({
+                    message: "Generate billing periods failed",
+                  }),
                 }),
-                "logStateTransition",
-                "notifyCustomer",
-              ],
-            },
+              },
+            ],
             onError: {
               target: "error",
               actions: [
@@ -481,6 +541,20 @@ export class SubscriptionMachine {
                     }
 
                     return context.subscription
+                  },
+                  hasDueBillingPeriods: ({ event, context }) => {
+                    if (event.output.hasDueBillingPeriods) {
+                      return event.output.hasDueBillingPeriods
+                    }
+
+                    return context.hasDueBillingPeriods
+                  },
+                  hasOpenInvoices: ({ event, context }) => {
+                    if (event.output.hasOpenInvoices) {
+                      return event.output.hasOpenInvoices
+                    }
+
+                    return context.hasOpenInvoices
                   },
                 }),
                 "logStateTransition",
@@ -1017,8 +1091,8 @@ export class SubscriptionMachine {
   }
 
   public async reportInvoiceFailure({
-    invoiceId,
     error,
+    invoiceId,
   }: {
     invoiceId: string
     error: string

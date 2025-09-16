@@ -1,4 +1,4 @@
-import { type Database, and, eq, lt, sql } from "@unprice/db"
+import { type Database, and, eq, lt, or, sql } from "@unprice/db"
 import { subscriptionLocks } from "@unprice/db/schema"
 import { newId, randomId } from "@unprice/db/utils"
 
@@ -21,7 +21,14 @@ export class SubscriptionLock {
   async acquire({
     ttlMs = 30_000,
     now = Date.now(),
-  }: { ttlMs?: number; now?: number } = {}): Promise<boolean> {
+    staleTakeoverMs = 120_000,
+    ownerStaleMs = ttlMs,
+  }: {
+    ttlMs?: number
+    now?: number
+    staleTakeoverMs?: number
+    ownerStaleMs?: number
+  } = {}): Promise<boolean> {
     const token = randomId()
     const expiresAt = now + ttlMs
 
@@ -38,7 +45,7 @@ export class SubscriptionLock {
       this.token = token
       return true
     } catch {
-      // row exists; try to take over if expired
+      // row exists; try to take over if expired or plausibly stale
     }
 
     const taken = await this.db
@@ -48,7 +55,15 @@ export class SubscriptionLock {
         and(
           eq(subscriptionLocks.projectId, this.projectId),
           eq(subscriptionLocks.subscriptionId, this.subscriptionId),
-          lt(subscriptionLocks.expiresAt, now)
+          or(
+            // hard expiry
+            lt(subscriptionLocks.expiresAt, now),
+            // early takeover window: near expiry AND no recent heartbeat
+            and(
+              lt(subscriptionLocks.expiresAt, now + staleTakeoverMs),
+              lt(subscriptionLocks.updatedAtM, now - ownerStaleMs)
+            )
+          )
         )
       )
       .returning({ projectId: subscriptionLocks.projectId })
