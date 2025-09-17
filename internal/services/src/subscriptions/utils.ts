@@ -1,125 +1,378 @@
 import type { Analytics } from "@unprice/analytics"
-import { type Database, and, eq, inArray, sql } from "@unprice/db"
-import { invoiceItems, invoices } from "@unprice/db/schema"
-import { AesGCM, hashStringSHA256 } from "@unprice/db/utils"
+import { type Database, and, eq, gte, inArray, isNull, or, sql } from "@unprice/db"
+import { creditGrants, invoiceCreditApplications, invoiceItems, invoices } from "@unprice/db/schema"
+import { AesGCM, hashStringSHA256, newId } from "@unprice/db/utils"
 import {
   type CollectionMethod,
   type Currency,
-  type Customer,
-  type FeatureType,
   type InvoiceItemExtended,
   type InvoiceStatus,
   type PaymentProvider,
   type SubscriptionInvoice,
   calculatePricePerFeature,
 } from "@unprice/db/validators"
-import { Err, Ok, type Result } from "@unprice/error"
+import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import { env } from "../../env"
 import { PaymentProviderService } from "../payment-provider"
 
+import type { Customer } from "@unprice/db/validators"
 import type { CustomerService } from "../customers"
 import { db } from "../utils/db"
 import { UnPriceSubscriptionError } from "./errors"
 
-interface ValidatePaymentMethodResult {
-  paymentMethodId: string | null
-  requiredPaymentMethod: boolean
-}
-
-/**
- * Validates the payment method status for a customer
- * @param customer - Customer information
- * @param paymentProvider - Optional payment provider
- * @param requiredPaymentMethod - Whether payment method is required
- * @param logger - Logger instance
- * @returns Payment method validation result
- */
-export async function validatePaymentMethod({
-  customer,
-  paymentProvider,
-  requiredPaymentMethod = false,
-  logger,
-}: {
-  customer: Customer
-  paymentProvider?: PaymentProvider
-  requiredPaymentMethod?: boolean
+export async function upsertPaymentProviderInvoice(opts: {
+  db: Database
   logger: Logger
-}): Promise<ValidatePaymentMethodResult> {
-  // If payment method is not required or no provider, return early
-  if (!requiredPaymentMethod || !paymentProvider) {
-    return {
-      paymentMethodId: null,
-      requiredPaymentMethod: false,
+  paymentProviderService: PaymentProviderService
+  invoice: SubscriptionInvoice
+  customer: Customer
+  items: InvoiceItemExtended[]
+}): Promise<
+  Result<
+    { providerInvoiceId?: string; providerInvoiceUrl?: string },
+    UnPriceSubscriptionError | FetchError
+  >
+> {
+  const { default: pLimit } = await import("p-limit")
+  const { db, logger, paymentProviderService, invoice, items, customer } = opts
+
+  // if the total amount is 0 we skip
+  if ((invoice.total ?? 0) === 0) return Ok({})
+
+  const description = `Invoice ${invoice.statementDateString}`
+  const customFields = [
+    { name: "Billing Period", value: invoice.statementDateString },
+    { name: "statementKey", value: invoice.statementKey },
+  ]
+  const basePayload = {
+    currency: invoice.currency,
+    collectionMethod: invoice.collectionMethod,
+    customerName: customer.name,
+    email: customer.email,
+    description,
+    dueDate: invoice.dueAt ?? undefined,
+    customFields,
+  } as const
+
+  let providerInvoiceId = invoice.invoicePaymentProviderId ?? ""
+  let providerInvoiceUrl = invoice.invoicePaymentProviderUrl ?? ""
+
+  // upsert provider invoice
+  if (!providerInvoiceId) {
+    const created = await paymentProviderService.createInvoice(basePayload)
+
+    if (created.err) {
+      return Err(
+        new UnPriceSubscriptionError({ message: `createInvoice failed: ${created.err.message}` })
+      )
+    }
+    providerInvoiceId = created.val?.invoiceId ?? ""
+    providerInvoiceUrl = created.val?.invoiceUrl ?? ""
+  } else {
+    const updated = await paymentProviderService.updateInvoice({
+      invoiceId: providerInvoiceId,
+      collectionMethod: basePayload.collectionMethod,
+      description: basePayload.description,
+      dueDate: basePayload.dueDate,
+      customFields: basePayload.customFields,
+    })
+
+    if (updated.err) {
+      return Err(
+        new UnPriceSubscriptionError({ message: `updateInvoice failed: ${updated.err.message}` })
+      )
+    }
+
+    providerInvoiceUrl = updated.val?.invoiceUrl ?? ""
+  }
+
+  // Reconcile items by subscriptionItemId metadata
+  const current = await paymentProviderService.getInvoice({ invoiceId: providerInvoiceId })
+
+  if (current.err) {
+    return Err(
+      new UnPriceSubscriptionError({ message: `getInvoice failed: ${current.err.message}` })
+    )
+  }
+
+  const bySubId = new Map<string, string>()
+  let creditLineId: string | undefined
+
+  // get the existing invoice item id by subscription item id and credit line id
+  for (const it of current.val.items) {
+    const subId = it.metadata?.subscriptionItemId
+    if (subId) bySubId.set(subId, it.id)
+
+    // get the credit line id
+    if (it.metadata?.kind === "credit_applied" && it.metadata?.invoiceId === invoice.id) {
+      creditLineId = it.id
     }
   }
 
-  // Get active payment provider config
-  const config = await db.query.paymentProviderConfig.findFirst({
-    where: (config, { and, eq }) =>
-      and(
-        eq(config.projectId, customer.projectId),
-        eq(config.paymentProvider, paymentProvider),
-        eq(config.active, true)
-      ),
+  // Upsert line items with bounded concurrency
+  const limit = pLimit(10) // 10 is the max number of concurrent requests to the payment provider
+  const tasks: Promise<unknown>[] = []
+
+  for (const item of items) {
+    // if the total amount and subtotal amount are 0 we skip the creation of the invoice item
+    if (item.amountTotal === 0 && item.amountSubtotal === 0) continue
+    const subId = item.subscriptionItemId ?? ""
+    const isProrated = (item.prorationFactor ?? 1) !== 1
+    // get the existing invoice item id by subscription item id
+    const existingId = subId ? bySubId.get(subId) : undefined
+
+    if (existingId) {
+      tasks.push(
+        limit(async () => {
+          const res = await paymentProviderService.updateInvoiceItem({
+            invoiceItemId: existingId,
+            totalAmount: item.amountTotal,
+            name: item.description ?? "",
+            isProrated,
+            quantity: item.quantity,
+            // add the subscription item id to the metadata to be able to update the invoice item
+            metadata: subId ? { subscriptionItemId: subId } : undefined,
+            description: item.description ?? "",
+          })
+          if (res.err) throw new Error(`updateInvoiceItem failed: ${res.err.message}`)
+        })
+      )
+    } else {
+      tasks.push(
+        limit(async () => {
+          const res = await paymentProviderService.addInvoiceItem({
+            invoiceId: providerInvoiceId,
+            name: item.featurePlanVersion.feature.slug,
+            // each product is created from the feature
+            productId: item.featurePlanVersion.feature.id,
+            description: item.description ?? "",
+            isProrated,
+            totalAmount: item.amountTotal,
+            unitAmount: item.unitAmountCents ?? undefined, // ignored in amount-path by provider
+            quantity: item.quantity,
+            currency: invoice.currency,
+            metadata: subId ? { subscriptionItemId: subId } : undefined,
+          })
+          if (res.err) throw new Error(`addInvoiceItem failed: ${res.err.message}`)
+        })
+      )
+    }
+  }
+
+  // apply credits
+  if (
+    invoice.amountCreditUsed &&
+    invoice.amountCreditUsed > 0 &&
+    invoice.total &&
+    invoice.total > 0
+  ) {
+    const credit = invoice.amountCreditUsed
+    tasks.push(
+      limit(async () => {
+        if (creditLineId) {
+          const res = await paymentProviderService.updateInvoiceItem({
+            invoiceItemId: creditLineId,
+            totalAmount: -credit,
+            name: "Credits applied",
+            isProrated: false,
+            quantity: 1,
+            metadata: { kind: "credit_applied", invoiceId: invoice.id },
+            description: "Customer credits applied",
+          })
+          if (res.err) throw new Error(`updateInvoiceItem(credit) failed: ${res.err.message}`)
+        } else {
+          const res = await paymentProviderService.addInvoiceItem({
+            invoiceId: providerInvoiceId,
+            name: "Credits applied",
+            description: "Customer credits applied",
+            isProrated: false,
+            totalAmount: -credit, // negative
+            unitAmount: -credit, // ensure Stripe wrapper uses 'amount' for no-product items
+            quantity: 1,
+            currency: invoice.currency,
+            metadata: { kind: "credit_applied", invoiceId: invoice.id },
+          })
+          if (res.err) throw new Error(`addInvoiceItem(credit) failed: ${res.err.message}`)
+        }
+      })
+    )
+  }
+
+  // Execute all item upserts
+  try {
+    await Promise.all(tasks)
+  } catch (e) {
+    const error = e as Error
+    logger.error("Provider item upsert failed", { error: error.message, invoiceId: invoice.id })
+    return Err(new UnPriceSubscriptionError({ message: error.message }))
+  }
+
+  // Re-fetch to validate totals and capture item IDs for persistence
+  const verify = await paymentProviderService.getInvoice({ invoiceId: providerInvoiceId })
+  if (verify.err) {
+    return Err(
+      new UnPriceSubscriptionError({
+        message: `getInvoice verification failed: ${verify.err.message}`,
+      })
+    )
+  }
+
+  if ((verify.val.total ?? 0) !== (invoice.total ?? 0)) {
+    logger.error("Provider invoice total mismatch", {
+      invoiceId: invoice.id,
+      providerInvoiceId,
+      internalTotal: invoice.total,
+      providerTotal: verify.val.total,
+    })
+    return Err(
+      new UnPriceSubscriptionError({ message: "Provider total does not match internal total" })
+    )
+  }
+
+  // Finalize provider invoice (no send/charge here)
+  const fin = await paymentProviderService.finalizeInvoice({ invoiceId: providerInvoiceId })
+  if (fin.err)
+    return Err(
+      new UnPriceSubscriptionError({ message: `finalizeInvoice failed: ${fin.err.message}` })
+    )
+
+  // Persist provider ids and item provider ids using the last snapshot (no remote calls in tx)
+  const providerItemBySub = new Map<string, string>()
+  for (const it of verify.val.items) {
+    const subId = it.metadata?.subscriptionItemId
+    if (subId) providerItemBySub.set(subId, it.id)
+  }
+
+  // Persist provider ids in a short tx
+  await db.transaction(async (tx) => {
+    await tx
+      .update(invoices)
+      .set({
+        invoicePaymentProviderId: providerInvoiceId,
+        invoicePaymentProviderUrl: providerInvoiceUrl,
+      })
+      .where(and(eq(invoices.id, invoice.id), eq(invoices.projectId, invoice.projectId)))
+
+    for (const item of items) {
+      const subId = item.subscriptionItemId ?? ""
+      const id = subId ? providerItemBySub.get(subId) : undefined
+      if (!id) continue
+      await tx
+        .update(invoiceItems)
+        .set({ itemProviderId: id })
+        .where(and(eq(invoiceItems.id, item.id), eq(invoiceItems.projectId, item.projectId)))
+    }
   })
 
-  if (!config) {
-    logger.error(
-      `Payment provider config for this project ${customer.projectId} and payment provider ${paymentProvider} not found or not active`
-    )
-    throw new Error(
-      `Payment provider config for this project ${customer.projectId} and payment provider ${paymentProvider} not found or not active`
-    )
-  }
-
-  // Decrypt provider key
-  const aesGCM = await AesGCM.withBase64Key(env.ENCRYPTION_KEY)
-  const decryptedKey = await aesGCM.decrypt({
-    iv: config.keyIv,
-    ciphertext: config.key,
-  })
-
-  // Initialize payment provider service
-  const paymentProviderService = new PaymentProviderService({
-    customer,
-    paymentProvider,
-    logger,
-    token: decryptedKey,
-  })
-
-  const { err: paymentMethodErr, val: paymentMethodId } =
-    await paymentProviderService.getDefaultPaymentMethodId()
-
-  if (paymentMethodErr) {
-    logger.error(
-      `Payment validation failed: ${paymentMethodErr.message} for project ${customer.projectId} and payment provider ${paymentProvider}`
-    )
-    throw new Error(`Payment validation failed: ${paymentMethodErr.message}`)
-  }
-
-  if (requiredPaymentMethod && !paymentMethodId?.paymentMethodId) {
-    logger.error(
-      `Required payment method not found for project ${customer.projectId} and payment provider ${paymentProvider}`
-    )
-    throw new Error("Required payment method not found")
-  }
-
-  return {
-    paymentMethodId: paymentMethodId.paymentMethodId,
-    requiredPaymentMethod: true,
-  }
+  return Ok({ providerInvoiceId, providerInvoiceUrl })
 }
 
-interface FinalizeInvoiceResult {
+/**
+ * Applies available customer credits to an invoice total.
+ * - Picks active, non-expired grants (same currency/provider), FIFO by earliest expiry.
+ * - Creates `invoice_credit_applications`, updates `credit_grants.amount_used` (+deactivate when fully used).
+ * - Updates `invoices.amountCreditUsed` and `invoices.total` accordingly.
+ */
+export async function applyCredits(input: {
+  db: Database
   invoice: SubscriptionInvoice
+  now: number
+}): Promise<
+  Result<
+    {
+      applied: number
+      remainingInvoiceTotal: number
+      applications: { grantId: string; amount: number }[]
+    },
+    UnPriceSubscriptionError | FetchError
+  >
+> {
+  const { db, invoice, now } = input
+
+  return db.transaction(async (tx) => {
+    const { projectId, customerId, id: invoiceId, currency, paymentProvider } = invoice
+
+    // Nothing to apply if already zero or void/paid
+    const currentCredit = invoice.amountCreditUsed ?? 0
+    const currentTotal = invoice.total ?? 0
+    if (currentTotal <= 0 || ["void", "paid"].includes(invoice.status)) {
+      return Ok({ applied: 0, remainingInvoiceTotal: currentTotal, applications: [] })
+    }
+
+    // Eligible credit grants (active, not expired, with available > 0)
+    const grants = await tx.query.creditGrants.findMany({
+      where: (g, { and, eq, or, isNull, gt }) =>
+        and(
+          eq(g.projectId, projectId),
+          eq(g.customerId, customerId),
+          // credit grants are always in the same currency and payment provider
+          eq(g.currency, currency),
+          eq(g.paymentProvider, paymentProvider),
+          eq(g.active, true),
+          or(isNull(g.expiresAt), gt(g.expiresAt, now))
+        ),
+      orderBy: (g, { asc }) => asc(g.expiresAt), // FIFO by earliest expiry
+    })
+
+    let remaining = currentTotal
+    let applied = 0
+    const applications: { grantId: string; amount: number }[] = []
+
+    for (const grant of grants) {
+      if (remaining <= 0) break
+      const available = Math.max(0, grant.totalAmount - grant.amountUsed)
+      if (available <= 0) continue
+
+      const toApply = Math.min(available, remaining)
+      if (toApply <= 0) continue
+
+      // Record application
+      await tx.insert(invoiceCreditApplications).values({
+        id: newId("invoice_credit_application"),
+        projectId,
+        invoiceId,
+        creditGrantId: grant.id,
+        amountApplied: toApply,
+      })
+
+      // Update grant usage (deactivate if fully used)
+      const newUsed = grant.amountUsed + toApply
+      await tx
+        .update(creditGrants)
+        .set({
+          amountUsed: newUsed,
+          active: newUsed < grant.totalAmount,
+        })
+        .where(and(eq(creditGrants.id, grant.id), eq(creditGrants.projectId, projectId)))
+
+      applied += toApply
+      remaining -= toApply
+      applications.push({ grantId: grant.id, amount: toApply })
+    }
+
+    if (applied === 0) {
+      return Ok({ applied: 0, remainingInvoiceTotal: currentTotal, applications })
+    }
+
+    // Update invoice totals
+    const newAmountCreditUsed = currentCredit + applied
+    const newTotal = Math.max(0, (invoice.subtotal ?? 0) - newAmountCreditUsed)
+
+    await tx
+      .update(invoices)
+      .set({
+        amountCreditUsed: newAmountCreditUsed,
+        total: newTotal,
+        metadata: { ...(invoice.metadata ?? {}), credits: "Credits applied" },
+      })
+      .where(and(eq(invoices.id, invoice.id), eq(invoices.projectId, projectId)))
+
+    return Ok({ applied, remainingInvoiceTotal: newTotal, applications })
+  })
 }
 
-// TODO: re evaludate if this should be inside the machine
-// this is here and not inside the machine because it doesn't neccesarilly concern the status of the subscription
-// if there is an error finilizing we report it to the machine
-// takes the invoice that are due and in draft status and finilizes them
-// basically sets up the usage per invoice items and updates the invoice status
+// only compute/persist amounts, apply credits, create/update/finalize the provider invoice.
 export async function finalizeInvoice({
   subscriptionId,
   projectId,
@@ -136,9 +389,10 @@ export async function finalizeInvoice({
   db: Database
   analytics: Analytics
   customerService: CustomerService
-}): Promise<Result<FinalizeInvoiceResult[], UnPriceSubscriptionError>> {
+}): Promise<Result<SubscriptionInvoice[], UnPriceSubscriptionError>> {
   const openInvoices = await db.query.invoices.findMany({
     with: {
+      customer: true,
       invoiceItems: {
         with: {
           featurePlanVersion: {
@@ -150,24 +404,39 @@ export async function finalizeInvoice({
       },
     },
     where: (inv, { and, eq, inArray, lte }) =>
-      and(
-        eq(inv.projectId, projectId),
-        eq(inv.subscriptionId, subscriptionId),
-        inArray(inv.status, ["draft"]),
-        lte(inv.dueAt, now)
+      or(
+        // for invoices that have not been finilized yet
+        and(
+          eq(inv.projectId, projectId),
+          eq(inv.subscriptionId, subscriptionId),
+          eq(inv.status, "draft"),
+          gte(inv.dueAt, now)
+        ),
+        // for invoices that have been finilized but not sent to the payment provider
+        and(
+          eq(inv.projectId, projectId),
+          eq(inv.subscriptionId, subscriptionId),
+          inArray(inv.status, ["unpaid", "waiting"]),
+          isNull(inv.invoicePaymentProviderId),
+          lte(inv.dueAt, now)
+        )
       ),
     orderBy: (inv, { asc }) => asc(inv.dueAt),
   })
 
   if (openInvoices.length === 0) {
-    return Ok([])
+    return Err(new UnPriceSubscriptionError({ message: "No open invoices found" }))
   }
 
-  const results = [] as FinalizeInvoiceResult[]
+  const results = [] as SubscriptionInvoice[]
+
+  // collect async tasks to run after the transaction commits
+  const postCommitTasks: Array<() => Promise<void>> = []
 
   for (const invoice of openInvoices) {
     // only kind period or trial are supported
     // for getting the quantity and price
+    // TODO: we need to handle the other cases as well
     const invoiceItemsToUpdate = invoice.invoiceItems
       .filter((item) => item.featurePlanVersionId !== null)
       .filter((item) => item.subscriptionItemId !== null)
@@ -177,27 +446,28 @@ export async function finalizeInvoice({
       continue
     }
 
-    const paymentProviderService = await customerService.getPaymentProvider({
-      projectId,
-      provider: invoice.paymentProvider,
-    })
+    const { err: paymentProviderServiceErr, val: paymentProviderService } =
+      await customerService.getPaymentProvider({
+        projectId,
+        provider: invoice.paymentProvider,
+      })
 
-    if (paymentProviderService.err) {
+    if (paymentProviderServiceErr) {
       logger.error("Error getting payment provider", {
         invoiceId: invoice.id,
         projectId: invoice.projectId,
       })
 
-      throw paymentProviderService.err
+      throw paymentProviderServiceErr
     }
 
-    // compute the invoice items
+    // compute the invoice items for getting the right quantities and prices
     const { val: billableItems, err: billableItemsErr } = await computeInvoiceItems({
       invoice,
       items: invoiceItemsToUpdate as InvoiceItemExtended[],
       analytics,
       logger,
-      paymentProviderService: paymentProviderService.val,
+      paymentProviderService: paymentProviderService,
     })
 
     if (billableItemsErr) {
@@ -275,21 +545,44 @@ export async function finalizeInvoice({
           )
         )
 
-      // update the billing period to invoiced
-      let totalAmount = 0
+      // get the subtotal amount
+      const subtotalAmount = billableItems.items.reduce((a, i) => a + i.subtotalAmount, 0)
+      const totalAmount = billableItems.items.reduce((a, i) => a + i.totalAmount, 0)
 
-      for (const item of billableItems.items) {
-        totalAmount += item.totalAmount
+      // apply credits
+      const { err: applyCreditsErr, val: applyCreditsResult } = await applyCredits({
+        db: tx, // execute in the same transaction
+        invoice: { ...invoice, subtotal: subtotalAmount, total: totalAmount },
+        now,
+      })
+
+      if (applyCreditsErr) {
+        logger.error("Error applying credits", {
+          invoiceId: invoice.id,
+          projectId: invoice.projectId,
+        })
+        throw applyCreditsErr
       }
 
-      // TODO: should I add the credits, invoice url and id from provider, etc? HERE??
+      const finalTotalAmount = applyCreditsResult.remainingInvoiceTotal
+      const finalSubtotalAmount = subtotalAmount - applyCreditsResult.applied
 
       // void the billing period if the total amount is 0 or proration factor is 0
       const statusInvoice = totalAmount === 0 ? ("void" as const) : ("unpaid" as const)
 
-      const updatedInvoice = await tx
+      // update the invoice
+      await tx
         .update(invoices)
-        .set({ subtotal: totalAmount, total: totalAmount, status: statusInvoice, issueDate: now })
+        .set({
+          subtotal: finalSubtotalAmount,
+          total: finalTotalAmount,
+          status: statusInvoice,
+          issueDate: now,
+          metadata: {
+            ...(invoice.metadata ?? {}),
+            note: "Finilized by scheduler",
+          },
+        })
         .where(
           and(
             eq(invoices.id, invoice.id),
@@ -297,27 +590,77 @@ export async function finalizeInvoice({
             eq(invoices.subscriptionId, subscriptionId)
           )
         )
-        .returning()
-        .then((res) => res[0])
+
+      // get the updated invoice with items
+      const updatedInvoice = await tx.query.invoices.findFirst({
+        with: {
+          customer: true,
+          invoiceItems: {
+            with: {
+              featurePlanVersion: {
+                with: {
+                  feature: true,
+                },
+              },
+            },
+          },
+        },
+        where: and(eq(invoices.id, invoice.id), eq(invoices.projectId, projectId)),
+      })
 
       if (!updatedInvoice) {
         return Err(new UnPriceSubscriptionError({ message: "Error updating invoice" }))
       }
 
-      results.push({ invoice: updatedInvoice })
+      // if void then skip creation and return the invoice
+      // create the invoice in the payment provider
+      // create the invoice items in the payment provider
+      // set the invoice payment provider id and url
+      // get the last open invoice
+
+      if (statusInvoice === "void") {
+        results.push(updatedInvoice)
+        return
+      }
+
+      // Note: Avoid remote calls inside this transaction; push work to be executed after commit
+      // We push a thunk to be executed after the transaction completes successfully
+      postCommitTasks.push(async () => {
+        const { err: processInvoiceErr } = await upsertPaymentProviderInvoice({
+          db,
+          logger,
+          invoice: updatedInvoice,
+          customer: updatedInvoice.customer,
+          items: updatedInvoice.invoiceItems.map((item) => ({
+            ...item,
+            featurePlanVersion: item.featurePlanVersion!,
+          })),
+          paymentProviderService: paymentProviderService,
+        })
+
+        if (processInvoiceErr) {
+          logger.error("Error processing invoice", {
+            invoiceId: updatedInvoice.id,
+            projectId: updatedInvoice.projectId,
+          })
+          throw processInvoiceErr
+        }
+
+        results.push(updatedInvoice)
+      })
     })
   }
 
-  // create the invoice in the payment provider
+  // TODO: we have to update the estimated amount of billing periods
+  // with computeInvoiceItems as a separete step
 
-  // create the invoice items in the payment provider
-
-  // set the status of the invoice as unpaid or void
-  // set estimated amount and subtotal
-  // apply credits
-  // set the invoice payment provider id and url
-
-  // get the last open invoice
+  // Execute post-commit remote calls with bounded concurrency
+  if (postCommitTasks.length > 0) {
+    const { default: pLimit } = await import("p-limit")
+    const limit = pLimit(3)
+    const exec = postCommitTasks.map((t: () => Promise<void>) => limit(() => t()))
+    await Promise.all(exec)
+  }
 
   return Ok(results)
 }
@@ -350,19 +693,12 @@ export async function computeStatementKey(input: {
 
 interface ComputeInvoiceItemsResult {
   id: string
-  featureType: FeatureType
-  productId: string
   totalAmount: number
   unitAmount: number
   subtotalAmount: number
   quantity: number
   prorate: number
-  productSlug: string
-  type: FeatureType
   description?: string
-  metadata: {
-    subscriptionItemId: string
-  }
   cycleStartAt: number
   cycleEndAt: number
 }
@@ -441,7 +777,7 @@ export const computeInvoiceItems = async (payload: {
 
           // TODO: how can I be sure that the usage is not null?
           if (!usage) {
-            logger.warn("usage not found", {
+            logger.debug("usage not found", {
               itemId: item.subscriptionItemId,
               featureType: item.featurePlanVersion.featureType,
             })
@@ -553,29 +889,14 @@ export const computeInvoiceItems = async (payload: {
           totalAmount: totalAmount,
           unitAmount: unitAmount,
           subtotalAmount: subtotalAmount,
-          featureType: item.featurePlanVersion.featureType,
-          productId: item.featurePlanVersion.feature.id,
-          productSlug: item.featurePlanVersion.feature.slug,
           prorate: item.prorationFactor,
-          type: item.featurePlanVersion.featureType,
           description: description ?? "",
-          metadata: {
-            subscriptionItemId: item.subscriptionItemId ?? "",
-          },
           cycleStartAt: item.cycleStartAt,
           cycleEndAt: item.cycleEndAt,
           quantity: quantity,
         })
       }
     }
-
-    // order by feature type and cycle start at
-    updatedItems.sort((a, b) => {
-      if (a.featureType === b.featureType) {
-        return a.cycleStartAt - b.cycleStartAt
-      }
-      return a.featureType.localeCompare(b.featureType)
-    })
 
     return Ok({
       items: updatedItems,
@@ -594,7 +915,7 @@ export const collectInvoicePayment = async (payload: {
   projectId: string
   logger: Logger
   now: number
-}): Promise<Result<FinalizeInvoiceResult, UnPriceSubscriptionError>> => {
+}): Promise<Result<SubscriptionInvoice, UnPriceSubscriptionError>> => {
   const { invoiceId, projectId, logger, now } = payload
 
   // Get invoice details
@@ -619,9 +940,7 @@ export const collectInvoicePayment = async (payload: {
 
   // check if the invoice is already paid or void
   if (["paid", "void"].includes(invoice.status)) {
-    return Ok({
-      invoice,
-    })
+    return Ok(invoice)
   }
 
   // validate if the invoice is failed
@@ -767,9 +1086,7 @@ export const collectInvoicePayment = async (payload: {
         return Err(new UnPriceSubscriptionError({ message: "Error updating invoice" }))
       }
 
-      return Ok({
-        invoice: updatedInvoice,
-      })
+      return Ok(updatedInvoice)
     }
 
     // 3 attempts max for the invoice and the past due date is suppased
@@ -795,9 +1112,7 @@ export const collectInvoicePayment = async (payload: {
         return Err(new UnPriceSubscriptionError({ message: "Error updating invoice" }))
       }
 
-      return Ok({
-        invoice: updatedInvoice,
-      })
+      return Ok(updatedInvoice)
     }
   }
 
@@ -865,9 +1180,7 @@ export const collectInvoicePayment = async (payload: {
       return Err(new UnPriceSubscriptionError({ message: "Error updating invoice" }))
     }
 
-    return Ok({
-      invoice: updatedInvoice,
-    })
+    return Ok(updatedInvoice)
   }
 
   // send the invoice to the customer and wait for the payment
@@ -904,9 +1217,7 @@ export const collectInvoicePayment = async (payload: {
       return Err(new UnPriceSubscriptionError({ message: "Error updating invoice" }))
     }
 
-    return Ok({
-      invoice: updatedInvoice,
-    })
+    return Ok(updatedInvoice)
   }
 
   return Err(new UnPriceSubscriptionError({ message: "Unsupported status for invoice" }))

@@ -139,11 +139,19 @@ export class SubscriptionMachine {
         loadSubscription: fromPromise(
           async ({
             input,
-          }: { input: { context: SubscriptionContext; logger: Logger; db: Database } }) => {
+          }: {
+            input: {
+              context: SubscriptionContext
+              logger: Logger
+              db: Database
+              customerService: CustomerService
+            }
+          }) => {
             const result = await loadSubscription({
               context: input.context,
               logger: input.logger,
               db: input.db,
+              customerService: input.customerService,
             })
 
             return result
@@ -237,6 +245,7 @@ export class SubscriptionMachine {
               context,
               logger: this.logger,
               db: this.db,
+              customerService: this.customerService,
             }),
             onDone: {
               target: "restored", // transitional state that will be used to determine the next state

@@ -235,5 +235,20 @@ export function calculateNextNCycles(params: CalculateNextCyclesParams): CycleWi
     current = next
   }
 
-  return results
+  // Recompute proration for each window relative to the reference date.
+  // This yields:
+  // - past windows: prorationFactor = 1
+  // - window containing reference: prorationFactor in (0,1]
+  // - future windows: prorationFactor = 0
+  const recomputed = results.map((w) => {
+    if (w.isTrial) return w
+    const { prorationFactor, billableSeconds } = calculateElapsedProration(
+      w.start,
+      w.end,
+      referenceDate
+    )
+    return { ...w, prorationFactor, billableSeconds }
+  })
+
+  return recomputed
 }

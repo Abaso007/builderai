@@ -60,13 +60,7 @@ const entitlementsExtendedSchema = createSelectSchema(customerEntitlements, {
 export const invoiceMetadataSchema = z.object({
   note: z.string().optional().describe("Note about the invoice"),
   reason: reasonSchema.optional().describe("Reason for the invoice"),
-  proration: z
-    .object({
-      proratedAt: z.number().optional().describe("Date of the proration"),
-      note: z.string().optional().describe("Note about the proration"),
-    })
-    .optional()
-    .describe("Proration information"),
+  credits: z.string().optional().describe("Credits applied to the invoice"),
 })
 
 export const subscriptionMetadataSchema = z.object({

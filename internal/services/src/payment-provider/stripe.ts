@@ -396,32 +396,31 @@ export class StripePaymentProvider implements PaymentProviderInterface {
       )
     }
 
-    // price data for the invoice item
-    // if the product we send price data, otherwise we send the amount
-    const priceData = productId
+    // If productId is provided use price_data; otherwise use 'amount' (can be negative)
+    const payload = productId
       ? {
-          quantity: quantity,
+          customer: this.providerCustomerId,
+          invoice: invoiceId,
+          quantity,
           price_data: {
-            currency: currency,
+            currency,
             product: productId,
             unit_amount: unitAmount,
           },
+          description: descriptionItem,
+          metadata,
         }
       : {
-          // for items that are not associated to a product, we send the total amount
-          currency: currency,
-          unit_amount: unitAmount,
-          quantity: quantity,
+          customer: this.providerCustomerId,
+          invoice: invoiceId,
+          amount: opts.totalAmount, // <-- use 'amount' for arbitrary lines
+          currency,
+          description: descriptionItem,
+          metadata,
         }
 
     return await this.client.invoiceItems
-      .create({
-        customer: this.providerCustomerId,
-        invoice: invoiceId,
-        ...priceData,
-        description: descriptionItem,
-        metadata,
-      })
+      .create(payload)
       .then(() => {
         return Ok(undefined)
       })
@@ -434,7 +433,7 @@ export class StripePaymentProvider implements PaymentProviderInterface {
       })
   }
 
-  public async updateInvoiceItem(
+  async updateInvoiceItem(
     opts: UpdateInvoiceItemOpts
   ): Promise<Result<void, FetchError | UnPricePaymentProviderError>> {
     if (!this.providerCustomerId)

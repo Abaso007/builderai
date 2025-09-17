@@ -1034,16 +1034,16 @@ export class SubscriptionService {
             await machine.reportInvoiceFailure({ invoiceId: "current", error: col.err.message })
             throw col.err
           }
-          const { invoice } = col.val
-          if (invoice.status === "paid" || invoice.status === "void") {
+          const { total, status } = col.val
+          if (status === "paid" || status === "void") {
             await machine.reportInvoiceSuccess({ invoiceId: "current" })
-          } else if (invoice.status === "failed") {
+          } else if (status === "failed") {
             await machine.reportPaymentFailure({ invoiceId: "current", error: "Payment failed" })
           }
-          return col.val
+          return { total, status }
         },
       })
-      return Ok({ total: res.invoice.total, status: res.invoice.status })
+      return Ok(res)
     } catch (e) {
       return Err(e as UnPriceSubscriptionError)
     }
@@ -1071,7 +1071,6 @@ export class SubscriptionService {
         subscriptionId,
         projectId,
         now,
-        // TODO: test this lock it's getting stuck
         lock: false, // no need to lock it here
         run: async (machine) => {
           const fin = await finalizeInvoice({
@@ -1092,7 +1091,7 @@ export class SubscriptionService {
         },
       })
 
-      return Ok(res.map((r) => ({ total: r.invoice.total, status: r.invoice.status })))
+      return Ok(res)
     } catch (e) {
       return Err(e as UnPriceSubscriptionError)
     }

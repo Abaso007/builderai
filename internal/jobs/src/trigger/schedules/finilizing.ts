@@ -1,4 +1,7 @@
 import { logger, schedules } from "@trigger.dev/sdk/v3"
+import { and, eq, lte } from "@unprice/db"
+import { invoices } from "@unprice/db/schema"
+
 import { db } from "../db"
 import { finilizeTask } from "../tasks/finilize"
 
@@ -13,15 +16,17 @@ export const finilizingSchedule = schedules.task({
   run: async (payload) => {
     const now = payload.timestamp.getTime()
 
-    // find all subscriptions phases that are currently in trial and the trial ends at is in the past
-    const subscriptions = await db.query.subscriptions.findMany({
-      where: (subscription, ops) =>
-        ops.and(
-          ops.eq(subscription.active, true),
-          ops.notInArray(subscription.status, ["canceled", "expired"]),
-          ops.lte(subscription.currentCycleEndAt, now)
-        ),
-    })
+    // find all subscription that have invoices in draft status and are due
+    const subscriptions = await db
+      .select({
+        projectId: invoices.projectId,
+        subscriptionId: invoices.subscriptionId,
+      })
+      .from(invoices)
+      .where(and(eq(invoices.status, "draft"), lte(invoices.dueAt, now)))
+      .groupBy(invoices.projectId, invoices.subscriptionId)
+
+    logger.info(`Found ${subscriptions.length} subscriptions for finilizing`)
 
     if (subscriptions.length === 0) {
       return {
@@ -34,16 +39,14 @@ export const finilizingSchedule = schedules.task({
       subscriptions.map((s) => ({
         payload: {
           projectId: s.projectId,
-          subscriptionId: s.id,
+          subscriptionId: s.subscriptionId,
           now,
         },
       }))
     )
 
-    logger.info(`Found ${subscriptions.length} subscriptions for finilizing`)
-
     return {
-      subscriptionIds: subscriptions.map((s) => s.id),
+      subscriptionIds: subscriptions.map((s) => s.subscriptionId),
     }
   },
 })

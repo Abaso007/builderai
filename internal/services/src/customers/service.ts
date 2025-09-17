@@ -1144,6 +1144,84 @@ export class CustomerService {
     return Ok(paymentProviderService)
   }
 
+  /**
+   * Validates the payment method status for a customer
+   * @param customerId - Customer id
+   * @param projectId - Project id
+   * @param paymentProvider - Optional payment provider
+   * @param requiredPaymentMethod - Whether payment method is required
+   * @returns Payment method validation result
+   */
+  public async validatePaymentMethod({
+    customerId,
+    projectId,
+    paymentProvider,
+    requiredPaymentMethod = false,
+  }: {
+    customerId: string
+    projectId: string
+    paymentProvider?: PaymentProvider
+    requiredPaymentMethod?: boolean
+  }): Promise<
+    Result<
+      {
+        paymentMethodId: string | null
+        requiredPaymentMethod: boolean
+      },
+      FetchError | UnPriceCustomerError
+    >
+  > {
+    // If payment method is not required or no provider, return early
+    if (!requiredPaymentMethod || !paymentProvider) {
+      return Ok({
+        paymentMethodId: null,
+        requiredPaymentMethod: false,
+      })
+    }
+
+    const { val: paymentProviderService, err: paymentProviderErr } = await this.getPaymentProvider({
+      customerId,
+      projectId,
+      provider: paymentProvider,
+    })
+
+    if (paymentProviderErr) {
+      return Err(paymentProviderErr)
+    }
+
+    const { err: paymentMethodErr, val: paymentMethodId } =
+      await paymentProviderService.getDefaultPaymentMethodId()
+
+    if (paymentMethodErr) {
+      this.logger.error(
+        `Payment validation failed: ${paymentMethodErr.message} for project ${projectId} and payment provider ${paymentProvider}`
+      )
+      return Err(
+        new FetchError({
+          message: paymentMethodErr.message,
+          retry: false,
+        })
+      )
+    }
+
+    if (requiredPaymentMethod && !paymentMethodId?.paymentMethodId) {
+      this.logger.error(
+        `Required payment method not found for project ${projectId} and payment provider ${paymentProvider}`
+      )
+      return Err(
+        new FetchError({
+          message: "Required payment method not found",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok({
+      paymentMethodId: paymentMethodId.paymentMethodId,
+      requiredPaymentMethod: true,
+    })
+  }
+
   public async _getActiveEntitlement(
     customerId: string,
     featureSlug: string,

@@ -7,14 +7,15 @@ import { addDays, format } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
 import type { CustomerService } from "../customers/service"
 import type { SubscriptionContext } from "./types"
-import { computeStatementKey, validatePaymentMethod } from "./utils"
+import { computeStatementKey } from "./utils"
 
 export async function loadSubscription(payload: {
   context: SubscriptionContext
   logger: Logger
   db: Database
+  customerService: CustomerService
 }): Promise<SubscriptionContext> {
-  const { context, logger, db } = payload
+  const { context, logger, db, customerService } = payload
   const { subscriptionId, projectId, now } = context
 
   const result = await db.query.subscriptions.findFirst({
@@ -56,12 +57,14 @@ export async function loadSubscription(payload: {
   })
 
   if (!result) {
+    logger.error(`Subscription with ID ${subscriptionId} not found`)
     throw new Error(`Subscription with ID ${subscriptionId} not found`)
   }
 
   const { phases, customer, ...subscription } = result
 
   if (!customer) {
+    logger.error(`Customer with ID ${result.customerId} not found`)
     throw new Error(`Customer with ID ${result.customerId} not found`)
   }
 
@@ -71,12 +74,19 @@ export async function loadSubscription(payload: {
   const currentPhase = phases[0]
 
   // check the payment method as well
-  const { paymentMethodId, requiredPaymentMethod } = await validatePaymentMethod({
-    customer,
+  const { val, err: validatePaymentMethodErr } = await customerService.validatePaymentMethod({
+    customerId: customer.id,
+    projectId: projectId,
     paymentProvider: currentPhase?.planVersion.paymentProvider,
     requiredPaymentMethod: currentPhase?.planVersion.paymentMethodRequired,
-    logger: logger,
   })
+
+  if (validatePaymentMethodErr) {
+    logger.error(`Error validating payment method: ${validatePaymentMethodErr.message}`)
+    throw validatePaymentMethodErr
+  }
+
+  const { paymentMethodId, requiredPaymentMethod } = val
 
   let resultPhase = null
 
@@ -575,6 +585,7 @@ export async function invoiceSubscription({
   }
 }
 
+// / TODO: delete this from here and pass to utils (shouldn't be a machine invoke)
 // generating billing periods
 // this will materialize all the pending billing periods for the current phase or ended phases in the last N days
 // the idea is to keep a record of every billing cycle for the subscription
@@ -653,7 +664,7 @@ export async function generateBillingPeriods({
           // always align the billing anchor to the phase anchor
           billingAnchor: phase.billingAnchor,
         },
-        count: 1, // we only need to materialize the next cycle
+        count: 0, // we only need until the end of the current cycle
       })
 
       if (windows.length === 0) continue
