@@ -14,70 +14,66 @@ import {
   DropdownMenuTrigger,
 } from "@unprice/ui/dropdown-menu"
 import { MoreVertical } from "lucide-react"
-import { useParams } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { startTransition, useState } from "react"
 import { z } from "zod"
 import { PropagationStopper } from "~/components/prevent-propagation"
-import { SuperLink } from "~/components/super-link"
 import { toast } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
 interface DataTableRowActionsProps<TData> {
   row: Row<TData>
 }
 
-type PlanVersion = RouterOutputs["plans"]["getSubscriptionsBySlug"]["subscriptions"][number]
-const schemaPlanVersion = z.custom<PlanVersion>()
+type SubscriptionInvoice =
+  RouterOutputs["customers"]["getSubscriptions"]["customer"]["invoices"][number]
+const schemaSubscriptionInvoice = z.custom<SubscriptionInvoice>()
 
 export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TData>) {
-  const { customer, ...subscription } = schemaPlanVersion.parse(row.original)
-  const { workspaceSlug, projectSlug } = useParams()
+  const invoice = schemaSubscriptionInvoice.parse(row.original)
   const [open, setOpen] = useState(false)
 
+  const router = useRouter()
   const trpc = useTRPC()
-  const subscriptionId = subscription.id
+  const subscriptionId = invoice.subscriptionId
+  const invoiceId = invoice.id
 
   const machine = useMutation(trpc.subscriptions.machine.mutationOptions({}))
 
-  function onGenerateInvoice() {
+  function onFinalizeInvoice() {
     startTransition(() => {
       toast.promise(
-        machine.mutateAsync({
-          subscriptionId: subscriptionId,
-          event: "invoice",
-        }),
+        machine
+          .mutateAsync({
+            subscriptionId: subscriptionId,
+            event: "finalize_invoice",
+            invoiceId: invoiceId,
+          })
+          .then(() => {
+            router.refresh()
+          }),
         {
-          loading: "Generating invoice...",
-          success: "Invoices generated",
+          loading: "Finalizing invoice...",
+          success: "Invoice finalized",
         }
       )
     })
   }
 
-  function onRenewSubscription() {
+  function onCollectPayment() {
     startTransition(() => {
       toast.promise(
-        machine.mutateAsync({
-          subscriptionId: subscriptionId,
-          event: "renew",
-        }),
+        machine
+          .mutateAsync({
+            subscriptionId: subscriptionId,
+            event: "collect_payment",
+            invoiceId: invoiceId,
+          })
+          .then(() => {
+            router.refresh()
+          }),
         {
-          loading: "Renewing subscription...",
-          success: "Subscription renewed",
-        }
-      )
-    })
-  }
-
-  function onGenerateBillingPeriods() {
-    startTransition(() => {
-      toast.promise(
-        machine.mutateAsync({
-          subscriptionId: subscriptionId,
-          event: "billing_period",
-        }),
-        {
-          loading: "Generating billing periods...",
-          success: "Billing periods generated",
+          loading: "Collecting payment...",
+          success: "Payment collected",
         }
       )
     })
@@ -95,42 +91,25 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
         <DropdownMenuContent align="end">
           <DropdownMenuLabel>Actions</DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DropdownMenuItem asChild>
-            <SuperLink
-              href={`/${workspaceSlug}/${projectSlug}/customers/subscriptions/${subscriptionId}`}
-            >
-              See Details
-            </SuperLink>
-          </DropdownMenuItem>
           <DropdownMenuItem
             onClick={(e) => {
               e.preventDefault()
-              onGenerateInvoice()
+              onFinalizeInvoice()
               setOpen(false)
             }}
             disabled={machine.isPending}
           >
-            Generate Invoices
+            Finalize Invoice
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={(e) => {
               e.preventDefault()
-              onRenewSubscription()
+              onCollectPayment()
               setOpen(false)
             }}
             disabled={machine.isPending}
           >
-            Renew Subscription
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={(e) => {
-              e.preventDefault()
-              onGenerateBillingPeriods()
-              setOpen(false)
-            }}
-            disabled={machine.isPending}
-          >
-            Generate Billing Periods
+            Collect Payment
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

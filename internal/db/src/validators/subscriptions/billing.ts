@@ -189,7 +189,9 @@ export interface CalculateNextCyclesParams {
  * @param params - The parameters for the calculation.
  * @returns An array of calculated cycles.
  */
-export function calculateNextNCycles(params: CalculateNextCyclesParams): CycleWindow[] {
+export function calculateNextNCycles(
+  params: CalculateNextCyclesParams
+): { end: number; start: number; isTrial?: boolean }[] {
   const { referenceDate, effectiveStartDate, effectiveEndDate, trialEndsAt, billingConfig, count } =
     params
 
@@ -210,19 +212,27 @@ export function calculateNextNCycles(params: CalculateNextCyclesParams): CycleWi
 
   const core = { effectiveStartDate, effectiveEndDate, trialEndsAt, billingConfig }
 
-  const results: CycleWindow[] = []
+  const results: { end: number; start: number; isTrial?: boolean }[] = []
 
   // Start from the very first window at the effective start
   let current = calculateCycleWindow({ now: effectiveStartDate, ...core })
   if (!current) return []
-  results.push(current)
+  results.push({
+    end: current.end,
+    start: current.start,
+    isTrial: current.isTrial,
+  })
 
   // Accumulate all cycles up to and including the one that contains the reference date
   while (current.end <= referenceDate) {
     if (effectiveEndDate && current.end >= effectiveEndDate) break
     const next = calculateCycleWindow({ now: current.end, ...core })
     if (!next) break
-    results.push(next)
+    results.push({
+      end: next.end,
+      start: next.start,
+      isTrial: next.isTrial,
+    })
     current = next
   }
 
@@ -231,24 +241,13 @@ export function calculateNextNCycles(params: CalculateNextCyclesParams): CycleWi
     if (effectiveEndDate && current.end >= effectiveEndDate) break
     const next = calculateCycleWindow({ now: current.end, ...core })
     if (!next) break
-    results.push(next)
+    results.push({
+      end: next.end,
+      start: next.start,
+      isTrial: next.isTrial,
+    })
     current = next
   }
 
-  // Recompute proration for each window relative to the reference date.
-  // This yields:
-  // - past windows: prorationFactor = 1
-  // - window containing reference: prorationFactor in (0,1]
-  // - future windows: prorationFactor = 0
-  const recomputed = results.map((w) => {
-    if (w.isTrial) return w
-    const { prorationFactor, billableSeconds } = calculateElapsedProration(
-      w.start,
-      w.end,
-      referenceDate
-    )
-    return { ...w, prorationFactor, billableSeconds }
-  })
-
-  return recomputed
+  return results
 }

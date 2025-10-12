@@ -35,31 +35,21 @@ export const isSubscriptionActive = (input: { context: SubscriptionContext }): b
   return input.context.subscription.active
 }
 
-export const hasOpenInvoices = (input: { context: SubscriptionContext }): boolean => {
-  return input.context.hasOpenInvoices
-}
-
 /**
  * Guard: Check if trial period has expired
  */
 export const isTrialExpired = (input: { context: SubscriptionContext }): boolean => {
   if (!input.context.currentPhase) return false
   const now = input.context.now
+  const trialUnits = input.context.currentPhase.trialUnits
   const trialEndsAt = input.context.currentPhase.trialEndsAt
+  const isTrial = trialUnits > 0
 
-  if (!trialEndsAt) {
-    return false
-  }
-
-  if (trialEndsAt > now) {
-    return false
+  if (isTrial) {
+    return (trialEndsAt && trialEndsAt <= now) || false
   }
 
   return true
-}
-
-export const hasDueBillingPeriods = (input: { context: SubscriptionContext }): boolean => {
-  return input.context.hasDueBillingPeriods
 }
 
 export const hasValidPaymentMethod = (input: {

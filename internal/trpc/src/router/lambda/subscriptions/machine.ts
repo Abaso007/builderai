@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server"
+import { BillingService } from "@unprice/services/billing"
 import { SubscriptionService } from "@unprice/services/subscriptions"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -6,8 +7,9 @@ import { protectedProjectProcedure } from "#trpc"
 export const machine = protectedProjectProcedure
   .input(
     z.object({
-      event: z.enum(["invoice", "renew", "billing_period", "finalize_invoice"]),
+      event: z.enum(["invoice", "renew", "billing_period", "finalize_invoice", "collect_payment"]),
       subscriptionId: z.string(),
+      invoiceId: z.string().optional(),
     })
   )
   .output(z.object({ status: z.string() }))
@@ -15,11 +17,20 @@ export const machine = protectedProjectProcedure
     const projectId = ctx.project.id
 
     const subscriptionService = new SubscriptionService(ctx)
+    const billingService = new BillingService(ctx)
 
     switch (input.event) {
-      case "finalize_invoice": {
-        const { err, val } = await subscriptionService.finalizeInvoice({
+      case "collect_payment": {
+        if (!input.invoiceId) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Invoice ID is required",
+          })
+        }
+
+        const { err, val } = await billingService.billingInvoice({
           subscriptionId: input.subscriptionId,
+          invoiceId: input.invoiceId,
           projectId,
           now: Date.now(),
         })
@@ -30,10 +41,41 @@ export const machine = protectedProjectProcedure
             message: err.message,
           })
         }
+
         return {
-          status: val.map((r) => r.status).join(","),
+          status: val.status,
         }
       }
+
+      case "finalize_invoice": {
+        if (!input.invoiceId) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Invoice ID is required",
+          })
+        }
+
+        const { err, val } = await billingService.finalizeInvoice({
+          subscriptionId: input.subscriptionId,
+          projectId,
+          invoiceId: input.invoiceId,
+          now: Date.now(),
+        })
+
+        if (err) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: err.message,
+          })
+        }
+        return {
+          providerInvoiceId: val.providerInvoiceId,
+          providerInvoiceUrl: val.providerInvoiceUrl,
+          invoiceId: val.invoiceId,
+          status: val.status,
+        }
+      }
+
       case "invoice": {
         const { err, val } = await subscriptionService.invoiceSubscription({
           subscriptionId: input.subscriptionId,
@@ -71,7 +113,7 @@ export const machine = protectedProjectProcedure
       }
 
       case "billing_period": {
-        const { err, val } = await subscriptionService.generateBillingPeriods({
+        const { err } = await billingService.generateBillingPeriods({
           subscriptionId: input.subscriptionId,
           projectId,
           now: Date.now(),
@@ -85,7 +127,7 @@ export const machine = protectedProjectProcedure
         }
 
         return {
-          status: val.status,
+          status: "success",
         }
       }
 

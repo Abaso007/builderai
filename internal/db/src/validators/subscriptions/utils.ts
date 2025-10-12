@@ -180,12 +180,7 @@ export function calculateProration(
     return { prorationFactor: 0, billableSeconds: 0 }
   }
 
-  // Remaining-fraction semantics used by utils tests
-  if (now >= end) {
-    return { prorationFactor: 0, billableSeconds: 0 }
-  }
-
-  if (now <= start) {
+  if (now <= start || now >= end) {
     return {
       prorationFactor: 1,
       billableSeconds: Math.floor(totalDurationMs / 1000),

@@ -118,7 +118,7 @@ export default async function CustomerPage({
               columns={columns}
               data={customer.subscriptions}
               filterOptions={{
-                filterBy: "customer",
+                filterBy: "customerId",
                 filterColumns: true,
                 filterDateRange: true,
                 filterServerSide: true,

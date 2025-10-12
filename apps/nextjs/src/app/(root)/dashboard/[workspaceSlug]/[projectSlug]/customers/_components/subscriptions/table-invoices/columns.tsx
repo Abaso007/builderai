@@ -12,6 +12,7 @@ import { InfoIcon } from "lucide-react"
 import Link from "next/link"
 import { DataTableColumnHeader } from "~/components/data-table/data-table-column-header"
 import { formatDate } from "~/lib/dates"
+import { DataTableRowActions } from "./data-table-row-actions"
 
 type InvoiceCustomer =
   RouterOutputs["customers"]["getSubscriptions"]["customer"]["invoices"][number]
@@ -144,5 +145,12 @@ export const columns: ColumnDef<InvoiceCustomer>[] = [
     enableSorting: true,
     enableHiding: true,
     size: 40,
+  },
+  {
+    id: "actions",
+    cell: function Cell({ row }) {
+      return <DataTableRowActions row={row} />
+    },
+    size: 30,
   },
 ]

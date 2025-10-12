@@ -1,7 +1,6 @@
 import { relations } from "drizzle-orm"
 import {
   bigint,
-  doublePrecision,
   foreignKey,
   index,
   integer,
@@ -32,7 +31,6 @@ export const billingPeriods = pgTableProject(
     cycleStartAt: bigint("cycle_start_at_m", { mode: "number" }).notNull(),
     cycleEndAt: bigint("cycle_end_at_m", { mode: "number" }).notNull(),
     amountEstimateCents: integer("amount_estimate_cents"),
-    prorationFactor: doublePrecision("proration_factor").notNull().default(1),
     reason: varchar("reason", { length: 64 }).$type<"normal" | "mid_cycle_change" | "trial">(), // annual_renewal|monthly_usage|mid_cycle_change|trial
     // invoice id is the invoice that is associated with the billing period can be null if the billing period is not invoiced yet
     invoiceId: cuid("invoice_id"),

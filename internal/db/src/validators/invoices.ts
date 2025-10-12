@@ -8,9 +8,11 @@ export const subscriptionInvoiceSelectSchema = createSelectSchema(invoices)
 
 export const invoiceItemSelectSchema = createSelectSchema(invoiceItems)
 export const invoiceItemExtendedSelectSchema = invoiceItemSelectSchema.extend({
-  featurePlanVersion: planVersionFeatureSelectBaseSchema.extend({
-    feature: featureSelectBaseSchema,
-  }),
+  featurePlanVersion: planVersionFeatureSelectBaseSchema
+    .extend({
+      feature: featureSelectBaseSchema,
+    })
+    .nullable(),
 })
 
 export const reasonCreditSchema = z.enum([

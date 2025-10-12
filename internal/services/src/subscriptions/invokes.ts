@@ -1,13 +1,12 @@
 import { type Database, and, eq, inArray, lte, sql } from "@unprice/db"
 import { billingPeriods, invoiceItems, invoices, subscriptions } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
-import { calculateCycleWindow, calculateDateAt, calculateNextNCycles } from "@unprice/db/validators"
+import { calculateCycleWindow, calculateDateAt, calculateProration } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logging"
-import { addDays, format } from "date-fns"
+import { format } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
 import type { CustomerService } from "../customers/service"
 import type { SubscriptionContext } from "./types"
-import { computeStatementKey } from "./utils"
 
 export async function loadSubscription(payload: {
   context: SubscriptionContext
@@ -100,29 +99,6 @@ export async function loadSubscription(payload: {
     }
   }
 
-  // load due open invoices for this phase
-  const hasOpenInvoices = await db.query.invoices.findFirst({
-    where: (inv, { and, eq, inArray, lte }) =>
-      and(
-        eq(inv.projectId, subscription.projectId),
-        eq(inv.subscriptionId, subscription.id),
-        inArray(inv.status, ["draft"]),
-        lte(inv.dueAt, now)
-      ),
-    orderBy: (inv, { asc }) => asc(inv.dueAt),
-  })
-
-  const hasDueBillingPeriods = await db.query.billingPeriods.findFirst({
-    where: (bp, { and, eq, inArray, lte }) =>
-      and(
-        eq(bp.projectId, subscription.projectId),
-        eq(bp.subscriptionId, subscription.id),
-        inArray(bp.status, ["pending"]),
-        lte(bp.invoiceAt, now)
-      ),
-    orderBy: (bp, { asc }) => asc(bp.invoiceAt),
-  })
-
   return {
     now,
     subscriptionId: subscription.id,
@@ -132,8 +108,6 @@ export async function loadSubscription(payload: {
     subscription,
     paymentMethodId,
     requiredPaymentMethod,
-    hasOpenInvoices: !!hasOpenInvoices,
-    hasDueBillingPeriods: !!hasDueBillingPeriods,
   }
 }
 
@@ -380,7 +354,12 @@ export async function invoiceSubscription({
         // take the timezone from the subscription
         const timezone = phase.subscription.timezone
         const date = toZonedTime(new Date(invoiceAt), timezone)
-        const statementDateString = format(date, "MMMM d, yyyy")
+        // minute interval is special because it has the time in the statement date string
+        const statementDateString = ["minute"].includes(
+          phase.planVersion.billingConfig.billingInterval
+        )
+          ? format(date, "MMMM d, yyyy hh:mm")
+          : format(date, "MMMM d, yyyy")
 
         // pay in advance have smaller grace period
         const dueAt =
@@ -473,24 +452,31 @@ export async function invoiceSubscription({
           return
         }
 
-        const invoiceItemsData = billingPeriodsToInvoice.map((period) => ({
-          id: newId("invoice_item"),
-          invoiceId: invoice.id,
-          featurePlanVersionId: period.subscriptionItem.featurePlanVersion.id,
-          subscriptionItemId: period.subscriptionItem.id,
-          billingPeriodId: period.id,
-          projectId: period.projectId,
-          quantity: period.subscriptionItem.units ?? 0,
-          cycleStartAt: period.cycleStartAt,
-          cycleEndAt: period.cycleEndAt,
-          kind: period.type === "trial" ? ("trial" as const) : ("period" as const),
-          unitAmountCents: 0,
-          amountSubtotal: 0,
-          amountTotal: 0,
-          prorationFactor: period.prorationFactor,
-          description: period.type === "trial" ? "Trial" : "Billing period",
-          itemProviderId: null,
-        }))
+        const invoiceItemsData = billingPeriodsToInvoice.map((period) => {
+          const prorationFactor =
+            period.type === "trial"
+              ? 0
+              : calculateProration(period.cycleStartAt, period.cycleEndAt, now).prorationFactor
+
+          return {
+            id: newId("invoice_item"),
+            invoiceId: invoice.id,
+            featurePlanVersionId: period.subscriptionItem.featurePlanVersion.id,
+            subscriptionItemId: period.subscriptionItem.id,
+            billingPeriodId: period.id,
+            projectId: period.projectId,
+            quantity: period.subscriptionItem.units ?? 0,
+            cycleStartAt: period.cycleStartAt,
+            cycleEndAt: period.cycleEndAt,
+            kind: period.type === "trial" ? ("trial" as const) : ("period" as const),
+            unitAmountCents: 0,
+            amountSubtotal: 0,
+            amountTotal: 0,
+            prorationFactor: prorationFactor,
+            description: period.type === "trial" ? "Trial" : "Billing period",
+            itemProviderId: null,
+          }
+        })
 
         // create invoice items
         await tx
@@ -553,211 +539,8 @@ export async function invoiceSubscription({
     })
   }
 
-  // get the last open invoices to update the openInvoices
-  const lastOpenInvoices = await db.query.invoices.findFirst({
-    where: (inv, { and, eq, inArray, lte }) =>
-      and(
-        eq(inv.projectId, subscription.projectId),
-        eq(inv.subscriptionId, subscription.id),
-        inArray(inv.status, ["draft", "unpaid", "waiting"]),
-        lte(inv.dueAt, now)
-      ),
-    orderBy: (inv, { asc }) => asc(inv.dueAt),
-  })
-
-  // get the last open billing periods to update the hasDueBillingPeriods
-  const lastDueBillingPeriods = await db.query.billingPeriods.findFirst({
-    where: (bp, { and, eq, inArray, lte }) =>
-      and(
-        eq(bp.projectId, subscription.projectId),
-        eq(bp.subscriptionId, subscription.id),
-        inArray(bp.status, ["pending"]),
-        lte(bp.cycleEndAt, now)
-      ),
-    orderBy: (bp, { asc }) => asc(bp.cycleEndAt),
-  })
-
   return {
     phasesProcessed: periodItemsGroups.length,
     subscription,
-    hasOpenInvoices: !!lastOpenInvoices,
-    hasDueBillingPeriods: !!lastDueBillingPeriods,
-  }
-}
-
-// / TODO: delete this from here and pass to utils (shouldn't be a machine invoke)
-// generating billing periods
-// this will materialize all the pending billing periods for the current phase or ended phases in the last N days
-// the idea is to keep a record of every billing cycle for the subscription
-// this way we can rely on these records to finalize and bill the invoices
-export async function generateBillingPeriods({
-  context,
-  logger,
-  db,
-}: {
-  context: SubscriptionContext
-  logger: Logger
-  db: Database
-}): Promise<
-  Partial<SubscriptionContext> & {
-    phasesProcessed: number
-  }
-> {
-  const { subscription, now } = context
-  const lookbackDays = 7 // lookback days to materialize the periods
-  const batch = 100 // process a max of 100 phases per trigger run
-
-  // fetch phases that are active now OR ended recently
-  const phases = await db.query.subscriptionPhases.findMany({
-    with: {
-      planVersion: true,
-      subscription: true,
-      items: {
-        with: {
-          featurePlanVersion: true,
-        },
-      },
-    },
-    where: (phase, ops) =>
-      ops.and(
-        ops.eq(phase.projectId, subscription.projectId),
-        ops.eq(phase.subscriptionId, subscription.id),
-        ops.lte(phase.startAt, now),
-        ops.or(ops.isNull(phase.endAt), ops.gte(phase.endAt, addDays(now, -lookbackDays).getTime()))
-      ),
-    limit: batch, // limit to batch size to avoid overwhelming the system
-  })
-
-  logger.info(`Materializing billing periods for ${phases.length} phases`)
-
-  let cyclesCreated = 0
-
-  // for each phase, materialize the periods
-  for (const phase of phases) {
-    // For every subscription item, backfill missing billing periods idempotently
-    for (const item of phase.items) {
-      // Find the last period for this item to make per-item backfill
-      const lastForItem = await db.query.billingPeriods.findFirst({
-        where: (bp, ops) =>
-          ops.and(
-            ops.eq(bp.projectId, phase.projectId),
-            ops.eq(bp.subscriptionId, phase.subscriptionId),
-            ops.eq(bp.subscriptionPhaseId, phase.id),
-            ops.eq(bp.subscriptionItemId, item.id)
-          ),
-        orderBy: (bp, ops) => ops.desc(bp.cycleEndAt),
-      })
-
-      const cursorStart = lastForItem ? lastForItem.cycleEndAt : phase.startAt
-      // INFO: this is a compatibility fix for the old data
-      const itemBillingConfig = item.featurePlanVersion.billingConfig?.billingInterval
-        ? item.featurePlanVersion.billingConfig
-        : phase.planVersion.billingConfig
-
-      const windows = calculateNextNCycles({
-        referenceDate: now, // we use the now to start the calculation
-        effectiveStartDate: cursorStart,
-        trialEndsAt: phase.trialEndsAt,
-        effectiveEndDate: phase.endAt,
-        billingConfig: {
-          ...itemBillingConfig,
-          // always align the billing anchor to the phase anchor
-          billingAnchor: phase.billingAnchor,
-        },
-        count: 0, // we only need until the end of the current cycle
-      })
-
-      if (windows.length === 0) continue
-
-      // Insert periods idempotently with unique index protection
-      const values = await Promise.all(
-        windows.map(async (w) => {
-          const whenToBill = phase.planVersion.whenToBill
-          // handles when to invoice this way pay in advance aligns with the cycle start
-          // and pay in arrear aligns with the cycle end
-          const invoiceAt = whenToBill === "pay_in_advance" ? w.start : w.end
-          const statementKey = await computeStatementKey({
-            projectId: phase.projectId,
-            customerId: phase.subscription.customerId,
-            subscriptionId: phase.subscriptionId,
-            invoiceAt: invoiceAt,
-            currency: phase.planVersion.currency,
-            paymentProvider: phase.planVersion.paymentProvider,
-            collectionMethod: phase.planVersion.collectionMethod,
-          })
-
-          return {
-            id: newId("billing_period"),
-            projectId: phase.projectId,
-            subscriptionId: phase.subscriptionId,
-            subscriptionPhaseId: phase.id,
-            subscriptionItemId: item.id,
-            status: "pending" as const,
-            type: w.isTrial ? ("trial" as const) : ("normal" as const),
-            cycleStartAt: w.start,
-            cycleEndAt: w.end,
-            statementKey: statementKey,
-            // if trial, we invoice at the end always
-            invoiceAt: w.isTrial ? w.end : invoiceAt,
-            whenToBill: whenToBill,
-            invoiceId: null,
-            amountEstimateCents: null,
-            prorationFactor: w.prorationFactor,
-            reason: w.isTrial ? ("trial" as const) : ("normal" as const),
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          }
-        })
-      )
-
-      cyclesCreated += values.length
-
-      try {
-        await db
-          .insert(billingPeriods)
-          .values(values)
-          .onConflictDoNothing({
-            target: [
-              billingPeriods.projectId,
-              billingPeriods.subscriptionId,
-              billingPeriods.subscriptionPhaseId,
-              billingPeriods.subscriptionItemId,
-              billingPeriods.cycleStartAt,
-              billingPeriods.cycleEndAt,
-            ],
-          })
-      } catch (e) {
-        logger.warn("Skipping existing billing periods (likely conflict)", {
-          phaseId: phase.id,
-          subscriptionId: phase.subscriptionId,
-          projectId: phase.projectId,
-          error: (e as Error)?.message,
-        })
-      }
-    }
-  }
-
-  logger.info(`Created ${cyclesCreated} billing periods for ${phases.length} phases`)
-
-  // get the last open billing periods to update the hasDueBillingPeriods
-  const lastDueBillingPeriods = await db.query.billingPeriods.findFirst({
-    where: (bp, { and, eq, inArray, lte }) =>
-      and(
-        eq(bp.projectId, subscription.projectId),
-        eq(bp.subscriptionId, subscription.id),
-        inArray(bp.status, ["pending"]),
-        lte(bp.cycleEndAt, now)
-      ),
-    orderBy: (bp, { asc }) => asc(bp.cycleEndAt),
-  })
-
-  const updatedCurrentPhase = phases.find(
-    (p) => p.startAt <= now && (p.endAt === null || p.endAt >= now)
-  )
-
-  return {
-    phasesProcessed: phases.length,
-    hasDueBillingPeriods: !!lastDueBillingPeriods,
-    subscription: updatedCurrentPhase?.subscription,
   }
 }

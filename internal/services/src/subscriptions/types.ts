@@ -7,7 +7,6 @@ import type {
 
 export type SusbriptionMachineStatus =
   | SubscriptionStatus
-  | "generating_billing_periods" // the subscription is generating billing periods
   | "loading"
   | "error"
   | "success"
@@ -32,9 +31,6 @@ export interface SubscriptionContext {
   requiredPaymentMethod: boolean
   // Current active phase for convenience
   currentPhase: SubscriptionPhaseExtended | null
-  // Open invoices for the current phase
-  hasOpenInvoices: boolean
-  hasDueBillingPeriods: boolean
   error?: {
     message: string
   }
@@ -51,7 +47,6 @@ export type SubscriptionEvent =
   | { type: "CANCEL" }
   | { type: "CHANGE" }
   | { type: "INVOICE" }
-  | { type: "BILLING_PERIOD" }
 
 export type SubscriptionGuards = {
   type:
@@ -63,7 +58,6 @@ export type SubscriptionGuards = {
     | "isAutoRenewEnabled"
     | "isAlreadyInvoiced"
     | "currentPhaseNull"
-    | "hasDueBillingPeriods"
 }
 
 export type SubscriptionActions = {

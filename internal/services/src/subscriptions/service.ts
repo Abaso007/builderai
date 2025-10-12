@@ -10,7 +10,6 @@ import { newId } from "@unprice/db/utils"
 import {
   type InsertSubscription,
   type InsertSubscriptionPhase,
-  type InvoiceStatus,
   type Subscription,
   type SubscriptionItemConfig,
   type SubscriptionPhase,
@@ -28,7 +27,6 @@ import { UnPriceSubscriptionError } from "./errors"
 import { SubscriptionMachine } from "./machine"
 import { SubscriptionLock } from "./subscriptionLock"
 import type { SusbriptionMachineStatus } from "./types"
-import { collectInvoicePayment, finalizeInvoice } from "./utils"
 
 export class SubscriptionService {
   private readonly db: Database
@@ -464,7 +462,7 @@ export class SubscriptionService {
           .update(subscriptions)
           .set({
             active: true,
-            status: trialUnitsToUse > 0 ? "trialing" : "active",
+            status: Number(trialUnitsToUse) > 0 ? "trialing" : "active",
             planSlug: versionData.plan.slug,
             currentCycleStartAt: calculatedBillingCycle.start,
             currentCycleEndAt: calculatedBillingCycle.end,
@@ -492,13 +490,7 @@ export class SubscriptionService {
 
     // generate the billing periods for the new phase on background
     // this can fail but background jobs can retry
-    this.waitUntil(
-      this.generateBillingPeriods({
-        subscriptionId,
-        projectId,
-        now,
-      })
-    )
+    // TODO: generate the billing periods for the new phase on background
 
     return result
   }
@@ -1000,130 +992,6 @@ export class SubscriptionService {
     }
   }
 
-  public async billingInvoice({
-    projectId,
-    subscriptionId,
-    now = Date.now(),
-  }: {
-    projectId: string
-    subscriptionId: string
-    now?: number
-  }): Promise<
-    Result<
-      {
-        total: number
-        status: InvoiceStatus
-      },
-      UnPriceSubscriptionError
-    >
-  > {
-    try {
-      const res = await this.withSubscriptionMachine({
-        subscriptionId,
-        projectId,
-        now,
-        lock: true,
-        run: async (machine) => {
-          const col = await collectInvoicePayment({
-            invoiceId: "current",
-            projectId,
-            logger: this.logger,
-            now,
-          })
-          if (col.err) {
-            await machine.reportInvoiceFailure({ invoiceId: "current", error: col.err.message })
-            throw col.err
-          }
-          const { total, status } = col.val
-          if (status === "paid" || status === "void") {
-            await machine.reportInvoiceSuccess({ invoiceId: "current" })
-          } else if (status === "failed") {
-            await machine.reportPaymentFailure({ invoiceId: "current", error: "Payment failed" })
-          }
-          return { total, status }
-        },
-      })
-      return Ok(res)
-    } catch (e) {
-      return Err(e as UnPriceSubscriptionError)
-    }
-  }
-
-  public async finalizeInvoice({
-    projectId,
-    subscriptionId,
-    now = Date.now(),
-  }: {
-    projectId: string
-    subscriptionId: string
-    now?: number
-  }): Promise<
-    Result<
-      {
-        total: number
-        status: InvoiceStatus
-      }[],
-      UnPriceSubscriptionError
-    >
-  > {
-    try {
-      const res = await this.withSubscriptionMachine({
-        subscriptionId,
-        projectId,
-        now,
-        lock: false, // no need to lock it here
-        run: async (machine) => {
-          const fin = await finalizeInvoice({
-            subscriptionId,
-            projectId,
-            logger: this.logger,
-            now,
-            analytics: this.analytics,
-            customerService: this.customerService,
-            db: this.db,
-          })
-          if (fin.err) {
-            await machine.reportInvoiceFailure({ invoiceId: "current", error: fin.err.message })
-            throw fin.err
-          }
-          await machine.reportInvoiceSuccess({ invoiceId: "current" })
-          return fin.val
-        },
-      })
-
-      return Ok(res)
-    } catch (e) {
-      return Err(e as UnPriceSubscriptionError)
-    }
-  }
-
-  public async generateBillingPeriods({
-    subscriptionId,
-    projectId,
-    now = Date.now(),
-  }: {
-    subscriptionId: string
-    projectId: string
-    now?: number
-  }): Promise<Result<{ status: SusbriptionMachineStatus }, UnPriceSubscriptionError>> {
-    try {
-      const status = await this.withSubscriptionMachine({
-        subscriptionId,
-        projectId,
-        now,
-        lock: true, // we need to lock the subscription to avoid cross-worker races
-        run: async (machine) => {
-          const s1 = await machine.generateBillingPeriods()
-          if (s1.err) throw s1.err
-          return s1.val
-        },
-      })
-      return Ok({ status })
-    } catch (e) {
-      return Err(e as UnPriceSubscriptionError)
-    }
-  }
-
   public async renewSubscription({
     subscriptionId,
     projectId,
@@ -1141,10 +1009,7 @@ export class SubscriptionService {
         run: async (machine) => {
           const s1 = await machine.renew()
           if (s1.err) throw s1.err
-          // create the billing periods
-          const b1 = await machine.generateBillingPeriods()
-          if (b1.err) throw b1.err
-          return b1.val
+          return s1.val
         },
       })
       return Ok({ status })
