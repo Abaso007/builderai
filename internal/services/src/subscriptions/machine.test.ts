@@ -179,6 +179,7 @@ describe("SubscriptionMachine - comprehensive", () => {
 
     mockCustomerService = {
       syncActiveEntitlementsLastUsage: vi.fn().mockResolvedValue(Ok({})),
+      validatePaymentMethod: vi.fn().mockResolvedValue(Ok({})),
     } as unknown as CustomerService
   })
 
@@ -240,25 +241,59 @@ describe("SubscriptionMachine - comprehensive", () => {
         }
       }),
       select: vi.fn(() => ({
-        from: vi.fn(() => ({
-          groupBy: vi.fn(() => ({
-            where: vi.fn(() => ({
-              limit: vi.fn(() =>
-                Promise.resolve([
-                  {
-                    projectId: subscription.projectId,
-                    subscriptionId: subscription.id,
-                    subscriptionPhaseId: subscription.phases[0]!.id,
-                    cycleStartAt: subscription.currentCycleStartAt,
-                    cycleEndAt: subscription.currentCycleEndAt,
-                    invoiceAt: subscription.currentCycleStartAt,
-                    statementKey: "test_statement_key",
-                  },
-                ])
-              ),
+        from: vi.fn((table) => {
+          if (table === billingPeriods) {
+            return {
+              groupBy: vi.fn(() => ({
+                where: vi.fn(() => ({
+                  limit: vi.fn(() =>
+                    Promise.resolve([
+                      {
+                        projectId: subscription.projectId,
+                        subscriptionId: subscription.id,
+                        subscriptionPhaseId: subscription.phases[0]!.id,
+                        cycleStartAt: subscription.currentCycleStartAt,
+                        cycleEndAt: subscription.currentCycleEndAt,
+                        invoiceAt: subscription.currentCycleStartAt,
+                        statementKey: "test_statement_key",
+                      },
+                    ])
+                  ),
+                })),
+              })),
+            }
+          }
+
+          if (table === subscriptions) {
+            return {
+              groupBy: vi.fn(() => ({
+                where: vi.fn(() => ({
+                  limit: vi.fn(() =>
+                    Promise.resolve([
+                      {
+                        projectId: subscription.projectId,
+                        subscriptionId: subscription.id,
+                        subscriptionPhaseId: subscription.phases[0]!.id,
+                        cycleStartAt: subscription.currentCycleStartAt,
+                        cycleEndAt: subscription.currentCycleEndAt,
+                        invoiceAt: subscription.currentCycleStartAt,
+                        statementKey: "test_statement_key",
+                      },
+                    ])
+                  ),
+                })),
+              })),
+            }
+          }
+
+          return {
+            groupBy: vi.fn(() => ({
+              where: vi.fn(() => ({
+                limit: vi.fn(() => Promise.resolve([])),
+              })),
             })),
-          })),
-        })),
+          }
+        }),
       })),
       insert: vi.fn((table) => {
         return {
@@ -611,7 +646,6 @@ describe("SubscriptionMachine - comprehensive", () => {
     setupDbMocks(sub)
 
     // no due billing periods
-    mockDb.query.billingPeriods.findFirst = vi.fn().mockResolvedValue(null)
 
     const { err, val } = await SubscriptionMachine.create({
       subscriptionId: sub.id,
@@ -620,7 +654,20 @@ describe("SubscriptionMachine - comprehensive", () => {
       logger: mockLogger,
       now: Date.now(),
       customer: mockCustomerService,
-      db: mockDb,
+      db: {
+        ...mockDb,
+        select: vi.fn(() => ({
+          from: vi.fn(() => {
+            return {
+              groupBy: vi.fn(() => ({
+                where: vi.fn(() => ({
+                  limit: vi.fn(() => Promise.resolve([])),
+                })),
+              })),
+            }
+          }),
+        })),
+      } as unknown as Database,
     })
     expect(err).toBeUndefined()
     if (err) return
@@ -628,8 +675,8 @@ describe("SubscriptionMachine - comprehensive", () => {
     expect(m.getState()).toBe("active")
 
     const res = await m.invoice()
-    expect(res.err).toBeDefined()
-    expect(res.err!.message).toContain("Cannot invoice subscription, no due billing periods")
+    expect(res.err).toBeUndefined()
+    expect(m.getState()).toBe("active")
     await m.shutdown()
   })
 

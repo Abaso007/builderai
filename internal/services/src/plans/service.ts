@@ -40,7 +40,7 @@ export class PlanService {
     // Create a stable string representation
     const paramsString = JSON.stringify(sortedParams)
       .replace(/["'{}]/g, "")
-      .replace(",", "-")
+      .replace(/,/g, "-")
 
     // Use a separator that's unlikely to appear in the data
     return `${prefix}:${paramsString}`
@@ -80,10 +80,18 @@ export class PlanService {
     const planFeatures = planVersion.planFeatures.map((planFeature) => {
       let displayFeatureText = ""
 
-      const freeUnits = calculateFreeUnits({
+      const { val: freeUnits, err: freeUnitsErr } = calculateFreeUnits({
         config: planFeature.config!,
         featureType: planFeature.featureType,
       })
+
+      if (freeUnitsErr) {
+        console.error(freeUnitsErr)
+        return {
+          ...planFeature,
+          displayFeatureText: "",
+        }
+      }
 
       const freeUnitsText =
         freeUnits === Number.POSITIVE_INFINITY
@@ -259,15 +267,15 @@ export class PlanService {
     })
 
     if (planVersionsData.length === 0) {
-      null
+      return null
     }
 
-    if (enterprise) {
-      planVersionsData.filter((version) => version.plan.enterprisePlan)
-    }
+    const filtered = enterprise
+      ? planVersionsData.filter((version) => version.plan.enterprisePlan)
+      : planVersionsData
 
     // format every plan
-    const result = planVersionsData.map((version) => {
+    const result = filtered.map((version) => {
       return this.formatPlanVersion({
         planVersion: version,
       })

@@ -180,10 +180,19 @@ export function calculateProration(
     return { prorationFactor: 0, billableSeconds: 0 }
   }
 
-  if (now <= start || now >= end) {
+  // If we're at or before the start: bill the full window
+  if (now <= start) {
     return {
       prorationFactor: 1,
       billableSeconds: Math.floor(totalDurationMs / 1000),
+    }
+  }
+
+  // If we're at or after the end: nothing to bill
+  if (now >= end) {
+    return {
+      prorationFactor: 0,
+      billableSeconds: 0,
     }
   }
 

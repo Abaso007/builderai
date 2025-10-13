@@ -252,10 +252,15 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
                   itemConfig.min ||
                   0
 
-                const freeUnits = calculateFreeUnits({
+                const { val: freeUnits, err: freeUnitsErr } = calculateFreeUnits({
                   config: feature.config!,
                   featureType: feature.featureType,
                 })
+
+                if (freeUnitsErr) {
+                  console.error(freeUnitsErr)
+                  return null
+                }
 
                 const freeUnitsText =
                   freeUnits === Number.POSITIVE_INFINITY

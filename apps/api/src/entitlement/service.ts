@@ -297,7 +297,7 @@ export class EntitlementService {
       this.waitUntil(
         Promise.all([
           // pre warm DO
-          await durableObject.prewarmDO({
+          durableObject.prewarmDO({
             entitlements,
             now,
             opts: {
@@ -641,7 +641,15 @@ export class EntitlementService {
             }
 
             const { config, featureType } = entitlementPhase.featurePlanVersion
-            const freeUnits = calculateFreeUnits({ config: config!, featureType: featureType })
+            const { val: freeUnits, err: freeUnitsErr } = calculateFreeUnits({
+              config: config!,
+              featureType: featureType,
+            })
+
+            if (freeUnitsErr) {
+              throw freeUnitsErr
+            }
+
             const { val: price } = calculatePricePerFeature({
               config: config!,
               featureType: featureType,

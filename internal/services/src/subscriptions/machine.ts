@@ -15,7 +15,6 @@ import {
   waitFor,
 } from "xstate"
 
-import { db } from "../utils/db"
 import { UnPriceMachineError } from "./errors"
 
 import type { CustomerService } from "../customers/service"
@@ -144,7 +143,7 @@ export class SubscriptionMachine {
             const result = await invoiceSubscription({
               context: input.context,
               logger: input.logger,
-              db: db,
+              db: input.db,
             })
 
             return result
@@ -710,7 +709,7 @@ export class SubscriptionMachine {
         if (currentState === lastPersisted) return
 
         try {
-          await db
+          await this.db
             .update(subscriptions)
             .set({
               status: currentState as SubscriptionStatus,
