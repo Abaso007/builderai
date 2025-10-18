@@ -2,9 +2,9 @@ import { createRoute } from "@hono/zod-openapi"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent } from "stoker/openapi/helpers"
 
+import { getCurrentUsageSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { keyAuth } from "~/auth/key"
-import { getUsageResponseSchema } from "~/entitlement/interface"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 
@@ -26,7 +26,7 @@ export const route = createRoute({
     }),
   },
   responses: {
-    [HttpStatusCodes.OK]: jsonContent(getUsageResponseSchema, "The result of the get usage"),
+    [HttpStatusCodes.OK]: jsonContent(getCurrentUsageSchema, "The result of the get usage"),
     ...openApiErrorResponses,
   },
 })
@@ -45,11 +45,15 @@ export const registerGetUsageV1 = (app: App) =>
     // validate the request
     const key = await keyAuth(c)
 
-    const result = await entitlement.getUsage({
+    const { err, val: result } = await entitlement.getCurrentUsage({
       customerId,
       projectId: key.projectId,
       now,
     })
+
+    if (err) {
+      throw err
+    }
 
     return c.json(result, HttpStatusCodes.OK)
   })

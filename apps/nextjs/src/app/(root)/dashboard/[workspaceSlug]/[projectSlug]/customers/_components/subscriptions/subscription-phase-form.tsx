@@ -14,7 +14,7 @@ import { z } from "zod"
 import ConfigItemsFormField from "~/components/forms/items-fields"
 import PaymentMethodsFormField from "~/components/forms/payment-method-field"
 import SelectPlanFormField from "~/components/forms/select-plan-field"
-import TrialDaysFormField from "~/components/forms/trial-days-field"
+import TrialUnitsFormField from "~/components/forms/trial-days-field"
 import { SubmitButton } from "~/components/submit-button"
 import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
@@ -61,6 +61,9 @@ export function SubscriptionPhaseForm({
     trpc.subscriptions.updatePhase.mutationOptions({
       onSuccess: () => {
         toastAction("success")
+      },
+      onError: (error) => {
+        toastAction("error", error.message)
       },
     })
   )
@@ -125,15 +128,17 @@ export function SubscriptionPhaseForm({
         <div className="flex flex-col items-center justify-start gap-4 lg:flex-row">
           <DurationFormField form={form} startDisabled={editMode} className="w-full" />
 
-          <TrialDaysFormField form={form} isDisabled={editMode} className="w-full" />
+          <TrialUnitsFormField form={form} isDisabled={editMode} className="w-full" />
         </div>
 
-        <PaymentMethodsFormField
-          form={form}
-          withSeparator
-          paymentProvider={selectedPlanVersion?.paymentProvider}
-          paymentProviderRequired={selectedPlanVersion?.paymentMethodRequired}
-        />
+        {selectedPlanVersion?.paymentProvider && (
+          <PaymentMethodsFormField
+            form={form}
+            withSeparator
+            paymentProvider={selectedPlanVersion?.paymentProvider}
+            paymentProviderRequired={selectedPlanVersion?.paymentMethodRequired}
+          />
+        )}
 
         <ConfigItemsFormField
           form={form}

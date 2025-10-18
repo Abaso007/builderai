@@ -101,6 +101,7 @@ export function FeatureConfigForm({
       tierMode: defaultValues.config?.tierMode ?? "volume",
       units: defaultValues.config?.units ?? 1,
     },
+    billingConfig: defaultValues.billingConfig ?? planVersion?.billingConfig,
     metadata: {
       realtime: defaultValues?.metadata?.realtime ?? false,
     },
@@ -129,6 +130,9 @@ export function FeatureConfigForm({
         toastAction("saved")
         setDialogOpen?.(false)
         router.refresh()
+      },
+      onError: (error) => {
+        console.error(error)
       },
     })
   )

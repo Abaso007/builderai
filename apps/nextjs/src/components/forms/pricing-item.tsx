@@ -67,10 +67,15 @@ export function PricingItem({
     },
   }
 
-  const freeUnits = calculateFreeUnits({
+  const { val: freeUnits, err: freeUnitsErr } = calculateFreeUnits({
     config: feature.config!,
     featureType: feature.featureType,
   })
+
+  if (freeUnitsErr) {
+    console.error(freeUnitsErr)
+    return "error calculating free units"
+  }
 
   const freeUnitsText =
     freeUnits === Number.POSITIVE_INFINITY

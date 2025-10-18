@@ -1,22 +1,26 @@
 import { TRPCError } from "@trpc/server"
+import { FEATURE_SLUGS } from "@unprice/config"
 import { sql } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 import { featureGuard } from "#utils/feature-guard"
+import { reportUsageFeature } from "#utils/shared"
 
+// TODO: move this to apikey service
 export const revoke = protectedProjectProcedure
   .input(z.object({ ids: z.string().array() }))
   .output(z.object({ success: z.boolean(), numRevoked: z.number() }))
   .mutation(async (opts) => {
     const { ids } = opts.input
     const project = opts.ctx.project
+    const featureSlug = FEATURE_SLUGS.API_KEYS
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
     const result = await featureGuard({
       customerId: project.workspace.unPriceCustomerId,
-      featureSlug: "apikeys",
+      featureSlug,
       isMain: project.workspace.isMain,
       metadata: {
         action: "revoke",
@@ -41,13 +45,25 @@ export const revoke = protectedProjectProcedure
     if (data.length === 0) {
       throw new TRPCError({
         code: "NOT_FOUND",
-        message: "API key not found you don't have access to this app",
+        message: "API key not found or already revoked",
       })
     }
 
     // remove from cache
     opts.ctx.waitUntil(
-      Promise.all(data.map(async (apikey) => opts.ctx.cache.apiKeyByHash.remove(apikey.hash)))
+      Promise.all([
+        ...data.map(async (apikey) => opts.ctx.cache.apiKeyByHash.remove(apikey.hash)),
+        // report usage
+        reportUsageFeature({
+          customerId: project.workspace.unPriceCustomerId,
+          featureSlug,
+          usage: -data.length,
+          isMain: project.workspace.isMain,
+          metadata: {
+            action: "revoke",
+          },
+        }),
+      ])
     )
 
     return { success: true, numRevoked: data.length }

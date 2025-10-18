@@ -3,7 +3,7 @@ import { SubscriptionService } from "@unprice/services/subscriptions"
 import { createContext } from "./context"
 
 export const invoiceTask = task({
-  id: "subscription.phase.invoice",
+  id: "invoice.create.task",
   retry: {
     maxAttempts: 3,
   },
@@ -12,12 +12,10 @@ export const invoiceTask = task({
       subscriptionId,
       projectId,
       now,
-      phaseId,
     }: {
       subscriptionId: string
       projectId: string
       now: number
-      phaseId: string
     },
     { ctx }
   ) => {
@@ -25,12 +23,10 @@ export const invoiceTask = task({
       taskId: ctx.task.id,
       subscriptionId,
       projectId,
-      phaseId,
       defaultFields: {
         subscriptionId,
         projectId,
-        api: "jobs.subscription.phase.invoice",
-        phaseId,
+        api: "jobs.invoice.create",
         now: now.toString(),
       },
     })
@@ -38,18 +34,19 @@ export const invoiceTask = task({
     const subscriptionService = new SubscriptionService(context)
 
     // init phase machine
-    const billingInvoiceResult = await subscriptionService.invoiceSubscription({
+    const invoiceResult = await subscriptionService.invoiceSubscription({
       subscriptionId,
       projectId,
       now,
     })
 
-    if (billingInvoiceResult.err) {
-      throw billingInvoiceResult.err
+    if (invoiceResult.err) {
+      throw invoiceResult.err
     }
 
     return {
-      status: billingInvoiceResult.val.status,
+      status: invoiceResult.val.status,
+      subscriptionId,
     }
   },
 })

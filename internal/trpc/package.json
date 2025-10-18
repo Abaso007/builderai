@@ -8,14 +8,7 @@
     "./routes": "./src/routes.ts",
     "./router/edge": "./src/router/edge/index.ts",
     "./router/lambda": "./src/router/lambda/index.ts",
-    "./transformer": "./src/transformer.ts",
-    "./services/subscriptions": "./src/services/subscriptions/index.ts",
-    "./services/customers": "./src/services/customers/index.ts",
-    "./services/payment-provider": "./src/services/payment-provider/index.ts",
-    "./services/apikeys": "./src/services/apikeys/index.ts",
-    "./services/cache": "./src/services/cache/index.ts",
-    "./services/metrics": "./src/services/metrics/index.ts",
-    "./services/package": "./src/services/package/index.ts"
+    "./transformer": "./src/transformer.ts"
   },
   "typesVersions": {
     "*": {
@@ -55,10 +48,9 @@
     "@unprice/services": "workspace:^",
     "@unprice/stripe": "workspace:^",
     "@unprice/vercel": "workspace:^",
-    "@upstash/redis": "^1.35.3",
     "@vercel/functions": "^1.0.2",
     "date-fns": "^3.3.1",
-    "date-fns-tz": "^3.1.3",
+    "date-fns-tz": "^3.2.0",
     "dinero.js": "2.0.0-alpha.14",
     "server-only": "^0.0.1",
     "superjson": "2.2.1",

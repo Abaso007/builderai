@@ -12,7 +12,11 @@ export function newApp() {
     defaultHook: handleZodError,
   })
 
-  app.use(prettyJSON())
+  // TODO: rename vercel env to env (it's funny using it in cloudflare workers)
+  if (env.VERCEL_ENV !== "production") {
+    app.use(prettyJSON())
+  }
+
   app.onError(handleError)
 
   app.use("*", async (c, next) => {
@@ -43,7 +47,7 @@ export function newApp() {
       version: "1.0.0",
     },
     servers:
-      env.NODE_ENV === "production"
+      env.VERCEL_ENV === "production"
         ? [
             {
               url: "https://api.unprice.dev",

@@ -3,10 +3,9 @@ import { APP_DOMAIN } from "@unprice/config"
 import { Alert, AlertDescription, AlertTitle } from "@unprice/ui/alert"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@unprice/ui/card"
 import { Typography } from "@unprice/ui/typography"
-import { differenceInCalendarDays } from "date-fns"
 import { AlertCircle } from "lucide-react"
 import { Fragment } from "react"
-import { PaymentMethodForm } from "~/components/forms/payment-method-form"
+import { PaymentMethodButton } from "~/components/forms/payment-method-form"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 import { formatDate } from "~/lib/dates"
@@ -72,11 +71,11 @@ async function PaymentMethodCard({
         <CardTitle>Default Payment Method</CardTitle>
       </CardHeader>
       <CardContent>
-        <PaymentMethodForm
+        <PaymentMethodButton
           customerId={customerId}
           successUrl={`${APP_DOMAIN}${workspaceSlug}/settings/billing`}
           cancelUrl={`${APP_DOMAIN}${workspaceSlug}/settings/billing`}
-          readonly={true}
+          paymentProvider="stripe"
         />
       </CardContent>
     </Card>
@@ -89,38 +88,32 @@ async function SubscriptionCard({
   customerId: string
 }) {
   // TODO: customer can only have one subscription for now
-  const [subscription, activePhase] = await Promise.all([
-    unprice.customers.getSubscription(customerId),
-    unprice.customers.getActivePhase(customerId),
-  ])
+  const { result: subscription, error: subscriptionError } =
+    await unprice.customers.getSubscription(customerId)
 
-  if (subscription.error || activePhase.error) {
+  if (subscriptionError) {
     return (
       <Alert variant="info">
         <AlertCircle className="h-4 w-4" />
         <AlertTitle>Error fetching subscription</AlertTitle>
-        <AlertDescription>
-          {subscription.error?.message || activePhase.error?.message}
-        </AlertDescription>
+        <AlertDescription>{subscriptionError.message}</AlertDescription>
       </Alert>
     )
   }
 
-  if (!subscription.result || !activePhase.result) {
+  const activePhase = subscription.activePhase
+
+  if (!activePhase) {
     return (
       <Alert variant="info">
         <AlertCircle className="h-4 w-4" />
-        <AlertTitle>No Subscription</AlertTitle>
-        <AlertDescription className="font-extralight">
-          You don't have any subscriptions yet or subscription is inactive.
-        </AlertDescription>
+        <AlertTitle>No active phase</AlertTitle>
       </Alert>
     )
   }
 
-  const { trialEndsAt } = activePhase.result
-  const { planSlug } = subscription.result
-  const currentTrialDays = trialEndsAt ? differenceInCalendarDays(trialEndsAt, Date.now()) : 0
+  const { planSlug } = subscription
+  const currentTrialUnits = activePhase.trialEndsAt ? activePhase.trialEndsAt - Date.now() : 0
 
   /**
    * if the customer is in trial days, we need to show the trial days left and when the trial ends
@@ -138,7 +131,7 @@ async function SubscriptionCard({
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="font-semibold text-md">
-                {currentTrialDays > 0 ? "Trial" : "Subscription"} Plan:{" "}
+                {currentTrialUnits > 0 ? "Trial" : "Subscription"} Plan:{" "}
                 <span className="inline-flex items-center gap-1">
                   <span className="font-bold">{planSlug}</span>
                 </span>
@@ -164,46 +157,35 @@ async function SubscriptionCard({
             <div className="gap-2 rounded-lg bg-background-bg p-4">
               <Typography variant="h6">Current Billing Cycle</Typography>
               <Typography variant="p">
-                {formatDate(
-                  subscription.result.currentCycleStartAt,
-                  subscription.result.timezone,
-                  "MMM d, yyyy"
-                )}{" "}
-                -{" "}
-                {formatDate(
-                  subscription.result.currentCycleEndAt,
-                  subscription.result.timezone,
-                  "MMM d, yyyy"
-                )}
+                {formatDate(subscription.currentCycleStartAt, subscription.timezone, "MMM d, yyyy")}{" "}
+                - {formatDate(subscription.currentCycleEndAt, subscription.timezone, "MMM d, yyyy")}
               </Typography>
               <div className="flex flex-col py-4">
                 <Typography variant="p" affects="removePaddingMargin">
                   <span className="font-bold">
-                    Your subscription{" "}
-                    {activePhase.result.startAt > Date.now() ? "will start" : "started"} at:
+                    Your subscription {activePhase.startAt > Date.now() ? "will start" : "started"}{" "}
+                    at:
                   </span>{" "}
-                  {formatDate(
-                    activePhase.result.startAt,
-                    subscription.result.timezone,
-                    "MMM d, yyyy"
-                  )}
+                  {formatDate(activePhase.startAt, subscription.timezone, "MMM d, yyyy")}
                 </Typography>
                 <Typography variant="p" affects="removePaddingMargin">
                   <span className="font-bold">Next billing date:</span>{" "}
                   {formatDate(
-                    subscription.result.invoiceAt,
-                    subscription.result.timezone,
+                    activePhase.planVersion.whenToBill === "pay_in_advance"
+                      ? subscription.currentCycleStartAt
+                      : subscription.currentCycleEndAt,
+                    subscription.timezone,
                     "MMM d, yyyy"
                   )}
                 </Typography>
               </div>
             </div>
-            {currentTrialDays > 0 && trialEndsAt && (
+            {currentTrialUnits > 0 && activePhase.trialEndsAt && (
               <Alert>
                 <AlertTitle>Trial Period</AlertTitle>
                 <AlertDescription>
-                  {activePhase.result.trialDays} days trial ends on{" "}
-                  {formatDate(trialEndsAt, subscription.result.timezone, "MMM d, yyyy")}
+                  {activePhase.trialUnits} units trial ends on{" "}
+                  {formatDate(activePhase.trialEndsAt, subscription.timezone, "MMM d, yyyy")}
                 </AlertDescription>
               </Alert>
             )}

@@ -4,7 +4,6 @@ import {
   getAnalyticsVerificationsResponseSchema,
   prepareInterval,
 } from "@unprice/analytics"
-import { FEATURE_SLUGS } from "@unprice/config"
 import { endTime, startTime } from "hono/timing"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
@@ -14,6 +13,7 @@ import { keyAuth } from "~/auth/key"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { reportUsageEvents } from "~/util/reportUsageEvents"
 
 const tags = ["analytics"]
 
@@ -67,17 +67,10 @@ export type GetAnalyticsVerificationsResponse = z.infer<
 export const registerGetAnalyticsVerificationsV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customerId, range, projectId } = c.req.valid("json")
-    const { analytics, logger, customer, entitlement, db } = c.get("services")
-    const requestId = c.get("requestId")
-
-    // start a new timer
-    startTime(c, "keyAuth")
+    const { analytics, cache } = c.get("services")
 
     // validate the request
     const key = await keyAuth(c)
-
-    // end the timer
-    endTime(c, "keyAuth")
 
     // start a new timer
     startTime(c, "getVerifications")
@@ -85,112 +78,46 @@ export const registerGetAnalyticsVerificationsV1 = (app: App) =>
     const { intervalDays } = prepareInterval(range)
 
     // main workspace can see all verifications
-    // TODO: abstract this to analytics service
     const isMain = key.project.workspace.isMain
+    const projectID = isMain ? (projectId ? projectId : key.projectId) : key.projectId
 
-    if (projectId && !isMain) {
-      // validate project from the key and the projectId
-      // are part of the same workspace
-      const project = await db.query.projects.findFirst({
-        with: {
-          workspace: true,
-        },
-        where: (project, { eq }) => eq(project.id, projectId),
+    if (!isMain && projectID !== projectId) {
+      throw new UnpriceApiError({
+        code: "FORBIDDEN",
+        message: "You are not allowed to access this app analytics.",
       })
-
-      if (!project) {
-        throw new UnpriceApiError({
-          code: "NOT_FOUND",
-          message: "Project not found",
-        })
-      }
-
-      // for now the only way to check if two workspaces are related is by the createdBy field
-      // TODO: improve this
-      if (project.workspace.createdBy !== key.project.workspace.createdBy) {
-        throw new UnpriceApiError({
-          code: "FORBIDDEN",
-          message: "You are not allowed to access this app analytics.",
-        })
-      }
     }
 
-    // for now works but we need to get the proper data from the customer service
-    // some features are over the whole dataset.
-    // maybe it's better to query the do.
-    // TODO: cache results
-    const data = await analytics
-      .getFeaturesVerifications({
-        customerId,
-        projectId,
-        intervalDays,
-      })
-      .catch((err) => {
-        logger.error(
-          JSON.stringify({
-            message: "Error getting verifications for customer",
-            error: err.message,
-          })
-        )
+    const cacheKey = `${projectID}:${customerId}:${intervalDays}`
 
-        return {
-          data: [],
-        }
-      })
+    const { err, val: data } = await cache.getVerifications.swr(cacheKey, async () => {
+      const result = analytics
+        .getFeaturesVerifications({
+          projectId,
+          intervalDays,
+          customerId,
+        })
+        .then((res) => res.data)
 
-    const unPriceCustomerId = c.get("unPriceCustomerId")
+      return result
+    })
 
-    // send analytics event for the unprice customer
-    c.executionCtx.waitUntil(
-      Promise.resolve().then(async () => {
-        if (unPriceCustomerId) {
-          const { val: unPriceCustomer, err: unPriceCustomerErr } =
-            await customer.getCustomer(unPriceCustomerId)
-
-          if (unPriceCustomerErr || !unPriceCustomer) {
-            logger.error("Failed to get unprice customer", {
-              error: unPriceCustomerErr,
-            })
-            return
-          }
-
-          const shouldReportUsage =
-            !unPriceCustomer.project.workspace.isInternal &&
-            !unPriceCustomer.project.workspace.isMain
-
-          // if the unprice customer is internal or main, we don't need to report the usage
-          if (shouldReportUsage) {
-            return
-          }
-
-          await entitlement
-            .reportUsage({
-              customerId: unPriceCustomer.id,
-              featureSlug: FEATURE_SLUGS.EVENTS,
-              projectId: unPriceCustomer.projectId,
-              requestId,
-              usage: 1,
-              idempotenceKey: `${requestId}:${unPriceCustomer.id}`,
-              timestamp: Date.now(),
-              // short ttl for dev
-              secondsToLive: c.env.NODE_ENV === "development" ? 5 : undefined,
-              metadata: {
-                action: "verifications",
-              },
-            })
-            .catch((err) => {
-              logger.error("Failed to report usage", err)
-            })
-        }
-      })
-    )
+    // throw error if there is an error
+    if (err) {
+      throw err
+    }
 
     // end the timer
     endTime(c, "getVerifications")
 
+    // send analytics event for the unprice customer
+    c.executionCtx.waitUntil(
+      reportUsageEvents(c, { action: "getVerifications", status: err ? "error" : "success" })
+    )
+
     return c.json(
       {
-        verifications: data.data,
+        verifications: data ?? [],
       },
       HttpStatusCodes.OK
     )

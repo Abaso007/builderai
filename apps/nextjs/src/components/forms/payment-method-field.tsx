@@ -3,7 +3,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { APP_DOMAIN } from "@unprice/config"
 import type { PaymentProvider } from "@unprice/db/validators"
-import { Button } from "@unprice/ui/button"
 import {
   FormControl,
   FormDescription,
@@ -19,8 +18,8 @@ import { cn } from "@unprice/ui/utils"
 import { useParams } from "next/navigation"
 import type { FieldErrors, FieldPath, FieldValues, UseFormReturn } from "react-hook-form"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
-import { PaymentMethodDialog } from "~/components/forms/payment-method-dialog"
 import { useTRPC } from "~/trpc/client"
+import { PaymentMethodButton } from "./payment-method-form"
 
 interface FormValues extends FieldValues {
   customerId?: string
@@ -38,7 +37,7 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
   isDisabled?: boolean
   paymentProviderRequired?: boolean
   withSeparator?: boolean
-  paymentProvider?: PaymentProvider
+  paymentProvider: PaymentProvider
 }) {
   const trpc = useTRPC()
   const workspaceSlug = useParams().workspaceSlug as string
@@ -168,15 +167,12 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
             No payment methods found.
           </EmptyPlaceholder.Description>
           <EmptyPlaceholder.Action>
-            <PaymentMethodDialog
+            <PaymentMethodButton
               customerId={customerId}
               successUrl={successUrl}
               cancelUrl={cancelUrl}
-            >
-              <Button variant="default" size="sm">
-                Add payment method
-              </Button>
-            </PaymentMethodDialog>
+              paymentProvider={paymentProvider}
+            />
           </EmptyPlaceholder.Action>
         </EmptyPlaceholder>
       )}

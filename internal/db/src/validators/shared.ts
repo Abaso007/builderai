@@ -1,16 +1,18 @@
 import * as z from "zod"
 
+import { formatInTimeZone, toZonedTime } from "date-fns-tz"
 import { extendZodWithOpenApi } from "zod-openapi"
 import {
   AGGREGATION_METHODS,
   BILLING_INTERVALS,
+  BILLING_PERIOD_STATUS,
+  BILLING_PERIOD_TYPE,
   COLLECTION_METHODS,
   CURRENCIES,
   DUE_BEHAVIOUR,
   FEATURE_TYPES,
   FEATURE_VERSION_TYPES,
   INVOICE_STATUS,
-  INVOICE_TYPE,
   PAYMENT_PROVIDERS,
   PLAN_TYPES,
   SUBSCRIPTION_STATUS,
@@ -24,6 +26,8 @@ extendZodWithOpenApi(z)
 export const paymentProviderSchema = z.enum(PAYMENT_PROVIDERS)
 export const currencySchema = z.enum(CURRENCIES)
 export const typeFeatureSchema = z.enum(FEATURE_TYPES)
+export const billingPeriodStatusSchema = z.enum(BILLING_PERIOD_STATUS)
+export const billingPeriodTypeSchema = z.enum(BILLING_PERIOD_TYPE)
 export const usageModeSchema = z.enum(USAGE_MODES)
 export const aggregationMethodSchema = z.enum(AGGREGATION_METHODS)
 export const tierModeSchema = z.enum(TIER_MODES)
@@ -36,30 +40,53 @@ export const whenToBillSchema = z.enum(WHEN_TO_BILLING)
 export const subscriptionStatusSchema = z.enum(SUBSCRIPTION_STATUS)
 export const dueBehaviourSchema = z.enum(DUE_BEHAVIOUR)
 export const invoiceStatusSchema = z.enum(INVOICE_STATUS)
-export const invoiceTypeSchema = z.enum(INVOICE_TYPE)
-export const billingAnchorSchema = z
-  .union([
-    z.number().int().min(1).max(31).openapi({
-      description:
-        "Days of the month. Pick a number between 1 and 31, if the month has less days, it will be the last day of the month",
-    }),
-    z.literal("dayOfCreation").openapi({
-      description: "the day of the creation of the subscription as the billing anchor",
-    }),
-  ])
-  .default("dayOfCreation")
+export const billingAnchorSchema = z.union([
+  z.coerce.number().int().min(1).max(31).openapi({
+    description:
+      "Days of the month. Pick a number between 1 and 31, if the month has less days, it will be the last day of the month",
+  }),
+  z.literal("dayOfCreation").openapi({
+    description: "the day of the creation of the subscription as the billing anchor",
+  }),
+])
 
 export const billingIntervalSchema = z.enum(BILLING_INTERVALS)
-export const billingIntervalCountSchema = z.coerce.number().int().min(1).max(12)
+export const billingIntervalCountSchema = z.coerce.number().int().min(1).max(60)
 export const planTypeSchema = z.enum(PLAN_TYPES)
 
-export const unpriceCustomerErrorSchema = z.enum([
+export const unpriceProjectErrorSchema = z.enum([
+  "PROJECT_FEATURES_NOT_FOUND",
+  "PROJECT_NOT_FOUND",
+  "PROJECT_NOT_ENABLED",
+])
+
+export const unpricePlanErrorSchema = z.enum(["PLAN_VERSION_NOT_FOUND"])
+
+export const deniedReasonSchema = z.enum([
+  "ERROR_SYNCING_ENTITLEMENTS_LAST_USAGE",
+  "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE",
+  "ENTITLEMENT_OUTSIDE_OF_CURRENT_BILLING_WINDOW",
+  "ERROR_RESETTING_DO",
+  "RATE_LIMITED",
+  "ENTITLEMENT_NOT_FOUND",
+  "LIMIT_EXCEEDED",
+  "ENTITLEMENT_EXPIRED",
+  "ENTITLEMENT_NOT_ACTIVE",
+  "DO_NOT_INITIALIZED",
+  "INCORRECT_USAGE_REPORTING",
+  "ERROR_INSERTING_USAGE_DO",
+  "ERROR_INSERTING_VERIFICATION_DO",
+  "PROJECT_DISABLED",
+  "CUSTOMER_DISABLED",
+  "SUBSCRIPTION_DISABLED",
+  "FETCH_ERROR",
+  "SUBSCRIPTION_ERROR",
+  "ENTITLEMENT_ERROR",
   "SUBSCRIPTION_EXPIRED",
   "NO_DEFAULT_PLAN_FOUND",
   "SUBSCRIPTION_NOT_ACTIVE",
   "PHASE_NOT_CREATED",
   "FEATURE_NOT_FOUND_IN_SUBSCRIPTION",
-  "CUSTOMER_SUBSCRIPTION_NOT_FOUND",
   "CUSTOMER_NOT_FOUND",
   "CUSTOMER_ENTITLEMENTS_NOT_FOUND",
   "FEATURE_TYPE_NOT_SUPPORTED",
@@ -80,51 +107,21 @@ export const unpriceCustomerErrorSchema = z.enum([
   "CUSTOMER_PHASE_NOT_FOUND",
   "CURRENCY_MISMATCH",
   "BILLING_INTERVAL_MISMATCH",
-])
-
-export const unpriceProjectErrorSchema = z.enum([
-  "PROJECT_FEATURES_NOT_FOUND",
-  "PROJECT_NOT_FOUND",
-  "PROJECT_NOT_ENABLED",
-])
-
-export const unpricePlanErrorSchema = z.enum(["PLAN_VERSION_NOT_FOUND"])
-
-export const deniedReasonSchema = z.enum([
-  "RATE_LIMITED",
-  "CUSTOMER_SUBSCRIPTION_NOT_FOUND",
   "ENTITLEMENT_NOT_FOUND",
-  "LIMIT_EXCEEDED",
-  "ENTITLEMENT_EXPIRED",
-  "ENTITLEMENT_NOT_ACTIVE",
+  "SUBSCRIPTION_NOT_FOUND",
+  "INVALID_ENTITLEMENT_TYPE",
 ])
 
-export const convertDateToUTC = (date: Date) => {
-  // Check if the date is already in UTC
-  if (
-    date.getUTCFullYear() === date.getFullYear() &&
-    date.getUTCMonth() === date.getMonth() &&
-    date.getUTCDate() === date.getDate() &&
-    date.getUTCHours() === date.getHours() &&
-    date.getUTCMinutes() === date.getMinutes() &&
-    date.getUTCSeconds() === date.getSeconds()
-  ) {
-    // The date is already in UTC, return it as is
-    return date
-  }
-
-  // Create a new Date object with UTC values
-  return new Date(
-    Date.UTC(
-      date.getFullYear(),
-      date.getMonth(),
-      date.getDate(),
-      date.getHours(),
-      date.getMinutes(),
-      date.getSeconds(),
-      date.getMilliseconds()
-    )
-  )
+// --- Helper Function ---
+/**
+ * Gets the start of the day for a given date, explicitly in UTC.
+ * This is crucial to avoid server timezone influencing the result.
+ */
+export function getStartOfDayInUtc(date: Date): Date {
+  // Format the date to a 'YYYY-MM-DD' string IN UTC, then parse it back.
+  // This effectively strips the time components according to UTC, not the host timezone.
+  const dateString = formatInTimeZone(date, "UTC", "yyyy-MM-dd")
+  return toZonedTime(dateString, "UTC")
 }
 
 export const dateToUnixMilli = z
@@ -143,6 +140,14 @@ export const datetimeToUnix = z.coerce
     return val.getTime()
   })
 
+export const billingConfigSchema = z.object({
+  name: z.string().min(1),
+  billingInterval: billingIntervalSchema,
+  billingIntervalCount: billingIntervalCountSchema,
+  billingAnchor: billingAnchorSchema,
+  planType: planTypeSchema,
+})
+
 export type Currency = z.infer<typeof currencySchema>
 export type PaymentProvider = z.infer<typeof paymentProviderSchema>
 export type FeatureType = z.infer<typeof typeFeatureSchema>
@@ -155,6 +160,6 @@ export type BillingAnchor = z.infer<typeof billingAnchorSchema>
 export type CollectionMethod = z.infer<typeof collectionMethodSchema>
 export type SubscriptionStatus = z.infer<typeof subscriptionStatusSchema>
 export type InvoiceStatus = z.infer<typeof invoiceStatusSchema>
-export type InvoiceType = z.infer<typeof invoiceTypeSchema>
 export type BillingInterval = z.infer<typeof billingIntervalSchema>
 export type PlanType = z.infer<typeof planTypeSchema>
+export type BillingConfig = z.infer<typeof billingConfigSchema>

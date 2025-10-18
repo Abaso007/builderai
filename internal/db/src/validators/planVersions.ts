@@ -5,26 +5,12 @@ import { versions } from "../schema/planVersions"
 import { featureSelectBaseSchema } from "./features"
 import { planVersionFeatureSelectBaseSchema } from "./planVersionFeatures"
 import { planSelectBaseSchema } from "./plans"
-import {
-  billingAnchorSchema,
-  billingIntervalCountSchema,
-  billingIntervalSchema,
-  currencySchema,
-  planTypeSchema,
-} from "./shared"
+import { billingConfigSchema, billingIntervalSchema, currencySchema } from "./shared"
 
 extendZodWithOpenApi(z)
 
 export const planVersionMetadataSchema = z.object({
   externalId: z.string().optional(),
-})
-
-export const billingConfigSchema = z.object({
-  name: z.string().min(1),
-  billingInterval: billingIntervalSchema,
-  billingIntervalCount: billingIntervalCountSchema,
-  billingAnchor: billingAnchorSchema.default("dayOfCreation"),
-  planType: planTypeSchema,
 })
 
 export const insertBillingConfigSchema = billingConfigSchema
@@ -85,7 +71,7 @@ export const versionInsertBaseSchema = createInsertSchema(versions, {
   metadata: planVersionMetadataSchema,
   currency: currencySchema,
   billingConfig: insertBillingConfigSchema,
-  trialDays: z.coerce.number().int().min(0).default(0),
+  trialUnits: z.coerce.number().int().min(0).default(0),
 })
   .required({
     planId: true,
@@ -161,7 +147,6 @@ export const getPlanVersionApiResponseSchema = planVersionSelectBaseSchema.exten
 export type InsertPlanVersion = z.infer<typeof versionInsertBaseSchema>
 export type PlanVersionMetadata = z.infer<typeof planVersionMetadataSchema>
 export type PlanVersion = z.infer<typeof planVersionSelectBaseSchema>
-export type BillingConfig = z.infer<typeof billingConfigSchema>
 export type InsertBillingConfig = z.infer<typeof insertBillingConfigSchema>
 export type PlanVersionApi = z.infer<typeof getPlanVersionApiResponseSchema>
 export type PlanVersionExtended = z.infer<typeof planVersionExtendedSchema>

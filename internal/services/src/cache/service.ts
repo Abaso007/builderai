@@ -11,6 +11,7 @@ import {
   CACHE_STALENESS_TIME_MS,
 } from "./stale-while-revalidate"
 
+// because this is instantiated as global, the map persist in memory for different requests
 const persistentMap = new Map()
 
 export type Cache = C<CacheNamespaces>
@@ -20,27 +21,33 @@ export class CacheService {
   private context: Context
   private metrics: Metrics
   private readonly emitMetrics: boolean
+  private isInitialized: boolean
 
   constructor(context: Context, metrics: Metrics, emitMetrics: boolean) {
     this.context = context
     this.metrics = metrics
     this.emitMetrics = emitMetrics
+    this.isInitialized = false
   }
 
   /**
    * Initialize the cache service
    * @param extraStores - Extra stores to add to the cache
    */
-  async init(extraStores: Store<CacheNamespace, CacheNamespaces[CacheNamespace]>[]): Promise<void> {
-    if (this.cache) return
+  init(extraStores: Store<CacheNamespace, CacheNamespaces[CacheNamespace]>[]): void {
+    if (this.isInitialized || this.cache) return
 
     // emit the cache size
-    this.metrics.emit({
-      metric: "metric.cache.size",
-      tier: "memory",
-      size: persistentMap.size,
-      name: "cache",
-    })
+    this.context.waitUntil(
+      Promise.all([
+        this.metrics.emit({
+          metric: "metric.cache.size",
+          tier: "memory",
+          size: persistentMap.size,
+          name: "cache",
+        }),
+      ])
+    )
 
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     const stores: Array<Store<CacheNamespace, any>> = []
@@ -56,7 +63,7 @@ export class CacheService {
     // push the memory first to hit it first
     stores.push(memory)
 
-    // push the extra stores
+    // push the extra stores in the same order as the extraStores
     stores.push(...extraStores)
 
     const metricsMiddleware = withMetrics(this.metrics)
@@ -72,18 +79,21 @@ export class CacheService {
 
     this.cache = createCache({
       apiKeyByHash: new Namespace<CacheNamespaces["apiKeyByHash"]>(this.context, defaultOpts),
-      customerEntitlement: new Namespace<CacheNamespaces["customerEntitlement"]>(
-        this.context,
-        defaultOpts
-      ),
-      customerActivePhase: new Namespace<CacheNamespaces["customerActivePhase"]>(
-        this.context,
-        defaultOpts
-      ),
-      customerEntitlements: new Namespace<CacheNamespaces["customerEntitlements"]>(
-        this.context,
-        defaultOpts
-      ),
+      customerEntitlement: new Namespace<CacheNamespaces["customerEntitlement"]>(this.context, {
+        ...defaultOpts,
+        fresh: 1000 * 60 * 60 * 24, // 24 hours
+        stale: 1000 * 60 * 60 * 1, // 1 hour
+      }),
+      customerEntitlements: new Namespace<CacheNamespaces["customerEntitlements"]>(this.context, {
+        ...defaultOpts,
+        fresh: 1000 * 60 * 60 * 24, // 24 hours
+        stale: 1000 * 60 * 60 * 1, // 1 hour
+      }),
+      customerSubscription: new Namespace<CacheNamespaces["customerSubscription"]>(this.context, {
+        ...defaultOpts,
+        fresh: 1000 * 60 * 60 * 24, // 24 hours
+        stale: 1000 * 60 * 60 * 1, // 1 hour
+      }),
       customerPaymentMethods: new Namespace<CacheNamespaces["customerPaymentMethods"]>(
         this.context,
         defaultOpts
@@ -96,13 +106,9 @@ export class CacheService {
         this.context,
         {
           ...defaultOpts,
-          fresh: 1000 * 60, // 1 minute
-          stale: 1000 * 60, // revalidate after 1 minutes
+          fresh: 1000 * 30, // 30 seconds
+          stale: 1000 * 60, // delete after 1 minute
         }
-      ),
-      customerSubscription: new Namespace<CacheNamespaces["customerSubscription"]>(
-        this.context,
-        defaultOpts
       ),
       pageCountryVisits: new Namespace<CacheNamespaces["pageCountryVisits"]>(this.context, {
         ...defaultOpts,
@@ -162,16 +168,24 @@ export class CacheService {
           stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
         }
       ),
+      getCurrentUsage: new Namespace<CacheNamespaces["getCurrentUsage"]>(this.context, {
+        ...defaultOpts,
+        fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
+        stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
+      }),
     })
+
+    this.isInitialized = true
   }
 
   /**
    * Get the cache
    */
   getCache(): Cache {
-    if (!this.cache) {
+    if (!this.isInitialized || !this.cache) {
       throw new Error("Cache not initialized. Call init() first.")
     }
+
     return this.cache
   }
 }

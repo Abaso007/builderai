@@ -2,7 +2,7 @@
 
 import type { Row } from "@tanstack/react-table"
 import { useRouter } from "next/navigation"
-import { startTransition } from "react"
+import { startTransition, useState } from "react"
 
 import { selectApiKeySchema } from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
@@ -15,7 +15,7 @@ import {
 import { Ellipsis } from "@unprice/ui/icons"
 
 import { useMutation } from "@tanstack/react-query"
-import { toastAction } from "~/lib/toast"
+import { toast } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
 
 interface DataTableRowActionsProps<TData> {
@@ -24,14 +24,17 @@ interface DataTableRowActionsProps<TData> {
 
 export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TData>) {
   const apikey = selectApiKeySchema.parse(row.original)
+  const [isOpen, setIsOpen] = useState(false)
   const router = useRouter()
   const trpc = useTRPC()
 
   const revokeApiKeys = useMutation(
     trpc.apikeys.revoke.mutationOptions({
       onSuccess: () => {
-        toastAction("saved")
         router.refresh()
+      },
+      onError: (error) => {
+        toast.error(error.message)
       },
     })
   )
@@ -39,30 +42,48 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
   const rollApiKey = useMutation(
     trpc.apikeys.roll.mutationOptions({
       onSuccess: () => {
-        toastAction("success")
         router.refresh()
+      },
+      onError: (error) => {
+        toast.error(error.message)
       },
     })
   )
 
   function onRevokeKey() {
     startTransition(() => {
-      void revokeApiKeys.mutateAsync({
-        ids: [apikey.id],
-      })
+      toast.promise(
+        revokeApiKeys.mutateAsync({
+          ids: [apikey.id],
+        }),
+        {
+          loading: "Revoking key...",
+          success: "Key revoked",
+        }
+      )
     })
   }
 
   function onRollKey() {
     startTransition(() => {
-      void rollApiKey.mutateAsync({
-        id: apikey.id,
-      })
+      toast.promise(
+        rollApiKey
+          .mutateAsync({
+            hashKey: apikey.hash,
+          })
+          .then((data) => {
+            navigator.clipboard.writeText(data.apikey.key)
+          }),
+        {
+          loading: "Rolling key...",
+          success: "Key rolled, your new key is been copied to your clipboard",
+        }
+      )
     })
   }
 
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={setIsOpen} open={isOpen}>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="h-8 w-8 p-0">
           <span className="sr-only">Open menu</span>
@@ -74,6 +95,7 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
           onClick={(e) => {
             e.preventDefault()
             onRevokeKey()
+            setIsOpen(false)
           }}
           className="text-destructive"
         >
@@ -84,6 +106,7 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
           onClick={(e) => {
             e.preventDefault()
             onRollKey()
+            setIsOpen(false)
           }}
           className="text-destructive"
         >

@@ -1,16 +1,21 @@
 import { env } from "cloudflare:workers"
+import type { CacheError } from "@unkey/cache"
 import type { Analytics } from "@unprice/analytics"
+import type { Stats } from "@unprice/analytics/utils"
 import type { Database } from "@unprice/db"
 import {
+  type CustomerEntitlementExtended,
+  type GetCurrentUsage,
+  type SubscriptionCache,
+  calculateCycleWindow,
   calculateFlatPricePlan,
   calculateFreeUnits,
   calculatePricePerFeature,
   calculateTotalPricePlan,
-  configureBillingCycleSubscription,
 } from "@unprice/db/validators"
-import { Err, type FetchError, Ok, type Result } from "@unprice/error"
+import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
-import type { Cache, CustomerEntitlementCache, SubcriptionCache } from "@unprice/services/cache"
+import type { Cache } from "@unprice/services/cache"
 import type { CustomerService, DenyReason } from "@unprice/services/customers"
 import { UnPriceCustomerError } from "@unprice/services/customers"
 import type { Metrics } from "@unprice/services/metrics"
@@ -22,11 +27,13 @@ import type {
   GetEntitlementsRequest,
   GetEntitlementsResponse,
   GetUsageRequest,
-  GetUsageResponse,
   ReportUsageRequest,
   ReportUsageResponse,
 } from "./interface"
 
+// you would understand entitlements service if you think about it as feature flag system
+// it's totally separated from billing system and you can give entitlements to customers
+// without affecting the billing.
 export class EntitlementService {
   private readonly namespace: DurableObjectNamespace<DurableObjectUsagelimiter>
   private readonly projectNamespace: DurableObjectNamespace<DurableObjectProject>
@@ -38,9 +45,9 @@ export class EntitlementService {
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
   private readonly customerService: CustomerService
-
-  // TODO: add in memory cache for overused entitlements
-  // https://github.com/unkeyed/unkey/blob/main/apps/api/src/pkg/ratelimit/do_client.ts#L31
+  private readonly stats: Stats
+  private readonly requestId: string
+  private hashCache: Map<string, string>
 
   constructor(opts: {
     namespace: DurableObjectNamespace<DurableObjectUsagelimiter>
@@ -50,11 +57,13 @@ export class EntitlementService {
     logger: Logger
     metrics: Metrics
     analytics: Analytics
+    hashCache: Map<string, string>
     cache: Cache
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     waitUntil: (promise: Promise<any>) => void
     db: Database
     customer: CustomerService
+    stats: Stats
   }) {
     this.namespace = opts.namespace
     this.logger = opts.logger
@@ -65,13 +74,33 @@ export class EntitlementService {
     this.waitUntil = opts.waitUntil
     this.customerService = opts.customer
     this.projectNamespace = opts.projectNamespace
+    this.stats = opts.stats
+    this.requestId = opts.requestId
+    this.hashCache = opts.hashCache
   }
 
-  // TODO: add jurisdiction to the stub
+  // in memory cache
+  private updateCache(key: string, result: CanResponse) {
+    if (env.VERCEL_ENV === "production" && !result.success) {
+      this.hashCache.set(key, JSON.stringify(result))
+    }
+  }
+
+  // for EU countries we have to keep the stub in the EU namespace
   private getStub(
     name: string,
     locationHint?: DurableObjectLocationHint
   ): DurableObjectStub<DurableObjectUsagelimiter> {
+    // jurisdiction is only available in production
+    if (this.stats.isEUCountry && env.NODE_ENV === "production") {
+      const euSubnamespace = this.namespace.jurisdiction("eu")
+      const euStub = euSubnamespace.get(euSubnamespace.idFromName(name), {
+        locationHint,
+      })
+
+      return euStub
+    }
+
     return this.namespace.get(this.namespace.idFromName(name), {
       locationHint,
     })
@@ -82,422 +111,379 @@ export class EntitlementService {
     return `${customerId}`
   }
 
-  private async getActiveEntitlementFromDO(
-    customerId: string,
-    featureSlug: string
-  ): Promise<Result<CustomerEntitlementCache | null, FetchError | UnPriceCustomerError>> {
-    const durableObject = this.getStub(this.getDurableObjectCustomerId(customerId))
-    const entitlement = await durableObject.getEntitlement(featureSlug)
-
-    if (!entitlement) {
-      return Ok(null)
-    }
-
-    const { id, entitlementId, ...rest } = entitlement
-
-    return Ok({
-      ...rest,
-      id: entitlementId,
-      active: entitlement.active === 1,
-      realtime: entitlement.realtime === 1,
-      isCustom: entitlement.isCustom === 1,
-      units: entitlement.units,
-      metadata: entitlement.metadata ? JSON.parse(entitlement.metadata) : null,
-    })
-  }
-
-  private async getEntitlementsFromDO(
-    customerId: string
-  ): Promise<Result<CustomerEntitlementCache[] | null, FetchError | UnPriceCustomerError>> {
-    const durableObject = this.getStub(this.getDurableObjectCustomerId(customerId))
-    const entitlements = await durableObject.getEntitlements()
-
-    if (!entitlements) {
-      return Ok(null)
-    }
-
-    return Ok(
-      entitlements.map((entitlement) => ({
-        ...entitlement,
-        id: entitlement.entitlementId,
-        active: entitlement.active === 1,
-        realtime: entitlement.realtime === 1,
-        isCustom: entitlement.isCustom === 1,
-        metadata: entitlement.metadata ? JSON.parse(entitlement.metadata) : null,
-      }))
-    )
-  }
-
-  public async revalidateEntitlement(
-    customerId: string,
-    featureSlug: string,
-    projectId: string,
-    now: number
-  ): Promise<Result<CustomerEntitlementCache | null, FetchError | UnPriceCustomerError>> {
-    const { err: entitlementErr, val: entitlement } =
-      await this.customerService.getActiveEntitlement(customerId, featureSlug, projectId, now, {
-        skipCache: true, // skip cache to force revalidation
-        withLastUsage: true, // get the last usage from analytics
-      })
-
-    if (entitlementErr) {
-      return Err(entitlementErr)
-    }
-
-    if (!entitlement) {
-      return Ok(null)
-    }
-
-    const durableObject = this.getStub(this.getDurableObjectCustomerId(customerId))
-
-    const { id, ...rest } = entitlement
-
-    const data = {
-      ...rest,
-      entitlementId: id,
-      metadata: JSON.stringify(rest.metadata),
-      isCustom: rest.isCustom ? 1 : 0,
-      active: rest.active ? 1 : 0,
-      realtime: rest.realtime ? 1 : 0,
-    }
-
-    await durableObject.setEntitlement(data)
-
-    return Ok({
-      ...rest,
-      id,
-      active: data.active === 1,
-      realtime: data.realtime === 1,
-      isCustom: data.isCustom === 1,
-    })
-  }
-
+  /*
+   * This is used to validate the subscription of the customer
+   * It's used to check if the customer has an active subscription
+   * @param customerId - The id of the customer
+   * @param projectId - The id of the project
+   * @returns The subscription of the customer
+   */
   private async validateSubscription(
     customerId: string,
-    projectId: string
-  ): Promise<Result<SubcriptionCache, FetchError | UnPriceCustomerError>> {
+    projectId: string,
+    now: number,
+    opts?: {
+      skipCache?: boolean
+    }
+  ): Promise<Result<SubscriptionCache, FetchError | UnPriceCustomerError>> {
     const { err: subscriptionErr, val: subscription } =
-      await this.customerService.getActiveSubscription(customerId, projectId, {
-        skipCache: false,
+      await this.customerService.getActiveSubscription({
+        customerId,
+        projectId,
+        now,
+        opts: {
+          skipCache: opts?.skipCache ?? false,
+        },
       })
 
     if (subscriptionErr) {
       return Err(subscriptionErr)
     }
 
-    if (!subscription) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "CUSTOMER_SUBSCRIPTION_NOT_FOUND",
-          message: "customer has no active subscription",
-        })
-      )
+    return Ok(subscription)
+  }
+
+  public async revalidateEntitlement(data: {
+    customerId: string
+    featureSlug: string
+    projectId: string
+    timestamp: number
+  }): Promise<
+    Result<
+      {
+        success: boolean
+        message: string
+        entitlement?: CustomerEntitlementExtended
+      },
+      FetchError | UnPriceCustomerError
+    >
+  > {
+    // deduplicate calls if the same request is made and we hit the same isolate
+    const key = `revalidateEntitlement:${data.customerId}:${data.featureSlug}:${data.projectId}`
+    const cached = this.hashCache.get(key)
+
+    if (cached) {
+      return Ok(JSON.parse(cached))
     }
 
-    return Ok(subscription)
+    const durableObject = this.getStub(this.getDurableObjectCustomerId(data.customerId))
+
+    // this is the most expensive call in terms of latency
+    // this will trigger a call to the DO and validate the entitlement given the current usage
+    const { err, val } = await durableObject.revalidateEntitlement({
+      customerId: data.customerId,
+      featureSlug: data.featureSlug,
+      projectId: data.projectId,
+      now: data.timestamp,
+      opts: {
+        skipCache: true,
+      },
+    })
+
+    const result = {
+      success: true,
+      message: "entitlement revalidated",
+      entitlement: val,
+    }
+
+    // if the entitlement is not found, return an error
+    if (err || !val) {
+      result.success = false
+      result.message = err?.message ?? "entitlement not found"
+      result.entitlement = val
+    }
+
+    this.hashCache.set(key, JSON.stringify(result))
+
+    return Ok(result)
   }
 
   public async resetEntitlements(
     customerId: string,
     projectId: string
-  ): Promise<{
-    success: boolean
-    message: string
-  }> {
-    const { err: subscriptionErr } = await this.validateSubscription(customerId, projectId)
+  ): Promise<
+    Result<
+      {
+        success: boolean
+        message: string
+        slugs?: string[]
+      },
+      FetchError | UnPriceCustomerError
+    >
+  > {
+    // deduplicate calls if the same request is made and we hit the same isolate
+    const key = `resetEntitlements:${customerId}:${projectId}`
+    const cached = this.hashCache.get(key)
 
-    if (subscriptionErr) {
-      return { success: false, message: subscriptionErr.message }
+    if (cached) {
+      return Ok(JSON.parse(cached))
     }
 
     const durableObject = this.getStub(this.getDurableObjectCustomerId(customerId))
-
     const result = await durableObject.resetDO()
 
     if (!result.success) {
-      return { success: false, message: result.message }
+      return Err(
+        new UnPriceCustomerError({
+          code: "ERROR_RESETTING_DO",
+          message: result.message,
+        })
+      )
     }
 
-    const keys = result.slugs?.map((slug) => `${customerId}:${slug}`)
+    // cache keys to remove
+    const keys = result.slugs?.map((slug) => `${projectId}:${customerId}:${slug}`)
 
     // delete the cache
     this.waitUntil(
       Promise.all([
         this.cache.customerEntitlement.remove(keys ?? []),
-        this.cache.customerSubscription.remove(customerId),
+        this.cache.customerEntitlements.remove(`${projectId}:${customerId}`),
+        this.cache.customerSubscription.remove(`${projectId}:${customerId}`),
       ])
     )
 
-    return { success: true, message: "customer object deleted" }
+    const resultCached = {
+      success: true,
+      message: "entitlements reseted",
+      slugs: result.slugs ?? [],
+    }
+
+    // cache the result
+    this.hashCache.set(key, JSON.stringify(resultCached))
+
+    return Ok(resultCached)
   }
 
-  // broadcast the event to the project
-  private async broadcastEvent(
+  public async prewarmEntitlements(
+    customerId: string,
     projectId: string,
-    event: {
-      customerId: string
-      featureSlug: string
-      type: "can" | "reportUsage"
-      success: boolean
-      deniedReason?: DenyReason
-      usage?: number
-      limit?: number
-      notifyUsage?: boolean
+    now: number
+  ): Promise<
+    Result<
+      {
+        success: boolean
+        message: string
+        slugs?: string[]
+      },
+      FetchError | UnPriceCustomerError
+    >
+  > {
+    const cacheKey = `prewarmEntitlements:${projectId}:${customerId}`
+    const cached = this.hashCache.get(cacheKey)
+
+    if (cached) {
+      return Ok(JSON.parse(cached))
     }
-  ) {
-    const projectDurableObject = this.projectNamespace.get(
-      this.projectNamespace.idFromName(projectId)
-    )
-    projectDurableObject.broadcastEvents(event)
+
+    const durableObject = this.getStub(this.getDurableObjectCustomerId(customerId))
+
+    const { err: entitlementsErr, val: entitlements } =
+      await this.customerService.getActiveEntitlements({
+        customerId,
+        projectId,
+        now,
+        opts: {
+          skipCache: false, // read from cache
+        },
+      })
+
+    if (entitlementsErr) {
+      return Err(entitlementsErr)
+    }
+
+    // do not prewarm if there are no entitlements
+    if (entitlements.length > 0) {
+      this.waitUntil(
+        Promise.all([
+          // pre warm DO
+          durableObject.prewarmDO({
+            entitlements,
+            now,
+            opts: {
+              force: true, // force the prewarm to avoid ttl issues
+            },
+          }),
+          // sync entitlements usage cache
+          this.customerService.syncEntitlementsCache({
+            entitlements,
+          }),
+        ])
+      )
+    }
+
+    const resultCached = {
+      success: true,
+      message: "entitlements prewarmed",
+      slugs: entitlements.map((e) => e.featureSlug),
+    }
+
+    // update the cache
+    this.hashCache.set(cacheKey, JSON.stringify(resultCached))
+
+    return Ok(resultCached)
   }
 
-  public async can(data: CanRequest): Promise<CanResponse> {
-    const { err: subscriptionErr } = await this.validateSubscription(
-      data.customerId,
-      data.projectId
-    )
+  public async can(
+    data: CanRequest
+  ): Promise<Result<CanResponse, FetchError | UnPriceCustomerError>> {
+    const key = `can:${data.projectId}:${data.customerId}:${data.featureSlug}:`
+    const cached = this.hashCache.get(key)
 
-    if (subscriptionErr) {
-      return {
-        success: false,
-        message: subscriptionErr.message,
-        deniedReason: subscriptionErr.code as CanResponse["deniedReason"],
-      }
+    // if we hit the same isolate we can return the cached result
+    // only for request that are denied.
+    // we don't use the normal swr cache here because it doesn't make sense to call
+    // the cache layer, the idea is to speed up the next request
+    if (cached && env.VERCEL_ENV === "production") {
+      const result = JSON.parse(cached) as CanResponse
+
+      return Ok({ ...result, cacheHit: true })
     }
 
-    // after this point we can report the verification event
     const durableObject = this.getStub(this.getDurableObjectCustomerId(data.customerId))
 
-    const result = await durableObject.can(data)
-
-    if (result.deniedReason === "ENTITLEMENT_NOT_FOUND") {
-      // revalidate the entitlement
-      const { err: revalidateErr } = await this.revalidateEntitlement(
+    // if the request is async, we can validate entitlement from cache
+    if (data.fromCache) {
+      const { err, val: entitlement } = await this.customerService.getActiveEntitlement(
         data.customerId,
         data.featureSlug,
         data.projectId,
-        data.timestamp // active entitlement actual timestamp
+        data.timestamp,
+        {
+          skipCache: false,
+        }
       )
 
-      if (revalidateErr) {
-        return {
-          success: false,
-          message: revalidateErr.message,
-          deniedReason: "ENTITLEMENT_NOT_FOUND",
+      if (err) {
+        if (err instanceof UnPriceCustomerError) {
+          return Ok({
+            success: false,
+            message: err.message,
+            deniedReason: err.code as DenyReason,
+          })
         }
+
+        if (err instanceof FetchError) {
+          return Ok({
+            success: false,
+            message: err.message,
+            deniedReason: "FETCH_ERROR",
+          })
+        }
+
+        return Ok({
+          success: false,
+          message: "error getting entitlement from do.",
+          deniedReason: "ENTITLEMENT_ERROR",
+        })
       }
 
-      // broadcast the event to the project with waitUntil
+      const entitlementGuard = this.customerService.checkLimitEntitlement({
+        entitlement: entitlement,
+        opts: {
+          allowOverage: false,
+        },
+      })
+
+      const latency = performance.now() - data.performanceStart
+
+      const result = {
+        success: entitlementGuard.valid,
+        message: entitlementGuard.message,
+        deniedReason: entitlementGuard.deniedReason,
+        limit: entitlementGuard.limit,
+        usage: entitlementGuard.usage,
+        latency: latency,
+      }
+
+      // report the verification event to the DO
       this.waitUntil(
-        this.broadcastEvent(data.projectId, {
-          customerId: data.customerId,
-          featureSlug: data.featureSlug,
-          type: "can",
-          success: result.success,
-          deniedReason: result.deniedReason,
+        durableObject.insertVerification({
+          entitlement: entitlement,
+          success: entitlementGuard.valid,
+          deniedReason: entitlementGuard.deniedReason,
+          // add fromCache to the metadata to keep track of the request
+          data: {
+            ...data,
+            metadata: {
+              ...data.metadata,
+              fromCache: true,
+            },
+          },
+          latency: latency,
+          alarm: {
+            ensure: true,
+            flushTime: data.flushTime,
+          },
         })
       )
 
-      // try again
-      return await durableObject.can(data)
+      // save in memory cache
+      this.updateCache(key, result)
+
+      // return the result
+      return Ok(result)
     }
 
-    // broadcast the event to the project with waitUntil
-    this.waitUntil(
-      this.broadcastEvent(data.projectId, {
-        customerId: data.customerId,
-        featureSlug: data.featureSlug,
-        type: "can",
-        success: result.success,
-        deniedReason: result.deniedReason,
-      })
-    )
+    // this is the most expensive call in terms of latency
+    // this will trigger a call to the DO and validate the entitlement given the current usage
+    const result = await durableObject.can(data)
 
-    return result
+    // in extreme cases we hit in memory cache for the same isolate, speeding up the next request
+    this.updateCache(key, result)
+
+    return Ok(result)
   }
 
-  public async reportUsage(data: ReportUsageRequest): Promise<ReportUsageResponse> {
-    try {
-      const { err: subscriptionErr } = await this.validateSubscription(
-        data.customerId,
-        data.projectId
-      )
+  public async reportUsage(
+    data: ReportUsageRequest
+  ): Promise<Result<ReportUsageResponse, FetchError | UnPriceCustomerError>> {
+    // in dev we use the idempotence key and timestamp to deduplicate reuse the same key for the same request
+    const idempotentKey =
+      env.VERCEL_ENV === "production"
+        ? `${data.idempotenceKey}`
+        : `${data.idempotenceKey}:${data.timestamp}`
 
-      if (subscriptionErr) {
-        return { success: false, message: subscriptionErr.message }
-      }
+    const cacheKey = `${data.projectId}:${data.customerId}:${data.featureSlug}:${idempotentKey}`
+    // Fast path: check if the event has already been sent to the DO
+    const { val: sent } = await this.cache.idempotentRequestUsageByHash.get(cacheKey)
 
-      // in dev we use the idempotence key and timestamp to deduplicate reuse the same key for the same request
-      const idempotentKey =
-        env.NODE_ENV === "production"
-          ? `${data.idempotenceKey}`
-          : `${data.idempotenceKey}:${data.timestamp}`
+    // if the usage is already sent, return the result
+    if (sent) {
+      return Ok({ ...sent, cacheHit: true })
+    }
 
-      // Fast path: check if the event has already been sent to the DO
-      const { val: sent } = await this.cache.idempotentRequestUsageByHash.get(idempotentKey)
-
-      // if the usage is already sent, return the result
-      if (sent) {
-        return sent
-      }
-
-      const durableObject = this.getStub(this.getDurableObjectCustomerId(data.customerId))
-      const result = await durableObject.reportUsage(data)
-
-      if (result.message === "ENTITLEMENT_NOT_FOUND") {
-        // revalidate the entitlement
-        const { err: revalidateErr } = await this.revalidateEntitlement(
-          data.customerId,
-          data.featureSlug,
-          data.projectId,
-          data.timestamp // active entitlement actual timestamp
-        )
-
-        if (revalidateErr) {
-          return { success: false, message: revalidateErr.message }
-        }
-
-        // try again
-        const result = await durableObject.reportUsage(data)
-
-        const response = {
-          success: result.success,
-          message: result.message,
-          limit: Number(result.limit),
-          usage: Number(result.usage),
-          notifyUsage: result.notifyUsage,
-        }
-
-        this.waitUntil(
-          // cache the result for the next time
-          // update the cache with the new usage so we can check limit in the next request
-          // without calling the DO again
-          Promise.all([
-            this.cache.idempotentRequestUsageByHash.set(idempotentKey, response),
-            this.broadcastEvent(data.projectId, {
-              customerId: data.customerId,
-              featureSlug: data.featureSlug,
-              type: "reportUsage",
-              success: result.success,
-              usage: Number(data.usage),
-              limit: Number(result.limit),
-              notifyUsage: result.notifyUsage,
-            }),
-          ])
-        )
-
-        return response
-      }
-
-      const response = {
+    const durableObject = this.getStub(this.getDurableObjectCustomerId(data.customerId))
+    const result = await durableObject.reportUsage(data).then((result) => {
+      return {
         success: result.success,
         message: result.message,
         limit: Number(result.limit),
         usage: Number(result.usage),
         notifyUsage: result.notifyUsage,
+        deniedReason: result.deniedReason,
       }
-
-      this.waitUntil(
-        // cache the result for the next time
-        // update the cache with the new usage so we can check limit in the next request
-        // without calling the DO again
-        Promise.all([
-          this.cache.idempotentRequestUsageByHash.set(idempotentKey, response),
-          this.broadcastEvent(data.projectId, {
-            customerId: data.customerId,
-            featureSlug: data.featureSlug,
-            type: "reportUsage",
-            success: result.success,
-            usage: Number(result.usage),
-            limit: Number(result.limit),
-            notifyUsage: result.notifyUsage,
-          }),
-        ])
-      )
-
-      return response
-    } catch (e) {
-      console.error("usagelimit failed", {
-        customerId: data.customerId,
-        error: (e as Error).message,
-      })
-      return { success: false, message: "usage limit failed" }
-    } finally {
-    }
-  }
-
-  public async getEntitlements(req: GetEntitlementsRequest): Promise<GetEntitlementsResponse> {
-    const { customerId, projectId, now } = req
-
-    const { err: subscriptionErr } = await this.validateSubscription(customerId, projectId)
-
-    if (subscriptionErr) {
-      throw subscriptionErr
-    }
-
-    const { err: entitlementsErr, val: entitlements } =
-      await this.customerService.getActiveEntitlements({
-        customerId,
-        projectId,
-        now,
-      })
-
-    if (entitlementsErr) {
-      throw entitlementsErr
-    }
-
-    if (!entitlements) {
-      throw new UnPriceCustomerError({
-        code: "CUSTOMER_ENTITLEMENTS_NOT_FOUND",
-        message: "customer has no entitlements",
-      })
-    }
-
-    // get the entitlements from the DO
-    const { val: entitlementsDO } = await this.getEntitlementsFromDO(customerId)
-
-    if (entitlementsDO) {
-      // set the usage from the DO to the entitlements
-      entitlements.forEach((entitlement) => {
-        const entitlementDO = entitlementsDO.find((e) => e.featureSlug === entitlement.featureSlug)
-        if (entitlementDO) {
-          entitlement.usage = entitlementDO.usage
-        }
-      })
-    }
-
-    return {
-      entitlements,
-    }
-  }
-
-  public async getUsage(req: GetUsageRequest): Promise<GetUsageResponse> {
-    const { customerId, projectId, now } = req
-
-    const { err: subscriptionErr, val: subscription } = await this.validateSubscription(
-      customerId,
-      projectId
-    )
-
-    if (subscriptionErr) {
-      throw subscriptionErr
-    }
-
-    const { err: phaseErr, val: phase } = await this.customerService.getActivePhase({
-      customerId,
-      projectId,
-      now,
     })
 
-    if (phaseErr) {
-      throw phaseErr
-    }
+    this.waitUntil(
+      // cache the result for the next time
+      // update the cache with the new usage so we can check limit in the next request
+      // without calling the DO again
+      this.cache.idempotentRequestUsageByHash.set(cacheKey, result)
+    )
 
-    if (!phase) {
-      throw new UnPriceCustomerError({
-        code: "CUSTOMER_PHASE_NOT_FOUND",
-        message: "customer has no active phase",
-      })
+    return Ok(result)
+  }
+
+  public async getEntitlements(
+    req: GetEntitlementsRequest
+  ): Promise<Result<GetEntitlementsResponse, FetchError | UnPriceCustomerError>> {
+    const { customerId, projectId, now } = req
+
+    const { err: subscriptionErr } = await this.validateSubscription(customerId, projectId, now)
+
+    if (subscriptionErr) {
+      return Err(subscriptionErr)
     }
 
     const { err: entitlementsErr, val: entitlements } =
@@ -508,145 +494,211 @@ export class EntitlementService {
       })
 
     if (entitlementsErr) {
-      throw entitlementsErr
+      return Err(entitlementsErr)
     }
 
     if (!entitlements || entitlements.length === 0) {
-      throw new UnPriceCustomerError({
-        code: "CUSTOMER_ENTITLEMENTS_NOT_FOUND",
-        message: "customer has no entitlements",
-      })
+      return Err(
+        new UnPriceCustomerError({
+          code: "CUSTOMER_ENTITLEMENTS_NOT_FOUND",
+          message: "customer has no entitlements",
+        })
+      )
     }
 
-    // get the entitlements from the DO
-    const { val: entitlementsDO } = await this.getEntitlementsFromDO(customerId)
+    return Ok({
+      entitlements,
+    })
+  }
 
-    if (entitlementsDO) {
-      // set the usage from the DO to the entitlements
-      entitlements.forEach((entitlement) => {
-        const entitlementDO = entitlementsDO.find((e) => e.featureSlug === entitlement.featureSlug)
-        if (entitlementDO) {
-          entitlement.usage = entitlementDO.usage
-        }
-      })
-    }
+  public async getCurrentUsage(
+    req: GetUsageRequest
+  ): Promise<Result<GetCurrentUsage, FetchError | UnPriceCustomerError | CacheError>> {
+    const { customerId, projectId, now } = req
+    const cacheKey = `${projectId}:${customerId}`
 
-    const quantities = entitlements.reduce(
-      (acc, entitlement) => {
-        acc[entitlement.featurePlanVersionId] =
-          entitlement.featureType === "usage"
-            ? Number(entitlement.usage)
-            : Number(entitlement.units)
-        return acc
-      },
-      {} as Record<string, number>
+    const { err: subscriptionErr, val: subscription } = await this.validateSubscription(
+      customerId,
+      projectId,
+      now
     )
 
-    const calculatedBillingCycle = configureBillingCycleSubscription({
-      currentCycleStartAt: subscription.currentCycleStartAt,
-      billingConfig: phase.planVersion.billingConfig,
-      trialDays: phase.trialDays,
-      alignStartToDay: true,
-      alignEndToDay: true,
-      endAt: phase.endAt ?? undefined,
-      alignToCalendar: true,
-    })
-
-    const { val: totalPricePlan, err: totalPricePlanErr } = calculateTotalPricePlan({
-      features: phase.customerEntitlements.map((e) => e.featurePlanVersion),
-      quantities: quantities,
-      prorate: calculatedBillingCycle.prorationFactor,
-      currency: phase.planVersion.currency,
-    })
-
-    const { err: flatPriceErr, val: flatPrice } = calculateFlatPricePlan({
-      planVersion: {
-        ...phase.planVersion,
-        // TODO: improve this
-        planFeatures: phase.customerEntitlements.map((e) => e.featurePlanVersion),
-      },
-      prorate: 1,
-    })
-
-    if (totalPricePlanErr || flatPriceErr) {
-      throw totalPricePlanErr || flatPriceErr
+    if (subscriptionErr) {
+      return Err(subscriptionErr)
     }
 
-    // TODO: save this to cache
-    const result = {
-      planVersion: {
-        description: phase.planVersion.description,
-        flatPrice: flatPrice.displayAmount,
-        currentTotalPrice: totalPricePlan.displayAmount,
-        billingConfig: phase.planVersion.billingConfig,
-      },
-      subscription: {
-        planSlug: subscription.planSlug,
-        status: subscription.status,
-        currentCycleEndAt: subscription.currentCycleEndAt,
-        timezone: subscription.timezone,
-        currentCycleStartAt: subscription.currentCycleStartAt,
-        prorationFactor: calculatedBillingCycle.prorationFactor,
-        prorated: calculatedBillingCycle.prorationFactor !== 1,
-      },
-      phase: {
-        trialEndsAt: phase.trialEndsAt,
-        endAt: phase.endAt,
-        trialDays: phase.trialDays,
-        isTrial: phase.trialEndsAt ? Date.now() < phase.trialEndsAt : false,
-      },
-      entitlement: entitlements.map((e) => {
-        const entitlementPhase = phase.customerEntitlements.find((p) => e.id === p.id)
+    const phase = subscription.activePhase
 
-        // if the entitlement is not found in the phase, it means it's a custom entitlement
-        // no need to add price information
-        if (!entitlementPhase) {
-          const featureVersion = phase.customerEntitlements.find(
-            (p) => p.featurePlanVersionId === e.featurePlanVersionId
-          )
-          return {
-            featureSlug: e.featureSlug,
-            featureType: e.featureType,
-            isCustom: true,
-            limit: e.limit,
-            usage: Number(e.usage),
-            units: e.units,
-            freeUnits: 0,
-            max: e.limit || Number.POSITIVE_INFINITY,
-            included: 0,
-            featureVersion: featureVersion?.featurePlanVersion!,
-            price: null,
-          }
+    if (!phase) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "SUBSCRIPTION_NOT_FOUND",
+          message: "subscription doesn't have an active phase",
+        })
+      )
+    }
+
+    const { err: entitlementsErr, val: entitlements } =
+      await this.customerService.getActiveEntitlements({
+        customerId,
+        projectId,
+        now,
+      })
+
+    if (entitlementsErr) {
+      return Err(entitlementsErr)
+    }
+
+    const { err: resultErr, val: result } = await this.cache.getCurrentUsage.swr(
+      cacheKey,
+      async () => {
+        const quantities = entitlements.reduce(
+          (acc, entitlement) => {
+            acc[entitlement.featurePlanVersionId] =
+              entitlement.featureType === "usage"
+                ? Number(entitlement.currentCycleUsage)
+                : Number(entitlement.units)
+            return acc
+          },
+          {} as Record<string, number>
+        )
+
+        const calculatedBillingCycle = calculateCycleWindow({
+          effectiveStartDate: phase.startAt,
+          effectiveEndDate: phase.endAt,
+          trialEndsAt: phase.trialEndsAt,
+          now: now,
+          billingConfig: phase.planVersion.billingConfig,
+        })
+
+        if (!calculatedBillingCycle) {
+          throw new Error("Failed to calculate billing cycle")
         }
 
-        const { config, featureType } = entitlementPhase.featurePlanVersion
-        const freeUnits = calculateFreeUnits({ config: config!, featureType: featureType })
-        const { val: price } = calculatePricePerFeature({
-          config: config!,
-          featureType: featureType,
-          quantity: quantities[entitlementPhase.featurePlanVersionId] ?? 0,
+        const { val: totalPricePlan, err: totalPricePlanErr } = calculateTotalPricePlan({
+          features: phase.customerEntitlements.map((e) => e.featurePlanVersion),
+          quantities: quantities,
+          prorate: calculatedBillingCycle.prorationFactor,
+          currency: phase.planVersion.currency,
+        })
+
+        const { err: flatPriceErr, val: flatPrice } = calculateFlatPricePlan({
+          planVersion: {
+            ...phase.planVersion,
+            planFeatures: phase.customerEntitlements.map((e) => e.featurePlanVersion),
+          },
           prorate: calculatedBillingCycle.prorationFactor,
         })
 
-        return {
-          featureSlug: e.featureSlug,
-          featureType: e.featureType,
-          limit: e.limit,
-          usage: Number(e.usage),
-          units: e.units,
-          isCustom: false,
-          freeUnits,
-          included:
-            freeUnits === Number.POSITIVE_INFINITY
-              ? e.limit || Number.POSITIVE_INFINITY
-              : freeUnits,
-          price: price?.totalPrice.displayAmount ?? "0",
-          max: e.limit || Number.POSITIVE_INFINITY,
-          featureVersion: entitlementPhase.featurePlanVersion,
+        if (totalPricePlanErr || flatPriceErr) {
+          throw totalPricePlanErr || flatPriceErr
         }
-      }),
+
+        const result = {
+          planVersion: {
+            description: phase.planVersion.description,
+            flatPrice: flatPrice.displayAmount,
+            currentTotalPrice: totalPricePlan.displayAmount,
+            billingConfig: phase.planVersion.billingConfig,
+          },
+          subscription: {
+            planSlug: subscription.planSlug,
+            status: subscription.status,
+            currentCycleEndAt: subscription.currentCycleEndAt,
+            timezone: subscription.timezone,
+            currentCycleStartAt: subscription.currentCycleStartAt,
+            prorationFactor: calculatedBillingCycle.prorationFactor,
+            prorated: calculatedBillingCycle.prorationFactor !== 1,
+          },
+          phase: {
+            trialEndsAt: phase.trialEndsAt,
+            endAt: phase.endAt,
+            trialUnits: phase.trialUnits,
+            isTrial: phase.trialEndsAt ? Date.now() < phase.trialEndsAt : false,
+          },
+          entitlement: entitlements.map((e) => {
+            const entitlementPhase = phase.customerEntitlements.find((p) => e.id === p.id)
+
+            // if the entitlement is not found in the phase, it means it's a custom entitlement
+            // no need to add price information
+            if (!entitlementPhase) {
+              const featureVersion = phase.customerEntitlements.find(
+                (p) => p.featurePlanVersionId === e.featurePlanVersionId
+              )
+              return {
+                featureSlug: e.featureSlug,
+                featureType: e.featureType,
+                isCustom: true,
+                limit: e.limit,
+                usage: Number(e.currentCycleUsage),
+                units: e.units,
+                freeUnits: 0,
+                max: e.limit || Number.POSITIVE_INFINITY,
+                included: 0,
+                featureVersion: featureVersion?.featurePlanVersion!,
+                price: null,
+              }
+            }
+
+            const { config, featureType } = entitlementPhase.featurePlanVersion
+            const { val: freeUnits, err: freeUnitsErr } = calculateFreeUnits({
+              config: config!,
+              featureType: featureType,
+            })
+
+            if (freeUnitsErr) {
+              throw freeUnitsErr
+            }
+
+            const { val: price, err: priceErr } = calculatePricePerFeature({
+              config: config!,
+              featureType: featureType,
+              quantity: quantities[entitlementPhase.featurePlanVersionId] ?? 0,
+              prorate: calculatedBillingCycle.prorationFactor,
+            })
+
+            if (priceErr) {
+              throw priceErr
+            }
+
+            return {
+              featureSlug: e.featureSlug,
+              featureType: e.featureType,
+              limit: e.limit,
+              usage: Number(e.currentCycleUsage),
+              units: e.units,
+              isCustom: false,
+              freeUnits,
+              included:
+                freeUnits === Number.POSITIVE_INFINITY
+                  ? e.limit || Number.POSITIVE_INFINITY
+                  : freeUnits,
+              price: price?.totalPrice.displayAmount ?? "0",
+              max: e.limit || Number.POSITIVE_INFINITY,
+              featureVersion: entitlementPhase.featurePlanVersion,
+            }
+          }),
+        }
+
+        return result
+      }
+    )
+
+    if (resultErr) {
+      return Err(resultErr)
     }
 
-    return result
+    if (!result) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "ENTITLEMENT_NOT_FOUND",
+          message: "failed to get current usage",
+        })
+      )
+    }
+
+    this.waitUntil(this.cache.getCurrentUsage.set(cacheKey, result))
+
+    return Ok(result)
   }
 }

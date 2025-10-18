@@ -1,4 +1,4 @@
-import { eq, relations } from "drizzle-orm"
+import { relations, sql } from "drizzle-orm"
 import { bigint, boolean, foreignKey, primaryKey, text, uniqueIndex } from "drizzle-orm/pg-core"
 
 import { pgTableProject } from "../utils/_table"
@@ -38,7 +38,10 @@ export const workspaces = pgTableProject(
     enabled: boolean("enabled").notNull().default(true),
   },
   (table) => ({
-    mainWorkspace: uniqueIndex("main_workspace").on(table.isMain).where(eq(table.isMain, true)),
+    // there must be only one main workspace
+    mainWorkspace: uniqueIndex("main_workspace")
+      .on(table.isMain)
+      .where(sql`${table.isMain} = true`),
   })
 )
 

@@ -1,8 +1,9 @@
 import { partyserverMiddleware } from "hono-party"
 import { cors } from "hono/cors"
-import type { Env } from "~/env"
+import { type Env, createRuntimeEnv } from "~/env"
 import { newApp } from "~/hono/app"
 import { init } from "~/middleware/init"
+import { metrics } from "~/middleware/metrics"
 
 import serveEmojiFavicon from "stoker/middlewares/serve-emoji-favicon"
 
@@ -12,12 +13,13 @@ export { DurableObjectProject } from "~/project/do"
 import { registerReportUsageV1 } from "~/routes/customer/reportUsageV1"
 import { registerCanV1 } from "./routes/customer/canV1"
 import { registerCreatePaymentMethodV1 } from "./routes/customer/createPaymentMethodV1"
-import { registerGetActivePhaseV1 } from "./routes/customer/getActivePhaseV1"
 import { registerGetEntitlementsV1 } from "./routes/customer/getEntitlementsV1"
 import { registerGetPaymentMethodsV1 } from "./routes/customer/getPaymentMethodsV1"
 import { registerGetSubscriptionV1 } from "./routes/customer/getSubscriptionV1"
 import { registerGetUsageV1 } from "./routes/customer/getUsageV1"
+import { registerPrewarmEntitlementsV1 } from "./routes/customer/prewarmEntitlementsV1"
 import { registerResetEntitlementsV1 } from "./routes/customer/resetEntitlementsV1"
+import { registerRevalidateEntitlementV1 } from "./routes/customer/revalidateEntitlementV1"
 import { registerSignUpV1 } from "./routes/customer/signUpV1"
 import { registerStripeSetupV1 } from "./routes/paymentProvider/stripeSetupV1"
 import { registerStripeSignUpV1 } from "./routes/paymentProvider/stripeSignUpV1"
@@ -27,21 +29,23 @@ import { registerGetFeaturesV1 } from "./routes/project/getFeaturesV1"
 
 import { env } from "cloudflare:workers"
 import { getToken } from "@auth/core/jwt"
+import { ConsoleLogger } from "@unprice/logging"
 import { timing } from "hono/timing"
 import { registerGetAnalyticsUsageV1 } from "./routes/analitycs/getUsageV1"
 import { registerGetAnalyticsVerificationsV1 } from "./routes/analitycs/getVerificationsV1"
 
 const app = newApp()
 
+app.use(timing())
 app.use(serveEmojiFavicon("◎"))
 
-app.use(timing())
 app.use("*", init())
 app.use("*", cors())
+app.use("*", metrics())
 
 // Handle websocket connections for Durable Objects
 app.use(
-  "*",
+  "/broadcast/**",
   partyserverMiddleware({
     onError: (error) => console.error(error),
     options: {
@@ -89,11 +93,12 @@ registerGetEntitlementsV1(app)
 registerCanV1(app)
 registerResetEntitlementsV1(app)
 registerGetSubscriptionV1(app)
-registerGetActivePhaseV1(app)
 registerGetUsageV1(app)
 registerGetPaymentMethodsV1(app)
 registerSignUpV1(app)
 registerCreatePaymentMethodV1(app)
+registerRevalidateEntitlementV1(app)
+registerPrewarmEntitlementsV1(app)
 
 // Project routes
 registerGetFeaturesV1(app)
@@ -113,7 +118,27 @@ registerGetAnalyticsVerificationsV1(app)
 // Export handler
 const handler = {
   fetch: (req: Request, env: Env, executionCtx: ExecutionContext) => {
-    return app.fetch(req, env, executionCtx)
+    try {
+      const parsedEnv = createRuntimeEnv(
+        env as unknown as Record<string, string | number | boolean>
+      )
+
+      return app.fetch(req, parsedEnv, executionCtx)
+    } catch (error) {
+      new ConsoleLogger({
+        requestId: "",
+        environment: env.NODE_ENV,
+        service: "api",
+      }).fatal(`BAD_ENVIRONMENT: ${error instanceof Error ? error.message : "Unknown error"}`)
+      return Response.json(
+        {
+          code: "BAD_ENVIRONMENT",
+          message: "Some environment variables are missing or are invalid",
+          errors: error instanceof Error ? error.message : "Unknown error",
+        },
+        { status: 500 }
+      )
+    }
   },
 } satisfies ExportedHandler<Env>
 

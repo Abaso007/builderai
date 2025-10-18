@@ -65,7 +65,7 @@ export default async function PlanPage({
                       paymentProvider: "stripe",
                       collectionMethod: "charge_automatically",
                       whenToBill: "pay_in_arrear",
-                      trialDays: 0,
+                      trialUnits: 0,
                       autoRenew: true,
                       paymentMethodRequired: false,
                       billingConfig: {
@@ -128,7 +128,6 @@ export default async function PlanPage({
                 "12rem",
                 "8rem",
               ]}
-              shrinkZero
             />
           }
         >

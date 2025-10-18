@@ -34,7 +34,7 @@ const unprice = new Unprice({
   baseUrl: process.env.UNPRICE_API_URL || "http://localhost:8787",
 })
 
-async function generateData(customerId: string, date: Date) {
+async function generateData(customerId: string, async?: boolean) {
   const now = performance.now()
 
   const { result: data } = await unprice.customers.getEntitlements(customerId)
@@ -51,15 +51,6 @@ async function generateData(customerId: string, date: Date) {
   )!
 
   for (let i = 0; i < 100; i++) {
-    // set the date for the timestamp at a random hour + minute + second
-    const timestamp = new Date(
-      date.setHours(
-        Math.floor(Math.random() * 24),
-        Math.floor(Math.random() * 60),
-        Math.floor(Math.random() * 60)
-      )
-    ).getTime()
-
     // ramdom usage between 1 and 100
     const usage = Math.floor(Math.random() * 100) + 1
     // pick a random feature slug
@@ -67,15 +58,21 @@ async function generateData(customerId: string, date: Date) {
       usageEntitlements[Math.floor(Math.random() * usageEntitlements.length)]?.featureSlug!
 
     if (featureSlug) {
-      await unprice.customers.reportUsage({
+      const result = await unprice.customers.reportUsage({
         customerId,
         featureSlug,
         usage,
         idempotenceKey: randomUUID(),
-        timestamp,
       })
 
-      console.info(`Usage ${usage} reported for ${featureSlug}`)
+      if (result.result?.success) {
+        console.info(`Usage ${usage} ${async ? "async" : "sync"} reported for ${featureSlug}`)
+      } else {
+        console.error(
+          `Usage ${usage} ${async ? "async" : "sync"} reported for ${featureSlug} failed`,
+          result.result?.message
+        )
+      }
     }
 
     // wait 200ms
@@ -87,13 +84,24 @@ async function generateData(customerId: string, date: Date) {
 
     if (randomFeatureSlug) {
       // verify the usage
-      await unprice.customers.can({
+      const result = await unprice.customers.can({
         customerId,
         featureSlug: randomFeatureSlug,
-        timestamp,
+        async,
       })
 
-      console.info(`Usage ${usage} verified for ${randomFeatureSlug}`)
+      console.info(
+        `Verification ${randomFeatureSlug} verified for ${customerId} in ${result.result?.latency}ms`
+      )
+
+      if (result.result?.success) {
+        console.info(`Verification ${randomFeatureSlug} verified for ${customerId}`)
+      } else {
+        console.error(
+          `Verification for ${randomFeatureSlug} and ${customerId} cannot be used`,
+          result.result?.message
+        )
+      }
     }
   }
 
@@ -101,40 +109,18 @@ async function generateData(customerId: string, date: Date) {
 }
 
 async function main() {
-  const today = new Date()
-
-  const yesterday = new Date(today.setDate(today.getDate() - 3))
-  const twoDaysAgo = new Date(today.setDate(today.getDate() - 4))
-  const threeDaysAgo = new Date(today.setDate(today.getDate() - 5))
-  const fourDaysAgo = new Date(today.setDate(today.getDate() - 6))
-  const fiveDaysAgo = new Date(today.setDate(today.getDate() - 7))
   const customerFree = "cus_1MeUjVxFbv8DP9X7f1UW9"
-  const customerPro = "cus_1MJ7etfqD3jbZTmayncaU"
+  const customerPro = "cus_1Kvgvu9qaReLXMtx3tNcg"
   const customerEnterprise = "cus_1MVdMxZ45uJKDo5z48hYJ"
 
-  // FREE plan
-  await generateData(customerFree, today)
-  await generateData(customerFree, yesterday)
-  await generateData(customerFree, twoDaysAgo)
-  await generateData(customerFree, threeDaysAgo)
-  await generateData(customerFree, fourDaysAgo)
-  await generateData(customerFree, fiveDaysAgo)
-
   // PRO plan
-  await generateData(customerPro, today)
-  await generateData(customerPro, yesterday)
-  await generateData(customerPro, twoDaysAgo)
-  await generateData(customerPro, threeDaysAgo)
-  await generateData(customerPro, fourDaysAgo)
-  await generateData(customerPro, fiveDaysAgo)
+  await generateData(customerPro, false)
+
+  // FREE plan
+  await generateData(customerFree)
 
   // ENTERPRISE plan
-  await generateData(customerEnterprise, today)
-  await generateData(customerEnterprise, yesterday)
-  await generateData(customerEnterprise, twoDaysAgo)
-  await generateData(customerEnterprise, threeDaysAgo)
-  await generateData(customerEnterprise, fourDaysAgo)
-  await generateData(customerEnterprise, fiveDaysAgo)
+  await generateData(customerEnterprise)
 }
 
 main()

@@ -1,5 +1,6 @@
 import { SchemaError } from "@unprice/error"
 import type { Context } from "hono"
+import { endTime, startTime } from "hono/timing"
 import { UnpriceApiError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
 
@@ -17,9 +18,29 @@ export async function keyAuth(c: Context<HonoEnv>) {
   }
 
   const { apikey } = c.get("services")
-  const { val: key, err } = await apikey.verifyApiKey(c, {
-    key: authorization,
-  })
+
+  // start timer
+  startTime(c, "verifyApiKey")
+
+  // quick off in parallel (reducing p95 latency)
+  const [rateLimited, verifyRes] = await Promise.all([
+    apikey.rateLimit({
+      key: authorization,
+      workspaceId: c.get("workspaceId") as string,
+      source: "cloudflare",
+      limiter: c.env.RL_FREE_600_60s,
+    }),
+    apikey.verifyApiKey({ key: authorization }),
+  ])
+
+  // end timer
+  endTime(c, "verifyApiKey")
+
+  if (!rateLimited) {
+    throw new UnpriceApiError({ code: "RATE_LIMITED", message: "apikey rate limit exceeded" })
+  }
+
+  const { val: key, err } = verifyRes
 
   if (err) {
     switch (true) {
@@ -41,6 +62,10 @@ export async function keyAuth(c: Context<HonoEnv>) {
       message: "key not found",
     })
   }
+
+  c.set("workspaceId", key.project.workspaceId)
+  c.set("projectId", key.project.id)
+  c.set("unPriceCustomerId", key.project.workspace.unPriceCustomerId)
 
   return key
 }

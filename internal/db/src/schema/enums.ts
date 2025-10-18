@@ -3,13 +3,15 @@ import { pgEnum } from "drizzle-orm/pg-core"
 import {
   AGGREGATION_METHODS,
   BILLING_INTERVALS,
+  BILLING_PERIOD_STATUS,
+  BILLING_PERIOD_TYPE,
   COLLECTION_METHODS,
   CURRENCIES,
   DUE_BEHAVIOUR,
   FEATURE_TYPES,
   FEATURE_VERSION_TYPES,
+  INVOICE_ITEM_KIND,
   INVOICE_STATUS,
-  INVOICE_TYPE,
   PAYMENT_PROVIDERS,
   PLAN_TYPES,
   ROLES_APP,
@@ -21,9 +23,10 @@ import {
   WHEN_TO_BILLING,
 } from "../utils"
 
-export const subscriptionStatusEnum = pgEnum("subscription_status", SUBSCRIPTION_STATUS)
+export const subscriptionStatusEnum = pgEnum("subscription_status_v3", SUBSCRIPTION_STATUS)
+export const billingPeriodStatusEnum = pgEnum("billing_period_status_v1", BILLING_PERIOD_STATUS)
+export const billingPeriodTypeEnum = pgEnum("billing_period_type", BILLING_PERIOD_TYPE)
 export const invoiceStatusEnum = pgEnum("invoice_status", INVOICE_STATUS)
-export const invoiceTypeEnum = pgEnum("invoice_type", INVOICE_TYPE)
 export const statusPlanEnum = pgEnum("plan_version_status", STATUS_PLAN)
 export const typeFeatureEnum = pgEnum("feature_types", FEATURE_TYPES)
 export const typeFeatureVersionEnum = pgEnum("feature_version_types", FEATURE_VERSION_TYPES)
@@ -39,3 +42,4 @@ export const billingIntervalEnum = pgEnum("billing_interval", BILLING_INTERVALS)
 export const planTypeEnum = pgEnum("plan_type", PLAN_TYPES)
 export const whenToBillEnum = pgEnum("when_to_bill", WHEN_TO_BILLING)
 export const collectionMethodEnum = pgEnum("collection_method", COLLECTION_METHODS)
+export const invoiceItemKindEnum = pgEnum("invoice_item_kind", INVOICE_ITEM_KIND)

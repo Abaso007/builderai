@@ -6,7 +6,7 @@ export class UnPricePaymentProviderError extends BaseError {
 
   constructor({ message }: { message: string }) {
     super({
-      message: `Payment provider error: ${message}`,
+      message: message ?? "",
     })
   }
 }

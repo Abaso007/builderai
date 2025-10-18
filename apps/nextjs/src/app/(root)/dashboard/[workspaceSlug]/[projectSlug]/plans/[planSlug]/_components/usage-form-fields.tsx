@@ -7,6 +7,7 @@ import { Separator } from "@unprice/ui/separator"
 
 import {
   AggregationMethodFormField,
+  BillingConfigFeatureFormField,
   LimitFormField,
   PriceFormField,
   TierFormField,
@@ -24,6 +25,10 @@ export function UsageFormFields({
 }) {
   return (
     <div className="flex flex-col space-y-6">
+      <BillingConfigFeatureFormField form={form} isDisabled={isDisabled} />
+
+      <Separator />
+
       <div className="flex w-full justify-between">
         <AggregationMethodFormField form={form} isDisabled={isDisabled} />
       </div>

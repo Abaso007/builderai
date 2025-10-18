@@ -1,3 +1,4 @@
+import { SUBSCRIPTION_STATUS } from "@unprice/db/utils"
 import { Button } from "@unprice/ui/button"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
 import { Typography } from "@unprice/ui/typography"
@@ -76,6 +77,7 @@ export default async function PlanSubscriptionsPage({
           fallback={
             <DataTableSkeleton
               columnCount={12}
+              rowCount={1}
               searchableColumnCount={1}
               filterableColumnCount={2}
               cellWidths={[
@@ -92,7 +94,6 @@ export default async function PlanSubscriptionsPage({
                 "12rem",
                 "8rem",
               ]}
-              shrinkZero
             />
           }
         >
@@ -100,12 +101,12 @@ export default async function PlanSubscriptionsPage({
             columns={columns}
             data={subscriptions}
             filterOptions={{
-              filterBy: "customer",
+              filterBy: "customerId",
               filterColumns: true,
               filterDateRange: true,
               filterServerSide: true,
               filterSelectors: {
-                status: ["active", "inactive"].map((value) => ({
+                status: SUBSCRIPTION_STATUS.map((value) => ({
                   value: value,
                   label: value,
                 })),

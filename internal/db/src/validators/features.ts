@@ -2,7 +2,7 @@ import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import * as z from "zod"
 
 import * as schema from "../schema"
-import { deniedReasonSchema, typeFeatureSchema, unpriceCustomerErrorSchema } from "./shared"
+import { deniedReasonSchema, typeFeatureSchema } from "./shared"
 
 export const featureSelectBaseSchema = createSelectSchema(schema.features)
 
@@ -35,7 +35,7 @@ export type Feature = z.infer<typeof featureSelectBaseSchema>
 
 export const featureVerificationSchema = z.object({
   success: z.boolean(),
-  deniedReason: z.union([deniedReasonSchema, unpriceCustomerErrorSchema]).optional(),
+  deniedReason: deniedReasonSchema.optional(),
   currentUsage: z.number().optional(),
   limit: z.number().optional(),
   featureType: typeFeatureSchema.optional(),

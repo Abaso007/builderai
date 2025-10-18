@@ -1,5 +1,8 @@
 import { NoopTinybird, Tinybird } from "@jhonsfran/zod-bird"
+import { Err, type FetchError, Ok, type Result } from "@unprice/error"
+import type { Logger } from "@unprice/logging"
 import { z } from "zod"
+import { UnPriceAnalyticsError } from "./errors"
 import {
   type AnalyticsEventAction,
   analyticsEventSchema,
@@ -13,12 +16,15 @@ import {
   schemaPlanVersionFeature,
 } from "./validators"
 
+// TODO: create interface to handle multiple clients analytics
 export class Analytics {
   public readonly readClient: Tinybird | NoopTinybird
   public readonly writeClient: Tinybird | NoopTinybird
   public readonly isNoop: boolean
+  private readonly logger: Logger
 
   constructor(opts: {
+    logger: Logger
     emit: boolean
     tinybirdToken?: string
     tinybirdUrl: string
@@ -27,11 +33,13 @@ export class Analytics {
       token: string
     }
   }) {
+    this.logger = opts.logger
     this.readClient =
       opts.tinybirdToken && opts.emit
         ? new Tinybird({ token: opts.tinybirdToken, baseUrl: opts.tinybirdUrl })
         : new NoopTinybird()
 
+    // TODO: implement delete endpoint https://www.tinybird.co/docs/api-reference/datasource-api#delete--v0-datasources-(.+)
     this.writeClient =
       opts.tinybirdProxy && opts.emit
         ? new Tinybird({
@@ -126,6 +134,7 @@ export class Analytics {
     })
   }
 
+  // analytics pages
   public get getPlanClickBySessionId() {
     return this.readClient.buildPipe({
       pipe: "v1_get_session_event",
@@ -147,6 +156,7 @@ export class Analytics {
     })
   }
 
+  // analytics events
   public get getLatestEvents() {
     return this.readClient.buildPipe({
       pipe: "v1_get_latest_events",
@@ -164,6 +174,7 @@ export class Analytics {
     })
   }
 
+  // analytics pages
   public get getPlansConversion() {
     return this.readClient.buildPipe({
       pipe: "v1_get_plans_conversion",
@@ -187,6 +198,7 @@ export class Analytics {
     })
   }
 
+  // analytics pages
   public get getBrowserVisits() {
     return this.readClient.buildPipe({
       pipe: "v1_get_top_browsers",
@@ -208,6 +220,7 @@ export class Analytics {
     })
   }
 
+  // analytics pages
   public get getCountryVisits() {
     return this.readClient.buildPipe({
       pipe: "v1_get_top_countries",
@@ -257,12 +270,14 @@ export class Analytics {
     })
   }
 
+  // analytics features
   public get getFeaturesOverview() {
     return this.readClient.buildPipe({
       pipe: "v1_get_features_overview",
       parameters: z.object({
         intervalDays: z.number().optional(),
         projectId: z.string().optional(),
+        timezone: z.string().optional(),
       }),
       data: z.object({
         date: z.coerce.date(),
@@ -306,12 +321,14 @@ export class Analytics {
     })
   }
 
+  // analytics verifications
   public get getFeaturesVerificationRegions() {
     return this.readClient.buildPipe({
       pipe: "v1_get_feature_verification_regions",
       parameters: z.object({
         intervalDays: z.number().optional(),
         projectId: z.string(),
+        timezone: z.string().optional(),
         region: z.string().optional(),
         start: z.number().optional(),
         end: z.number().optional(),
@@ -332,13 +349,13 @@ export class Analytics {
     })
   }
 
+  // analytics usage
   public get getFeaturesUsagePeriod() {
     return this.readClient.buildPipe({
       pipe: "v1_get_feature_usage_period",
       parameters: z.object({
-        projectId: z.string().optional(),
+        projectId: z.string(),
         customerId: z.string().optional(),
-        featureSlug: z.string().optional(),
         entitlementId: z.string().optional(),
         intervalDays: z.number().optional(),
         start: z.number().optional(),
@@ -362,19 +379,19 @@ export class Analytics {
     })
   }
 
+  // analytics usage
   public get getFeaturesUsageTotal() {
     return this.readClient.buildPipe({
       pipe: "v1_get_feature_usage_total",
       parameters: z.object({
         projectId: z.string(),
         customerId: z.string(),
-        featureSlug: z.string().optional(),
-        entitlementId: z.string().optional(),
+        entitlementIds: z.array(z.string()),
       }),
       data: z.object({
         projectId: z.string(),
         customerId: z.string(),
-        entitlementId: z.string().optional(),
+        entitlementId: z.string(),
         featureSlug: z.string(),
         count_all: z.number(),
         sum_all: z.number(),
@@ -393,7 +410,8 @@ export class Analytics {
     return this.readClient.buildPipe({
       pipe: "v1_get_feature_usage_no_duplicates",
       parameters: z.object({
-        subscriptionItemId: z.string(),
+        entitlementIds: z.array(z.string()).optional(),
+        subscriptionItemIds: z.array(z.string()).optional(),
         customerId: z.string(),
         projectId: z.string(),
         start: z.number().optional(),
@@ -401,12 +419,16 @@ export class Analytics {
       }),
       data: z.object({
         projectId: z.string(),
-        customerId: z.string().optional(),
+        customerId: z.string(),
+        entitlementId: z.string().optional(),
         subscriptionItemId: z.string().optional(),
         featureSlug: z.string(),
-        sum: z.number(),
-        max: z.number(),
-        count: z.number(),
+        sum_all: z.number().optional(),
+        max_all: z.number().optional(),
+        count_all: z.number().optional(),
+        sum: z.number().optional(),
+        max: z.number().optional(),
+        count: z.number().optional(),
         last_during_period: z.number(),
       }),
       opts: {
@@ -441,5 +463,244 @@ export class Analytics {
         timeout: 5000, // 5 seconds
       },
     })
+  }
+
+  // TODO: add telemtry for this endpoint to know how many times it's being called and the latency
+  public async getUsageBillingEntitlements({
+    customerId,
+    projectId,
+    entitlements,
+    startAt,
+    endAt,
+    includeAccumulatedUsage,
+  }: {
+    customerId: string
+    projectId: string
+    entitlements: {
+      entitlementId: string
+      aggregationMethod: string
+      featureType: string
+    }[]
+    startAt: number
+    endAt: number
+    includeAccumulatedUsage: boolean
+  }): Promise<
+    Result<
+      { entitlementId: string; usage: number; accumulatedUsage: number }[] | null,
+      FetchError | UnPriceAnalyticsError
+    >
+  > {
+    // filter that only usage, package and tier features are being requested
+    const entitlementsUsage = entitlements.filter((entitlement) =>
+      ["usage", "package", "tier"].includes(entitlement.featureType)
+    )
+
+    const entitlementIdsArray = entitlementsUsage.map((entitlement) => entitlement.entitlementId)
+
+    if (entitlementIdsArray.length === 0) {
+      return Ok([])
+    }
+
+    // we use the same endpoint for billing usage as it's the
+    // more accurate one
+    const [totalAccumulatedUsages, totalPeriodUsages] = await Promise.all([
+      includeAccumulatedUsage
+        ? this.getBillingUsage({ customerId, projectId, entitlementIds: entitlementIdsArray })
+            .then((usage) => usage.data ?? [])
+            .catch((error) => {
+              this.logger.error("error getting features usage total", {
+                error: JSON.stringify(error),
+                customerId,
+                projectId,
+                entitlementIds: entitlementIdsArray,
+                startAt,
+                endAt,
+                includeAccumulatedUsage,
+              })
+              return null
+            })
+        : Promise.resolve([]),
+      this.getBillingUsage({
+        customerId,
+        projectId,
+        entitlementIds: entitlementIdsArray,
+        start: startAt,
+        end: endAt,
+      })
+        .then((usage) => usage.data ?? [])
+        .catch((error) => {
+          this.logger.error("error getting features usage period", {
+            error: JSON.stringify(error),
+            customerId,
+            projectId,
+            entitlementIds: entitlementIdsArray,
+            startAt,
+            endAt,
+          })
+          return null
+        }),
+    ])
+
+    // if there was an error, return null
+    if (!totalPeriodUsages || !totalAccumulatedUsages) {
+      return Err(new UnPriceAnalyticsError({ message: "Error getting usage billing entitlements" }))
+    }
+
+    const result = []
+
+    // iterate over the entitlements
+    for (const entitlement of entitlements) {
+      let accumulatedUsage = 0
+      let usage = 0
+      const aggregationMethod = entitlement.aggregationMethod
+      const isAccumulated = entitlement.aggregationMethod.endsWith("_all")
+
+      const totalUsage = totalPeriodUsages.find(
+        (usage) => usage.entitlementId === entitlement.entitlementId
+      )
+      const totalAccumulatedUsage = totalAccumulatedUsages.find(
+        (usage) => usage.entitlementId === entitlement.entitlementId
+      )
+
+      if (totalUsage) {
+        usage = (totalUsage[aggregationMethod as keyof typeof totalUsage] as number) ?? 0
+      }
+
+      // if the aggregation method is _all, we get the usage for all time
+      if (totalAccumulatedUsage && isAccumulated) {
+        accumulatedUsage =
+          (totalAccumulatedUsage[
+            aggregationMethod as keyof typeof totalAccumulatedUsage
+          ] as number) ?? 0
+      }
+
+      result.push({
+        entitlementId: entitlement.entitlementId,
+        accumulatedUsage,
+        usage,
+      })
+    }
+
+    return Ok(result)
+  }
+
+  public async getUsageBillingSubscriptionItems({
+    customerId,
+    projectId,
+    subscriptionItems,
+    startAt,
+    endAt,
+  }: {
+    customerId: string
+    projectId: string
+    subscriptionItems: {
+      subscriptionItemId: string
+      aggregationMethod: string
+      featureType: string
+    }[]
+    startAt: number
+    endAt: number
+  }): Promise<
+    Result<
+      { subscriptionItemId: string; usage: number; accumulatedUsage: number }[],
+      FetchError | UnPriceAnalyticsError
+    >
+  > {
+    // filter that only usage, package and tier features are being requested
+    const subscriptionItemsUsage = subscriptionItems.filter((subscriptionItem) =>
+      ["usage", "package", "tier"].includes(subscriptionItem.featureType)
+    )
+
+    const subscriptionItemIdsArray = subscriptionItemsUsage.map(
+      (subscriptionItem) => subscriptionItem.subscriptionItemId
+    )
+
+    if (subscriptionItemIdsArray.length === 0) {
+      return Ok([])
+    }
+
+    // we use the same endpoint for billing usage as it's the
+    // more accurate one
+    const [totalAccumulatedUsages, totalPeriodUsages] = await Promise.all([
+      this.getBillingUsage({ customerId, projectId, subscriptionItemIds: subscriptionItemIdsArray })
+        .then((usage) => usage.data ?? [])
+        .catch((error) => {
+          this.logger.error("error getting features usage total", {
+            error: JSON.stringify(error),
+            customerId,
+            projectId,
+            subscriptionItemIds: subscriptionItemIdsArray,
+            startAt,
+            endAt,
+          })
+          return null
+        }),
+      this.getBillingUsage({
+        customerId,
+        projectId,
+        subscriptionItemIds: subscriptionItemIdsArray,
+        start: startAt,
+        end: endAt,
+      })
+        .then((usage) => usage.data ?? [])
+        .catch((error) => {
+          this.logger.error("error getting features usage period", {
+            error: JSON.stringify(error),
+            customerId,
+            projectId,
+            subscriptionItemIds: subscriptionItemIdsArray,
+            startAt,
+            endAt,
+          })
+          return null
+        }),
+    ])
+
+    // if there was an error, return null
+    if (!totalPeriodUsages || !totalAccumulatedUsages) {
+      return Err(
+        new UnPriceAnalyticsError({ message: "Error getting usage billing subscription items" })
+      )
+    }
+
+    // if there are no usages, return an empty array
+    if (totalPeriodUsages.length === 0 || totalAccumulatedUsages.length === 0) {
+      return Ok([])
+    }
+
+    const result = []
+
+    // iterate over the entitlements
+    for (const subscriptionItem of subscriptionItems) {
+      let accumulatedUsage = 0
+      let usage = 0
+      const aggregationMethod = subscriptionItem.aggregationMethod
+
+      const totalUsage = totalPeriodUsages.find(
+        (usage) => usage.subscriptionItemId === subscriptionItem.subscriptionItemId
+      )
+      const totalAccumulatedUsage = totalAccumulatedUsages.find(
+        (usage) => usage.subscriptionItemId === subscriptionItem.subscriptionItemId
+      )
+
+      if (totalUsage) {
+        usage = (totalUsage[aggregationMethod as keyof typeof totalUsage] as number) ?? 0
+      }
+
+      if (totalAccumulatedUsage) {
+        accumulatedUsage =
+          (totalAccumulatedUsage[
+            aggregationMethod as keyof typeof totalAccumulatedUsage
+          ] as number) ?? 0
+      }
+
+      result.push({
+        subscriptionItemId: subscriptionItem.subscriptionItemId,
+        accumulatedUsage,
+        usage,
+      })
+    }
+
+    return Ok(result)
   }
 }

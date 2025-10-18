@@ -91,7 +91,7 @@ export const duplicate = protectedProjectProcedure
           .values({
             ...planVersionData,
             id: planVersionId,
-            trialDays: planVersionData.trialDays,
+            trialUnits: planVersionData.trialUnits,
             billingConfig: planVersionData.billingConfig,
             autoRenew: planVersionData.autoRenew,
             paymentMethodRequired: planVersionData.paymentMethodRequired,

@@ -1,5 +1,5 @@
 import type { Analytics } from "@unprice/analytics"
-import type { Database, TransactionDatabase } from "@unprice/db"
+import type { Database } from "@unprice/db"
 import { nFormatter } from "@unprice/db/utils"
 import {
   type BillingInterval,
@@ -17,7 +17,7 @@ import type { Metrics } from "../metrics"
 import { retry } from "../utils/retry"
 
 export class PlanService {
-  private readonly db: Database | TransactionDatabase
+  private readonly db: Database
   private readonly logger: Logger
   private readonly analytics: Analytics
   private readonly cache: Cache
@@ -40,7 +40,7 @@ export class PlanService {
     // Create a stable string representation
     const paramsString = JSON.stringify(sortedParams)
       .replace(/["'{}]/g, "")
-      .replace(",", "-")
+      .replace(/,/g, "-")
 
     // Use a separator that's unlikely to appear in the data
     return `${prefix}:${paramsString}`
@@ -54,7 +54,7 @@ export class PlanService {
     cache,
     metrics,
   }: {
-    db: Database | TransactionDatabase
+    db: Database
     logger: Logger
     analytics: Analytics
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
@@ -80,10 +80,18 @@ export class PlanService {
     const planFeatures = planVersion.planFeatures.map((planFeature) => {
       let displayFeatureText = ""
 
-      const freeUnits = calculateFreeUnits({
+      const { val: freeUnits, err: freeUnitsErr } = calculateFreeUnits({
         config: planFeature.config!,
         featureType: planFeature.featureType,
       })
+
+      if (freeUnitsErr) {
+        console.error(freeUnitsErr)
+        return {
+          ...planFeature,
+          displayFeatureText: "error calculating free units",
+        }
+      }
 
       const freeUnitsText =
         freeUnits === Number.POSITIVE_INFINITY
@@ -259,15 +267,15 @@ export class PlanService {
     })
 
     if (planVersionsData.length === 0) {
-      null
+      return null
     }
 
-    if (enterprise) {
-      planVersionsData.filter((version) => version.plan.enterprisePlan)
-    }
+    const filtered = enterprise
+      ? planVersionsData.filter((version) => version.plan.enterprisePlan)
+      : planVersionsData
 
     // format every plan
-    const result = planVersionsData.map((version) => {
+    const result = filtered.map((version) => {
       return this.formatPlanVersion({
         planVersion: version,
       })

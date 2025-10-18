@@ -27,9 +27,13 @@ export const prefixes = {
   usage: "usage",
   log: "log",
   invoice: "inv",
+  billing_period: "bp",
   payment_provider_config: "ppc",
   isolate: "iso",
   session: "sess",
+  subscription_lock: "slock",
+  invoice_item: "ii",
+  invoice_credit_application: "ica",
 } as const
 
 // Thread-local counter for monotonicity within the same millisecond
@@ -100,6 +104,10 @@ export function newId<TPrefix extends keyof typeof prefixes>(
   buf[8] = (buf[8]! & 0x3f) | 0x80
 
   return `${prefixes[prefix]}_${b58.encode(buf)}` as const
+}
+
+export function randomId(): string {
+  return b58.encode(new Uint8Array(16))
 }
 
 /**

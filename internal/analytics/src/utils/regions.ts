@@ -456,6 +456,7 @@ export const regionsCloudflare: Record<string, RegionCloudflare> = {
   DKR: { code: "DKR", location: "Dakar, Senegal", flag: "🇸🇳" },
   BEG: { code: "BEG", location: "Belgrade, Serbia", flag: "🇷🇸" },
   SGP: { code: "SGP", location: "Singapore", flag: "🇸🇬" },
+  SIN: { code: "SIN", location: "Singapore", flag: "🇸🇬" },
   LJU: { code: "LJU", location: "Ljubljana, Slovenia", flag: "🇸🇮" },
   CPT: { code: "CPT", location: "Cape Town, South Africa", flag: "🇿🇦" },
   DUR: { code: "DUR", location: "Durban, South Africa", flag: "🇿🇦" },

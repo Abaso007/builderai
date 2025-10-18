@@ -48,7 +48,7 @@ export const columns: ColumnDef<Subscription>[] = [
     enableResizing: false,
   },
   {
-    accessorKey: "customer",
+    accessorKey: "customerId",
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Customer" />,
     cell: ({ row }) => {
@@ -65,6 +65,25 @@ export const columns: ColumnDef<Subscription>[] = [
       )
     },
     size: 40,
+    filterFn: (row, _, filterValue) => {
+      // search by name, email or customer id
+      const searchValue = filterValue.toLowerCase()
+      const name = row.original.customer.name.toLowerCase()
+      const email = row.original.customer.email.toLowerCase()
+      const id = row.original.customer.id.toLowerCase()
+      const planSlug = row.original.planSlug.toLowerCase()
+
+      if (
+        name.includes(searchValue) ||
+        email.includes(searchValue) ||
+        id.includes(searchValue) ||
+        planSlug.includes(searchValue)
+      ) {
+        return true
+      }
+
+      return false
+    },
   },
   {
     accessorKey: "status",
@@ -73,14 +92,13 @@ export const columns: ColumnDef<Subscription>[] = [
     cell: ({ row }) => {
       return (
         <Badge variant={row.original.active ? "success" : "destructive"}>
-          {row.original.active ? "active" : "inactive"}
+          {row.original.status}
         </Badge>
       )
     },
     size: 20,
     filterFn: (row, _id, value) => {
-      const status = row.original.active ? "active" : "inactive"
-
+      const status = row.original.status.toLowerCase()
       return Array.isArray(value) && value.includes(status)
     },
   },
@@ -174,54 +192,6 @@ export const columns: ColumnDef<Subscription>[] = [
                 <Typography variant="p" affects="removePaddingMargin" className="text-xs">
                   <span className="font-semibold">Customer time: </span>
                   {format(new Date(endDate), "PPpp")}
-                </Typography>
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      )
-    },
-    enableSorting: true,
-    enableHiding: true,
-    size: 40,
-  },
-  {
-    accessorKey: "invoiceAt",
-    header: ({ column }) => <DataTableColumnHeader column={column} title="Next invoice" />,
-    cell: ({ row }) => {
-      const invoiceDate = row.original.invoiceAt
-
-      if (invoiceDate === null || invoiceDate === undefined) {
-        return (
-          <Typography variant="p" affects="removePaddingMargin">
-            No defined yet
-          </Typography>
-        )
-      }
-
-      return (
-        <div className="flex items-center space-x-1 whitespace-nowrap">
-          <Typography variant="p" affects="removePaddingMargin">
-            {formatDate(invoiceDate, row.original.timezone)}
-          </Typography>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <AlertCircle className="size-4 font-light text-muted-foreground" />
-            </TooltipTrigger>
-            <TooltipContent align="start" side="right" sideOffset={10} alignOffset={-5}>
-              <div className="flex flex-col gap-1">
-                <Typography variant="p" affects="removePaddingMargin" className="font-semibold">
-                  Timezone: {row.original.timezone}
-                </Typography>
-                <Separator className="my-1" />
-                <Typography variant="p" affects="removePaddingMargin" className="text-xs">
-                  <span className="font-semibold">Local time: </span>
-                  {format(toZonedTime(invoiceDate, row.original.timezone), "PPpp")}
-                </Typography>
-
-                <Typography variant="p" affects="removePaddingMargin" className="text-xs">
-                  <span className="font-semibold">Customer time: </span>
-                  {format(new Date(invoiceDate), "PPpp")}
                 </Typography>
               </div>
             </TooltipContent>

@@ -1,25 +1,23 @@
 import { task } from "@trigger.dev/sdk/v3"
-import { SubscriptionService } from "@unprice/services/subscriptions"
+import { BillingService } from "@unprice/services/billing"
 import { createContext } from "./context"
 
 export const finilizeTask = task({
-  id: "subscription.phase.finilize",
+  id: "invoice.finilize.task",
   retry: {
     maxAttempts: 1,
   },
   run: async (
     {
-      subscriptionPhaseId,
-      invoiceId,
       projectId,
       now,
       subscriptionId,
+      invoiceId,
     }: {
-      subscriptionPhaseId: string
       projectId: string
-      invoiceId: string
       now: number
       subscriptionId: string
+      invoiceId: string
     },
     { ctx }
   ) => {
@@ -27,23 +25,20 @@ export const finilizeTask = task({
       taskId: ctx.task.id,
       subscriptionId,
       projectId,
-      phaseId: subscriptionPhaseId,
       defaultFields: {
         subscriptionId,
         projectId,
-        api: "jobs.subscription.phase.billing",
-        subscriptionPhaseId,
-        invoiceId,
+        api: "jobs.invoice.finilize",
         now: now.toString(),
+        invoiceId,
       },
     })
 
-    const subscriptionService = new SubscriptionService(context)
-
-    const finalizeInvoiceResult = await subscriptionService.finalizeInvoice({
-      invoiceId,
+    const billingService = new BillingService(context)
+    const finalizeInvoiceResult = await billingService.finalizeInvoice({
       projectId,
       subscriptionId,
+      invoiceId,
       now,
     })
 
@@ -56,7 +51,6 @@ export const finilizeTask = task({
       subscriptionId,
       projectId,
       now,
-      subscriptionPhaseId,
     }
   },
 })

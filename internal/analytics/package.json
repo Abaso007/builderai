@@ -23,7 +23,9 @@
   "dependencies": {
     "@jhonsfran/zod-bird": "^1.0.2",
     "@t3-oss/env-core": "^0.12.0",
-    "zod": "^3.24.2"
+    "zod": "^3.24.2",
+    "@unprice/error": "workspace:^",
+    "@unprice/logging": "workspace:^"
   },
   "devDependencies": {
     "@unprice/tsconfig": "^0.1.0",

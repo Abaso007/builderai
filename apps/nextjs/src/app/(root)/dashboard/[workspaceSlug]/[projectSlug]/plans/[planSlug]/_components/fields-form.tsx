@@ -4,7 +4,7 @@ import { DollarSignIcon, HelpCircle, Plus, XCircle } from "lucide-react"
 import type { UseFormReturn } from "react-hook-form"
 import { useFieldArray } from "react-hook-form"
 
-import { AGGREGATION_METHODS, AGGREGATION_METHODS_MAP } from "@unprice/db/utils"
+import { AGGREGATION_METHODS, AGGREGATION_METHODS_MAP, BILLING_CONFIG } from "@unprice/db/utils"
 import type { Currency, PlanVersionFeatureInsert } from "@unprice/db/validators"
 
 import { currencySymbol } from "@unprice/db/utils"
@@ -186,6 +186,74 @@ export function UnitsFormField({
   )
 }
 
+export function BillingConfigFeatureFormField({
+  form,
+  isDisabled,
+}: {
+  form: UseFormReturn<PlanVersionFeatureInsert>
+  isDisabled?: boolean
+}) {
+  // filter dev option when node_env is production
+  const options = Object.entries(BILLING_CONFIG)
+    .filter(([key]) => {
+      if (process.env.NODE_ENV === "production") {
+        return BILLING_CONFIG[key]?.dev !== true
+      }
+
+      // deactivate yearly for now
+      return !["yearly", "onetime"].includes(key)
+    })
+    .map(([key, value]) => ({
+      label: value.label,
+      key,
+      description: value.description,
+    }))
+
+  return (
+    <div className="w-full">
+      <FormField
+        control={form.control}
+        name={"billingConfig.name"}
+        render={({ field }) => (
+          <FormItem className="flex w-full flex-col">
+            <FormLabel>Billing Interval</FormLabel>
+            <FormDescription>
+              The interval for this item. This is different from the billing interval of the plan.
+            </FormDescription>
+            <Select
+              onValueChange={(value) => {
+                const config = BILLING_CONFIG[value]
+                if (!config) return
+
+                form.setValue("billingConfig.planType", config.planType)
+                form.setValue("billingConfig.billingIntervalCount", config.billingIntervalCount)
+                form.setValue("billingConfig.billingInterval", config.billingInterval)
+                form.setValue("billingConfig.name", value)
+              }}
+              value={field.value?.toString() ?? ""}
+              disabled={isDisabled}
+            >
+              <FormControl>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a billing interval" />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent className="text-xs">
+                {options.map((value) => (
+                  <SelectItem value={value.key} key={value.key} description={value.description}>
+                    {value.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+    </div>
+  )
+}
+
 export function AggregationMethodFormField({
   form,
   isDisabled,
@@ -208,24 +276,18 @@ export function AggregationMethodFormField({
             </div>
             <Select onValueChange={field.onChange} value={field.value ?? ""} disabled={isDisabled}>
               <FormControl className="truncate">
-                <SelectTrigger
-                  className="items-start [&_[data-description]]:hidden"
-                  disabled={isDisabled}
-                >
+                <SelectTrigger disabled={isDisabled}>
                   <SelectValue placeholder="Select type" />
                 </SelectTrigger>
               </FormControl>
-              <SelectContent>
+              <SelectContent className="text-xs">
                 {AGGREGATION_METHODS.map((mode) => (
-                  <SelectItem value={mode} key={mode}>
-                    <div className="flex items-start gap-3">
-                      <div className="grid gap-0.5">
-                        <p>{AGGREGATION_METHODS_MAP[mode].label}</p>
-                        <p className="text-xs" data-description>
-                          {AGGREGATION_METHODS_MAP[mode].description}
-                        </p>
-                      </div>
-                    </div>
+                  <SelectItem
+                    value={mode}
+                    key={mode}
+                    description={AGGREGATION_METHODS_MAP[mode].description}
+                  >
+                    {AGGREGATION_METHODS_MAP[mode].label}
                   </SelectItem>
                 ))}
               </SelectContent>

@@ -18,10 +18,13 @@ SCHEMA >
     `billing_interval_count` Int8 `json:$.billing_interval_count`,
     `billing_anchor` LowCardinality(String) `json:$.billing_anchor`,
     `plan_type` LowCardinality(String) `json:$.plan_type`,
-    `trial_days` Int8 `json:$.trial_days`,
+    `trial_units` Int8 `json:$.trial_units`,
     `payment_method_required` Int8 `json:$.payment_method_required`,
     `timestamp` DateTime64(3) `json:$.timestamp`,
 
 ENGINE MergeTree
 ENGINE_PARTITION_KEY toYYYYMM(timestamp)
 ENGINE_SORTING_KEY id
+
+FORWARD_QUERY >
+  SELECT id, project_id, plan_id, plan_slug, plan_version, currency, payment_provider, billing_interval, billing_interval_count, billing_anchor, plan_type, defaultValueOfTypeName('Int8') AS trial_units, payment_method_required, timestamp

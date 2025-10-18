@@ -2,27 +2,19 @@ import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import { z } from "zod"
 import { extendZodWithOpenApi } from "zod-openapi"
 import * as schema from "../schema"
+import { featureSelectBaseSchema } from "./features"
+import { planVersionFeatureSelectBaseSchema } from "./planVersionFeatures"
+import { billingConfigSchema } from "./shared"
 import {
-  aggregationMethodSchema,
   billingIntervalSchema,
   currencySchema,
-  featureVersionType,
   paymentProviderSchema,
+  subscriptionStatusSchema,
   typeFeatureSchema,
 } from "./shared"
 import { subscriptionItemsConfigSchema } from "./subscriptions/items"
 
 extendZodWithOpenApi(z)
-
-export const reasonCreditSchema = z.enum([
-  "downgrade_in_advance",
-  "downgrade_arrear",
-  "invoice_total_overdue",
-])
-export const customerCreditMetadataSchema = z.object({
-  reason: reasonCreditSchema.optional().describe("Reason for the invoice credit"),
-  note: z.string().optional().describe("Note about the invoice credit"),
-})
 
 export const customerMetadataSchema = z.object({
   externalId: z.string().optional(),
@@ -223,42 +215,6 @@ export const customerSessionMetadataSchema = z.object({
   pageId: z.string().optional(),
 })
 
-export const customerEntitlementMetadataSchema = z.record(
-  z.string(),
-  z.union([z.string(), z.number(), z.boolean(), z.null()])
-)
-
-export const customerEntitlementSchema = createSelectSchema(schema.customerEntitlements, {
-  type: featureVersionType,
-  metadata: customerEntitlementMetadataSchema,
-})
-
-export const customerEntitlementInsertSchema = createInsertSchema(
-  schema.customerEntitlements
-).partial({
-  id: true,
-  projectId: true,
-})
-
-export const customerEntitlementExtendedSchema = customerEntitlementSchema.extend({
-  featureType: typeFeatureSchema,
-  aggregationMethod: aggregationMethodSchema,
-  featureSlug: z.string(),
-})
-
-export const customerEntitlementsSchema = customerEntitlementExtendedSchema.pick({
-  featureSlug: true,
-  validFrom: true,
-  validTo: true,
-  featureType: true,
-  usage: true,
-  limit: true,
-  featurePlanVersionId: true,
-  aggregationMethod: true,
-  units: true,
-  id: true,
-})
-
 export const customerPaymentMethodSchema = z.object({
   id: z.string(),
   name: z.string().nullable(),
@@ -268,14 +224,54 @@ export const customerPaymentMethodSchema = z.object({
   brand: z.string().optional(),
 })
 
+export const getCurrentUsageSchema = z.object({
+  planVersion: z.object({
+    description: z.string(),
+    flatPrice: z.string(),
+    currentTotalPrice: z.string(),
+    billingConfig: billingConfigSchema,
+  }),
+  subscription: z.object({
+    planSlug: z.string(),
+    status: subscriptionStatusSchema,
+    currentCycleEndAt: z.number(),
+    timezone: z.string(),
+    currentCycleStartAt: z.number(),
+    prorationFactor: z.number(),
+    prorated: z.boolean(),
+  }),
+  phase: z.object({
+    trialEndsAt: z.number().nullable(),
+    endAt: z.number().nullable(),
+    trialUnits: z.number(),
+    isTrial: z.boolean(),
+  }),
+  entitlement: z.array(
+    z
+      .object({
+        featureSlug: z.string(),
+        featureType: typeFeatureSchema,
+        isCustom: z.boolean(),
+        limit: z.number().nullable(),
+        usage: z.number(),
+        freeUnits: z.number(),
+        max: z.number().nullable(),
+        units: z.number().nullable(),
+        included: z.number(),
+        featureVersion: planVersionFeatureSelectBaseSchema.extend({
+          feature: featureSelectBaseSchema,
+        }),
+        price: z.string().nullable(),
+      })
+      .optional()
+  ),
+})
+
 export type StripePlanVersion = z.infer<typeof stripePlanVersionSchema>
 export type Customer = z.infer<typeof customerSelectSchema>
 export type InsertCustomer = z.infer<typeof customerInsertBaseSchema>
 export type StripeSetup = z.infer<typeof stripeSetupSchema>
 export type CustomerSignUp = z.infer<typeof customerSignUpSchema>
 export type CustomerSetUp = z.infer<typeof customerSetUpSchema>
-export type CustomerEntitlement = z.infer<typeof customerEntitlementSchema>
-export type InsertCustomerEntitlement = z.infer<typeof customerEntitlementInsertSchema>
-export type CustomerEntitlementExtended = z.infer<typeof customerEntitlementExtendedSchema>
-export type CustomerEntitlementsExtended = z.infer<typeof customerEntitlementsSchema>
 export type CustomerPaymentMethod = z.infer<typeof customerPaymentMethodSchema>
+export type GetCurrentUsage = z.infer<typeof getCurrentUsageSchema>

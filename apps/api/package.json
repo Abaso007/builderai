@@ -1,7 +1,8 @@
 {
   "name": "api",
   "scripts": {
-    "deploy": "wrangler deploy",
+    "deploy:preview": "wrangler deploy --env preview",
+    "deploy:prod": "wrangler deploy --env prod",
     "dev": "sh dev.sh",
     "dev:wrangler": "wrangler dev -e dev",
     "start": "wrangler dev -e dev",
@@ -30,7 +31,7 @@
     "@unprice/logs": "workspace:^",
     "@unprice/metrics": "workspace:^",
     "@unprice/services": "workspace:^",
-    "drizzle-orm": "^0.42.0",
+    "drizzle-orm": "^0.44.5",
     "hono": "^4.7.4",
     "hono-party": "^0.0.6",
     "partyserver": "^0.0.65",

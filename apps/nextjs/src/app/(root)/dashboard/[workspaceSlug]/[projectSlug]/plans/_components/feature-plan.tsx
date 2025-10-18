@@ -151,6 +151,10 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
                     </Tooltip>
                   )}
 
+                  {planFeatureVersion.featureType === "usage" && (
+                    <Badge variant={"secondary"}>{planFeatureVersion.billingConfig.name}</Badge>
+                  )}
+
                   {planFeatureVersion.metadata?.realtime && (
                     <Tooltip>
                       <div className="flex items-center justify-center gap-2 font-normal text-xs">
@@ -248,44 +252,34 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
               {feature.description ?? "No description"}
             </div>
 
-            {planFeatureVersion.featureType && (
-              <div className="mt-2 hidden w-full flex-row items-center justify-between gap-2 md:flex">
-                <div className="flex flex-row gap-1">
-                  <Badge variant={"secondary"}>{planFeatureVersion.featureType}</Badge>
-                  {planFeatureVersion.featureType !== "flat" && (
-                    <>
-                      {planFeatureVersion.config?.usageMode && (
-                        <Badge>{planFeatureVersion.config.usageMode}</Badge>
-                      )}
-                      <Badge>{planFeatureVersion.aggregationMethod}</Badge>
-                      {planFeatureVersion.config?.tierMode && (
-                        <Badge>{planFeatureVersion.config.tierMode}</Badge>
-                      )}
-                    </>
-                  )}
-                </div>
-                <div className="line-clamp-1 pr-3 font-light text-xs">
-                  {/* // TODO: fix this */}
-                  {planFeatureVersion?.config?.price
-                    ? `${
-                        planFeatureVersion?.config?.price.dinero.amount === 0
-                          ? "Free"
-                          : planFeatureVersion?.config?.units
-                            ? `${toDecimal(
-                                dinero(planFeatureVersion?.config?.price.dinero),
-                                ({ value, currency }) => `${currencySymbol(currency.code)}${value}`
-                              )} per ${planFeatureVersion?.config?.units} units`
-                            : toDecimal(
-                                dinero(planFeatureVersion?.config?.price.dinero),
-                                ({ value, currency }) => `${currencySymbol(currency.code)}${value}`
-                              )
-                      }`
-                    : planFeatureVersion.config?.tiers?.length?.toString()
-                      ? `${planFeatureVersion?.config?.tiers?.length ?? 0} tiers`
-                      : null}
-                </div>
+            <div className="mt-2 hidden w-full flex-row items-center justify-between gap-2 md:flex">
+              <div className="flex flex-row gap-1">
+                <Badge>{planFeatureVersion.featureType}</Badge>
+                {planFeatureVersion.config.usageMode && (
+                  <Badge>{planFeatureVersion.config.usageMode}</Badge>
+                )}
               </div>
-            )}
+              <div className="line-clamp-1 pr-3 font-light text-xs">
+                {/* // TODO: fix this */}
+                {planFeatureVersion?.config?.price
+                  ? `${
+                      planFeatureVersion?.config?.price.dinero.amount === 0
+                        ? "Free"
+                        : planFeatureVersion?.config?.units
+                          ? `${toDecimal(
+                              dinero(planFeatureVersion?.config?.price.dinero),
+                              ({ value, currency }) => `${currencySymbol(currency.code)}${value}`
+                            )} per ${planFeatureVersion?.config?.units} units`
+                          : toDecimal(
+                              dinero(planFeatureVersion?.config?.price.dinero),
+                              ({ value, currency }) => `${currencySymbol(currency.code)}${value}`
+                            )
+                    }`
+                  : planFeatureVersion.config?.tiers?.length?.toString()
+                    ? `${planFeatureVersion?.config?.tiers?.length ?? 0} tiers`
+                    : null}
+              </div>
+            </div>
           </div>
         </PlanVersionFeatureSheet>
       ) : null}

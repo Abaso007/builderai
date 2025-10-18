@@ -1,12 +1,4 @@
-import {
-  billingConfigSchema,
-  customerEntitlementsSchema,
-  deniedReasonSchema,
-  featureSelectBaseSchema,
-  planVersionFeatureSelectBaseSchema,
-  subscriptionStatusSchema,
-  typeFeatureSchema,
-} from "@unprice/db/validators"
+import { customerEntitlementExtendedSchema, deniedReasonSchema } from "@unprice/db/validators"
 import { z } from "zod"
 
 export const reportUsageSchema = z.object({
@@ -14,7 +6,7 @@ export const reportUsageSchema = z.object({
   featureSlug: z.string(),
   usage: z.number(),
   idempotenceKey: z.string(),
-  secondsToLive: z.number().optional(),
+  flushTime: z.number().optional(),
   timestamp: z.number(),
   projectId: z.string(),
   sync: z.boolean().optional(),
@@ -29,8 +21,14 @@ export const canSchema = z.object({
   projectId: z.string(),
   requestId: z.string(),
   metadata: z.record(z.string(), z.any()).optional(),
-  secondsToLive: z.number().optional(),
+  flushTime: z.number().optional(),
   performanceStart: z.number(),
+  fromCache: z
+    .boolean()
+    .optional()
+    .describe(
+      "if true will check the entitlement from cache. This will reduce latency for the request but won't have 100% accuracy. If false, the entitlement will be validated synchronously 100% accurate but will have a higher latency"
+    ),
 })
 
 export type ReportUsageRequest = z.infer<typeof reportUsageSchema>
@@ -42,6 +40,9 @@ export const canResponseSchema = z.object({
   deniedReason: deniedReasonSchema.optional(),
   cacheHit: z.boolean().optional(),
   remaining: z.number().optional(),
+  limit: z.number().optional(),
+  usage: z.number().optional(),
+  latency: z.number().optional(),
 })
 export type CanResponse = z.infer<typeof canResponseSchema>
 
@@ -51,11 +52,13 @@ export const reportUsageResponseSchema = z.object({
   limit: z.number().optional(),
   usage: z.number().optional(),
   notifyUsage: z.boolean().optional(),
+  deniedReason: deniedReasonSchema.optional(),
+  cacheHit: z.boolean().optional(),
 })
 export type ReportUsageResponse = z.infer<typeof reportUsageResponseSchema>
 
 export const getEntitlementsResponseSchema = z.object({
-  entitlements: customerEntitlementsSchema.array(),
+  entitlements: customerEntitlementExtendedSchema.array(),
 })
 
 export type GetEntitlementsResponse = z.infer<typeof getEntitlementsResponseSchema>
@@ -73,48 +76,3 @@ export const getUsageRequestSchema = z.object({
   now: z.number(),
 })
 export type GetUsageRequest = z.infer<typeof getUsageRequestSchema>
-
-export const getUsageResponseSchema = z.object({
-  planVersion: z.object({
-    description: z.string(),
-    flatPrice: z.string(),
-    currentTotalPrice: z.string(),
-    billingConfig: billingConfigSchema,
-  }),
-  subscription: z.object({
-    planSlug: z.string(),
-    status: subscriptionStatusSchema,
-    currentCycleEndAt: z.number(),
-    timezone: z.string(),
-    currentCycleStartAt: z.number(),
-    prorationFactor: z.number(),
-    prorated: z.boolean(),
-  }),
-  phase: z.object({
-    trialEndsAt: z.number().nullable(),
-    endAt: z.number().nullable(),
-    trialDays: z.number(),
-    isTrial: z.boolean(),
-  }),
-  entitlement: z.array(
-    z
-      .object({
-        featureSlug: z.string(),
-        featureType: typeFeatureSchema,
-        isCustom: z.boolean(),
-        limit: z.number().nullable(),
-        usage: z.number(),
-        freeUnits: z.number(),
-        max: z.number().nullable(),
-        units: z.number().nullable(),
-        included: z.number(),
-        featureVersion: planVersionFeatureSelectBaseSchema.extend({
-          feature: featureSelectBaseSchema,
-        }),
-        price: z.string().nullable(),
-      })
-      .optional()
-  ),
-})
-
-export type GetUsageResponse = z.infer<typeof getUsageResponseSchema>

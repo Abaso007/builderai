@@ -1,25 +1,23 @@
 import { task } from "@trigger.dev/sdk/v3"
-import { SubscriptionService } from "@unprice/services/subscriptions"
+import { BillingService } from "@unprice/services/billing"
 import { createContext } from "./context"
 
 export const billingTask = task({
-  id: "subscription.phase.billing",
+  id: "invoice.billing.task",
   retry: {
     maxAttempts: 1,
   },
   run: async (
     {
-      subscriptionPhaseId,
-      invoiceId,
+      subscriptionId,
       projectId,
       now,
-      subscriptionId,
+      invoiceId,
     }: {
-      subscriptionPhaseId: string
       projectId: string
-      invoiceId: string
       now: number
       subscriptionId: string
+      invoiceId: string
     },
     { ctx }
   ) => {
@@ -27,23 +25,20 @@ export const billingTask = task({
       taskId: ctx.task.id,
       subscriptionId,
       projectId,
-      phaseId: subscriptionPhaseId,
       defaultFields: {
         subscriptionId,
         projectId,
-        api: "jobs.subscription.phase.billing",
-        subscriptionPhaseId,
         invoiceId,
+        api: "jobs.invoice.billing",
         now: now.toString(),
       },
     })
 
-    const subscriptionService = new SubscriptionService(context)
-
-    const billingResult = await subscriptionService.billingInvoice({
-      invoiceId,
+    const billingService = new BillingService(context)
+    const billingResult = await billingService.billingInvoice({
       projectId,
       subscriptionId,
+      invoiceId,
       now,
     })
 
@@ -56,7 +51,6 @@ export const billingTask = task({
       subscriptionId,
       projectId,
       now,
-      subscriptionPhaseId,
     }
   },
 })

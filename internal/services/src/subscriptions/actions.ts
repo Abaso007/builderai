@@ -2,9 +2,8 @@ import { and, eq } from "@unprice/db"
 import { subscriptions } from "@unprice/db/schema"
 import type { Subscription } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logging"
-import { env } from "../../env"
 
-import { db } from "@unprice/db"
+import { db } from "../utils/db"
 import type { SubscriptionContext, SubscriptionEvent } from "./types"
 
 /**
@@ -19,23 +18,36 @@ export const logTransition = ({
   event: SubscriptionEvent
   logger: Logger
 }): void => {
-  if (env.NODE_ENV === "development") {
-    if (!context.currentPhase) {
-      logger.info(`Subscription ${context.subscriptionId} has no current phase`)
-    }
-
-    if (context.error) {
-      logger.error(`Subscription ${context.subscriptionId} error: ${context.error.message}`)
-    }
-
-    console.info(`Subscription ${context.subscriptionId} state transition: ${event.type}`)
+  if (!context.currentPhase) {
+    logger.debug(`Subscription ${context.subscriptionId} has no current phase`, {
+      subscriptionId: context.subscriptionId,
+      customerId: context.customer.id,
+      projectId: context.projectId,
+      now: context.now,
+      event: JSON.stringify(event),
+    })
   }
+
+  if (context.error) {
+    logger.debug(`Subscription ${context.subscriptionId} error: ${context.error.message}`, {
+      subscriptionId: context.subscriptionId,
+      customerId: context.customer.id,
+      currentPhaseId: context.currentPhase?.id,
+      projectId: context.projectId,
+      now: context.now,
+      event: JSON.stringify(event),
+    })
+  }
+
+  logger.debug(
+    `Subscription ${context.subscriptionId} ${context.subscription.status} state transition: ${event.type}`
+  )
 }
 
 /**
  * Action: Send notification to customer
  */
-export const sendCustomerNotification = ({
+export default ({
   context,
   event,
   logger,
@@ -44,7 +56,7 @@ export const sendCustomerNotification = ({
   event: SubscriptionEvent
   logger: Logger
 }): void => {
-  logger.info(
+  logger.debug(
     `Notifying customer about subscription ${context.subscriptionId} event: ${event.type}`
   )
 }

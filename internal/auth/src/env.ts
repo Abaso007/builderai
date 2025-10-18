@@ -5,12 +5,12 @@ import { z } from "zod"
 
 export const env = createEnv({
   shared: {
-    NODE_ENV: z.enum(["development", "production", "test", "preview"]).default("development"),
+    NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
     VERCEL_ENV: z.enum(["development", "preview", "production"]).default("development"),
   },
   server: {
     UNPRICE_API_KEY: z.string(),
-    UNPRICE_API_URL: z.string().url(),
+    UNPRICE_API_URL: z.string().url().optional(),
     AUTH_GITHUB_CLIENT_ID: z.string().min(1),
     AUTH_GITHUB_CLIENT_SECRET: z.string().min(1),
     AUTH_GOOGLE_CLIENT_ID: z.string().min(1),

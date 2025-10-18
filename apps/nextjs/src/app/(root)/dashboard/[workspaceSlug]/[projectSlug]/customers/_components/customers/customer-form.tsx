@@ -81,6 +81,9 @@ export function CustomerForm({
 
         router.refresh()
       },
+      onError: (error) => {
+        toast.error(error.message)
+      },
     })
   )
 
@@ -89,6 +92,9 @@ export function CustomerForm({
       onSuccess: () => {
         form.reset()
         router.refresh()
+      },
+      onError: (error) => {
+        toast.error(error.message)
       },
     })
   )

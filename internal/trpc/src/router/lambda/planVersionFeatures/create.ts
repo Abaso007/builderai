@@ -26,6 +26,7 @@ export const create = protectedProjectProcedure
       order,
       defaultQuantity,
       limit,
+      billingConfig,
       hidden,
     } = opts.input
     const project = opts.ctx.project
@@ -67,6 +68,10 @@ export const create = protectedProjectProcedure
 
     const planVersionFeatureId = utils.newId("feature_version")
 
+    // only usage items can have a different billing config but the billing anchor should be the same as the plan version billing config
+    const billingConfigCreate =
+      featureType === "usage" ? billingConfig : planVersionData.billingConfig
+
     const planVersionFeatureCreated = await opts.ctx.db
       .insert(schema.planVersionFeatures)
       .values({
@@ -74,6 +79,11 @@ export const create = protectedProjectProcedure
         featureId: featureData.id,
         projectId: project.id,
         planVersionId: planVersionData.id,
+        // for now we use the same billing config as the plan version
+        billingConfig: {
+          ...billingConfigCreate,
+          billingAnchor: planVersionData.billingConfig.billingAnchor,
+        },
         featureType,
         config: config!,
         metadata,

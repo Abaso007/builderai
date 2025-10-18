@@ -22,6 +22,7 @@ import { SubscriptionPhaseForm } from "./subscription-phase-form"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { startTransition } from "react"
+import { toastAction } from "~/lib/toast"
 
 export default function SubscriptionPhaseFormField({
   form,
@@ -52,7 +53,7 @@ export default function SubscriptionPhaseFormField({
     startAt: Date.now(),
     subscriptionId,
     paymentMethodRequired: false,
-    trialDays: 0,
+    trialUnits: 0,
   } as InsertSubscriptionPhase
 
   const [selectedPhase, setSelectedPhase] = useState<InsertSubscriptionPhase>(defaultValuesPhase)
@@ -67,7 +68,16 @@ export default function SubscriptionPhaseFormField({
     })
   )
 
-  const removePhase = useMutation(trpc.subscriptions.removePhase.mutationOptions())
+  const removePhase = useMutation(
+    trpc.subscriptions.removePhase.mutationOptions({
+      onSuccess: () => {
+        toastAction("success")
+      },
+      onError: (error) => {
+        toastAction("error", error.message)
+      },
+    })
+  )
 
   const [isDelete, setConfirmDelete] = useState<Map<string, boolean>>(
     new Map<string, boolean>(fields.map((item) => [item.id, false] as [string, boolean]))
@@ -184,8 +194,8 @@ export default function SubscriptionPhaseFormField({
                           <Typography variant="h5">
                             {index + 1}. {selectedPlanVersion.title} v{selectedPlanVersion.version}{" "}
                             - {selectedPlanVersion.billingConfig.name}
-                            {phase.trialDays && phase.trialDays > 0 ? (
-                              <Badge className="ml-2">{phase.trialDays} days trial</Badge>
+                            {phase.trialUnits && phase.trialUnits > 0 ? (
+                              <Badge className="ml-2">{phase.trialUnits} units trial</Badge>
                             ) : (
                               <Badge className="ml-2">no trial</Badge>
                             )}
@@ -218,7 +228,7 @@ export default function SubscriptionPhaseFormField({
                                 paymentMethodRequired:
                                   selectedPlanVersion.paymentMethodRequired ?? false,
                                 planVersionId: selectedPlanVersion.id,
-                                trialDays: selectedPlanVersion.trialDays,
+                                trialUnits: selectedPlanVersion.trialUnits,
                               })
                               setDialogOpen(true)
                             }}

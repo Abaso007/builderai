@@ -1,47 +1,64 @@
 import { logger, schedules } from "@trigger.dev/sdk/v3"
-import { db } from "@unprice/db"
+import { and, eq, lte } from "@unprice/db"
+import { billingPeriods } from "@unprice/db/schema"
+import { db } from "../db"
 import { invoiceTask } from "../tasks/invoice"
 
 export const invoicingSchedule = schedules.task({
-  id: "subscriptionPhase.invoicing",
+  id: "invoice.invoicing",
   // every 12 hours (UTC timezone)
-  // if dev then every 5 minutes in dev mode
-  cron: process.env.NODE_ENV === "development" ? "*/5 * * * *" : "0 */12 * * *",
+  // if dev then every 5 minutes in dev mode every 1 hour in prod
+  // cron: process.env.NODE_ENV === "development" ? "*/5 * * * *" : "0 */12 * * *",
+  cron: {
+    timezone: "UTC",
+    pattern: process.env.NODE_ENV === "development" ? "*/5 * * * *" : "0 */12 * * *",
+  },
   run: async (payload) => {
     const now = payload.timestamp.getTime()
 
-    // get the subscription ready for billing
-    const subscriptions = await db.query.subscriptions.findMany({
-      with: {
-        phases: {
-          where: (phase, { lte, and, gte, isNull, or }) =>
-            and(lte(phase.startAt, now), or(isNull(phase.endAt), gte(phase.endAt, now))),
-        },
-      },
-      where: (sub, { eq, and, lte }) => and(eq(sub.active, true), lte(sub.invoiceAt, now)),
-    })
-
-    logger.info(`Found ${subscriptions.length} subscriptions for invoicing`)
-
-    // trigger the end trial task for each subscription phase
-    for (const sub of subscriptions) {
-      const phase = sub.phases[0]
-
-      if (!phase) {
-        logger.error(`No active phase found for subscription ${sub.id}, skipping`)
-        continue
-      }
-
-      await invoiceTask.triggerAndWait({
-        subscriptionId: sub.id,
-        projectId: sub.projectId,
-        now,
-        phaseId: phase.id,
+    // get pending periods items per phase
+    const periodItems = await db
+      .select({
+        projectId: billingPeriods.projectId,
+        subscriptionId: billingPeriods.subscriptionId,
+        subscriptionPhaseId: billingPeriods.subscriptionPhaseId,
+        cycleStartAt: billingPeriods.cycleStartAt,
+        cycleEndAt: billingPeriods.cycleEndAt,
       })
+      .from(billingPeriods)
+      .groupBy(
+        billingPeriods.projectId,
+        billingPeriods.subscriptionId,
+        billingPeriods.subscriptionPhaseId,
+        billingPeriods.cycleStartAt,
+        billingPeriods.cycleEndAt
+      )
+      .where(and(eq(billingPeriods.status, "pending"), lte(billingPeriods.cycleEndAt, now)))
+      .limit(500) // limit to 500 period items to avoid overwhelming the system
+
+    const periodItemsWithActiveSubscription = periodItems.filter((s) => s.subscriptionId !== null)
+
+    logger.info(`Found ${periodItemsWithActiveSubscription.length} period items for invoicing`)
+
+    if (periodItemsWithActiveSubscription.length === 0) {
+      return {
+        subscriptionIds: [],
+      }
     }
 
+    // trigger handles concurrency
+    await invoiceTask.batchTrigger(
+      periodItemsWithActiveSubscription.map((sub) => ({
+        payload: {
+          subscriptionId: sub.subscriptionId,
+          projectId: sub.projectId,
+          now,
+        },
+      }))
+    )
+
     return {
-      subscriptionIds: subscriptions.map((s) => s.id),
+      subscriptionIds: periodItems.map((s) => s.subscriptionId),
     }
   },
 })

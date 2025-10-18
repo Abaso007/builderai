@@ -1,13 +1,5 @@
 import type { Analytics } from "@unprice/analytics"
-import {
-  type Database,
-  type SQL,
-  type TransactionDatabase,
-  and,
-  eq,
-  inArray,
-  sql,
-} from "@unprice/db"
+import { type Database, type SQL, and, eq, inArray, sql } from "@unprice/db"
 import {
   customerEntitlements,
   subscriptionItems,
@@ -18,26 +10,26 @@ import { newId } from "@unprice/db/utils"
 import {
   type InsertSubscription,
   type InsertSubscriptionPhase,
-  type InvoiceStatus,
   type Subscription,
   type SubscriptionItemConfig,
   type SubscriptionPhase,
-  configureBillingCycleSubscription,
+  calculateCycleWindow,
+  calculateDateAt,
   createDefaultSubscriptionConfig,
+  getAnchor,
 } from "@unprice/db/validators"
 import { Err, Ok, type Result, type SchemaError } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
-import { getDate } from "date-fns"
 import type { Cache } from "../cache"
 import { CustomerService } from "../customers/service"
 import type { Metrics } from "../metrics"
 import { UnPriceSubscriptionError } from "./errors"
 import { SubscriptionMachine } from "./machine"
+import { SubscriptionLock } from "./subscriptionLock"
 import type { SusbriptionMachineStatus } from "./types"
-import { collectInvoicePayment, finalizeInvoice } from "./utils"
 
 export class SubscriptionService {
-  private readonly db: Database | TransactionDatabase
+  private readonly db: Database
   private readonly logger: Logger
   private readonly analytics: Analytics
   private readonly cache: Cache
@@ -54,7 +46,7 @@ export class SubscriptionService {
     cache,
     metrics,
   }: {
-    db: Database | TransactionDatabase
+    db: Database
     logger: Logger
     analytics: Analytics
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
@@ -78,52 +70,6 @@ export class SubscriptionService {
     })
   }
 
-  // get the items for the phase and set the end date to the entitlements that are no longer valid
-  private async setEndEntitlementsForPhase({
-    phaseId,
-    projectId,
-    endAt,
-    db,
-  }: {
-    phaseId: string
-    projectId: string
-    endAt: number | null
-    db?: Database | TransactionDatabase
-  }): Promise<Result<void, UnPriceSubscriptionError>> {
-    // get the active phase for the subscription with the customer entitlements
-    const phase = await (db ?? this.db).query.subscriptionPhases.findFirst({
-      with: {
-        items: true,
-      },
-      where: (phase, { eq, and }) => and(eq(phase.id, phaseId), eq(phase.projectId, projectId)),
-    })
-
-    if (!phase) {
-      return Err(
-        new UnPriceSubscriptionError({
-          message: "Phase not found",
-        })
-      )
-    }
-
-    const { items } = phase
-
-    const ids = items.map((item) => item.id)
-
-    await (db ?? this.db)
-      .update(customerEntitlements)
-      .set({ validTo: endAt ?? null })
-      .where(inArray(customerEntitlements.subscriptionItemId, ids))
-      .catch((e) => {
-        this.logger.error(e.message)
-        throw new UnPriceSubscriptionError({
-          message: `Error while updating customer entitlements: ${e.message}`,
-        })
-      })
-
-    return Ok(undefined)
-  }
-
   // create the entitlements for the new phase
   public async createEntitlementsForPhase({
     phaseId,
@@ -134,7 +80,7 @@ export class SubscriptionService {
     phaseId: string
     projectId: string
     customerId: string
-    db?: Database | TransactionDatabase
+    db?: Database
   }): Promise<Result<void, UnPriceSubscriptionError>> {
     // get the active phase for the subscription with the customer entitlements
     const phase = await (db ?? this.db).query.subscriptionPhases.findFirst({
@@ -211,12 +157,12 @@ export class SubscriptionService {
   }: {
     input: InsertSubscriptionPhase
     projectId: string
-    db?: Database | TransactionDatabase
+    db?: Database
     now: number
   }): Promise<Result<SubscriptionPhase, UnPriceSubscriptionError | SchemaError>> {
     const {
       planVersionId,
-      trialDays,
+      trialUnits,
       metadata,
       config,
       paymentMethodId,
@@ -227,6 +173,15 @@ export class SubscriptionService {
 
     const startAtToUse = startAt ?? now
     const endAtToUse = endAt ?? undefined
+
+    // if the end date is in the past, set it to the current date
+    if (endAtToUse && endAtToUse < now) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: "End date is in the past",
+        })
+      )
+    }
 
     // get subscription with phases from start date
     const subscriptionWithPhases = await (db ?? this.db).query.subscriptions.findFirst({
@@ -245,10 +200,10 @@ export class SubscriptionService {
     }
 
     // don't allow to create phase when the subscription is not active
-    if (!subscriptionWithPhases.active && subscriptionWithPhases.status !== "idle") {
+    if (!subscriptionWithPhases.active && subscriptionWithPhases.status !== "active") {
       return Err(
         new UnPriceSubscriptionError({
-          message: "Subscription is not active",
+          message: "Subscription must be active to create a new phase. Please contact support.",
         })
       )
     }
@@ -373,21 +328,20 @@ export class SubscriptionService {
 
     // check if payment method is required for the plan version
     const paymentMethodRequired = versionData.paymentMethodRequired
-    let trialDaysToUse = trialDays ?? versionData.trialDays ?? 0
-    let billingAnchorToUse = versionData.billingConfig.billingAnchor
-    const billingIntervalToUse = versionData.billingConfig.billingInterval
-
-    // don't apply trials if the interval is not day, month or year
-    if (!["year", "month", "day"].includes(billingIntervalToUse)) {
-      trialDaysToUse = 0
-      // don't apply billing anchor if the interval is not day, month or year
-      billingAnchorToUse = 0
-    }
+    const trialUnitsToUse = trialUnits ?? versionData.trialUnits ?? 0
+    const billingAnchorToUse = getAnchor(
+      startAtToUse,
+      versionData.billingConfig.billingInterval,
+      versionData.billingConfig.billingAnchor
+    )
+    // const billingIntervalToUse = versionData.billingConfig.billingInterval
+    // const subscriptionTimezone = subscriptionWithPhases.timezone
 
     // calculate the day of creation of the subscription
-    if (billingAnchorToUse === "dayOfCreation") {
-      billingAnchorToUse = getDate(startAtToUse)
-    }
+    // important to keep in mind the timezone of the project
+    // if (billingAnchorToUse === "dayOfCreation") {
+    //   billingAnchorToUse = getDate(toZonedTime(startAtToUse, subscriptionTimezone))
+    // }
 
     // validate payment method is required and if not provided
     if (paymentMethodRequired && (!paymentMethodId || paymentMethodId === "")) {
@@ -420,23 +374,33 @@ export class SubscriptionService {
       configItemsSubscription = config
     }
 
+    const trialsEndAt =
+      trialUnitsToUse > 0
+        ? calculateDateAt({
+            startDate: startAtToUse,
+            config: {
+              interval: versionData.billingConfig.billingInterval,
+              units: trialUnitsToUse,
+            },
+          })
+        : null
+
     // get the billing cycle for the subscription given the start date
-    const calculatedBillingCycle = configureBillingCycleSubscription({
-      currentCycleStartAt: startAtToUse,
-      trialDays: trialDaysToUse,
-      billingConfig: {
-        ...versionData.billingConfig,
-        billingAnchor: billingAnchorToUse ?? 0,
-      },
-      endAt: endAtToUse ?? undefined,
-      alignStartToDay: false,
-      alignEndToDay: true,
-      alignToCalendar: true,
+    const calculatedBillingCycle = calculateCycleWindow({
+      effectiveStartDate: startAtToUse,
+      effectiveEndDate: endAtToUse ?? null,
+      trialEndsAt: trialsEndAt,
+      now: startAtToUse, // we use the start date to calculate the billing cycle
+      billingConfig: versionData.billingConfig,
     })
 
-    const trialDaysEndAt = calculatedBillingCycle.trialEndsAtMs
-      ? calculatedBillingCycle.trialEndsAtMs
-      : undefined
+    if (!calculatedBillingCycle) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: "Failed to calculate billing cycle",
+        })
+      )
+    }
 
     const result = await (db ?? this.db).transaction(async (trx) => {
       // create the subscription phase
@@ -448,8 +412,8 @@ export class SubscriptionService {
           planVersionId,
           subscriptionId,
           paymentMethodId,
-          trialEndsAt: trialDaysEndAt,
-          trialDays: trialDaysToUse,
+          trialEndsAt: trialsEndAt,
+          trialUnits: trialUnitsToUse,
           startAt: startAtToUse,
           endAt: endAtToUse,
           metadata,
@@ -494,47 +458,17 @@ export class SubscriptionService {
         phase.startAt <= Date.now() && (phase.endAt ?? Number.POSITIVE_INFINITY) >= Date.now()
 
       if (isActivePhase) {
-        // set the next invoice at the end of the trial or the end of the billing cycle
-        const invoiceAt =
-          trialDaysToUse > 0
-            ? calculatedBillingCycle.cycleEndMs
-            : versionData.whenToBill === "pay_in_advance"
-              ? calculatedBillingCycle.cycleStartMs
-              : calculatedBillingCycle.cycleEndMs
-
         await trx
           .update(subscriptions)
           .set({
             active: true,
-            status: trialDaysToUse > 0 ? "trialing" : "active",
-            // if there are trial days, we set the next invoice at to the end of the trial
-            invoiceAt,
+            status: Number(trialUnitsToUse) > 0 ? "trialing" : "active",
             planSlug: versionData.plan.slug,
-            currentCycleStartAt: calculatedBillingCycle.cycleStartMs,
-            currentCycleEndAt: calculatedBillingCycle.cycleEndMs,
-            renewAt: invoiceAt + 1,
-            endAt: endAtToUse ?? undefined,
+            currentCycleStartAt: calculatedBillingCycle.start,
+            currentCycleEndAt: calculatedBillingCycle.end,
+            renewAt: calculatedBillingCycle.start, // we schedule the renewal for the start of the cycle always
           })
           .where(and(eq(subscriptions.id, subscriptionId), eq(subscriptions.projectId, projectId)))
-      }
-
-      // we set end date to the entitlements that are no longer valid
-      // phases are ordered by startAt so we can get the previous phase
-      const previousPhase = orderedPhases.find((p) => p.startAt < phase.startAt)
-
-      if (previousPhase?.endAt) {
-        const removeEntitlementsResult = await this.setEndEntitlementsForPhase({
-          phaseId: previousPhase.id,
-          projectId,
-          endAt: previousPhase.endAt,
-          db: trx,
-        })
-
-        if (removeEntitlementsResult.err) {
-          this.logger.error(removeEntitlementsResult.err.message)
-          trx.rollback()
-          throw removeEntitlementsResult.err
-        }
       }
 
       // we create the entitlements for the new phase
@@ -553,6 +487,10 @@ export class SubscriptionService {
 
       return Ok(phase)
     })
+
+    // generate the billing periods for the new phase on background
+    // this can fail but background jobs can retry
+    // TODO: generate the billing periods for the new phase on background
 
     return result
   }
@@ -623,14 +561,22 @@ export class SubscriptionService {
     input: SubscriptionPhase
     subscriptionId: string
     projectId: string
-    db?: Database | TransactionDatabase
+    db?: Database
     now: number
   }): Promise<Result<SubscriptionPhase, UnPriceSubscriptionError | SchemaError>> {
     const { startAt, endAt, items } = input
 
+    let endAtToUse = endAt ?? undefined
+
+    // TODO: check this
+    // if the end date is in the past, set it to the current date
+    if (endAt && endAt < now) {
+      endAtToUse = now
+    }
+
     // get subscription with phases from start date
     const subscriptionWithPhases = await (db ?? this.db).query.subscriptions.findFirst({
-      where: (sub, { eq }) => eq(sub.id, subscriptionId),
+      where: (sub, { eq, and }) => and(eq(sub.id, subscriptionId), eq(sub.projectId, projectId)),
       with: {
         phases: {
           where: (phase, { gte }) => gte(phase.startAt, startAt),
@@ -685,7 +631,7 @@ export class SubscriptionService {
       const endAtPhase = p.endAt ?? Number.POSITIVE_INFINITY
 
       return (
-        (startAtPhase < endAt! || startAtPhase === endAt!) &&
+        (startAtPhase < endAtToUse! || startAtPhase === endAtToUse!) &&
         (endAtPhase > startAt || endAtPhase === startAt)
       )
     })
@@ -706,7 +652,7 @@ export class SubscriptionService {
         phaseToCheck = {
           ...p,
           startAt,
-          endAt,
+          endAt: endAtToUse ?? null,
         }
       }
 
@@ -727,7 +673,6 @@ export class SubscriptionService {
     }
 
     // validate the the end date is not less that the end date of the current billing cycle
-
     const currentCycleEndAt = subscriptionWithPhases.currentCycleEndAt
 
     if (endAt && endAt < currentCycleEndAt) {
@@ -744,7 +689,7 @@ export class SubscriptionService {
         .update(subscriptionPhases)
         .set({
           startAt: startAt,
-          endAt: endAt ?? null,
+          endAt: endAtToUse ?? null,
         })
         .where(eq(subscriptionPhases.id, input.id))
         .returning()
@@ -790,7 +735,9 @@ export class SubscriptionService {
         await (db ?? this.db)
           .update(subscriptionItems)
           .set({ units: finalSqlItems })
-          .where(inArray(subscriptionItems.id, ids))
+          .where(
+            and(inArray(subscriptionItems.id, ids), eq(subscriptionItems.projectId, projectId))
+          )
           .catch((e) => {
             this.logger.error(e.message)
             throw new UnPriceSubscriptionError({
@@ -809,19 +756,6 @@ export class SubscriptionService {
               message: `Error while updating customer entitlements: ${e.message}`,
             })
           })
-      }
-
-      // set the new end date for the entitlements
-      const setEndEntitlementsResult = await this.setEndEntitlementsForPhase({
-        phaseId: subscriptionPhase.id,
-        projectId,
-        endAt: endAt,
-        db: trx,
-      })
-
-      if (setEndEntitlementsResult.err) {
-        trx.rollback()
-        throw setEndEntitlementsResult.err
       }
 
       return Ok(subscriptionPhase)
@@ -893,11 +827,10 @@ export class SubscriptionService {
             projectId,
             customerId: customerData.id,
             active: false,
-            status: "idle",
+            status: "active",
             timezone: timezoneToUse,
             metadata: metadata,
             // provisional values
-            invoiceAt: Date.now(),
             currentCycleStartAt: Date.now(),
             currentCycleEndAt: Date.now(),
           })
@@ -937,7 +870,129 @@ export class SubscriptionService {
     return Ok(subscription)
   }
 
-  public async endTrial({
+  public async getSubscriptionData({
+    subscriptionId,
+    projectId,
+  }: {
+    subscriptionId: string
+    projectId: string
+  }): Promise<Subscription | null> {
+    const subscriptionData = await this.db.query.subscriptions.findFirst({
+      with: {
+        project: true,
+      },
+      where: (subscription, operators) =>
+        operators.and(
+          operators.eq(subscription.id, subscriptionId),
+          operators.eq(subscription.projectId, projectId)
+        ),
+    })
+
+    if (!subscriptionData?.id) {
+      return null
+    }
+
+    return subscriptionData
+  }
+
+  private async withSubscriptionMachine<T>(args: {
+    subscriptionId: string
+    projectId: string
+    now: number
+    // new options
+    lock?: boolean
+    ttlMs?: number
+    run: (m: SubscriptionMachine) => Promise<T>
+  }): Promise<T> {
+    const { subscriptionId, projectId, now, run, lock: shouldLock = true, ttlMs = 30_000 } = args
+
+    // create the lock if it should be locked
+    const lock = shouldLock
+      ? new SubscriptionLock({ db: this.db, projectId, subscriptionId })
+      : null
+
+    if (lock) {
+      const acquired = await lock.acquire({
+        ttlMs,
+        now,
+        staleTakeoverMs: 120_000,
+        ownerStaleMs: ttlMs,
+      })
+      if (!acquired) throw new UnPriceSubscriptionError({ message: "SUBSCRIPTION_BUSY" })
+    }
+
+    // heartbeat to keep the lock alive for long transitions
+    const stopHeartbeat = lock
+      ? (() => {
+          let stopped = false
+          const startedAt = Date.now()
+          const renewEveryMs = Math.max(1_000, Math.floor(ttlMs / 2))
+          const maxHoldMs = Math.max(ttlMs * 10, 2 * 60_000) // cap renewals to avoid indefinite locks
+
+          const interval = setInterval(async () => {
+            if (stopped) return
+            const elapsed = Date.now() - startedAt
+            if (elapsed > maxHoldMs) {
+              this.logger.warn("subscription lock heartbeat maxHoldMs reached; stopping renew", {
+                subscriptionId,
+                projectId,
+                ttlMs,
+                maxHoldMs,
+              })
+              stopped = true
+              clearInterval(interval)
+              return
+            }
+            try {
+              const ok = await lock.extend({ ttlMs })
+              if (!ok) {
+                this.logger.warn("subscription lock extend returned false; lock may be lost", {
+                  subscriptionId,
+                  projectId,
+                })
+              }
+            } catch (e) {
+              this.logger.error("subscription lock heartbeat extend failed", {
+                error: e instanceof Error ? e.message : String(e),
+                subscriptionId,
+                projectId,
+              })
+            }
+          }, renewEveryMs)
+
+          return () => {
+            stopped = true
+            clearInterval(interval)
+          }
+        })()
+      : () => {}
+
+    const { err, val: machine } = await SubscriptionMachine.create({
+      now,
+      subscriptionId,
+      projectId,
+      logger: this.logger,
+      analytics: this.analytics,
+      customer: this.customerService,
+      db: this.db,
+    })
+
+    if (err) {
+      stopHeartbeat()
+      if (lock) await lock.release()
+      throw err
+    }
+
+    try {
+      return await run(machine)
+    } finally {
+      await machine.shutdown()
+      stopHeartbeat()
+      if (lock) await lock.release()
+    }
+  }
+
+  public async renewSubscription({
     subscriptionId,
     projectId,
     now = Date.now(),
@@ -946,210 +1001,21 @@ export class SubscriptionService {
     projectId: string
     now?: number
   }): Promise<Result<{ status: SusbriptionMachineStatus }, UnPriceSubscriptionError>> {
-    const { err, val: machine } = await SubscriptionMachine.create({
-      subscriptionId,
-      projectId,
-      logger: this.logger,
-      analytics: this.analytics,
-      waitUntil: this.waitUntil,
-      now,
-    })
-
-    if (err) {
-      return Err(err)
-    }
-
-    const currentState = machine.getState()
-
-    switch (currentState) {
-      case "trialing":
-      case "ending_trial": {
-        const { err: errEndTrial } = await machine.endTrial()
-        if (errEndTrial) {
-          return Err(errEndTrial)
-        }
-
-        const { err: errRenew, val: resultRenew } = await machine.renew()
-        if (errRenew) {
-          return Err(errRenew)
-        }
-
-        await machine.shutdown()
-
-        return Ok({
-          status: resultRenew,
-        })
-      }
-      case "renewing":
-      case "past_due":
-      case "invoiced": {
-        const { err: errRenew, val: resultRenew } = await machine.renew()
-        if (errRenew) {
-          return Err(errRenew)
-        }
-
-        await machine.shutdown()
-
-        return Ok({
-          status: resultRenew,
-        })
-      }
-      default:
-        return Err(
-          new UnPriceSubscriptionError({
-            message: "Subscription is not in a valid state or not found",
-          })
-        )
-    }
-  }
-
-  public async billingInvoice({
-    invoiceId,
-    projectId,
-    subscriptionId,
-    now = Date.now(),
-  }: {
-    invoiceId: string
-    projectId: string
-    subscriptionId: string
-    now?: number
-  }): Promise<
-    Result<
-      {
-        total: number
-        status: InvoiceStatus
-      },
-      UnPriceSubscriptionError
-    >
-  > {
-    const { err, val: machine } = await SubscriptionMachine.create({
-      now,
-      subscriptionId,
-      projectId,
-      logger: this.logger,
-      analytics: this.analytics,
-      waitUntil: this.waitUntil,
-    })
-
-    if (err) {
-      return Err(err)
-    }
-
-    // lets try to finalize the invoice
-    const { err: errCollectInvoicePayment, val: resultCollectInvoicePayment } =
-      await collectInvoicePayment({
-        invoiceId,
+    try {
+      const status = await this.withSubscriptionMachine({
+        subscriptionId,
         projectId,
-        logger: this.logger,
         now,
+        run: async (machine) => {
+          const s1 = await machine.renew()
+          if (s1.err) throw s1.err
+          return s1.val
+        },
       })
-
-    if (errCollectInvoicePayment) {
-      // report fail to machine
-      await machine.reportInvoiceFailure({
-        invoiceId,
-        error: errCollectInvoicePayment.message,
-      })
-      // shutdown the machine
-      await machine.shutdown()
-      return Err(errCollectInvoicePayment)
+      return Ok({ status })
+    } catch (e) {
+      return Err(e as UnPriceSubscriptionError)
     }
-
-    const invoiceStatus = resultCollectInvoicePayment.invoice.status
-
-    switch (invoiceStatus) {
-      case "paid":
-      case "void":
-        // report payment success to machine
-        await machine.reportPaymentSuccess({
-          invoiceId,
-        })
-        break
-      case "failed":
-        // report payment failure to machine
-        await machine.reportPaymentFailure({
-          invoiceId,
-          error: "Payment failed",
-        })
-        break
-      // don't do anything if the invoice is not paid
-      default:
-        break
-    }
-
-    // shutdown the machine
-    await machine.shutdown()
-
-    return Ok({
-      total: resultCollectInvoicePayment.invoice.total,
-      status: resultCollectInvoicePayment.invoice.status,
-    })
-  }
-
-  public async finalizeInvoice({
-    invoiceId,
-    projectId,
-    subscriptionId,
-    now = Date.now(),
-  }: {
-    invoiceId: string
-    projectId: string
-    subscriptionId: string
-    now?: number
-  }): Promise<
-    Result<
-      {
-        total: number
-        status: InvoiceStatus
-      },
-      UnPriceSubscriptionError
-    >
-  > {
-    const { err, val: machine } = await SubscriptionMachine.create({
-      now,
-      subscriptionId,
-      projectId,
-      logger: this.logger,
-      analytics: this.analytics,
-      waitUntil: this.waitUntil,
-    })
-
-    if (err) {
-      return Err(err)
-    }
-
-    // lets try to finalize the invoice
-    const { err: errFinalizeInvoice, val: resultFinalizeInvoice } = await finalizeInvoice({
-      invoiceId,
-      projectId,
-      logger: this.logger,
-      now,
-      analytics: this.analytics,
-    })
-
-    if (errFinalizeInvoice) {
-      // report fail to machine
-      await machine.reportInvoiceFailure({
-        invoiceId,
-        error: errFinalizeInvoice.message,
-      })
-      // shutdown the machine
-      await machine.shutdown()
-      return Err(errFinalizeInvoice)
-    }
-
-    // report success to machine
-    await machine.reportInvoiceSuccess({
-      invoiceId,
-    })
-
-    // shutdown the machine
-    await machine.shutdown()
-
-    return Ok({
-      total: resultFinalizeInvoice.invoice.total,
-      status: resultFinalizeInvoice.invoice.status,
-    })
   }
 
   public async invoiceSubscription({
@@ -1168,59 +1034,21 @@ export class SubscriptionService {
       UnPriceSubscriptionError
     >
   > {
-    const { err, val: machine } = await SubscriptionMachine.create({
-      now,
-      subscriptionId,
-      projectId,
-      logger: this.logger,
-      analytics: this.analytics,
-      waitUntil: this.waitUntil,
-    })
-
-    if (err) {
-      return Err(err)
-    }
-
-    const currentState = machine.getState()
-
-    switch (currentState) {
-      case "active":
-      case "renewing":
-      case "past_due": {
-        const { err: errInvoice } = await machine.invoice()
-        if (errInvoice) {
-          return Err(errInvoice)
-        }
-
-        const { err: errRenew, val: resultRenew } = await machine.renew()
-        if (errRenew) {
-          return Err(errRenew)
-        }
-
-        await machine.shutdown()
-
-        return Ok({
-          status: resultRenew,
-        })
-      }
-      case "invoiced": {
-        const { err: errRenew, val: resultRenew } = await machine.renew()
-        if (errRenew) {
-          return Err(errRenew)
-        }
-
-        await machine.shutdown()
-
-        return Ok({
-          status: resultRenew,
-        })
-      }
-      default:
-        return Err(
-          new UnPriceSubscriptionError({
-            message: "Subscription is not in a valid state or not found",
-          })
-        )
+    try {
+      const status = await this.withSubscriptionMachine({
+        subscriptionId,
+        projectId,
+        now,
+        lock: true, // we need to lock the subscription to avoid cross-worker races
+        run: async (machine) => {
+          const i = await machine.invoice()
+          if (i.err) throw i.err
+          return i.val
+        },
+      })
+      return Ok({ status })
+    } catch (e) {
+      return Err(e as UnPriceSubscriptionError)
     }
   }
 }

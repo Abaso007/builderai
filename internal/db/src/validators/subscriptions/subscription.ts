@@ -3,14 +3,16 @@ import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import { z } from "zod"
 
 import type { Result } from "@unprice/error"
+import { customerEntitlements } from "../../schema/customers"
 import { subscriptionPhases, subscriptions } from "../../schema/subscriptions"
-import { customerEntitlementSchema, customerSelectSchema } from "../customer"
+import { customerSelectSchema } from "../customer"
 import { featureSelectBaseSchema } from "../features"
 import {
   type PlanVersionExtended,
   planVersionExtendedSchema,
   planVersionSelectBaseSchema,
 } from "../planVersions"
+import { planSelectBaseSchema } from "../plans"
 import { projectSelectBaseSchema } from "../project"
 import { UnPriceCalculationError } from "./../errors"
 import { configPackageSchema, planVersionFeatureSelectBaseSchema } from "./../planVersionFeatures"
@@ -43,18 +45,22 @@ const reasonSchema = z.enum([
   "cancelled",
   "auto_renew_disabled",
   "customer_signout",
+  "generate_billing_periods_failed",
 ])
+
+// schema for entitlements this is repeated but avoid circular dependencies
+const entitlementsExtendedSchema = createSelectSchema(customerEntitlements, {
+  metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
+}).extend({
+  featurePlanVersion: planVersionFeatureSelectBaseSchema.extend({
+    feature: featureSelectBaseSchema,
+  }),
+})
 
 export const invoiceMetadataSchema = z.object({
   note: z.string().optional().describe("Note about the invoice"),
   reason: reasonSchema.optional().describe("Reason for the invoice"),
-  proration: z
-    .object({
-      proratedAt: z.number().optional().describe("Date of the proration"),
-      note: z.string().optional().describe("Note about the proration"),
-    })
-    .optional()
-    .describe("Proration information"),
+  credits: z.string().optional().describe("Credits applied to the invoice"),
 })
 
 export const subscriptionMetadataSchema = z.object({
@@ -83,7 +89,7 @@ export const subscriptionSelectSchema = createSelectSchema(subscriptions, {
 
 export const subscriptionPhaseSelectSchema = createSelectSchema(subscriptionPhases, {
   planVersionId: z.string().min(1, { message: "Plan version is required" }),
-  trialDays: z.coerce.number().int().min(0).default(0),
+  trialUnits: z.coerce.number().int().min(0).default(0),
   metadata: subscriptionPhaseMetadataSchema,
 })
   .extend({
@@ -97,13 +103,16 @@ export const subscriptionPhaseSelectSchema = createSelectSchema(subscriptionPhas
 
 export const subscriptionPhaseExtendedSchema = subscriptionPhaseSelectSchema.extend({
   items: subscriptionItemExtendedSchema.array(),
-  planVersion: planVersionSelectBaseSchema,
+  entitlements: entitlementsExtendedSchema.array(),
+  planVersion: planVersionSelectBaseSchema.extend({
+    plan: planSelectBaseSchema,
+  }),
 })
 
 export const subscriptionPhaseInsertSchema = createInsertSchema(subscriptionPhases, {
   planVersionId: z.string().min(1, { message: "Plan version is required" }),
   metadata: subscriptionPhaseMetadataSchema,
-  trialDays: z.coerce.number().int().min(0).default(0),
+  trialUnits: z.coerce.number().int().min(0).default(0),
 })
   .extend({
     config: subscriptionItemsConfigSchema,
@@ -118,7 +127,7 @@ export const subscriptionPhaseInsertSchema = createInsertSchema(subscriptionPhas
     config: true,
     items: true,
     metadata: true,
-    trialDays: true,
+    trialUnits: true,
   })
   .omit({
     createdAtM: true,
@@ -158,12 +167,12 @@ export const subscriptionInsertSchema = createInsertSchema(subscriptions, {
             }
           }
 
-          if (phase.trialDays) {
-            if (phase.trialDays < 0) {
+          if (phase.trialUnits) {
+            if (phase.trialUnits < 0) {
               return ctx.addIssue({
                 code: z.ZodIssueCode.custom,
                 message: "Trial days must be greater than 0",
-                path: [index, "trialDays"],
+                path: [index, "trialUnits"],
               })
             }
           }
@@ -211,7 +220,6 @@ export const subscriptionInsertSchema = createInsertSchema(subscriptions, {
     projectId: true,
     currentCycleStartAt: true,
     currentCycleEndAt: true,
-    invoiceAt: true,
   })
   .required({
     customerId: true,
@@ -242,24 +250,19 @@ export const subscriptionChangePlanSchema = subscriptionSelectSchema
     whenToChange: z.enum(["immediately", "end_of_cycle"]).optional(),
   })
 
-export const getActivePhaseResponseSchema = subscriptionPhaseSelectSchema.extend({
+export const subscriptionPhaseCacheSchema = subscriptionPhaseSelectSchema.extend({
   planVersion: planVersionSelectBaseSchema,
-  customerEntitlements: z.array(
-    customerEntitlementSchema.extend({
-      featurePlanVersion: planVersionFeatureSelectBaseSchema.extend({
-        feature: featureSelectBaseSchema,
-      }),
-    })
-  ),
+  customerEntitlements: z.array(entitlementsExtendedSchema),
 })
 
-export const getSubscriptionResponseSchema = subscriptionSelectSchema.extend({
+export const subscriptionCacheSchema = subscriptionSelectSchema.extend({
   project: projectSelectBaseSchema.pick({
     enabled: true,
   }),
   customer: customerSelectSchema.pick({
     active: true,
   }),
+  activePhase: subscriptionPhaseCacheSchema.optional(),
 })
 
 export type Subscription = z.infer<typeof subscriptionSelectSchema>
@@ -272,6 +275,8 @@ export type SubscriptionMetadata = z.infer<typeof subscriptionMetadataSchema>
 export type SubscriptionPhaseMetadata = z.infer<typeof subscriptionPhaseMetadataSchema>
 export type SubscriptionChangePlan = z.infer<typeof subscriptionChangePlanSchema>
 export type InvoiceMetadata = z.infer<typeof invoiceMetadataSchema>
+export type SubscriptionCache = z.infer<typeof subscriptionCacheSchema>
+export type SubscriptionPhaseCache = z.infer<typeof subscriptionPhaseCacheSchema>
 
 // TODO: TEST THIS
 export const createDefaultSubscriptionConfig = ({

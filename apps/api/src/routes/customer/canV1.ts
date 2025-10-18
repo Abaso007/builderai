@@ -1,5 +1,4 @@
 import { createRoute } from "@hono/zod-openapi"
-import { FEATURE_SLUGS } from "@unprice/config"
 import { endTime } from "hono/timing"
 import { startTime } from "hono/timing"
 import * as HttpStatusCodes from "stoker/http-status-codes"
@@ -10,6 +9,7 @@ import { keyAuth } from "~/auth/key"
 import { canResponseSchema } from "~/entitlement/interface"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { reportUsageEvents } from "~/util/reportUsageEvents"
 const tags = ["customer"]
 
 export const route = createRoute({
@@ -30,10 +30,16 @@ export const route = createRoute({
           description: "The feature slug",
           example: "tokens",
         }),
-        timestamp: z.number().optional().openapi({
-          description: "The timestamp of the request",
-          example: 1717852800,
+        fromCache: z.boolean().optional().openapi({
+          description:
+            "if true will check the entitlement from cache. This will reduce latency for the request but won't have 100% accuracy. If false, the entitlement will be validated synchronously 100% accurate but will have a higher latency",
+          example: true,
+          default: false,
         }),
+        // timestamp: z.number().optional().openapi({
+        //   description: "The timestamp of the request",
+        //   example: 1717852800,
+        // }),
         metadata: z
           .record(z.string(), z.string())
           .openapi({
@@ -63,34 +69,31 @@ export type CanResponse = z.infer<
 
 export const registerCanV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId, featureSlug, metadata, timestamp } = c.req.valid("json")
-    const { entitlement, customer, logger } = c.get("services")
+    const { customerId, featureSlug, metadata, fromCache } = c.req.valid("json")
+    const { entitlement } = c.get("services")
     const stats = c.get("stats")
     const requestId = c.get("requestId")
     const performanceStart = c.get("performanceStart")
 
-    // start a new timer
-    startTime(c, "keyAuth")
-
     // validate the request
     const key = await keyAuth(c)
 
-    // end the timer
-    endTime(c, "keyAuth")
+    const canType = fromCache ? "canCache" : "can"
 
     // start a new timer
-    startTime(c, "can")
+    startTime(c, canType)
 
     // validate usage from db
-    const result = await entitlement.can({
+    const { err, val: result } = await entitlement.can({
       customerId,
       featureSlug,
       projectId: key.projectId,
       requestId,
-      performanceStart: performanceStart,
+      performanceStart,
+      fromCache,
       // short ttl for dev
-      secondsToLive: c.env.NODE_ENV === "development" ? 5 : undefined,
-      timestamp: timestamp ?? Date.now(),
+      flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
+      timestamp: Date.now(), // for now we report the usage at the time of the request
       metadata: {
         ...metadata,
         ip: stats.ip,
@@ -98,73 +101,23 @@ export const registerCanV1 = (app: App) =>
         region: stats.region,
         colo: stats.colo,
         city: stats.city,
-        latitude: stats.latitude,
-        longitude: stats.longitude,
         ua: stats.ua,
         continent: stats.continent,
         source: stats.source,
       },
     })
 
-    const unPriceCustomerId = c.get("unPriceCustomerId")
+    // end the timer
+    endTime(c, canType)
 
     // send analytics event for the unprice customer
     c.executionCtx.waitUntil(
-      Promise.resolve().then(async () => {
-        if (unPriceCustomerId) {
-          const { val: unPriceCustomer, err: unPriceCustomerErr } =
-            await customer.getCustomer(unPriceCustomerId)
-
-          if (unPriceCustomerErr || !unPriceCustomer) {
-            logger.error("Failed to get unprice customer", {
-              error: unPriceCustomerErr,
-            })
-            return
-          }
-
-          const shouldReportUsage =
-            !unPriceCustomer.project.workspace.isInternal &&
-            !unPriceCustomer.project.workspace.isMain
-
-          // if the unprice customer is internal or main, we don't need to report the usage
-          if (shouldReportUsage) {
-            return
-          }
-
-          await entitlement
-            .reportUsage({
-              customerId: unPriceCustomer.id,
-              featureSlug: FEATURE_SLUGS.EVENTS,
-              projectId: unPriceCustomer.projectId,
-              requestId,
-              usage: 1,
-              // short ttl for dev
-              secondsToLive: c.env.NODE_ENV === "development" ? 5 : undefined,
-              idempotenceKey: `${requestId}:${unPriceCustomer.id}`,
-              timestamp: Date.now(),
-              metadata: {
-                action: "can",
-                ip: stats.ip,
-                country: stats.country,
-                region: stats.region,
-                colo: stats.colo,
-                city: stats.city,
-                latitude: stats.latitude,
-                longitude: stats.longitude,
-                ua: stats.ua,
-                continent: stats.continent,
-                source: stats.source,
-              },
-            })
-            .catch((err) => {
-              logger.error("Failed to report usage", err)
-            })
-        }
-      })
+      reportUsageEvents(c, { action: canType, status: err ? "error" : "success" })
     )
 
-    // end the timer
-    endTime(c, "can")
+    if (err) {
+      throw err
+    }
 
     return c.json(result, HttpStatusCodes.OK)
   })

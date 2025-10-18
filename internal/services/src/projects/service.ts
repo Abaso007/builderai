@@ -1,5 +1,5 @@
 import type { Analytics } from "@unprice/analytics"
-import type { Database, TransactionDatabase } from "@unprice/db"
+import type { Database } from "@unprice/db"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import type { ProjectFeatureCache } from "../cache"
@@ -9,7 +9,7 @@ import { retry } from "../utils/retry"
 import { UnPriceProjectError } from "./errors"
 
 export class ProjectService {
-  private readonly db: Database | TransactionDatabase
+  private readonly db: Database
   private readonly logger: Logger
   private readonly analytics: Analytics
   private readonly cache: Cache
@@ -25,7 +25,7 @@ export class ProjectService {
     cache,
     metrics,
   }: {
-    db: Database | TransactionDatabase
+    db: Database
     logger: Logger
     analytics: Analytics
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>

@@ -1,1 +1,0 @@
-ALTER TABLE "unprice_plan_versions_features" ALTER COLUMN "features_config" SET NOT NULL;

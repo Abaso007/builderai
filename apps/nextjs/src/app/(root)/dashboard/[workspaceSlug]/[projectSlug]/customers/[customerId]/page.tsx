@@ -1,22 +1,20 @@
-import { notFound } from "next/navigation"
-
-import { APP_DOMAIN } from "@unprice/config"
-import { SUBSCRIPTION_STATUS } from "@unprice/db/utils"
+import { INVOICE_STATUS, SUBSCRIPTION_STATUS } from "@unprice/db/utils"
 import { Button } from "@unprice/ui/button"
 import { Separator } from "@unprice/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@unprice/ui/tabs"
 import { Typography } from "@unprice/ui/typography"
 import { Code, Plus } from "lucide-react"
+import { notFound } from "next/navigation"
 import { Suspense } from "react"
 import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DataTable } from "~/components/data-table/data-table"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
-import { PaymentMethodForm } from "~/components/forms/payment-method-form"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 import { api } from "~/trpc/server"
 import { CustomerActions } from "../_components/customers/customer-actions"
 import { SubscriptionSheet } from "../_components/subscriptions/subscription-sheet"
+import { columns as invoicesColumns } from "../_components/subscriptions/table-invoices/columns"
 import { columns } from "../_components/subscriptions/table-subscriptions/columns"
 
 export default async function CustomerPage({
@@ -28,7 +26,7 @@ export default async function CustomerPage({
     customerId: string
   }
 }) {
-  const { customerId, workspaceSlug, projectSlug } = params
+  const { customerId } = params
 
   const { customer } = await api.customers.getSubscriptions({
     customerId,
@@ -113,7 +111,6 @@ export default async function CustomerPage({
                   "12rem",
                   "8rem",
                 ]}
-                shrinkZero
               />
             }
           >
@@ -121,7 +118,7 @@ export default async function CustomerPage({
               columns={columns}
               data={customer.subscriptions}
               filterOptions={{
-                filterBy: "customer",
+                filterBy: "customerId",
                 filterColumns: true,
                 filterDateRange: true,
                 filterServerSide: true,
@@ -138,21 +135,56 @@ export default async function CustomerPage({
         <TabsContent value="paymentMethods" className="mt-4">
           <div className="flex flex-col px-1 py-4">
             <Typography variant="p" affects="removePaddingMargin">
-              Payment Methods of this customer
+              All subscriptions of this customer
             </Typography>
           </div>
-          <PaymentMethodForm
-            customerId={customer.id}
-            successUrl={`${APP_DOMAIN}${workspaceSlug}/${projectSlug}/customers/${customerId}`}
-            cancelUrl={`${APP_DOMAIN}${workspaceSlug}/${projectSlug}/customers/${customerId}`}
-          />
+          {/* // TODO: fix this */}
         </TabsContent>
-        <TabsContent value="invoices">
+        <TabsContent value="invoices" className="mt-4">
           <div className="flex flex-col px-1 py-4">
             <Typography variant="p" affects="removePaddingMargin">
-              Invoices of this customer {customer.invoices.length}
+              All invoices of this customer
             </Typography>
           </div>
+          <Suspense
+            fallback={
+              <DataTableSkeleton
+                columnCount={11}
+                searchableColumnCount={1}
+                filterableColumnCount={2}
+                cellWidths={[
+                  "10rem",
+                  "40rem",
+                  "12rem",
+                  "12rem",
+                  "12rem",
+                  "12rem",
+                  "12rem",
+                  "12rem",
+                  "12rem",
+                  "12rem",
+                  "8rem",
+                ]}
+              />
+            }
+          >
+            <DataTable
+              columns={invoicesColumns}
+              data={customer.invoices}
+              filterOptions={{
+                filterBy: "id",
+                filterColumns: true,
+                filterDateRange: true,
+                filterServerSide: true,
+                filterSelectors: {
+                  status: INVOICE_STATUS.map((value) => ({
+                    value: value,
+                    label: value,
+                  })),
+                },
+              }}
+            />
+          </Suspense>
         </TabsContent>
       </Tabs>
     </DashboardShell>
