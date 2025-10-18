@@ -1,6 +1,4 @@
 import { logger, schedules } from "@trigger.dev/sdk/v3"
-import { and, eq, lte } from "@unprice/db"
-import { invoices } from "@unprice/db/schema"
 
 import { db } from "../db"
 import { finilizeTask } from "../tasks/finilize"
@@ -16,37 +14,57 @@ export const finilizingSchedule = schedules.task({
   run: async (payload) => {
     const now = payload.timestamp.getTime()
 
-    // find all subscription that have invoices in draft status and are due
-    const subscriptions = await db
-      .select({
-        projectId: invoices.projectId,
-        subscriptionId: invoices.subscriptionId,
-      })
-      .from(invoices)
-      .where(and(eq(invoices.status, "draft"), lte(invoices.dueAt, now)))
-      .groupBy(invoices.projectId, invoices.subscriptionId)
+    // find all invoices that need to be finilized
+    const openInvoices = await db.query.invoices.findMany({
+      with: {
+        customer: true,
+        invoiceItems: {
+          with: {
+            featurePlanVersion: {
+              with: {
+                feature: true,
+              },
+            },
+          },
+        },
+      },
+      where: (inv, { and, eq, inArray, lte, or, isNull }) =>
+        or(
+          // for invoices that have not been finilized yet
+          and(eq(inv.status, "draft"), lte(inv.dueAt, now)),
+          // for invoices that have been finilized but not sent to the payment provider
+          and(
+            inArray(inv.status, ["unpaid", "waiting"]),
+            isNull(inv.invoicePaymentProviderId),
+            lte(inv.dueAt, now)
+          )
+        ),
+      orderBy: (inv, { asc }) => asc(inv.dueAt),
+      limit: 500,
+    })
 
-    logger.info(`Found ${subscriptions.length} subscriptions for finilizing`)
+    logger.info(`Found ${openInvoices.length} open invoices for finilizing`)
 
-    if (subscriptions.length === 0) {
+    if (openInvoices.length === 0) {
       return {
-        subscriptionIds: [],
+        invoiceIds: [],
       }
     }
 
     // trigger handles concurrency
     await finilizeTask.batchTrigger(
-      subscriptions.map((s) => ({
+      openInvoices.map((i) => ({
         payload: {
-          projectId: s.projectId,
-          subscriptionId: s.subscriptionId,
+          projectId: i.projectId,
+          subscriptionId: i.subscriptionId,
+          invoiceId: i.id,
           now,
         },
       }))
     )
 
     return {
-      subscriptionIds: subscriptions.map((s) => s.subscriptionId),
+      invoiceIds: openInvoices.map((i) => i.id),
     }
   },
 })

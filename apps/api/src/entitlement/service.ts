@@ -650,12 +650,16 @@ export class EntitlementService {
               throw freeUnitsErr
             }
 
-            const { val: price } = calculatePricePerFeature({
+            const { val: price, err: priceErr } = calculatePricePerFeature({
               config: config!,
               featureType: featureType,
               quantity: quantities[entitlementPhase.featurePlanVersionId] ?? 0,
               prorate: calculatedBillingCycle.prorationFactor,
             })
+
+            if (priceErr) {
+              throw priceErr
+            }
 
             return {
               featureSlug: e.featureSlug,

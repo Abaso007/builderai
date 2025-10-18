@@ -31,12 +31,6 @@ export const createContext = async ({
 
   cache.init([])
 
-  const tinybird = new Analytics({
-    emit: true,
-    tinybirdToken: env.TINYBIRD_TOKEN,
-    tinybirdUrl: env.TINYBIRD_URL,
-  })
-
   const logger = new ConsoleLogger({
     requestId: taskId,
     environment: env.NODE_ENV,
@@ -51,6 +45,13 @@ export const createContext = async ({
     },
   })
 
+  const analytics = new Analytics({
+    emit: true,
+    tinybirdToken: env.TINYBIRD_TOKEN,
+    tinybirdUrl: env.TINYBIRD_URL,
+    logger: logger,
+  })
+
   return {
     waitUntil: () => {},
     headers: new Headers(),
@@ -63,6 +64,6 @@ export const createContext = async ({
     metrics: new NoopMetrics(),
     cache: cache.getCache(),
     db: db,
-    analytics: tinybird,
+    analytics: analytics,
   }
 }

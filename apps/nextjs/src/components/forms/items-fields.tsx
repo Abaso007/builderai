@@ -259,7 +259,7 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
 
                 if (freeUnitsErr) {
                   console.error(freeUnitsErr)
-                  return null
+                  return "error calculating free units"
                 }
 
                 const freeUnitsText =

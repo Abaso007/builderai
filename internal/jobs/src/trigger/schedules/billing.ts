@@ -13,37 +13,37 @@ export const billingSchedule = schedules.task({
   run: async (payload) => {
     const now = payload.timestamp.getTime()
 
-    // find all subscriptions phases that are currently in trial and the trial ends at is in the past
-    const subscriptions = await db.query.subscriptions.findMany({
-      where: (subscription, ops) =>
+    // find all invoices that need to be billed
+    const invoices = await db.query.invoices.findMany({
+      where: (invoice, ops) =>
         ops.and(
-          ops.eq(subscription.active, true),
-          ops.notInArray(subscription.status, ["canceled", "expired"]),
-          ops.lte(subscription.currentCycleEndAt, now)
+          ops.inArray(invoice.status, ["unpaid", "waiting", "failed"]),
+          ops.lte(invoice.dueAt, now)
         ),
     })
 
-    if (subscriptions.length === 0) {
+    if (invoices.length === 0) {
       return {
-        subscriptionIds: [],
+        invoiceIds: [],
       }
     }
 
     // trigger handles concurrency
     await billingTask.batchTrigger(
-      subscriptions.map((s) => ({
+      invoices.map((i) => ({
         payload: {
-          subscriptionId: s.id,
-          projectId: s.projectId,
+          invoiceId: i.id,
+          subscriptionId: i.subscriptionId,
+          projectId: i.projectId,
           now,
         },
       }))
     )
 
-    logger.info(`Found ${subscriptions.length} subscriptions for billing`)
+    logger.info(`Found ${invoices.length} invoices for billing`)
 
     return {
-      subscriptionIds: subscriptions.map((s) => s.id),
+      invoiceIds: invoices.map((i) => i.id),
     }
   },
 })

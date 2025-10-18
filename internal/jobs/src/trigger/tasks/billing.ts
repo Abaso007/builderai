@@ -1,5 +1,5 @@
 import { task } from "@trigger.dev/sdk/v3"
-import { SubscriptionService } from "@unprice/services/subscriptions"
+import { BillingService } from "@unprice/services/billing"
 import { createContext } from "./context"
 
 export const billingTask = task({
@@ -12,10 +12,12 @@ export const billingTask = task({
       subscriptionId,
       projectId,
       now,
+      invoiceId,
     }: {
       projectId: string
       now: number
       subscriptionId: string
+      invoiceId: string
     },
     { ctx }
   ) => {
@@ -26,16 +28,17 @@ export const billingTask = task({
       defaultFields: {
         subscriptionId,
         projectId,
+        invoiceId,
         api: "jobs.invoice.billing",
         now: now.toString(),
       },
     })
 
-    const subscriptionService = new SubscriptionService(context)
-
-    const billingResult = await subscriptionService.billingInvoice({
+    const billingService = new BillingService(context)
+    const billingResult = await billingService.billingInvoice({
       projectId,
       subscriptionId,
+      invoiceId,
       now,
     })
 

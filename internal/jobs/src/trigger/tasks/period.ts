@@ -1,5 +1,5 @@
 import { task } from "@trigger.dev/sdk/v3"
-import { SubscriptionService } from "@unprice/services/subscriptions"
+import { BillingService } from "@unprice/services/billing"
 import { createContext } from "./context"
 
 export const periodTask = task({
@@ -31,10 +31,10 @@ export const periodTask = task({
       },
     })
 
-    const subscriptionService = new SubscriptionService(context)
+    const billingService = new BillingService(context)
 
     // init phase machine
-    const periodResult = await subscriptionService.generateBillingPeriods({
+    const periodResult = await billingService.generateBillingPeriods({
       subscriptionId,
       projectId,
       now,
@@ -45,7 +45,8 @@ export const periodTask = task({
     }
 
     return {
-      status: periodResult.val.status,
+      cyclesCreated: periodResult.val.cyclesCreated,
+      phasesProcessed: periodResult.val.phasesProcessed,
       subscriptionId,
       projectId,
       now,

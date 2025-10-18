@@ -89,7 +89,7 @@ export class PlanService {
         console.error(freeUnitsErr)
         return {
           ...planFeature,
-          displayFeatureText: "",
+          displayFeatureText: "error calculating free units",
         }
       }
 

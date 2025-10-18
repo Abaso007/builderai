@@ -1,5 +1,8 @@
 import { NoopTinybird, Tinybird } from "@jhonsfran/zod-bird"
+import { Err, type FetchError, Ok, type Result } from "@unprice/error"
+import type { Logger } from "@unprice/logging"
 import { z } from "zod"
+import { UnPriceAnalyticsError } from "./errors"
 import {
   type AnalyticsEventAction,
   analyticsEventSchema,
@@ -13,12 +16,15 @@ import {
   schemaPlanVersionFeature,
 } from "./validators"
 
+// TODO: create interface to handle multiple clients analytics
 export class Analytics {
   public readonly readClient: Tinybird | NoopTinybird
   public readonly writeClient: Tinybird | NoopTinybird
   public readonly isNoop: boolean
+  private readonly logger: Logger
 
   constructor(opts: {
+    logger: Logger
     emit: boolean
     tinybirdToken?: string
     tinybirdUrl: string
@@ -27,6 +33,7 @@ export class Analytics {
       token: string
     }
   }) {
+    this.logger = opts.logger
     this.readClient =
       opts.tinybirdToken && opts.emit
         ? new Tinybird({ token: opts.tinybirdToken, baseUrl: opts.tinybirdUrl })
@@ -458,7 +465,6 @@ export class Analytics {
     })
   }
 
-  // TODO: create analytics service interface in services/src/analytics/service.ts
   // TODO: add telemtry for this endpoint to know how many times it's being called and the latency
   public async getUsageBillingEntitlements({
     customerId,
@@ -478,7 +484,12 @@ export class Analytics {
     startAt: number
     endAt: number
     includeAccumulatedUsage: boolean
-  }): Promise<{ entitlementId: string; usage: number; accumulatedUsage: number }[] | null> {
+  }): Promise<
+    Result<
+      { entitlementId: string; usage: number; accumulatedUsage: number }[] | null,
+      FetchError | UnPriceAnalyticsError
+    >
+  > {
     // filter that only usage, package and tier features are being requested
     const entitlementsUsage = entitlements.filter((entitlement) =>
       ["usage", "package", "tier"].includes(entitlement.featureType)
@@ -487,7 +498,7 @@ export class Analytics {
     const entitlementIdsArray = entitlementsUsage.map((entitlement) => entitlement.entitlementId)
 
     if (entitlementIdsArray.length === 0) {
-      return []
+      return Ok([])
     }
 
     // we use the same endpoint for billing usage as it's the
@@ -497,7 +508,15 @@ export class Analytics {
         ? this.getBillingUsage({ customerId, projectId, entitlementIds: entitlementIdsArray })
             .then((usage) => usage.data ?? [])
             .catch((error) => {
-              console.error("error getting features usage total", error)
+              this.logger.error("error getting features usage total", {
+                error: JSON.stringify(error),
+                customerId,
+                projectId,
+                entitlementIds: entitlementIdsArray,
+                startAt,
+                endAt,
+                includeAccumulatedUsage,
+              })
               return null
             })
         : Promise.resolve([]),
@@ -510,14 +529,21 @@ export class Analytics {
       })
         .then((usage) => usage.data ?? [])
         .catch((error) => {
-          console.error("error getting features usage period", error)
+          this.logger.error("error getting features usage period", {
+            error: JSON.stringify(error),
+            customerId,
+            projectId,
+            entitlementIds: entitlementIdsArray,
+            startAt,
+            endAt,
+          })
           return null
         }),
     ])
 
     // if there was an error, return null
     if (!totalPeriodUsages || !totalAccumulatedUsages) {
-      return null
+      return Err(new UnPriceAnalyticsError({ message: "Error getting usage billing entitlements" }))
     }
 
     const result = []
@@ -555,7 +581,7 @@ export class Analytics {
       })
     }
 
-    return result
+    return Ok(result)
   }
 
   public async getUsageBillingSubscriptionItems({
@@ -574,7 +600,12 @@ export class Analytics {
     }[]
     startAt: number
     endAt: number
-  }): Promise<{ subscriptionItemId: string; usage: number; accumulatedUsage: number }[] | null> {
+  }): Promise<
+    Result<
+      { subscriptionItemId: string; usage: number; accumulatedUsage: number }[],
+      FetchError | UnPriceAnalyticsError
+    >
+  > {
     // filter that only usage, package and tier features are being requested
     const subscriptionItemsUsage = subscriptionItems.filter((subscriptionItem) =>
       ["usage", "package", "tier"].includes(subscriptionItem.featureType)
@@ -585,7 +616,7 @@ export class Analytics {
     )
 
     if (subscriptionItemIdsArray.length === 0) {
-      return []
+      return Ok([])
     }
 
     // we use the same endpoint for billing usage as it's the
@@ -594,7 +625,14 @@ export class Analytics {
       this.getBillingUsage({ customerId, projectId, subscriptionItemIds: subscriptionItemIdsArray })
         .then((usage) => usage.data ?? [])
         .catch((error) => {
-          console.info("error getting features usage total", error)
+          this.logger.error("error getting features usage total", {
+            error: JSON.stringify(error),
+            customerId,
+            projectId,
+            subscriptionItemIds: subscriptionItemIdsArray,
+            startAt,
+            endAt,
+          })
           return null
         }),
       this.getBillingUsage({
@@ -606,19 +644,28 @@ export class Analytics {
       })
         .then((usage) => usage.data ?? [])
         .catch((error) => {
-          console.info("error getting features usage period", error)
+          this.logger.error("error getting features usage period", {
+            error: JSON.stringify(error),
+            customerId,
+            projectId,
+            subscriptionItemIds: subscriptionItemIdsArray,
+            startAt,
+            endAt,
+          })
           return null
         }),
     ])
 
     // if there was an error, return null
     if (!totalPeriodUsages || !totalAccumulatedUsages) {
-      return null
+      return Err(
+        new UnPriceAnalyticsError({ message: "Error getting usage billing subscription items" })
+      )
     }
 
     // if there are no usages, return an empty array
     if (totalPeriodUsages.length === 0 || totalAccumulatedUsages.length === 0) {
-      return []
+      return Ok([])
     }
 
     const result = []
@@ -654,6 +701,6 @@ export class Analytics {
       })
     }
 
-    return result
+    return Ok(result)
   }
 }

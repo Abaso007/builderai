@@ -441,7 +441,7 @@ export class CustomerService {
     if (!billingWindow) throw new Error("No billing window found")
 
     // get the usage from analytics
-    const usages = await this.analytics.getUsageBillingEntitlements({
+    const { err: usagesErr, val: usages } = await this.analytics.getUsageBillingEntitlements({
       customerId,
       projectId,
       entitlements: entitlementIds,
@@ -449,6 +449,15 @@ export class CustomerService {
       endAt: billingWindow.end,
       includeAccumulatedUsage: true,
     })
+
+    if (usagesErr) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "ERROR_SYNCING_ENTITLEMENTS_LAST_USAGE",
+          message: usagesErr.message,
+        })
+      )
+    }
 
     const sqlChunksEntitlementsUsage: SQL[] = []
     const sqlChunksEntitlementsAccumulatedUsage: SQL[] = []
@@ -979,7 +988,7 @@ export class CustomerService {
         entitlement.lastUsageUpdateAt >= billingWindow.start &&
         entitlement.lastUsageUpdateAt < billingWindow.end
 
-      const result = await this.analytics.getUsageBillingEntitlements({
+      const { err: usagesErr, val: usages } = await this.analytics.getUsageBillingEntitlements({
         customerId,
         projectId,
         entitlements: [
@@ -994,7 +1003,20 @@ export class CustomerService {
         includeAccumulatedUsage: includeAccumulatedUsage,
       })
 
-      const entitlmenteResult = result?.find((r) => r.entitlementId === entitlement.id)
+      if (usagesErr) {
+        this.logger.error("error getting usage from analytics in getEntitlementData", {
+          customerId,
+          projectId,
+          entitlementId: entitlement.id,
+          startAt: new Date(billingWindow.start).toISOString(),
+          endAt: new Date(now).toISOString(),
+          error: usagesErr.message,
+        })
+
+        // TODO: what to do??
+      }
+
+      const entitlmenteResult = usages?.find((r) => r.entitlementId === entitlement.id)
       // don't use the accumulated usage if it was reseted within the current billing window
       let lastUsage = entitlmenteResult?.usage
       let lastAccumulatedUsage = includeAccumulatedUsage

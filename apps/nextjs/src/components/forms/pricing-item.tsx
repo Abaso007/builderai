@@ -74,7 +74,7 @@ export function PricingItem({
 
   if (freeUnitsErr) {
     console.error(freeUnitsErr)
-    return null
+    return "error calculating free units"
   }
 
   const freeUnitsText =

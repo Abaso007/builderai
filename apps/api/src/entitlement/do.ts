@@ -90,12 +90,6 @@ export class DurableObjectUsagelimiter extends Server {
       this.TTL_SYNC_USAGE = 1000 * 60 * 30 // 5 mins
     }
 
-    this.analytics = new Analytics({
-      emit: env.EMIT_ANALYTICS.toString() === "true",
-      tinybirdToken: env.TINYBIRD_TOKEN,
-      tinybirdUrl: env.TINYBIRD_URL,
-    })
-
     const emitMetrics = env.EMIT_METRICS_LOGS.toString() === "true"
 
     this.logger = emitMetrics
@@ -119,6 +113,13 @@ export class DurableObjectUsagelimiter extends Server {
             durableObjectId: this.ctx.id.toString(),
           },
         })
+
+    this.analytics = new Analytics({
+      emit: env.EMIT_ANALYTICS.toString() === "true",
+      tinybirdToken: env.TINYBIRD_TOKEN,
+      tinybirdUrl: env.TINYBIRD_URL,
+      logger: this.logger,
+    })
 
     this.metrics = emitMetrics
       ? new LogdrainMetrics({

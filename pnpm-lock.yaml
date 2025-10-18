@@ -392,6 +392,12 @@ importers:
       '@t3-oss/env-core':
         specifier: ^0.12.0
         version: 0.12.0(typescript@5.9.2)(zod@3.25.76)
+      '@unprice/error':
+        specifier: workspace:^
+        version: link:../error
+      '@unprice/logging':
+        specifier: workspace:^
+        version: link:../logging
       zod:
         specifier: ^3.24.2
         version: 3.25.76

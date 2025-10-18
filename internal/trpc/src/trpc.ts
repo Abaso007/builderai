@@ -68,6 +68,7 @@ export const createInnerTRPCContext = (
       tinybirdToken: env.TINYBIRD_TOKEN,
       tinybirdUrl: env.TINYBIRD_URL,
       emit: env.EMIT_ANALYTICS,
+      logger: opts.logger,
     }),
     // INFO: better wait for native support for RLS in Drizzle
     // txRLS: rls.authTxn(db, opts.session?.user.id),

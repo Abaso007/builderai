@@ -193,6 +193,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       emit: c.env.EMIT_ANALYTICS.toString() === "true",
       tinybirdToken: c.env.TINYBIRD_TOKEN,
       tinybirdUrl: c.env.TINYBIRD_URL,
+      logger,
     })
 
     endTime(c, "initAnalytics")

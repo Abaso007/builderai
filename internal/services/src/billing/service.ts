@@ -952,17 +952,18 @@ export class BillingService {
           }))
 
         // get the usage for the cycle in one call
-        const usages = await this.analytics.getUsageBillingSubscriptionItems({
-          customerId: invoice.customerId,
-          projectId: invoice.projectId,
-          subscriptionItems: usageItems,
-          startAt: cycleStartAt,
-          endAt: cycleEndAt,
-        })
+        const { err: usagesErr, val: usages } =
+          await this.analytics.getUsageBillingSubscriptionItems({
+            customerId: invoice.customerId,
+            projectId: invoice.projectId,
+            subscriptionItems: usageItems,
+            startAt: cycleStartAt,
+            endAt: cycleEndAt,
+          })
 
         // if usages failed, return an error
-        if (!usages) {
-          return Err(new UnPriceBillingError({ message: "Error getting usages" }))
+        if (usagesErr) {
+          return Err(new UnPriceBillingError({ message: usagesErr.message }))
         }
 
         let quantity = 0

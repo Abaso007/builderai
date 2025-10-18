@@ -1,5 +1,5 @@
 import { task } from "@trigger.dev/sdk/v3"
-import { SubscriptionService } from "@unprice/services/subscriptions"
+import { BillingService } from "@unprice/services/billing"
 import { createContext } from "./context"
 
 export const finilizeTask = task({
@@ -12,10 +12,12 @@ export const finilizeTask = task({
       projectId,
       now,
       subscriptionId,
+      invoiceId,
     }: {
       projectId: string
       now: number
       subscriptionId: string
+      invoiceId: string
     },
     { ctx }
   ) => {
@@ -28,14 +30,15 @@ export const finilizeTask = task({
         projectId,
         api: "jobs.invoice.finilize",
         now: now.toString(),
+        invoiceId,
       },
     })
 
-    const subscriptionService = new SubscriptionService(context)
-
-    const finalizeInvoiceResult = await subscriptionService.finalizeInvoice({
+    const billingService = new BillingService(context)
+    const finalizeInvoiceResult = await billingService.finalizeInvoice({
       projectId,
       subscriptionId,
+      invoiceId,
       now,
     })
 
@@ -44,7 +47,7 @@ export const finilizeTask = task({
     }
 
     return {
-      status: finalizeInvoiceResult.val.map((r) => r.status).join(","),
+      status: finalizeInvoiceResult.val.status,
       subscriptionId,
       projectId,
       now,
