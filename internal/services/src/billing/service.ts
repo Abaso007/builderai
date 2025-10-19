@@ -247,13 +247,13 @@ export class BillingService {
             await machine.reportInvoiceFailure({ invoiceId, error: col.err.message })
             throw col.err
           }
-          const { total, status } = col.val
+          const { totalCents, status } = col.val
           if (status === "paid" || status === "void") {
             await machine.reportInvoiceSuccess({ invoiceId })
           } else if (status === "failed") {
             await machine.reportPaymentFailure({ invoiceId, error: "Payment failed" })
           }
-          return { total, status }
+          return { total: totalCents, status }
         },
       })
       return Ok(res)
@@ -834,7 +834,7 @@ export class BillingService {
         // apply credits if any
         const { err: applyCreditsErr, val: applyCreditsResult } = await this._applyCredits({
           db: tx, // execute in the same transaction
-          invoice: { ...openInvoiceData, subtotal: subtotalAmount, total: totalAmount },
+          invoice: { ...openInvoiceData, subtotalCents: subtotalAmount, totalCents: totalAmount },
           now,
         })
 
@@ -858,8 +858,8 @@ export class BillingService {
         const updatedInvoice = await tx
           .update(invoices)
           .set({
-            subtotal: finalSubtotalAmount,
-            total: finalTotalAmount,
+            subtotalCents: finalSubtotalAmount,
+            totalCents: finalTotalAmount,
             status: statusInvoice,
             issueDate: now,
             metadata: {
@@ -1206,7 +1206,7 @@ export class BillingService {
       return Err(new UnPriceBillingError({ message: "Invoice is not ready to process" }))
     }
 
-    if (invoice.status === "void" || invoice.total === 0) {
+    if (invoice.status === "void" || invoice.totalCents === 0) {
       return Ok({
         providerInvoiceId: "",
         providerInvoiceUrl: "",
@@ -1366,8 +1366,8 @@ export class BillingService {
     if (
       invoice.amountCreditUsed &&
       invoice.amountCreditUsed > 0 &&
-      invoice.total &&
-      invoice.total > 0
+      invoice.totalCents &&
+      invoice.totalCents > 0
     ) {
       const credit = invoice.amountCreditUsed
       tasks.push(
@@ -1426,11 +1426,11 @@ export class BillingService {
       )
     }
 
-    if (invoiceFromProvider.total !== invoice.total) {
+    if (invoiceFromProvider.total !== invoice.totalCents) {
       this.logger.error("Provider invoice total mismatch", {
         invoiceId: invoice.id,
         providerInvoiceId,
-        internalTotal: invoice.total,
+        internalTotal: invoice.totalCents,
         providerTotal: invoiceFromProvider.total,
       })
 
@@ -1453,7 +1453,7 @@ export class BillingService {
 
       return Err(
         new UnPriceBillingError({
-          message: `Provider total does not match internal total: ${invoice.total} !== ${invoiceFromProvider.total}`,
+          message: `Provider total does not match internal total: ${invoice.totalCents} !== ${invoiceFromProvider.total}`,
         })
       )
     }
@@ -1530,7 +1530,7 @@ export class BillingService {
       const { projectId, customerId, id: invoiceId, currency, paymentProvider } = invoice
 
       // Nothing to apply if already zero or void/paid
-      const currentTotalBeforeCredits = invoice.total ?? 0
+      const currentTotalBeforeCredits = invoice.totalCents ?? 0
       if (currentTotalBeforeCredits <= 0 || ["void", "paid"].includes(invoice.status)) {
         return Ok({
           applied: 0,
@@ -1594,14 +1594,14 @@ export class BillingService {
       }
 
       const newAmountCreditUsed = alreadyApplied + applied
-      const newTotal = Math.max(0, (invoice.subtotal ?? 0) - newAmountCreditUsed)
+      const newTotal = Math.max(0, (invoice.subtotalCents ?? 0) - newAmountCreditUsed)
 
       // Persist only if anything changed or if idempotent recompute
       await tx
         .update(invoices)
         .set({
           amountCreditUsed: newAmountCreditUsed,
-          total: newTotal,
+          totalCents: newTotal,
           metadata: { ...(invoice.metadata ?? {}), credits: "Credits applied" },
         })
         .where(and(eq(invoices.id, invoice.id), eq(invoices.projectId, projectId)))

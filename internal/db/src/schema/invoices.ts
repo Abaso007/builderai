@@ -80,9 +80,9 @@ export const invoices = pgTableProject(
     // amount of the credit used to pay the invoice
     amountCreditUsed: integer("amount_credit_used").default(0),
     // subtotal of the invoice before the credit is applied
-    subtotal: integer("subtotal").default(0).notNull(),
+    subtotalCents: integer("subtotal_cents").default(0).notNull(),
     // total amount of the invoice after the credit is applied
-    total: integer("total").default(0).notNull(),
+    totalCents: integer("total_cents").default(0).notNull(),
     // ----------------- amounts --------------------------------
     invoicePaymentProviderId: text("invoice_payment_provider_id"),
     invoicePaymentProviderUrl: text("invoice_payment_provider_url"),

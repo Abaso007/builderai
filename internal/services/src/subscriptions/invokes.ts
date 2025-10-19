@@ -347,8 +347,17 @@ export async function invoiceSubscription({
       try {
         const invoiceAt = periodItemGroup.invoiceAt
         // wait so we can aovid late usage records being flushed from analytics system
-        const waitPeriodAdvance = 1000 * 60 * 15 // 15 minutes
-        const waitPeriodArrear = 1000 * 60 * 60 // 1 hour
+        const waitPeriodAdvance = ["minute"].includes(
+          phase.planVersion.billingConfig.billingInterval
+        )
+          ? 1000 * 60 * 1
+          : 1000 * 60 * 15 // 1 minute for minute interval, 15 minutes for other intervals
+
+        const waitPeriodArrear = ["minute"].includes(
+          phase.planVersion.billingConfig.billingInterval
+        )
+          ? 1000 * 60 * 1
+          : 1000 * 60 * 60 // 1 minute for minute interval, 1 hour for other intervals
 
         // statement date string is the date that is shown on the invoice
         // take the timezone from the subscription
@@ -402,9 +411,9 @@ export async function invoiceSubscription({
             dueAt: dueAt,
             // all this is calculated in finalizeInvoice
             paidAt: null,
-            subtotal: 0,
+            subtotalCents: 0,
             paymentAttempts: [],
-            total: 0,
+            totalCents: 0,
             amountCreditUsed: 0,
             issueDate: null, // we don't have a issue date yet
             metadata: { note: "Invoiced by scheduler" },
