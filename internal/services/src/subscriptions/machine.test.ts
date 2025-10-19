@@ -129,6 +129,12 @@ function buildMockSubscription({
                 feature: { id: "feature_123", slug: "test-feature", title: "Test Feature" },
                 aggregationMethod: "sum",
                 config: { units: 1 },
+                billingConfig: {
+                  billingInterval: "month",
+                  billingIntervalCount: 1,
+                  planType: "recurring",
+                  billingAnchor: 1,
+                },
               },
             },
           ],
@@ -256,6 +262,7 @@ describe("SubscriptionMachine - comprehensive", () => {
                         cycleEndAt: subscription.currentCycleEndAt,
                         invoiceAt: subscription.currentCycleStartAt,
                         statementKey: "test_statement_key",
+                        subscriptionItem: subscription.phases[0]!.items[0]!,
                       },
                     ])
                   ),
@@ -525,7 +532,9 @@ describe("SubscriptionMachine - comprehensive", () => {
 
     // mark hasDueBillingPeriods true through load -> generateBillingPeriods on context
     // emulate db query returning a due billing period
-    mockDb.query.billingPeriods.findFirst = vi.fn().mockResolvedValue({ id: "bp_due" })
+    mockDb.query.billingPeriods.findMany = vi
+      .fn()
+      .mockResolvedValue([{ id: "bp_due", subscriptionItem: sub.phases[0]!.items[0]! }])
 
     const { err, val } = await SubscriptionMachine.create({
       subscriptionId: sub.id,
@@ -536,6 +545,7 @@ describe("SubscriptionMachine - comprehensive", () => {
       customer: mockCustomerService,
       db: mockDb,
     })
+
     expect(err).toBeUndefined()
     if (err) return
     const m = val

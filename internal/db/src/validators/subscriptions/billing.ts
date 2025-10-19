@@ -1,19 +1,9 @@
 import type { BillingConfig } from "../shared"
-import {
-  addByInterval,
-  calculateElapsedProration,
-  getAnchor,
-  setUtc,
-  setUtcDay,
-  startOfUtcDay,
-  startOfUtcHour,
-} from "./utils"
+import { addByInterval, getAnchor, setUtc, setUtcDay, startOfUtcDay, startOfUtcHour } from "./utils"
 
 export interface CycleWindow {
   start: number
   end: number
-  prorationFactor: number
-  billableSeconds: number
   isTrial?: boolean
 }
 
@@ -48,7 +38,7 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
     const start = effectiveStartDate
     const end = Math.min(trialEndsAt, effectiveEndDate ?? Number.POSITIVE_INFINITY)
     // trial is not billable
-    return { start, end, prorationFactor: 0, billableSeconds: 0, isTrial: true }
+    return { start, end, isTrial: true }
   }
 
   // --- 2. Handle Onetime Plan Cycle (No changes needed) ---
@@ -58,10 +48,9 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
     // For onetime without effectiveEndDate, tests expect infinite window with
     // billableSeconds computed as elapsed since start and proration 0.
     if (!effectiveEndDate) {
-      return { start, end, prorationFactor: 0, billableSeconds: Math.floor((now - start) / 1000) }
+      return { start, end }
     }
-    const proration = calculateElapsedProration(start, end, now)
-    return { start, end, ...proration }
+    return { start, end }
   }
 
   // --- 3. Recurring Plan Validation and Setup (No changes needed) ---
@@ -131,9 +120,7 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
         effectiveEndDate ?? Number.POSITIVE_INFINITY
       )
       // Use elapsed semantics from the billable start inside the aligned window
-      const billableStart = Math.max(paidPeriodStart, fullStart)
-      const proration = calculateElapsedProration(fullStart, end, now, billableStart)
-      return { start: fullStart, end, ...proration }
+      return { start: fullStart, end }
     }
 
     // Default behavior (non-minute or count=1): stub from paid start to first anchor
@@ -142,8 +129,7 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
       firstPaidCycleStart.getTime(),
       effectiveEndDate ?? Number.POSITIVE_INFINITY
     )
-    const proration = calculateElapsedProration(start, end, now)
-    return { start, end, ...proration }
+    return { start, end }
   }
 
   // If we are past the first anchor, find the correct cycle.
@@ -156,9 +142,8 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
   // --- 6. Construct, Cap, and Return the Final Window ---
   const start = currentCycleStart.getTime()
   const end = Math.min(nextCycleStart.getTime(), effectiveEndDate ?? Number.POSITIVE_INFINITY)
-  const proration = calculateElapsedProration(start, end, now)
 
-  return { start, end, ...proration }
+  return { start, end }
 }
 
 // =================================================================================

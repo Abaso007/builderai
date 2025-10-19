@@ -127,7 +127,6 @@ export const subscriptionPhaseInsertSchema = createInsertSchema(subscriptionPhas
     config: true,
     items: true,
     metadata: true,
-    trialUnits: true,
   })
   .omit({
     createdAtM: true,

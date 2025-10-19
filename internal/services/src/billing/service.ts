@@ -694,7 +694,7 @@ export class BillingService {
 
       if (!invoice) {
         return Err(
-          new UnPriceBillingError({ message: "Invoice not found or not ready to process" })
+          new UnPriceBillingError({ message: "Invoice not found or not due to be processed" })
         )
       }
 
@@ -864,6 +864,7 @@ export class BillingService {
             issueDate: now,
             metadata: {
               ...(openInvoiceData.metadata ?? {}),
+              // TODO: change who is finalizing the invoice
               note: "Finilized by scheduler",
             },
           })
@@ -1011,6 +1012,9 @@ export class BillingService {
           let totalAmount = 0
           let unitAmount = 0
           let subtotalAmount = 0
+
+          const isTrial = item.kind === "trial"
+
           // calculate the price depending on the type of feature
           const { val: priceCalculation, err: priceCalculationErr } = calculatePricePerFeature({
             config: item.featurePlanVersion!.config,
@@ -1053,48 +1057,104 @@ export class BillingService {
           // the totals takes into account the proration factor
           unitAmount = formattedUnitAmount.amount
           subtotalAmount = formattedSubtotalAmount.amount
-          totalAmount = formattedTotalAmount.amount
+          // by default usage based is not prorated we need to explicitly set the total amount to 0 for trials
+          totalAmount = isTrial ? 0 : formattedTotalAmount.amount
 
           // give good description per item type so the customer can identify the charge
           // take into account if the charge is prorated or not
           // add the period of the charge if prorated
-          let description = undefined
-
-          if (item.featurePlanVersion!.featureType === "usage") {
-            description = `${item.featurePlanVersion!.feature.title.toUpperCase()} - usage`
-          } else if (item.featurePlanVersion!.featureType === "flat") {
-            description = `${item.featurePlanVersion!.feature.title.toUpperCase()} - flat`
-          } else if (item.featurePlanVersion!.featureType === "tier") {
-            description = `${item.featurePlanVersion!.feature.title.toUpperCase()} - tier`
-          } else if (item.featurePlanVersion!.featureType === "package") {
-            // package is a special case, we need to calculate the quantity of packages the customer bought
-            // we do it after the price calculation because we pass the package units to the payment provider
-            const quantityPackages = Math.ceil(quantity / item.featurePlanVersion!.config?.units!)
-            quantity = quantityPackages
-            description = `${item.featurePlanVersion!.feature.title.toUpperCase()} - ${quantityPackages} package of ${item.featurePlanVersion!
-              .config?.units!} units`
-          }
+          let description = ""
+          let descriptionDetail = ""
 
           if (item.prorationFactor !== 1) {
             const billingPeriod = `${new Date(item.cycleStartAt).toISOString().split("T")[0]} to ${
               new Date(item.cycleEndAt).toISOString().split("T")[0]
             }`
 
-            description +=
+            descriptionDetail +=
               item.kind === "trial" ? ` trial (${billingPeriod})` : ` prorated (${billingPeriod})`
           }
 
-          updatedItems.push({
-            id: item.id,
-            totalAmount: totalAmount,
-            unitAmount: unitAmount,
-            subtotalAmount: subtotalAmount,
-            prorate: item.prorationFactor,
-            description: description ?? "",
-            cycleStartAt: item.cycleStartAt,
-            cycleEndAt: item.cycleEndAt,
-            quantity: quantity,
-          })
+          switch (item.featurePlanVersion!.featureType) {
+            case "usage": {
+              description = `${item.featurePlanVersion!.feature.title.toUpperCase()}`
+
+              // add the item to the updated items
+              updatedItems.push({
+                id: item.id,
+                totalAmount: totalAmount,
+                unitAmount: unitAmount,
+                subtotalAmount: subtotalAmount,
+                prorate: item.prorationFactor,
+                description: `${description} - tier usage ${descriptionDetail}`,
+                cycleStartAt: item.cycleStartAt,
+                cycleEndAt: item.cycleEndAt,
+                quantity: quantity,
+              })
+
+              // TODO: when it's tier we need to add an extra line item for the flat price
+              break
+            }
+            case "flat": {
+              description = `${item.featurePlanVersion!.feature.title.toUpperCase()} - flat ${descriptionDetail}`
+
+              // add the item to the updated items
+              updatedItems.push({
+                id: item.id,
+                totalAmount: totalAmount,
+                unitAmount: unitAmount,
+                subtotalAmount: subtotalAmount,
+                prorate: item.prorationFactor,
+                description: description,
+                cycleStartAt: item.cycleStartAt,
+                cycleEndAt: item.cycleEndAt,
+                quantity: quantity,
+              })
+              break
+            }
+            case "tier": {
+              description = `${item.featurePlanVersion!.feature.title.toUpperCase()}`
+
+              // TODO: we need to add an extra line item for the flat price
+
+              // add the item to the updated items
+              updatedItems.push({
+                id: item.id,
+                totalAmount: totalAmount,
+                unitAmount: unitAmount,
+                subtotalAmount: subtotalAmount,
+                prorate: item.prorationFactor,
+                description: `${description} - tier usage ${descriptionDetail}`,
+                cycleStartAt: item.cycleStartAt,
+                cycleEndAt: item.cycleEndAt,
+                quantity: quantity,
+              })
+
+              break
+            }
+            case "package": {
+              // package is a special case, we need to calculate the quantity of packages the customer bought
+              // we do it after the price calculation because we pass the package units to the payment provider
+              const quantityPackages = Math.ceil(quantity / item.featurePlanVersion!.config?.units!)
+              quantity = quantityPackages
+              description = `${item.featurePlanVersion!.feature.title.toUpperCase()} - ${quantityPackages} package of ${item.featurePlanVersion!
+                .config?.units!} units ${descriptionDetail}`
+
+              // add the item to the updated items
+              updatedItems.push({
+                id: item.id,
+                totalAmount: totalAmount,
+                unitAmount: unitAmount,
+                subtotalAmount: subtotalAmount,
+                prorate: item.prorationFactor,
+                description: description,
+                cycleStartAt: item.cycleStartAt,
+                cycleEndAt: item.cycleEndAt,
+                quantity: quantity,
+              })
+              break
+            }
+          }
         }
       }
 
@@ -1283,7 +1343,11 @@ export class BillingService {
               invoiceId: providerInvoiceId,
               name: item.featurePlanVersion!.feature.slug,
               // each product is created from the feature
-              productId: item.featurePlanVersion!.feature.id,
+              // TODO: don't activate for now to avoid mismatch between internal and provider
+              // there is an edge case where if the feature is tier based with flat charges
+              // the flat charge is combined with the tier charge and the total amount is not correct
+              // we need to add a separate line item for the flat charge
+              // productId: item.featurePlanVersion!.feature.id,
               description: item.description ?? "",
               isProrated,
               totalAmount: item.amountTotal,
@@ -1362,15 +1426,35 @@ export class BillingService {
       )
     }
 
-    if ((invoiceFromProvider.total ?? 0) !== (invoice.total ?? 0)) {
+    if (invoiceFromProvider.total !== invoice.total) {
       this.logger.error("Provider invoice total mismatch", {
         invoiceId: invoice.id,
         providerInvoiceId,
         internalTotal: invoice.total,
         providerTotal: invoiceFromProvider.total,
       })
+
+      // before returning we need to save the invoice from the provider to debug
+      // the newly created invoice from the provider remains as draft to be able to debug if necessary
+      // next iteration we will try to finalize the invoice again
+      await this.db.transaction(async (tx) => {
+        await tx
+          .update(invoices)
+          .set({
+            status: "draft", // we need to set the status to draft to be able to debug
+            metadata: {
+              ...(invoice.metadata ?? {}),
+              reason: "invoice_failed",
+              note: "Failed to finalize invoice due to provider invoice total mismatch",
+            },
+          })
+          .where(and(eq(invoices.id, invoice.id), eq(invoices.projectId, invoice.projectId)))
+      })
+
       return Err(
-        new UnPriceBillingError({ message: "Provider total does not match internal total" })
+        new UnPriceBillingError({
+          message: `Provider total does not match internal total: ${invoice.total} !== ${invoiceFromProvider.total}`,
+        })
       )
     }
 
@@ -1399,6 +1483,10 @@ export class BillingService {
         .set({
           invoicePaymentProviderId: providerInvoiceId,
           invoicePaymentProviderUrl: providerInvoiceUrl,
+          metadata: {
+            ...(invoice.metadata ?? {}),
+            note: "Invoice finalized successfully",
+          },
         })
         .where(and(eq(invoices.id, invoice.id), eq(invoices.projectId, invoice.projectId)))
 
@@ -1542,7 +1630,7 @@ export class BillingService {
       UnPriceBillingError
     >
   > {
-    const lookbackDays = 7 // lookback days to materialize the periods
+    const lookbackDays = 7 // lookback days to materialize pending periods
     const batch = 100 // process a max of 100 phases per trigger run
 
     // fetch phases that are active now OR ended recently
@@ -1573,7 +1661,7 @@ export class BillingService {
 
     let cyclesCreated = 0
 
-    // for each phase, materialize the periods
+    // for each phase, materialize the pending periods
     for (const phase of phases) {
       // For every subscription item, backfill missing billing periods idempotently
       for (const item of phase.items) {
@@ -1590,10 +1678,7 @@ export class BillingService {
         })
 
         const cursorStart = lastForItem ? lastForItem.cycleEndAt : phase.startAt
-        // INFO: this is a compatibility fix for the old data
-        const itemBillingConfig = item.featurePlanVersion.billingConfig?.billingInterval
-          ? item.featurePlanVersion.billingConfig
-          : phase.planVersion.billingConfig
+        const itemBillingConfig = item.featurePlanVersion.billingConfig
 
         const windows = calculateNextNCycles({
           referenceDate: now, // we use the now to start the calculation
@@ -1607,6 +1692,8 @@ export class BillingService {
           },
           count: 0, // we only need until the end of the current cycle
         })
+
+        console.log("windows", windows)
 
         if (windows.length === 0) continue
 

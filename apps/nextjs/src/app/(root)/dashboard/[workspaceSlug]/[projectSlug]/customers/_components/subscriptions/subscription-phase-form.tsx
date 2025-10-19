@@ -110,8 +110,9 @@ export function SubscriptionPhaseForm({
     if (selectedPlanVersion) {
       form.setValue("paymentMethodRequired", selectedPlanVersion.paymentMethodRequired)
       form.setValue("paymentMethodId", defaultValues.paymentMethodId)
+      form.setValue("trialUnits", selectedPlanVersion.trialUnits)
     }
-  }, [selectedPlanVersion])
+  }, [selectedPlanVersionId])
 
   return (
     <Form {...form}>

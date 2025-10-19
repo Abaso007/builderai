@@ -20,6 +20,7 @@ import {
 } from "@unprice/db/validators"
 import { Err, Ok, type Result, type SchemaError } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
+import { BillingService } from "../billing/service"
 import type { Cache } from "../cache"
 import { CustomerService } from "../customers/service"
 import type { Metrics } from "../metrics"
@@ -37,6 +38,7 @@ export class SubscriptionService {
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
   private customerService: CustomerService
+  private billingService: BillingService
 
   constructor({
     db,
@@ -61,6 +63,14 @@ export class SubscriptionService {
     this.metrics = metrics
     this.waitUntil = waitUntil
     this.customerService = new CustomerService({
+      db,
+      logger,
+      analytics,
+      waitUntil,
+      cache,
+      metrics,
+    })
+    this.billingService = new BillingService({
       db,
       logger,
       analytics,
@@ -490,7 +500,20 @@ export class SubscriptionService {
 
     // generate the billing periods for the new phase on background
     // this can fail but background jobs can retry
-    // TODO: generate the billing periods for the new phase on background
+    this.waitUntil(
+      // TODO: report the event to analytics
+      // this.analytics.trackEvent({
+      //   event: "subscription.phase.created",
+      //   properties: {
+      //     subscriptionId,
+      //   },
+      // })
+      this.billingService.generateBillingPeriods({
+        subscriptionId,
+        projectId,
+        now,
+      })
+    )
 
     return result
   }

@@ -242,3 +242,128 @@ describe("calculateNextNCycles sequences", () => {
     }
   })
 })
+
+describe("calculateNextNCycles sequences (minute interval, 5-minute windows)", () => {
+  function cfg5m(anchor: number) {
+    return {
+      name: "test",
+      billingInterval: "minute" as const,
+      billingIntervalCount: 5,
+      billingAnchor: anchor,
+      planType: "recurring" as const,
+    }
+  }
+
+  it("aligns to 5-minute windows and appends count beyond the reference", () => {
+    const day = "2024-01-01"
+    const start = utcDate(day, "10:02:30.000")
+    const reference = utcDate(day, "10:07:00.000")
+
+    const windows = calculateNextNCycles({
+      referenceDate: reference,
+      effectiveStartDate: start,
+      effectiveEndDate: null,
+      trialEndsAt: null,
+      billingConfig: cfg5m(0),
+      count: 2,
+    })
+
+    const expected = [
+      [utcDate(day, "10:00:00.000"), utcDate(day, "10:05:00.000")],
+      [utcDate(day, "10:05:00.000"), utcDate(day, "10:10:00.000")],
+      [utcDate(day, "10:10:00.000"), utcDate(day, "10:15:00.000")],
+      [utcDate(day, "10:15:00.000"), utcDate(day, "10:20:00.000")],
+    ]
+
+    expect(windows.length).toBe(expected.length)
+    for (let i = 0; i < expected.length; i++) {
+      const w = windows[i]!
+      expect(w.start).toBe(expected[i]![0])
+      expect(w.end).toBe(expected[i]![1])
+    }
+  })
+
+  it("reference at exact boundary uses next window; count=0", () => {
+    const day = "2024-01-01"
+    const start = utcDate(day, "10:00:00.000")
+    const reference = utcDate(day, "10:05:00.000")
+
+    const windows = calculateNextNCycles({
+      referenceDate: reference,
+      effectiveStartDate: start,
+      effectiveEndDate: null,
+      trialEndsAt: null,
+      billingConfig: cfg5m(0),
+      count: 0,
+    })
+
+    const expected = [
+      [utcDate(day, "10:00:00.000"), utcDate(day, "10:05:00.000")],
+      [utcDate(day, "10:05:00.000"), utcDate(day, "10:10:00.000")],
+    ]
+
+    expect(windows.length).toBe(expected.length)
+    for (let i = 0; i < expected.length; i++) {
+      const w = windows[i]!
+      expect(w.start).toBe(expected[i]![0])
+      expect(w.end).toBe(expected[i]![1])
+    }
+  })
+
+  it("caps by effectiveEndDate even when appending count", () => {
+    const day = "2024-01-01"
+    const start = utcDate(day, "10:02:30.000")
+    const reference = utcDate(day, "10:06:00.000")
+    const endAt = utcDate(day, "10:12:00.000")
+
+    const windows = calculateNextNCycles({
+      referenceDate: reference,
+      effectiveStartDate: start,
+      effectiveEndDate: endAt,
+      trialEndsAt: null,
+      billingConfig: cfg5m(0),
+      count: 5,
+    })
+
+    const expected = [
+      [utcDate(day, "10:00:00.000"), utcDate(day, "10:05:00.000")],
+      [utcDate(day, "10:05:00.000"), utcDate(day, "10:10:00.000")],
+      [utcDate(day, "10:10:00.000"), endAt],
+    ]
+
+    expect(windows.length).toBe(expected.length)
+    for (let i = 0; i < expected.length; i++) {
+      const w = windows[i]!
+      expect(w.start).toBe(expected[i]![0])
+      expect(w.end).toBe(expected[i]![1])
+    }
+  })
+
+  it("honors second-level anchor inside each 5-minute window", () => {
+    const day = "2024-01-01"
+    const start = utcDate(day, "10:02:45.000")
+    const reference = utcDate(day, "10:07:00.000")
+
+    const windows = calculateNextNCycles({
+      referenceDate: reference,
+      effectiveStartDate: start,
+      effectiveEndDate: null,
+      trialEndsAt: null,
+      billingConfig: cfg5m(30),
+      count: 1,
+    })
+
+    const expected = [
+      [utcDate(day, "10:00:30.000"), utcDate(day, "10:05:30.000")],
+      [utcDate(day, "10:05:30.000"), utcDate(day, "10:10:30.000")],
+      [utcDate(day, "10:10:30.000"), utcDate(day, "10:15:30.000")],
+    ]
+
+    expect(windows.length).toBe(expected.length)
+    for (let i = 0; i < expected.length; i++) {
+      const w = windows[i]!
+      expect(w.start).toBe(expected[i]![0])
+      expect(w.end).toBe(expected[i]![1])
+    }
+  })
+})

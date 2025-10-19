@@ -358,7 +358,7 @@ export async function invoiceSubscription({
         const statementDateString = ["minute"].includes(
           phase.planVersion.billingConfig.billingInterval
         )
-          ? format(date, "MMMM d, yyyy hh:mm")
+          ? format(date, "MMMM d, yyyy hh:mm a")
           : format(date, "MMMM d, yyyy")
 
         // pay in advance have smaller grace period
@@ -453,10 +453,21 @@ export async function invoiceSubscription({
         }
 
         const invoiceItemsData = billingPeriodsToInvoice.map((period) => {
-          const prorationFactor =
-            period.type === "trial"
-              ? 0
-              : calculateProration(period.cycleStartAt, period.cycleEndAt, now).prorationFactor
+          const itemBillingConfig = {
+            ...period.subscriptionItem.featurePlanVersion.billingConfig,
+            // ensure numeric anchor alignment to phase anchor
+            billingAnchor: phase.billingAnchor,
+          }
+
+          const proration = calculateProration({
+            serviceStart: period.cycleStartAt,
+            serviceEnd: period.cycleEndAt,
+            effectiveStartDate: phase.startAt,
+            billingConfig: itemBillingConfig,
+          })
+
+          // trial is not billable
+          const prorationFactor = period.type === "trial" ? 0 : proration.prorationFactor
 
           return {
             id: newId("invoice_item"),

@@ -578,7 +578,7 @@ export class EntitlementService {
         const { val: totalPricePlan, err: totalPricePlanErr } = calculateTotalPricePlan({
           features: phase.customerEntitlements.map((e) => e.featurePlanVersion),
           quantities: quantities,
-          prorate: calculatedBillingCycle.prorationFactor,
+          prorate: undefined, // TODO: add proration factor
           currency: phase.planVersion.currency,
         })
 
@@ -587,7 +587,7 @@ export class EntitlementService {
             ...phase.planVersion,
             planFeatures: phase.customerEntitlements.map((e) => e.featurePlanVersion),
           },
-          prorate: calculatedBillingCycle.prorationFactor,
+          prorate: undefined, // TODO: add proration factor
         })
 
         if (totalPricePlanErr || flatPriceErr) {
@@ -607,8 +607,8 @@ export class EntitlementService {
             currentCycleEndAt: subscription.currentCycleEndAt,
             timezone: subscription.timezone,
             currentCycleStartAt: subscription.currentCycleStartAt,
-            prorationFactor: calculatedBillingCycle.prorationFactor,
-            prorated: calculatedBillingCycle.prorationFactor !== 1,
+            prorationFactor: 1, // TODO: add proration factor
+            prorated: false, // TODO: add proration factor
           },
           phase: {
             trialEndsAt: phase.trialEndsAt,
@@ -654,7 +654,7 @@ export class EntitlementService {
               config: config!,
               featureType: featureType,
               quantity: quantities[entitlementPhase.featurePlanVersionId] ?? 0,
-              prorate: calculatedBillingCycle.prorationFactor,
+              prorate: undefined, // TODO: add proration factor
             })
 
             if (priceErr) {
