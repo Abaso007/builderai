@@ -3,6 +3,7 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch"
 import { auth } from "@unprice/auth/server"
 import { createTRPCContext } from "@unprice/trpc"
 import { edgeRouter } from "@unprice/trpc/router/edge"
+import { geolocation } from "@vercel/functions"
 
 import { CorsOptions, setCorsHeaders } from "../../../_enableCors"
 
@@ -16,6 +17,8 @@ const handler = auth(async (req) => {
   const pathName = req.nextUrl.pathname
   const endpoint = pathName.startsWith("/api") ? "/api/trpc/edge" : "/trpc/edge"
 
+  const geo = geolocation(req)
+
   const response = await fetchRequestHandler({
     endpoint: endpoint,
     router: edgeRouter,
@@ -25,6 +28,14 @@ const handler = auth(async (req) => {
         headers: req.headers,
         session: req.auth,
         req,
+        geo: geo
+          ? {
+              continent: geo.countryRegion || "Unknown",
+              country: geo.country || "Unknown",
+              region: geo.region || "Unknown",
+              city: geo.city || "Unknown",
+            }
+          : undefined,
       }),
     onError: ({ error, path }) => {
       if (error.code === "INTERNAL_SERVER_ERROR") {
