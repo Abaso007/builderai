@@ -464,6 +464,43 @@ export class BillingService {
     // collect the payment depending on the collection method
     // collect automatically means we will try to collect the payment with the default payment method
     if (invoice.collectionMethod === "charge_automatically") {
+      // before collecting we need to check if the invoice is already paid
+      const statusInvoice = await paymentProviderService.getStatusInvoice({
+        invoiceId: invoicePaymentProviderId,
+      })
+
+      if (statusInvoice.err) {
+        return Err(new UnPriceBillingError({ message: "Error getting invoice status" }))
+      }
+
+      // this happen when there are many invoices and stripe merge them into one invoice
+      if (["paid", "void"].includes(statusInvoice.val.status)) {
+        // update the invoice status if the payment is successful
+        // if not add the failed attempt
+        const updatedInvoice = await this.db
+          .update(invoices)
+          .set({
+            status: statusInvoice.val.status as InvoiceStatus,
+            ...(statusInvoice.val.status === "paid" ? { paidAt: Date.now() } : {}),
+            ...(statusInvoice.val.status === "paid"
+              ? { invoicePaymentProviderUrl: statusInvoice.val.invoiceUrl }
+              : {}),
+            paymentAttempts: [
+              ...(invoice.paymentAttempts ?? []),
+              ...statusInvoice.val.paymentAttempts,
+            ],
+          })
+          .where(eq(invoices.id, invoice.id))
+          .returning()
+          .then((res) => res[0])
+
+        if (!updatedInvoice) {
+          return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
+        }
+
+        return Ok(updatedInvoice)
+      }
+
       const stripePaymentInvoice = await paymentProviderService.collectPayment({
         invoiceId: invoicePaymentProviderId,
         paymentMethodId: paymentMethodId,
@@ -1692,8 +1729,6 @@ export class BillingService {
           },
           count: 0, // we only need until the end of the current cycle
         })
-
-        console.log("windows", windows)
 
         if (windows.length === 0) continue
 

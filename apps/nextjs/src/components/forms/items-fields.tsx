@@ -270,7 +270,7 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
                     : freeUnits === 0
                       ? feature.limit
                         ? `Up to ${nFormatter(feature.limit)}`
-                        : ""
+                        : "Starts at 0"
                       : nFormatter(freeUnits)
 
                 return (

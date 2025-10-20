@@ -57,6 +57,10 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
       },
       {
         enabled: !!customerId,
+        refetchOnMount: true,
+        refetchOnWindowFocus: true,
+        refetchOnReconnect: true,
+        staleTime: 1000 * 30, // 30 seconds
       }
     )
   )

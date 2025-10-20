@@ -22,6 +22,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@unprice/ui/dropdown-menu"
+import { useParams } from "next/navigation"
+import { SuperLink } from "~/components/super-link"
 import { CustomerForm } from "../customer-form"
 
 interface DataTableRowActionsProps<TData> {
@@ -31,6 +33,8 @@ interface DataTableRowActionsProps<TData> {
 export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TData>) {
   const customer = customerSelectSchema.parse(row.original)
   const [dialogOpen, setDialogOpen] = React.useState(false)
+  const { workspaceSlug, projectSlug } = useParams()
+  const baseUrl = `/${workspaceSlug}/${projectSlug}/customers/${customer.id}`
 
   return (
     <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -47,9 +51,14 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
           <DialogTrigger asChild>
             <DropdownMenuItem>Edit Customer</DropdownMenuItem>
           </DialogTrigger>
+          <DialogTrigger asChild>
+            <DropdownMenuItem>
+              <SuperLink href={baseUrl}>Manage Customer Details</SuperLink>
+            </DropdownMenuItem>
+          </DialogTrigger>
         </DropdownMenuContent>
       </DropdownMenu>
-      <DialogContent>
+      <DialogContent className="max-h-[95vh] md:max-w-screen-md">
         <DialogHeader>
           <DialogTitle>Customer Form</DialogTitle>
           <DialogDescription>Modify the customer details below.</DialogDescription>

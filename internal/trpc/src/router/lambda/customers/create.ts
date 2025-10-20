@@ -45,10 +45,13 @@ export const create = protectedProjectProcedure
       })
     }
 
+    // remove ip from geolocation
+    const { ip, ...geolocation } = opts.ctx.geolocation
+    const metadataWithGeolocation = metadata ? { ...metadata, ...geolocation } : geolocation
+
     const customerId = newId("customer")
 
     // TODO: check what happens when the currency changes?
-
     const customerData = await opts.ctx.db
       .insert(customers)
       .values({
@@ -59,7 +62,7 @@ export const create = protectedProjectProcedure
         description,
         timezone: timezone || "UTC",
         active: true,
-        ...(metadata && { metadata }),
+        ...(metadataWithGeolocation && { metadata: metadataWithGeolocation }),
         ...(defaultCurrency && { defaultCurrency }),
         ...(stripeCustomerId && { stripeCustomerId }),
       })

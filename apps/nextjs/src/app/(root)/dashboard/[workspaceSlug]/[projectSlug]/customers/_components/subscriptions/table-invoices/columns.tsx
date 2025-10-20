@@ -63,6 +63,17 @@ export const columns: ColumnDef<InvoiceCustomer>[] = [
       )
     },
     size: 40,
+    filterFn: (row, _, filterValue) => {
+      // search by id
+      const searchValue = filterValue.toLowerCase()
+      const id = row.original.id.toLowerCase()
+
+      if (id.includes(searchValue)) {
+        return true
+      }
+
+      return false
+    },
   },
   {
     accessorKey: "status",
