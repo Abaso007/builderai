@@ -14,8 +14,8 @@ import HeaderTab from "~/components/layout/header-tab"
 import { SuperLink } from "~/components/super-link"
 import { api } from "~/trpc/server"
 import { CustomerActions } from "../../_components/customers/customer-actions"
+import { columns as invoicesColumns } from "../../_components/invoices/table-invoices/columns"
 import { SubscriptionSheet } from "../../_components/subscriptions/subscription-sheet"
-import { columns as invoicesColumns } from "../../_components/subscriptions/table-invoices/columns"
 
 export default async function CustomerPage({
   params,
@@ -29,7 +29,7 @@ export default async function CustomerPage({
   const { workspaceSlug, projectSlug, customerId } = params
   const baseUrl = `/${workspaceSlug}/${projectSlug}/customers/${customerId}`
 
-  const { customer } = await api.customers.getSubscriptions({
+  const { customer } = await api.customers.getInvoices({
     customerId,
   })
 

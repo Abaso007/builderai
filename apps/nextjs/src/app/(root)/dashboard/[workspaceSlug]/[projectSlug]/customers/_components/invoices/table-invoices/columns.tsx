@@ -10,8 +10,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { Typography } from "@unprice/ui/typography"
 import { format } from "date-fns"
 import { InfoIcon } from "lucide-react"
-import Link from "next/link"
+import { useParams } from "next/navigation"
 import { DataTableColumnHeader } from "~/components/data-table/data-table-column-header"
+import { SuperLink } from "~/components/super-link"
 import { DataTableRowActions } from "./data-table-row-actions"
 
 type InvoiceCustomer =
@@ -50,15 +51,15 @@ export const columns: ColumnDef<InvoiceCustomer>[] = [
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Invoice" />,
     cell: ({ row }) => {
+      const { workspaceSlug, projectSlug, customerId } = useParams()
       return (
         <div className="whitespace-nowrap text-sm">
-          <Link
-            href={row.original.invoicePaymentProviderUrl ?? ""}
-            target="_blank"
+          <SuperLink
+            href={`/${workspaceSlug}/${projectSlug}/customers/${customerId}/invoices/${row.original.id}`}
             className="hover:underline"
           >
             {row.original.id}
-          </Link>
+          </SuperLink>
         </div>
       )
     },

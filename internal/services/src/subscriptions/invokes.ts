@@ -315,7 +315,11 @@ export async function invoiceSubscription({
       with: {
         subscriptionItem: {
           with: {
-            featurePlanVersion: true,
+            featurePlanVersion: {
+              with: {
+                feature: true,
+              },
+            },
           },
         },
       },
@@ -493,7 +497,7 @@ export async function invoiceSubscription({
             amountSubtotal: 0,
             amountTotal: 0,
             prorationFactor: prorationFactor,
-            description: period.type === "trial" ? "Trial" : "Billing period",
+            description: period.subscriptionItem.featurePlanVersion.feature.title,
             itemProviderId: null,
           }
         })
