@@ -34,6 +34,8 @@ export const prefixes = {
   subscription_lock: "slock",
   invoice_item: "ii",
   invoice_credit_application: "ica",
+  entitlement: "ent",
+  grant: "grnt",
 } as const
 
 // Thread-local counter for monotonicity within the same millisecond

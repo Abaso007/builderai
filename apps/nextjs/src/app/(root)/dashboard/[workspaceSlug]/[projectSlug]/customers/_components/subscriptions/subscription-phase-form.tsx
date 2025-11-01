@@ -56,7 +56,17 @@ export function SubscriptionPhaseForm({
     defaultValues,
   })
 
-  const createPhase = useMutation(trpc.subscriptions.createPhase.mutationOptions())
+  const createPhase = useMutation(
+    trpc.subscriptions.createPhase.mutationOptions({
+      onSuccess: () => {
+        toastAction("success")
+      },
+      onError: (error) => {
+        toastAction("error", error.message)
+      },
+    })
+  )
+
   const updatePhase = useMutation(
     trpc.subscriptions.updatePhase.mutationOptions({
       onSuccess: () => {

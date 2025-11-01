@@ -14,7 +14,6 @@ import HeaderTab from "~/components/layout/header-tab"
 import { SuperLink } from "~/components/super-link"
 import { api } from "~/trpc/server"
 import { CustomerActions } from "../../_components/customers/customer-actions"
-import { SubscriptionSheet } from "../../_components/subscriptions/subscription-sheet"
 import { columns } from "../../_components/subscriptions/table-subscriptions/columns"
 
 export default async function CustomerPage({
@@ -55,19 +54,12 @@ export default async function CustomerPage({
               </CodeApiSheet>
               <div className="button-primary flex items-center space-x-1 rounded-md">
                 <div className="sm:col-span-full">
-                  <SubscriptionSheet
-                    defaultValues={{
-                      customerId: customer.id,
-                      projectId: customer.projectId,
-                      timezone: customer.timezone,
-                      phases: [],
-                    }}
-                  >
-                    <Button variant={"custom"}>
+                  <SuperLink href={`/${workspaceSlug}/${projectSlug}/customers/subscriptions/new`}>
+                    <Button variant={"primary"}>
                       <Plus className="mr-2 h-4 w-4" />
                       Subscription
                     </Button>
-                  </SubscriptionSheet>
+                  </SuperLink>
                 </div>
 
                 <Separator orientation="vertical" className="h-[20px] p-0" />

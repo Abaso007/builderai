@@ -2,6 +2,7 @@ import type { Analytics } from "@unprice/analytics"
 import { type Database, type SQL, and, eq, inArray, sql } from "@unprice/db"
 import {
   customerEntitlements,
+  grants,
   subscriptionItems,
   subscriptionPhases,
   subscriptions,
@@ -117,6 +118,32 @@ export class SubscriptionService {
     }
 
     const { items, ...phaseData } = phase
+
+    // TODO: add create grants for the entitlements in service
+    await (db ?? this.db).insert(grants).values(
+      items.map((item) => {
+        return {
+          id: newId("grant"),
+          projectId,
+          featurePlanVersionId: item.featurePlanVersionId,
+          subscriptionItemId: item.id,
+          // TODO: could be trial as well
+          type: "subscription",
+          priority: 10,
+          // grant directly tied to the customer
+          subjectType: "customer",
+          subjectId: customerId,
+          effectiveAt: phaseData.startAt,
+          // grant is valid for the entire phase
+          expiresAt: phaseData.endAt,
+          deleted: false,
+          limit: item.units ?? item.featurePlanVersion.limit,
+          hardLimit: false,
+          units: item.units,
+          metadata: {},
+        }
+      })
+    )
 
     await (db ?? this.db)
       .insert(customerEntitlements)

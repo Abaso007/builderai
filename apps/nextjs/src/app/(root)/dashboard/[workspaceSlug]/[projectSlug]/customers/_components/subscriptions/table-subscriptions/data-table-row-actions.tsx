@@ -111,6 +111,13 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
               See Details
             </SuperLink>
           </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <SuperLink
+              href={`/${workspaceSlug}/${projectSlug}/customers/subscriptions/${subscriptionId}`}
+            >
+              Add Phase
+            </SuperLink>
+          </DropdownMenuItem>
           <DropdownMenuItem
             onClick={(e) => {
               e.preventDefault()

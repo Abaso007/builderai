@@ -9,6 +9,7 @@ import { getInvoices } from "./getInvoices"
 import { getSubscriptions } from "./getSubscriptions"
 import { listByActiveProject } from "./listByActiveProject"
 import { remove } from "./remove"
+import { test } from "./test"
 import { update } from "./update"
 
 export const customersRouter = createTRPCRouter({
@@ -23,4 +24,5 @@ export const customersRouter = createTRPCRouter({
   listByActiveProject: listByActiveProject,
   getInvoices: getInvoices,
   getInvoiceById: getInvoiceById,
+  test: test,
 })

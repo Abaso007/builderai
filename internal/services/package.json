@@ -14,6 +14,7 @@
     "./projects": "./src/projects/index.ts",
     "./apikey": "./src/apikey/index.ts",
     "./billing": "./src/billing/index.ts",
+    "./grants": "./src/grants/index.ts",
     "./env": "./env.ts"
   },
   "typesVersions": {

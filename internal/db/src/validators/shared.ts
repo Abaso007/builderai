@@ -148,6 +148,13 @@ export const billingConfigSchema = z.object({
   planType: planTypeSchema,
 })
 
+export const resetConfigSchema = z.object({
+  name: z.string().min(1),
+  resetInterval: billingIntervalSchema,
+  resetIntervalCount: billingIntervalCountSchema,
+  resetAnchor: billingAnchorSchema,
+})
+
 export type Currency = z.infer<typeof currencySchema>
 export type PaymentProvider = z.infer<typeof paymentProviderSchema>
 export type FeatureType = z.infer<typeof typeFeatureSchema>
@@ -163,3 +170,4 @@ export type InvoiceStatus = z.infer<typeof invoiceStatusSchema>
 export type BillingInterval = z.infer<typeof billingIntervalSchema>
 export type PlanType = z.infer<typeof planTypeSchema>
 export type BillingConfig = z.infer<typeof billingConfigSchema>
+export type ResetConfig = z.infer<typeof resetConfigSchema>

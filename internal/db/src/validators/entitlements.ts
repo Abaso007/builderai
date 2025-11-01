@@ -2,7 +2,7 @@ import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import { z } from "zod"
 import { extendZodWithOpenApi } from "zod-openapi"
 import * as schema from "../schema"
-import { billingConfigSchema } from "./shared"
+import { billingConfigSchema, resetConfigSchema } from "./shared"
 import { aggregationMethodSchema, typeFeatureSchema } from "./shared"
 import { subscriptionPhaseSelectSchema } from "./subscriptions"
 
@@ -12,6 +12,27 @@ export const customerEntitlementMetadataSchema = z.record(
   z.string(),
   z.union([z.string(), z.number(), z.boolean(), z.null()])
 )
+
+export const grantSchema = createSelectSchema(schema.grants)
+
+export const entitlementGrantsSnapshotSchema = z.object({
+  id: z.string(),
+  featurePlanVersion: z.object({
+    id: z.string(),
+    planVersionId: z.string(),
+    featureType: z.string(),
+    resetConfig: resetConfigSchema,
+  }),
+  type: z.string(),
+  subjectType: z.string(),
+  subjectId: z.string(),
+  priority: z.number(),
+  effectiveAt: z.number(),
+  expiresAt: z.number(),
+  limit: z.number().nullable(),
+  units: z.number().nullable(),
+  hardLimit: z.boolean(),
+})
 
 export const customerEntitlementSchema = createSelectSchema(schema.customerEntitlements, {
   metadata: customerEntitlementMetadataSchema,
