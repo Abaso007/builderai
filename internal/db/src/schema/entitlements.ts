@@ -25,6 +25,7 @@ import { planVersionFeatures } from "./planVersionFeatures"
 import { projects } from "./projects"
 import { subscriptionItems } from "./subscriptions"
 
+// TODO: this should be named customer entitlements
 // entitlements are a snapshot of the grants groupd by subject and feature
 // if there are more than one grant for the same subject and feature, the entitlements will be merged using the merging policy
 // but still having them inside grants as json for billing attribution

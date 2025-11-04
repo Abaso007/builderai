@@ -18,6 +18,7 @@ import type z from "zod"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
 import { UnPriceGrantError } from "./errors"
+import type { ConsumptionResult, EntitlementState, VerificationResult } from "./types"
 
 type MergingPolicy = "sum" | "max" | "min" | "replace"
 
@@ -32,7 +33,7 @@ interface SubjectGrantQuery {
   subjectType: "customer" | "project" | "plan" | "plan_version"
 }
 
-export class GrantService {
+export class GrantsManager {
   private readonly db: Database
   private readonly logger: Logger
   private readonly analytics: Analytics
@@ -64,6 +65,8 @@ export class GrantService {
     this.cache = cache
     this.metrics = metrics
   }
+
+  // TODO: create a method to insert grants for a customer
 
   /**
    * Computes all entitlements for a customer by aggregating grants from:
@@ -700,5 +703,89 @@ export class GrantService {
     const end = Math.min(cycleEnd.getTime(), expiresAt ?? Number.POSITIVE_INFINITY)
 
     return { start, end: expiresAt ? end : null }
+  }
+
+  /**
+   * Check if usage is allowed
+   */
+  verify(state: EntitlementState): VerificationResult {
+    // Flat features always allowed
+    if (state.featureType === "flat") {
+      return {
+        allowed: true,
+        message: "Flat feature",
+        usage: 1,
+        limit: 1,
+      }
+    }
+
+    // Check limit
+    const hasLimit = state.limit !== null
+    const withinLimit = !hasLimit || state.currentUsage < (state.limit ?? Number.POSITIVE_INFINITY)
+
+    return {
+      allowed: withinLimit,
+      message: withinLimit ? "Allowed" : "Limit exceeded",
+      usage: state.currentUsage,
+      limit: state.limit,
+    }
+  }
+
+  /**
+   * Consume usage from grants by priority
+   * Returns which grants were consumed for billing attribution
+   */
+  consume(state: EntitlementState, amount: number): ConsumptionResult {
+    // Flat features don't consume
+    if (state.featureType === "flat") {
+      return {
+        success: false,
+        message: "Cannot report usage for flat features",
+        usage: state.currentUsage,
+        limit: state.limit,
+        consumedFrom: [],
+      }
+    }
+
+    // Sort grants by priority (highest first)
+    const sortedGrants = [...state.grants].sort((a, b) => b.priority - a.priority)
+
+    // Consume from each grant
+    const consumedFrom: ConsumptionResult["consumedFrom"] = []
+    let remaining = amount
+
+    for (const grant of sortedGrants) {
+      if (remaining <= 0) break
+
+      const available =
+        grant.limit === null
+          ? remaining // unlimited
+          : Math.max(0, grant.limit - grant.consumed)
+
+      if (available <= 0) continue
+
+      const toConsume = Math.min(available, remaining)
+
+      consumedFrom.push({
+        grantId: grant.id,
+        amount: toConsume,
+        priority: grant.priority,
+        type: grant.type,
+      })
+
+      grant.consumed += toConsume
+      remaining -= toConsume
+    }
+
+    const newUsage = state.currentUsage + (amount - remaining)
+    const withinLimit = state.limit === null || newUsage <= state.limit
+
+    return {
+      success: remaining === 0 || withinLimit,
+      message: remaining === 0 ? "Consumed" : "Insufficient capacity",
+      usage: newUsage,
+      limit: state.limit,
+      consumedFrom,
+    }
   }
 }
