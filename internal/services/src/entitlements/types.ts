@@ -7,6 +7,8 @@
  * - Cache (DO/Redis) for low latency, PostgreSQL synced periodically
  */
 
+import type { DenyReason } from "../customers"
+
 /**
  * Grant within an entitlement snapshot
  */
@@ -19,57 +21,44 @@ export interface Grant {
 }
 
 /**
- * Entitlement state (cached in DO/Redis)
- */
-export interface EntitlementState {
-  id: string
-  customerId: string
-  projectId: string
-  featureSlug: string
-  featureType: string
-
-  // Current usage (mutable in cache)
-  currentUsage: number
-  limit: number | null
-
-  // Grants sorted by priority (from snapshot)
-  grants: Grant[]
-
-  // For sync with PostgreSQL
-  version: number
-  lastSyncAt: number
-
-  // For cache invalidation
-  nextRevalidateAt: number // When to check DB for new version
-  computedAt: number // When snapshot was created in DB
-}
-
-/**
  * Usage record for buffering
  */
-export interface UsageRecord {
+export type UsageRecord = {
+  id: number
+  entitlementId: string
+  idempotenceKey: string
+  requestId: string
+  featureSlug: string
   customerId: string
   projectId: string
-  featureSlug: string
-  usage: number
-  timestamp: number
+  featurePlanVersionId: string
+  subscriptionItemId: string | null
+  subscriptionPhaseId: string | null
+  subscriptionId: string | null
   grantId: string
-  grantType: string
-  grantPriority: number
-  metadata?: Record<string, unknown>
+  timestamp: number
+  createdAt: number
+  usage: string | null
+  metadata: string | null
+  deleted: number
 }
 
 /**
  * Verification record for buffering
  */
-export interface VerificationRecord {
+export type VerificationRecord = {
+  id: number
+  entitlementId: string
+  requestId: string
+  featureSlug: string
   customerId: string
   projectId: string
-  featureSlug: string
   timestamp: number
-  success: boolean
-  deniedReason?: string
-  metadata?: Record<string, unknown>
+  createdAt: number
+  metadata: string | null
+  deniedReason: string | null
+  latency: string | null
+  success: number
 }
 
 /**
@@ -98,4 +87,5 @@ export interface VerificationResult {
   message: string
   usage: number
   limit: number | null
+  deniedReason?: DenyReason
 }

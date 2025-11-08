@@ -8,8 +8,10 @@ import {
   COLLECTION_METHODS,
   CURRENCIES,
   DUE_BEHAVIOUR,
+  ENTITLEMENT_MERGING_POLICY,
   FEATURE_TYPES,
   FEATURE_VERSION_TYPES,
+  GRANT_TYPES,
   INVOICE_ITEM_KIND,
   INVOICE_STATUS,
   PAYMENT_PROVIDERS,
@@ -17,6 +19,7 @@ import {
   ROLES_APP,
   STAGES,
   STATUS_PLAN,
+  SUBJECT_TYPES,
   SUBSCRIPTION_STATUS,
   TIER_MODES,
   USAGE_MODES,
@@ -28,6 +31,9 @@ export const billingPeriodStatusEnum = pgEnum("billing_period_status_v1", BILLIN
 export const billingPeriodTypeEnum = pgEnum("billing_period_type", BILLING_PERIOD_TYPE)
 export const invoiceStatusEnum = pgEnum("invoice_status", INVOICE_STATUS)
 export const statusPlanEnum = pgEnum("plan_version_status", STATUS_PLAN)
+export const entitlementMergingPolicyEnum = pgEnum("merging_policy", ENTITLEMENT_MERGING_POLICY)
+export const grantTypeEnum = pgEnum("grant_type", GRANT_TYPES)
+export const subjectTypeEnum = pgEnum("subject_type", SUBJECT_TYPES)
 export const typeFeatureEnum = pgEnum("feature_types", FEATURE_TYPES)
 export const typeFeatureVersionEnum = pgEnum("feature_version_types", FEATURE_VERSION_TYPES)
 export const aggregationMethodEnum = pgEnum("aggregation_method", AGGREGATION_METHODS)

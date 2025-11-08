@@ -1,26 +1,52 @@
 import type { EntitlementState } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
-import type { UsageRecord, VerificationRecord } from ".."
-import { UnPriceEntitlementStorageError } from "../errors"
-import type { UnPriceEntitlementStorage } from "../storage-provider"
+import {
+  type UnPriceEntitlementStorage,
+  UnPriceEntitlementStorageError,
+} from "@unprice/services/entitlements"
+import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite"
+import {
+  type NewUsageRecord,
+  type NewVerification,
+  type UsageRecord,
+  type Verification,
+  schema,
+} from "~/db/types"
 
 /**
- * Simple Memory client interface
+ * SQLite Storage Provider for Durable Objects
+ * Uses Drizzle ORM with DO's internal SQLite database
+ *
+ * Tables needed in your schema:
+ * - entitlementStates: Cache entitlement snapshots
+ * - usageRecordsBuffer: Buffer usage for Tinybird
+ * - verificationsBuffer: Buffer verifications for Tinybird
  */
-interface MemoryStorage extends Map<string, EntitlementState> {}
+export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
+  readonly name = "sqlite-do"
 
-/**
- * Simplified Memory Storage Provider
- */
-export class MemoryStorageProvider implements UnPriceEntitlementStorage {
-  readonly name = "memory"
-  private readonly memory: MemoryStorage
-  private readonly logger: Logger
+  constructor(
+    private readonly db: DrizzleSqliteDODatabase<typeof schema>,
+    private storage: DurableObjectStorage,
+    private readonly logger: Logger
+  ) {}
 
-  constructor(opts: { memory: MemoryStorage; logger: Logger }) {
-    this.memory = opts.memory
-    this.logger = opts.logger
+  async getAll(): Promise<Result<EntitlementState[], UnPriceEntitlementStorageError>> {
+    try {
+      const states = await this.storage.list()
+      return Ok(Object.values(states).map((state) => state as EntitlementState))
+    } catch (error) {
+      this.logger.error("DO getAll failed", {
+        error: error instanceof Error ? error.message : "unknown",
+      })
+      return Err(
+        new UnPriceEntitlementStorageError({
+          message: "Get all failed",
+          context: { error: error instanceof Error ? error.message : "unknown" },
+        })
+      )
+    }
   }
 
   async get(params: {
@@ -30,38 +56,15 @@ export class MemoryStorageProvider implements UnPriceEntitlementStorage {
   }): Promise<Result<EntitlementState | null, UnPriceEntitlementStorageError>> {
     try {
       const key = this.makeKey(params)
-      const value = this.memory.get(key)
-
-      if (!value) return Ok(null)
-
-      return Ok(value as EntitlementState)
+      const value = await this.storage.get<EntitlementState>(key)
+      return Ok(value ?? null)
     } catch (error) {
-      this.logger.error("Memory get failed", {
+      this.logger.error("DO get failed", {
         error: error instanceof Error ? error.message : "unknown",
       })
       return Err(
         new UnPriceEntitlementStorageError({
           message: "Get failed",
-          context: {
-            error: error instanceof Error ? error.message : "unknown",
-          },
-        })
-      )
-    }
-  }
-
-  async getAll(): Promise<Result<EntitlementState[], UnPriceEntitlementStorageError>> {
-    try {
-      const result: EntitlementState[] = []
-      this.memory.forEach((value) => result.push(value))
-      return Ok(result)
-    } catch (error) {
-      this.logger.error("Memory getAll failed", {
-        error: error instanceof Error ? error.message : "unknown",
-      })
-      return Err(
-        new UnPriceEntitlementStorageError({
-          message: "Get all failed",
           context: {
             error: error instanceof Error ? error.message : "unknown",
           },
@@ -79,12 +82,11 @@ export class MemoryStorageProvider implements UnPriceEntitlementStorage {
         projectId: params.state.projectId,
         featureSlug: params.state.featureSlug,
       })
-
-      this.memory.set(key, params.state)
+      await this.storage.put(key, params.state)
 
       return Ok(undefined)
     } catch (error) {
-      this.logger.error("Memory set failed", {
+      this.logger.error("DO set failed", {
         error: error instanceof Error ? error.message : "unknown",
       })
       return Err(
@@ -105,10 +107,11 @@ export class MemoryStorageProvider implements UnPriceEntitlementStorage {
   }): Promise<Result<void, UnPriceEntitlementStorageError>> {
     try {
       const key = this.makeKey(params)
-      this.memory.delete(key)
+      await this.storage.delete(key)
+
       return Ok(undefined)
     } catch (error) {
-      this.logger.error("Memory delete failed", {
+      this.logger.error("DO delete failed", {
         error: error instanceof Error ? error.message : "unknown",
       })
       return Err(
@@ -122,17 +125,20 @@ export class MemoryStorageProvider implements UnPriceEntitlementStorage {
     }
   }
 
+  /**
+   * Insert usage record in SQLite
+   */
   async insertUsageRecord(
-    record: UsageRecord
+    record: NewUsageRecord
   ): Promise<Result<void, UnPriceEntitlementStorageError>> {
     try {
-      this.memory.set(record.id, record)
+      await this.db.insert(schema.usageRecords).values(record)
+
       return Ok(undefined)
     } catch (error) {
-      this.logger.error("Memory insert usage record failed", {
+      this.logger.error("Failed to insert usage record", {
         error: error instanceof Error ? error.message : "unknown",
       })
-
       return Err(
         new UnPriceEntitlementStorageError({
           message: "Insert usage record failed",
@@ -144,17 +150,20 @@ export class MemoryStorageProvider implements UnPriceEntitlementStorage {
     }
   }
 
+  /**
+   * Buffer verification in SQLite
+   */
   async insertVerification(
-    record: VerificationRecord
+    record: NewVerification
   ): Promise<Result<void, UnPriceEntitlementStorageError>> {
     try {
-      this.memory.set(record.id, record)
+      await this.db.insert(schema.verifications).values(record)
+
       return Ok(undefined)
     } catch (error) {
-      this.logger.error("Memory insert verification failed", {
+      this.logger.error("Failed to insert verification", {
         error: error instanceof Error ? error.message : "unknown",
       })
-
       return Err(
         new UnPriceEntitlementStorageError({
           message: "Insert verification failed",
@@ -166,53 +175,15 @@ export class MemoryStorageProvider implements UnPriceEntitlementStorage {
     }
   }
 
-  async deleteAllVerifications(): Promise<Result<void, UnPriceEntitlementStorageError>> {
+  /**
+   * Get all verifications
+   */
+  async getVerifications(): Promise<Result<Verification[], UnPriceEntitlementStorageError>> {
     try {
-      this.memory.clear()
-      return Ok(undefined)
+      const verifications = await this.db.query.verifications.findMany()
+      return Ok(verifications)
     } catch (error) {
-      this.logger.error("Memory delete all verifications failed", {
-        error: error instanceof Error ? error.message : "unknown",
-      })
-
-      return Err(
-        new UnPriceEntitlementStorageError({
-          message: "Delete all verifications failed",
-          context: {
-            error: error instanceof Error ? error.message : "unknown",
-          },
-        })
-      )
-    }
-  }
-
-  async deleteAllUsageRecords(): Promise<Result<void, UnPriceEntitlementStorageError>> {
-    try {
-      this.memory.clear()
-      return Ok(undefined)
-    } catch (error) {
-      this.logger.error("Memory delete all usage records failed", {
-        error: error instanceof Error ? error.message : "unknown",
-      })
-
-      return Err(
-        new UnPriceEntitlementStorageError({
-          message: "Delete all usage records failed",
-          context: {
-            error: error instanceof Error ? error.message : "unknown",
-          },
-        })
-      )
-    }
-  }
-
-  async getVerifications(): Promise<Result<VerificationRecord[], UnPriceEntitlementStorageError>> {
-    try {
-      const result: VerificationRecord[] = []
-      this.memory.forEach((value) => result.push(value))
-      return Ok(result)
-    } catch (error) {
-      this.logger.error("Memory get verifications failed", {
+      this.logger.error("Failed to get verifications", {
         error: error instanceof Error ? error.message : "unknown",
       })
 
@@ -227,13 +198,15 @@ export class MemoryStorageProvider implements UnPriceEntitlementStorage {
     }
   }
 
+  /**
+   * Get all usage records
+   */
   async getUsageRecords(): Promise<Result<UsageRecord[], UnPriceEntitlementStorageError>> {
     try {
-      const result: UsageRecord[] = []
-      this.memory.forEach((value) => result.push(value as UsageRecord))
-      return Ok(result)
+      const usage = await this.db.query.usageRecords.findMany()
+      return Ok(usage)
     } catch (error) {
-      this.logger.error("Memory get usage records failed", {
+      this.logger.error("Failed to get usage records", {
         error: error instanceof Error ? error.message : "unknown",
       })
       return Err(
@@ -247,11 +220,55 @@ export class MemoryStorageProvider implements UnPriceEntitlementStorage {
     }
   }
 
+  /**
+   * Delete all usage records
+   */
+  async deleteAllUsageRecords(): Promise<Result<void, UnPriceEntitlementStorageError>> {
+    try {
+      await this.db.delete(schema.usageRecords)
+      return Ok(undefined)
+    } catch (error) {
+      this.logger.error("Failed to delete all usage records", {
+        error: error instanceof Error ? error.message : "unknown",
+      })
+      return Err(
+        new UnPriceEntitlementStorageError({
+          message: "Delete all usage records failed",
+          context: {
+            error: error instanceof Error ? error.message : "unknown",
+          },
+        })
+      )
+    }
+  }
+
+  /**
+   * Delete all verifications
+   */
+  async deleteAllVerifications(): Promise<Result<void, UnPriceEntitlementStorageError>> {
+    try {
+      await this.db.delete(schema.verifications)
+      return Ok(undefined)
+    } catch (error) {
+      this.logger.error("Failed to delete all verifications", {
+        error: error instanceof Error ? error.message : "unknown",
+      })
+      return Err(
+        new UnPriceEntitlementStorageError({
+          message: "Delete all verifications failed",
+          context: {
+            error: error instanceof Error ? error.message : "unknown",
+          },
+        })
+      )
+    }
+  }
+
   private makeKey(params: {
     customerId: string
     projectId: string
     featureSlug: string
   }): string {
-    return `entitlement:${params.projectId}:${params.customerId}:${params.featureSlug}`
+    return `${params.projectId}:${params.customerId}:${params.featureSlug}`
   }
 }

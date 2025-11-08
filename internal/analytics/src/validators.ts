@@ -58,10 +58,6 @@ export const metadataSchema = z
 
 export const featureVerificationSchemaV1 = z.object({
   projectId: z.string(),
-  featurePlanVersionId: z.string(),
-  subscriptionItemId: z.string().nullable(),
-  subscriptionPhaseId: z.string().nullable(),
-  subscriptionId: z.string().nullable(),
   entitlementId: z.string(),
   deniedReason: z.string().optional(),
   success: z.boolean(),

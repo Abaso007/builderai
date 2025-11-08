@@ -10,11 +10,14 @@ import {
   COLLECTION_METHODS,
   CURRENCIES,
   DUE_BEHAVIOUR,
+  ENTITLEMENT_MERGING_POLICY,
   FEATURE_TYPES,
   FEATURE_VERSION_TYPES,
+  GRANT_TYPES,
   INVOICE_STATUS,
   PAYMENT_PROVIDERS,
   PLAN_TYPES,
+  SUBJECT_TYPES,
   SUBSCRIPTION_STATUS,
   TIER_MODES,
   USAGE_MODES,
@@ -23,6 +26,8 @@ import {
 
 extendZodWithOpenApi(z)
 
+export const subjectTypeSchema = z.enum(SUBJECT_TYPES)
+export const grantTypeSchema = z.enum(GRANT_TYPES)
 export const paymentProviderSchema = z.enum(PAYMENT_PROVIDERS)
 export const currencySchema = z.enum(CURRENCIES)
 export const typeFeatureSchema = z.enum(FEATURE_TYPES)
@@ -155,6 +160,8 @@ export const resetConfigSchema = z.object({
   resetAnchor: billingAnchorSchema,
 })
 
+export const entitlementMergingPolicySchema = z.enum(ENTITLEMENT_MERGING_POLICY)
+
 export type Currency = z.infer<typeof currencySchema>
 export type PaymentProvider = z.infer<typeof paymentProviderSchema>
 export type FeatureType = z.infer<typeof typeFeatureSchema>
@@ -171,3 +178,4 @@ export type BillingInterval = z.infer<typeof billingIntervalSchema>
 export type PlanType = z.infer<typeof planTypeSchema>
 export type BillingConfig = z.infer<typeof billingConfigSchema>
 export type ResetConfig = z.infer<typeof resetConfigSchema>
+export type EntitlementMergingPolicy = z.infer<typeof entitlementMergingPolicySchema>

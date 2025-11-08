@@ -128,10 +128,10 @@ export class SubscriptionService {
           featurePlanVersionId: item.featurePlanVersionId,
           subscriptionItemId: item.id,
           // TODO: could be trial as well
-          type: "subscription",
+          type: "subscription" as const,
           priority: 10,
           // grant directly tied to the customer
-          subjectType: "customer",
+          subjectType: "customer" as const,
           subjectId: customerId,
           effectiveAt: phaseData.startAt,
           // grant is valid for the entire phase

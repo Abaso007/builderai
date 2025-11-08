@@ -1,5 +1,4 @@
-import { usageRecords } from "./schema"
-import { verifications } from "./schema"
+import { usageRecords, verifications } from "./schema"
 
 export type UsageRecord = typeof usageRecords.$inferSelect
 export type NewUsageRecord = typeof usageRecords.$inferInsert

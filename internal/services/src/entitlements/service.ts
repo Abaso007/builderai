@@ -2,14 +2,16 @@ import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { and, eq } from "@unprice/db"
 import { entitlements } from "@unprice/db/schema"
+import type { EntitlementState } from "@unprice/db/validators"
+import { Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
+import type { UnPriceEntitlementStorageError } from "./errors"
 import { GrantsManager } from "./grants"
-import type { EntitlementStorageProvider } from "./storage-provider"
+import type { UnPriceEntitlementStorage } from "./storage-provider"
 import type {
   ConsumptionResult,
-  EntitlementState,
   UsageRecord,
   VerificationRecord,
   VerificationResult,
@@ -28,7 +30,7 @@ export class EntitlementService {
   private readonly grantsManager: GrantsManager
   private readonly revalidateInterval: number
   private readonly db: Database
-  private readonly storage: EntitlementStorageProvider
+  public readonly storage: UnPriceEntitlementStorage
   private readonly logger: Logger
   private readonly analytics: Analytics
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
@@ -38,7 +40,7 @@ export class EntitlementService {
 
   constructor(opts: {
     db: Database
-    storage: EntitlementStorageProvider
+    storage: UnPriceEntitlementStorage
     logger: Logger
     analytics: Analytics
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
@@ -75,46 +77,62 @@ export class EntitlementService {
     customerId: string
     projectId: string
     featureSlug: string
+    requestId: string
+    now: number
+    startTime: number
   }): Promise<VerificationResult> {
-    const state = await this.getStateWithRevalidation(params)
+    const state = await this.getStateWithRevalidation({
+      customerId: params.customerId,
+      projectId: params.projectId,
+      featureSlug: params.featureSlug,
+      now: params.now,
+    })
 
     if (!state) {
-      // Buffer verification failure if provider supports it
-      if (this.storage.bufferVerification) {
-        await this.storage.bufferVerification({
-          customerId: params.customerId,
-          projectId: params.projectId,
-          featureSlug: params.featureSlug,
-          timestamp: Date.now(),
-          success: false,
-          deniedReason: "NO_ENTITLEMENT",
-        })
-      }
+      await this.storage.insertVerification({
+        customerId: params.customerId,
+        projectId: params.projectId,
+        featureSlug: params.featureSlug,
+        timestamp: params.now,
+        success: 0,
+        deniedReason: "ENTITLEMENT_NOT_FOUND",
+        metadata: JSON.stringify({}),
+        latency: (performance.now() - params.startTime).toString(),
+        entitlementId: "",
+        requestId: params.requestId,
+        createdAt: Date.now(),
+      })
 
       return {
         allowed: false,
         message: "No entitlement found",
+        deniedReason: "ENTITLEMENT_NOT_FOUND",
         usage: 0,
         limit: null,
       }
     }
 
-    const result = this.grantsManager.verify(state)
+    const result = this.grantsManager.verify({ state, now: params.now })
 
-    // Buffer verification if provider supports it
-    if (this.storage.bufferVerification) {
-      await this.storage.bufferVerification({
-        customerId: params.customerId,
-        projectId: params.projectId,
-        featureSlug: params.featureSlug,
-        timestamp: Date.now(),
-        success: result.allowed,
-        deniedReason: result.allowed ? undefined : "LIMIT_EXCEEDED",
-      })
-    }
+    // Insert verification record
+    await this.storage.insertVerification({
+      customerId: params.customerId,
+      projectId: params.projectId,
+      featureSlug: params.featureSlug,
+      timestamp: params.now,
+      success: result.allowed ? 1 : 0,
+      deniedReason: result.deniedReason ?? null,
+      metadata: JSON.stringify({}),
+      latency: (performance.now() - params.startTime).toString(),
+      entitlementId: state.id,
+      requestId: params.requestId,
+      createdAt: Date.now(),
+    })
 
     return result
   }
+
+  // TODO can and reportUsage as one function as well
 
   /**
    * Report usage with priority-based consumption
@@ -127,7 +145,13 @@ export class EntitlementService {
     amount: number
   }): Promise<ConsumptionResult> {
     // Get state with automatic revalidation (handles cache miss internally)
-    const state = await this.getStateWithRevalidation(params)
+    const now = Date.now()
+    const state = await this.getStateWithRevalidation({
+      customerId: params.customerId,
+      projectId: params.projectId,
+      featureSlug: params.featureSlug,
+      now: now,
+    })
 
     if (!state) {
       return {
@@ -140,36 +164,216 @@ export class EntitlementService {
     }
 
     // Consume with priority
-    const result = this.grantsManager.consume(state, params.amount)
+    const result = this.grantsManager.consume({ state, amount: params.amount, now })
 
     // Update state in cache
     if (result.success) {
-      state.currentUsage = result.usage
+      state.currentCycleUsage = result.usage.toString()
       await this.storage.set({ state })
 
       // Buffer usage records if provider supports it
-      if (this.storage.bufferUsageRecord) {
-        for (const consumed of result.consumedFrom) {
-          await this.storage.bufferUsageRecord({
-            customerId: params.customerId,
-            projectId: params.projectId,
-            featureSlug: params.featureSlug,
-            usage: consumed.amount,
-            timestamp: Date.now(),
-            grantId: consumed.grantId,
-            grantType: consumed.type,
-            grantPriority: consumed.priority,
-          })
-        }
-      }
+      // for (const consumed of result.consumedFrom) {
+      //   await this.storage.bufferUsageRecord({
+      //     customerId: params.customerId,
+      //     projectId: params.projectId,
+      //     featureSlug: params.featureSlug,
+      //     usage: consumed.amount.toString(),
+      //     timestamp: Date.now(),
+      //     grantId: consumed.grantId,
+      //     grantType: consumed.type,
+      //     grantPriority: consumed.priority,
+      //   })
+      // }
 
       // Async sync to DB (don't block)
-      this.syncToDB(state).catch((err) => {
-        this.logger.error("Failed to sync to DB", { error: err.message })
-      })
+      // this.syncToDB(state).catch((err) => {
+      //   this.logger.error("Failed to sync to DB", { error: err.message })
+      // })
     }
 
     return result
+  }
+
+  /**
+   * Send verifications to analytics
+   */
+  private async sendVerificationsToAnalytics({
+    verifications,
+  }: {
+    verifications: VerificationRecord[]
+  }): Promise<
+    Result<
+      {
+        success: boolean
+        quarantined: number
+      },
+      UnPriceEntitlementStorageError
+    >
+  > {
+    try {
+      const transformedEvents = verifications.map((event) => ({
+        featureSlug: event.featureSlug,
+        entitlementId: event.entitlementId,
+        customerId: event.customerId,
+        projectId: event.projectId,
+        timestamp: event.timestamp,
+        status: event.deniedReason,
+        metadata: event.metadata ? JSON.parse(event.metadata) : {},
+        latency: event.latency ? Number(event.latency) : 0,
+        requestId: event.requestId,
+        success: event.success === 1,
+      }))
+
+      const data = await this.analytics
+        .ingestFeaturesVerification(transformedEvents)
+        .catch((e) => {
+          this.logger.error(`Failed in ingestFeaturesVerification from do ${e.message}`, {
+            error: JSON.stringify(e),
+            customerId: transformedEvents[0]?.customerId,
+            projectId: transformedEvents[0]?.projectId,
+          })
+          throw e
+        })
+        .then(async (data) => {
+          const rows = data?.successful_rows ?? 0
+          const quarantined = data?.quarantined_rows ?? 0
+          const total = rows + quarantined
+
+          if (quarantined > 0) {
+            this.logger.warn("quarantined verifications", {
+              quarantined,
+            })
+          }
+
+          if (total >= verifications.length) {
+            this.logger.info(`Processed ${total} verifications`, {
+              customerId: transformedEvents[0]?.customerId,
+              projectId: transformedEvents[0]?.projectId,
+            })
+          } else {
+            this.logger.debug(
+              "the total of verifications sent to tinybird are not the same as the total of verifications in the db",
+              {
+                total,
+                expected: verifications.length,
+                customerId: transformedEvents[0]?.customerId,
+                projectId: transformedEvents[0]?.projectId,
+              }
+            )
+          }
+
+          return data
+        })
+
+      return Ok({
+        success: true,
+        quarantined: data.quarantined_rows ?? 0,
+      })
+    } catch (error) {
+      this.logger.error(
+        `Failed to send verifications to analytics ${error instanceof Error ? error.message : "unknown error"}`,
+        {
+          error: error instanceof Error ? JSON.stringify(error) : "unknown error",
+          customerId: verifications[0]?.customerId,
+          projectId: verifications[0]?.projectId,
+        }
+      )
+
+      throw error
+    }
+  }
+
+  /**
+   * Send usage records to analytics
+   */
+  private async sendUsageRecordsToAnalytics({
+    usageRecords,
+  }: {
+    usageRecords: UsageRecord[]
+  }): Promise<
+    Result<
+      {
+        success: boolean
+        quarantined: number
+      },
+      UnPriceEntitlementStorageError
+    >
+  > {
+    // Create a Map to deduplicate events based on their unique identifiers
+    const uniqueEvents = new Map()
+    for (const event of usageRecords) {
+      if (!uniqueEvents.has(event.idempotenceKey)) {
+        uniqueEvents.set(event.idempotenceKey, {
+          ...event,
+          metadata: event.metadata ? JSON.parse(event.metadata) : {},
+        })
+      }
+    }
+
+    const deduplicatedEvents = Array.from(uniqueEvents.values())
+
+    if (deduplicatedEvents.length > 0) {
+      try {
+        const data = await this.analytics
+          .ingestFeaturesUsage(deduplicatedEvents)
+          .catch((e) => {
+            this.logger.error(`Failed to send ${deduplicatedEvents.length} events to Analytics:`, {
+              error: e.message,
+              customerId: deduplicatedEvents[0]?.customerId,
+              projectId: deduplicatedEvents[0]?.projectId,
+            })
+            throw e
+          })
+          .then(async (data) => {
+            const rows = data?.successful_rows ?? 0
+            const quarantined = data?.quarantined_rows ?? 0
+            const total = rows + quarantined
+
+            if (total >= deduplicatedEvents.length) {
+              this.logger.debug(
+                `successfully sent ${deduplicatedEvents.length} usage records to Analytics`,
+                {
+                  rows: total,
+                }
+              )
+            } else {
+              this.logger.debug(
+                "the total of usage records sent to Analytics are not the same as the total of usage records in the db",
+                {
+                  total,
+                  expected: deduplicatedEvents.length,
+                  customerId: deduplicatedEvents[0]?.customerId,
+                  projectId: deduplicatedEvents[0]?.projectId,
+                }
+              )
+            }
+
+            this.logger.info(`Processed ${total} usage events`, {
+              customerId: deduplicatedEvents[0]?.customerId,
+              projectId: deduplicatedEvents[0]?.projectId,
+            })
+
+            return data
+          })
+
+        return Ok({
+          success: true,
+          quarantined: data?.quarantined_rows ?? 0,
+        })
+      } catch (error) {
+        this.logger.error("Failed to send usage records to Analytics:", {
+          error: error instanceof Error ? error.message : "unknown error",
+          customerId: usageRecords[0]?.customerId,
+          projectId: usageRecords[0]?.projectId,
+        })
+        throw error
+      }
+    } else {
+      return Ok({
+        success: true,
+        quarantined: 0,
+      })
+    }
   }
 
   /**
@@ -190,22 +394,53 @@ export class EntitlementService {
   }
 
   /**
-   * Flush buffered records (for DO alarms or periodic timers)
-   * Returns the buffered records so you can send them to Tinybird
+   * Flush usage records to analytics
    */
-  async flush(): Promise<{
-    usage: UsageRecord[]
-    verifications: VerificationRecord[]
-  }> {
-    if (this.storage.flush) {
-      const { val, err } = await this.storage.flush()
-      if (err) {
-        this.logger.error("Failed to flush", { error: err.message })
-        return { usage: [], verifications: [] }
-      }
-      return val
+  async flushUsageRecords(): Promise<Result<void, UnPriceEntitlementStorageError>> {
+    const usageRecords = await this.storage.getUsageRecords()
+
+    if (usageRecords.err) {
+      this.logger.error("Failed to get usage records", { error: usageRecords.err.message })
+      throw usageRecords.err
     }
-    return { usage: [], verifications: [] }
+
+    const result = await this.sendUsageRecordsToAnalytics({
+      usageRecords: usageRecords.val,
+    })
+
+    if (result.err) {
+      this.logger.error("Failed to send usage records to analytics", { error: result.err.message })
+      throw result.err
+    }
+
+    await this.storage.deleteAllUsageRecords()
+
+    return Ok(undefined)
+  }
+
+  /**
+   * Flush verifications to analytics
+   */
+  async flushVerifications(): Promise<Result<void, UnPriceEntitlementStorageError>> {
+    const verifications = await this.storage.getVerifications()
+
+    if (verifications.err) {
+      this.logger.error("Failed to get verifications", { error: verifications.err.message })
+      throw verifications.err
+    }
+
+    const result = await this.sendVerificationsToAnalytics({
+      verifications: verifications.val,
+    })
+
+    if (result.err) {
+      this.logger.error("Failed to send verifications to analytics", { error: result.err.message })
+      throw result.err
+    }
+
+    await this.storage.deleteAllVerifications()
+
+    return Ok(undefined)
   }
 
   /**
@@ -216,6 +451,21 @@ export class EntitlementService {
     projectId: string
     featureSlug: string
   }): Promise<void> {
+    // flush buffered records first
+    const verificationsResult = await this.flushVerifications()
+    const usageRecordsResult = await this.flushUsageRecords()
+
+    if (verificationsResult.err) {
+      this.logger.error("Failed to flush verifications", { error: verificationsResult.err.message })
+      throw verificationsResult.err
+    }
+
+    if (usageRecordsResult.err) {
+      this.logger.error("Failed to flush usage records", { error: usageRecordsResult.err.message })
+      throw usageRecordsResult.err
+    }
+
+    // delete the entitlement from the storage
     await this.storage.delete(params)
   }
 
@@ -236,27 +486,29 @@ export class EntitlementService {
     customerId: string
     projectId: string
     featureSlug: string
+    now: number
   }): Promise<EntitlementState | null> {
-    const now = Date.now()
     const { val: cached } = await this.storage.get(params)
 
     // Cache miss - load from DB
     if (!cached) {
       this.logger.debug("Cache miss, loading from DB", params)
-      return this.loadFromDB(params, now)
+      return this.loadFromDB(params, params.now)
     }
 
     // Cache hit - check if we need to revalidate
-    if (now >= cached.nextRevalidateAt) {
+    if (params.now >= cached.nextRevalidateAt) {
       this.logger.debug("Revalidation time, checking version", params)
 
       // Lightweight version check (just query version number)
       const dbVersion = await this.db.query.entitlements.findFirst({
-        where: (e, { and, eq }) =>
+        where: (e, { and, eq, gte, lte, isNull, or }) =>
           and(
             eq(e.customerId, params.customerId),
             eq(e.projectId, params.projectId),
-            eq(e.featureSlug, params.featureSlug)
+            eq(e.featureSlug, params.featureSlug),
+            gte(e.effectiveAt, params.now),
+            or(isNull(e.expiresAt), lte(e.expiresAt, params.now))
           ),
         columns: { version: true, computedAt: true },
       })
@@ -276,11 +528,11 @@ export class EntitlementService {
           cachedComputedAt: cached.computedAt,
           dbComputedAt: dbVersion.computedAt,
         })
-        return this.loadFromDB(params, now)
+        return this.loadFromDB(params, params.now)
       }
 
       // Version matches - just update revalidation time
-      cached.nextRevalidateAt = now + this.revalidateInterval
+      cached.nextRevalidateAt = params.now + this.revalidateInterval
       await this.storage.set({ state: cached })
     }
 
@@ -299,11 +551,13 @@ export class EntitlementService {
     now: number
   ): Promise<EntitlementState | null> {
     const entitlement = await this.db.query.entitlements.findFirst({
-      where: (e, { and, eq }) =>
+      where: (e, { and, eq, or, isNull, lte, gte }) =>
         and(
           eq(e.customerId, params.customerId),
           eq(e.projectId, params.projectId),
-          eq(e.featureSlug, params.featureSlug)
+          eq(e.featureSlug, params.featureSlug),
+          gte(e.effectiveAt, now),
+          or(isNull(e.expiresAt), lte(e.expiresAt, now))
         ),
     })
 
@@ -312,20 +566,20 @@ export class EntitlementService {
     const state: EntitlementState = {
       id: entitlement.id,
       customerId: entitlement.customerId,
+      timezone: entitlement.timezone,
+      resetConfig: entitlement.resetConfig,
+      effectiveAt: entitlement.effectiveAt,
+      expiresAt: entitlement.expiresAt,
+      mergingPolicy: entitlement.mergingPolicy,
+      aggregationMethod: entitlement.aggregationMethod,
       projectId: entitlement.projectId,
       featureSlug: entitlement.featureSlug,
       featureType: entitlement.featureType,
-      currentUsage: Number(entitlement.currentCycleUsage),
-      limit: entitlement.effectiveLimit,
-      grants: (entitlement.grants ?? [])
-        .map((g) => ({
-          id: g.id,
-          priority: g.priority,
-          type: g.type,
-          limit: g.limit,
-          consumed: 0, // Start fresh from snapshot
-        }))
-        .sort((a, b) => b.priority - a.priority),
+      currentCycleUsage: entitlement.currentCycleUsage,
+      accumulatedUsage: entitlement.accumulatedUsage,
+      limit: entitlement.limit,
+      hardLimit: entitlement.hardLimit,
+      grants: entitlement.grants,
       version: entitlement.version,
       lastSyncAt: now,
       nextRevalidateAt: now + this.revalidateInterval,
@@ -341,97 +595,13 @@ export class EntitlementService {
   /**
    * Sync usage back to DB (async, non-blocking)
    */
-  private async syncToDB(state: EntitlementState): Promise<void> {
+  public async syncToDB(state: EntitlementState): Promise<void> {
     await this.db
       .update(entitlements)
       .set({
-        currentCycleUsage: state.currentUsage.toString(),
-        lastUsageUpdateAt: Date.now(),
+        currentCycleUsage: state.currentCycleUsage.toString(),
+        lastSyncAt: Date.now(),
       })
       .where(and(eq(entitlements.id, state.id), eq(entitlements.projectId, state.projectId)))
-  }
-
-  /**
-   * Check if usage is allowed
-   */
-  verify(state: EntitlementState): VerificationResult {
-    // Flat features always allowed
-    if (state.featureType === "flat") {
-      return {
-        allowed: true,
-        message: "Flat feature",
-        usage: 1,
-        limit: 1,
-      }
-    }
-
-    // Check limit
-    const hasLimit = state.limit !== null
-    const withinLimit = !hasLimit || state.currentUsage < (state.limit ?? Number.POSITIVE_INFINITY)
-
-    return {
-      allowed: withinLimit,
-      message: withinLimit ? "Allowed" : "Limit exceeded",
-      usage: state.currentUsage,
-      limit: state.limit,
-    }
-  }
-
-  /**
-   * Consume usage from grants by priority
-   * Returns which grants were consumed for billing attribution
-   */
-  consume(state: EntitlementState, amount: number): ConsumptionResult {
-    // Flat features don't consume
-    if (state.featureType === "flat") {
-      return {
-        success: false,
-        message: "Cannot report usage for flat features",
-        usage: state.currentUsage,
-        limit: state.limit,
-        consumedFrom: [],
-      }
-    }
-
-    // Sort grants by priority (highest first)
-    const sortedGrants = [...state.grants].sort((a, b) => b.priority - a.priority)
-
-    // Consume from each grant
-    const consumedFrom: ConsumptionResult["consumedFrom"] = []
-    let remaining = amount
-
-    for (const grant of sortedGrants) {
-      if (remaining <= 0) break
-
-      const available =
-        grant.limit === null
-          ? remaining // unlimited
-          : Math.max(0, grant.limit - grant.consumed)
-
-      if (available <= 0) continue
-
-      const toConsume = Math.min(available, remaining)
-
-      consumedFrom.push({
-        grantId: grant.id,
-        amount: toConsume,
-        priority: grant.priority,
-        type: grant.type,
-      })
-
-      grant.consumed += toConsume
-      remaining -= toConsume
-    }
-
-    const newUsage = state.currentUsage + (amount - remaining)
-    const withinLimit = state.limit === null || newUsage <= state.limit
-
-    return {
-      success: remaining === 0 || withinLimit,
-      message: remaining === 0 ? "Consumed" : "Insufficient capacity",
-      usage: newUsage,
-      limit: state.limit,
-      consumedFrom,
-    }
   }
 }

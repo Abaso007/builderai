@@ -11,6 +11,7 @@ import { featureSelectBaseSchema } from "./features"
 import {
   aggregationMethodSchema,
   billingConfigSchema,
+  resetConfigSchema,
   tierModeSchema,
   typeFeatureSchema,
   unitSchema,
@@ -326,6 +327,7 @@ export const configFeatureSchema = z.union([
 // TODO: use discriminated union
 export const planVersionFeatureSelectBaseSchema = createSelectSchema(planVersionFeatures, {
   config: configFeatureSchema,
+  resetConfig: resetConfigSchema,
   metadata: planVersionFeatureMetadataSchema,
   defaultQuantity: z.coerce.number().int().optional().default(1),
   aggregationMethod: aggregationMethodSchema,

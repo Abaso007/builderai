@@ -12,21 +12,18 @@ import {
   startOfUtcDay,
   startOfUtcHour,
 } from "@unprice/db/validators"
+import type {
+  EntitlementMergingPolicy,
+  EntitlementState,
+  grantSchemaExtended,
+} from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import type z from "zod"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
 import { UnPriceGrantError } from "./errors"
-import type { ConsumptionResult, EntitlementState, VerificationResult } from "./types"
-
-type MergingPolicy = "sum" | "max" | "min" | "replace"
-
-interface ComputeEntitlementsForCustomerParams {
-  customerId: string
-  projectId: string
-  now: number
-}
+import type { ConsumptionResult, VerificationResult } from "./types"
 
 interface SubjectGrantQuery {
   subjectId: string
@@ -66,7 +63,209 @@ export class GrantsManager {
     this.metrics = metrics
   }
 
-  // TODO: create a method to insert grants for a customer
+  /**
+   * Creates grants with validation to ensure configuration consistency.
+   *
+   * Validates that all grants for the same feature within overlapping date ranges
+   * have the same featureType, resetConfig, and aggregationMethod.
+   */
+  public async createGrant(params: {
+    grant: (typeof grants.$inferInsert)[]
+    projectId: string
+  }): Promise<Result<(typeof grants.$inferSelect)[], UnPriceGrantError>> {
+    const { grant: grantsToCreate, projectId } = params
+
+    if (grantsToCreate.length === 0) {
+      return Err(
+        new UnPriceGrantError({
+          message: "No grants provided",
+        })
+      )
+    }
+
+    // Helper function to check if two date ranges overlap
+    const dateRangesOverlap = (
+      start1: number,
+      end1: number | null,
+      start2: number,
+      end2: number | null
+    ): boolean => {
+      const end1Value = end1 ?? Number.POSITIVE_INFINITY
+      const end2Value = end2 ?? Number.POSITIVE_INFINITY
+      return start1 < end2Value && start2 < end1Value
+    }
+
+    // Helper function to compare resetConfig objects
+    const resetConfigsEqual = (
+      config1: ResetConfig | null,
+      config2: ResetConfig | null
+    ): boolean => {
+      if (config1 === null && config2 === null) return true
+      if (config1 === null || config2 === null) return false
+      return JSON.stringify(config1) === JSON.stringify(config2)
+    }
+
+    // Validate each grant before insertion
+    for (const newGrant of grantsToCreate) {
+      // Get the featurePlanVersion to access feature configuration
+      const featurePlanVersion = await this.db.query.planVersionFeatures.findFirst({
+        with: {
+          feature: {
+            columns: {
+              slug: true,
+            },
+          },
+        },
+        where: (fpv, { and, eq }) =>
+          and(eq(fpv.id, newGrant.featurePlanVersionId), eq(fpv.projectId, projectId)),
+      })
+
+      if (!featurePlanVersion) {
+        return Err(
+          new UnPriceGrantError({
+            message: `Feature plan version not found: ${newGrant.featurePlanVersionId}`,
+            grantId: newGrant.id,
+          })
+        )
+      }
+
+      const featureSlug = featurePlanVersion.feature.slug
+      const newGrantConfig = {
+        featureType: featurePlanVersion.featureType,
+        resetConfig: featurePlanVersion.resetConfig,
+        aggregationMethod: featurePlanVersion.aggregationMethod,
+      }
+
+      // Find all existing grants that:
+      // 1. Are in the same project
+      // 2. Are for the same subject (subjectId + subjectType)
+      // 3. Have overlapping date ranges
+      // 4. Reference a featurePlanVersion with the same feature slug
+      const existingGrants = await this.db.query.grants.findMany({
+        with: {
+          featurePlanVersion: {
+            with: {
+              feature: {
+                columns: {
+                  slug: true,
+                },
+              },
+            },
+          },
+        },
+        where: (grant, { and, eq, not, or, isNull, lt, gt }) =>
+          and(
+            eq(grant.projectId, projectId),
+            eq(grant.subjectId, newGrant.subjectId),
+            eq(grant.subjectType, newGrant.subjectType),
+            not(eq(grant.deleted, true)),
+            // Check for date range overlap:
+            // The new grant's effectiveAt must be before existing grant's expiresAt (or null)
+            // AND existing grant's effectiveAt must be before new grant's expiresAt (or null)
+            or(
+              // Case 1: New grant starts before existing grant ends
+              and(
+                lt(grant.effectiveAt, newGrant.expiresAt ?? Number.MAX_SAFE_INTEGER),
+                or(isNull(grant.expiresAt), gt(grant.expiresAt, newGrant.effectiveAt))
+              )
+            )
+          ),
+      })
+
+      // Filter to only grants with the same feature slug
+      const overlappingGrants = existingGrants.filter(
+        (grant) => grant.featurePlanVersion.feature.slug === featureSlug
+      )
+
+      // Validate configuration consistency with overlapping grants
+      for (const existingGrant of overlappingGrants) {
+        const existingFeaturePlanVersion = await this.db.query.planVersionFeatures.findFirst({
+          where: (fpv, { and, eq }) =>
+            and(eq(fpv.id, existingGrant.featurePlanVersionId), eq(fpv.projectId, projectId)),
+        })
+
+        if (!existingFeaturePlanVersion) {
+          continue // Skip if feature plan version not found
+        }
+
+        const existingGrantConfig = {
+          featureType: existingFeaturePlanVersion.featureType,
+          resetConfig: existingFeaturePlanVersion.resetConfig,
+          aggregationMethod: existingFeaturePlanVersion.aggregationMethod,
+        }
+
+        // Verify date ranges actually overlap (double-check)
+        const rangesOverlap = dateRangesOverlap(
+          newGrant.effectiveAt,
+          newGrant.expiresAt ?? null,
+          existingGrant.effectiveAt,
+          existingGrant.expiresAt ?? null
+        )
+
+        if (!rangesOverlap) {
+          continue // Skip if ranges don't actually overlap
+        }
+
+        // Validate configuration matches
+        if (newGrantConfig.featureType !== existingGrantConfig.featureType) {
+          return Err(
+            new UnPriceGrantError({
+              message: `Cannot create grant: featureType mismatch. New grant has featureType "${newGrantConfig.featureType}" but existing grant (${existingGrant.id}) has featureType "${existingGrantConfig.featureType}" for feature "${featureSlug}". All grants for the same feature within overlapping date ranges must have the same featureType.`,
+              grantId: newGrant.id,
+              subjectId: newGrant.subjectId,
+            })
+          )
+        }
+
+        if (newGrantConfig.aggregationMethod !== existingGrantConfig.aggregationMethod) {
+          return Err(
+            new UnPriceGrantError({
+              message: `Cannot create grant: aggregationMethod mismatch. New grant has aggregationMethod "${newGrantConfig.aggregationMethod}" but existing grant (${existingGrant.id}) has aggregationMethod "${existingGrantConfig.aggregationMethod}" for feature "${featureSlug}". All grants for the same feature within overlapping date ranges must have the same aggregationMethod.`,
+              grantId: newGrant.id,
+              subjectId: newGrant.subjectId,
+            })
+          )
+        }
+
+        if (!resetConfigsEqual(newGrantConfig.resetConfig, existingGrantConfig.resetConfig)) {
+          return Err(
+            new UnPriceGrantError({
+              message: `Cannot create grant: resetConfig mismatch. New grant and existing grant (${existingGrant.id}) have different resetConfig values for feature "${featureSlug}". All grants for the same feature within overlapping date ranges must have the same resetConfig.`,
+              grantId: newGrant.id,
+              subjectId: newGrant.subjectId,
+            })
+          )
+        }
+      }
+    }
+
+    // All validations passed, insert the grants
+    try {
+      const insertedGrants = await this.db
+        .insert(grants)
+        .values(
+          grantsToCreate.map((grant) => ({
+            ...grant,
+            projectId,
+          }))
+        )
+        .returning()
+
+      return Ok(insertedGrants)
+    } catch (error) {
+      this.logger.error("Error creating grants", {
+        error: error instanceof Error ? error.message : String(error),
+        projectId,
+        grantCount: grantsToCreate.length,
+      })
+
+      return Err(
+        new UnPriceGrantError({
+          message: `Failed to create grants: ${error instanceof Error ? error.message : String(error)}`,
+        })
+      )
+    }
+  }
 
   /**
    * Computes all entitlements for a customer by aggregating grants from:
@@ -76,9 +275,11 @@ export class GrantsManager {
    *
    * Creates versioned snapshots that are valid until the next cycle end.
    */
-  public async computeEntitlementsForCustomer(
-    params: ComputeEntitlementsForCustomerParams
-  ): Promise<Result<(typeof entitlements.$inferSelect)[], FetchError | UnPriceGrantError>> {
+  public async computeEntitlementsForCustomer(params: {
+    customerId: string
+    projectId: string
+    now: number
+  }): Promise<Result<(typeof entitlements.$inferSelect)[], FetchError | UnPriceGrantError>> {
     const { customerId, projectId, now } = params
 
     try {
@@ -179,7 +380,7 @@ export class GrantsManager {
         if (featureGrants.length === 0) continue
 
         const entitlementResult = await this.computeEntitlementFromGrants({
-          grants: featureGrants as unknown as z.infer<typeof entitlementGrantsSnapshotSchema>[],
+          grants: featureGrants,
           customerId,
           projectId,
           featureSlug,
@@ -223,7 +424,7 @@ export class GrantsManager {
    * This is the core merging logic.
    */
   private async computeEntitlementFromGrants(params: {
-    grants: z.infer<typeof entitlementGrantsSnapshotSchema>[]
+    grants: z.infer<typeof grantSchemaExtended>[]
     customerId: string
     projectId: string
     featureSlug: string
@@ -250,14 +451,14 @@ export class GrantsManager {
       )
     }
 
-    // Get the first grant's feature metadata (all should have same feature)
-    const firstGrant = featureGrants[0]!
-    const featurePlanVersion = firstGrant.featurePlanVersion
+    // Get the best priority grant's feature metadata (all should have same feature)
+    // if not they are going to be overridden by the best priority grant
+    const bestPriorityGrant = featureGrants.sort((a, b) => b.priority - a.priority)[0]!
 
     // Determine merging policy from the feature type
-    let mergingPolicy: MergingPolicy = "sum"
+    let mergingPolicy: EntitlementMergingPolicy = "sum"
 
-    switch (featurePlanVersion.featureType) {
+    switch (bestPriorityGrant.featurePlanVersion.featureType) {
       case "flat":
         mergingPolicy = "replace"
         break
@@ -278,8 +479,28 @@ export class GrantsManager {
     // Sort by priority (higher first) to preserve consumption order
     const ordered = [...featureGrants].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
 
+    // Prepare grants snapshot (preserve priority order)
+    const grantsSnapshot = ordered.map((g) => ({
+      id: g.id,
+      type: g.type,
+      effectiveAt: g.effectiveAt,
+      expiresAt: g.expiresAt,
+      limit: g.limit,
+      subjectType: g.subjectType,
+      subjectId: g.subjectId,
+      priority: g.priority,
+      realtime: g.featurePlanVersion.metadata?.realtime ?? false,
+      hardLimit: g.hardLimit,
+      subscriptionItemId: g.subscriptionItem?.id,
+      subscriptionPhaseId: g.subscriptionItem?.subscriptionPhaseId,
+      subscriptionId: g.subscriptionItem?.subscription?.id,
+    }))
+
     // Merge grants according to merging policy
-    const merged = this.mergeGrants(ordered, mergingPolicy)
+    const merged = this.mergeGrants({
+      grants: grantsSnapshot,
+      policy: mergingPolicy,
+    })
 
     // Compute earliest boundary where the answer can change:
     // among the ACTIVE grants we have now, it’s the earliest expiresAt (if any)
@@ -296,7 +517,7 @@ export class GrantsManager {
         .reduce((max, e) => Math.max(max, e), 0) || null
 
     // Compute cycle window from reset config (half-open style via bounds)
-    const resetConfig = featurePlanVersion.resetConfig
+    const resetConfig = bestPriorityGrant.featurePlanVersion.resetConfig
     const cycleBoundaries = this.computeCycleBoundaries({
       now,
       resetConfig,
@@ -314,26 +535,6 @@ export class GrantsManager {
       ? nextBoundary
       : (cycleEndAt ?? unionExpires ?? null)
 
-    // Prepare grants snapshot (preserve priority order)
-    const grantsSnapshot = ordered.map((grant) => ({
-      id: grant.id,
-      featurePlanVersion: {
-        id: featurePlanVersion.id,
-        planVersionId: featurePlanVersion.planVersionId,
-        featureType: featurePlanVersion.featureType,
-        resetConfig: featurePlanVersion.resetConfig,
-      },
-      type: grant.type,
-      subjectType: grant.subjectType,
-      subjectId: grant.subjectId,
-      priority: grant.priority,
-      effectiveAt: Number(grant.effectiveAt),
-      expiresAt: grant.expiresAt ? Number(grant.expiresAt) : Number.POSITIVE_INFINITY,
-      limit: grant.limit,
-      units: grant.units,
-      hardLimit: grant.hardLimit,
-    }))
-
     // Check if entitlement already exists (using customer as subject for the snapshot)
     const existingEntitlement = await this.db.query.entitlements.findFirst({
       where: (entitlement, { and, eq }) =>
@@ -348,17 +549,12 @@ export class GrantsManager {
       projectId,
       customerId,
       featureSlug,
-      featureType: featurePlanVersion.featureType as FeatureType,
-      effectiveLimit: merged.limit,
-      effectiveUnits: merged.units,
-      effectiveHardLimit: merged.hardLimit,
-      effectiveResetConfig: resetConfig,
+      featureType: bestPriorityGrant.featurePlanVersion.featureType as FeatureType,
+      limit: merged.limit,
+      hardLimit: merged.hardLimit,
+      aggregationMethod: bestPriorityGrant.featurePlanVersion.aggregationMethod,
+      resetConfig,
       timezone,
-      cycleStartAt: cycleBoundaries.start,
-      cycleEndAt: Number.isFinite(nextBoundary)
-        ? nextBoundary
-        : (cycleEndAt ?? cycleBoundaries.end ?? null),
-      lastResetAt: cycleBoundaries.start,
       mergingPolicy,
       grants: grantsSnapshot,
       version: existingEntitlement ? existingEntitlement.version + 1 : 0,
@@ -368,8 +564,8 @@ export class GrantsManager {
       // Preserve existing usage if updating
       currentCycleUsage: existingEntitlement?.currentCycleUsage ?? "0",
       accumulatedUsage: existingEntitlement?.accumulatedUsage ?? "0",
-      lastUsageUpdateAt: existingEntitlement?.lastUsageUpdateAt ?? now,
-      nextRevalidateAt: resolvedExpiresAt ?? cycleEndAt ?? cycleBoundaries.end!,
+      lastSyncAt: existingEntitlement?.lastSyncAt ?? now,
+      nextRevalidateAt: nextBoundary,
     }
 
     let result: typeof entitlements.$inferSelect
@@ -384,7 +580,7 @@ export class GrantsManager {
           computedAt: now,
           effectiveAt,
           expiresAt: resolvedExpiresAt,
-          lastUsageUpdateAt: now,
+          lastSyncAt: now,
           updatedAtM: now,
         })
         .where(
@@ -541,16 +737,17 @@ export class GrantsManager {
   /**
    * Merges grants according to the specified merging policy.
    */
-  private mergeGrants(
-    grants: z.infer<typeof entitlementGrantsSnapshotSchema>[],
-    policy: MergingPolicy
-  ): {
+  private mergeGrants(params: {
+    grants: z.infer<typeof entitlementGrantsSnapshotSchema>[]
+    policy: EntitlementMergingPolicy
+  }): {
     limit: number | null
-    units: number | null
     hardLimit: boolean
   } {
+    const { grants, policy } = params
+
     if (grants.length === 0) {
-      return { limit: null, units: null, hardLimit: false }
+      return { limit: null, hardLimit: false }
     }
 
     // Sort by priority (higher priority first)
@@ -559,34 +756,28 @@ export class GrantsManager {
     switch (policy) {
       case "sum": {
         const limit = sorted.reduce((sum, g) => sum + (g.limit ?? 0), 0)
-        const units = sorted.reduce((sum, g) => sum + (g.units ?? 0), 0)
         // Hard limit is true if ANY grant has hard limit
         const hardLimit = sorted.some((g) => g.hardLimit)
         return {
           limit: limit > 0 ? limit : null,
-          units: units > 0 ? units : null,
           hardLimit,
         }
       }
 
       case "max": {
         const limits = sorted.map((g) => g.limit).filter((l): l is number => l !== null)
-        const units = sorted.map((g) => g.units).filter((u): u is number => u !== null)
         const hardLimit = sorted.some((g) => g.hardLimit)
         return {
           limit: limits.length > 0 ? Math.max(...limits) : null,
-          units: units.length > 0 ? Math.max(...units) : null,
           hardLimit,
         }
       }
 
       case "min": {
         const limits = sorted.map((g) => g.limit).filter((l): l is number => l !== null)
-        const units = sorted.map((g) => g.units).filter((u): u is number => u !== null)
         const hardLimit = sorted.every((g) => g.hardLimit)
         return {
           limit: limits.length > 0 ? Math.min(...limits) : null,
-          units: units.length > 0 ? Math.min(...units) : null,
           hardLimit,
         }
       }
@@ -596,7 +787,6 @@ export class GrantsManager {
         const highest = sorted[0]!
         return {
           limit: highest.limit,
-          units: highest.units,
           hardLimit: highest.hardLimit,
         }
       }
@@ -606,7 +796,6 @@ export class GrantsManager {
         const highestD = sorted[0]!
         return {
           limit: highestD.limit ?? null,
-          units: highestD.units ?? null,
           hardLimit: !!highestD.hardLimit,
         }
       }
@@ -706,11 +895,27 @@ export class GrantsManager {
   }
 
   /**
-   * Check if usage is allowed
+   * Check if usage is allowed and give the information of the grants that were used to calculate the result
    */
-  verify(state: EntitlementState): VerificationResult {
+  public verify(params: { state: EntitlementState; now: number }): VerificationResult {
+    const { state, now } = params
+    const { err, val: validatedState } = this.validateEntitlementAccess({
+      state,
+      now,
+    })
+
+    if (err) {
+      return {
+        allowed: false,
+        message: err.message,
+        deniedReason: "ENTITLEMENT_ERROR",
+        usage: 0,
+        limit: null,
+      }
+    }
+
     // Flat features always allowed
-    if (state.featureType === "flat") {
+    if (validatedState.featureType === "flat") {
       return {
         allowed: true,
         message: "Flat feature",
@@ -720,14 +925,17 @@ export class GrantsManager {
     }
 
     // Check limit
-    const hasLimit = state.limit !== null
-    const withinLimit = !hasLimit || state.currentUsage < (state.limit ?? Number.POSITIVE_INFINITY)
+    const hasLimit = validatedState.limit !== null
+    const withinLimit =
+      !hasLimit ||
+      Number(validatedState.currentCycleUsage) < (validatedState.limit ?? Number.POSITIVE_INFINITY)
 
     return {
       allowed: withinLimit,
       message: withinLimit ? "Allowed" : "Limit exceeded",
-      usage: state.currentUsage,
-      limit: state.limit,
+      deniedReason: withinLimit ? undefined : "LIMIT_EXCEEDED",
+      usage: Number(validatedState.currentCycleUsage),
+      limit: validatedState.limit,
     }
   }
 
@@ -735,57 +943,162 @@ export class GrantsManager {
    * Consume usage from grants by priority
    * Returns which grants were consumed for billing attribution
    */
-  consume(state: EntitlementState, amount: number): ConsumptionResult {
-    // Flat features don't consume
-    if (state.featureType === "flat") {
+  public consume(params: {
+    state: EntitlementState
+    amount: number
+    now: number
+  }): ConsumptionResult {
+    const { state, amount, now } = params
+
+    // 1. Get active grants at this timestamp
+    const { err, val: validatedState } = this.validateEntitlementAccess({
+      state,
+      now,
+    })
+
+    if (err) {
       return {
         success: false,
-        message: "Cannot report usage for flat features",
-        usage: state.currentUsage,
-        limit: state.limit,
+        usage: 0,
+        limit: null,
         consumedFrom: [],
+        message: err.message,
       }
     }
 
-    // Sort grants by priority (highest first)
-    const sortedGrants = [...state.grants].sort((a, b) => b.priority - a.priority)
+    const activeGrants = validatedState.grants
 
-    // Consume from each grant
-    const consumedFrom: ConsumptionResult["consumedFrom"] = []
+    // 2. Recalculate effective limit from active grants (in case grants expired)
+    const { limit: effectiveLimit, hardLimit } = this.mergeGrants({
+      grants: activeGrants,
+      policy: validatedState.mergingPolicy,
+    })
+
+    // 3. Check unified limit (no per-grant tracking needed)
+    const newUsage = Number(state.currentCycleUsage) + amount
+    const withinLimit = effectiveLimit === null || newUsage <= effectiveLimit
+
+    // 4. Determine which grants would be consumed for billing attribution
+    const consumedFrom = this.attributeConsumption(activeGrants, amount)
+
+    const success = withinLimit || !hardLimit
+
+    return {
+      success,
+      usage: newUsage,
+      limit: effectiveLimit,
+      consumedFrom,
+      message: success ? "Allowed" : "Limit exceeded",
+    }
+  }
+
+  /**
+   * Determine which grants would be consumed for billing attribution
+   */
+  private attributeConsumption(
+    grants: z.infer<typeof entitlementGrantsSnapshotSchema>[],
+    amount: number
+  ): Array<{ grantId: string; amount: number; priority: number; type: string }> {
+    // Sort by priority
+    const sorted = [...grants].sort((a, b) => b.priority - a.priority)
+
+    // Attribute consumption by priority (for billing records)
+    // This is just for attribution, not for limit checking
+    const attribution: Array<{ grantId: string; amount: number; priority: number; type: string }> =
+      []
     let remaining = amount
 
-    for (const grant of sortedGrants) {
+    for (const grant of sorted) {
       if (remaining <= 0) break
 
-      const available =
-        grant.limit === null
-          ? remaining // unlimited
-          : Math.max(0, grant.limit - grant.consumed)
+      // For attribution, we can use grant.limit as a guide
+      // but we don't need to track consumed per-grant
+      const toAttribute = grant.limit === null ? remaining : Math.min(remaining, grant.limit)
 
-      if (available <= 0) continue
-
-      const toConsume = Math.min(available, remaining)
-
-      consumedFrom.push({
+      attribution.push({
         grantId: grant.id,
-        amount: toConsume,
+        amount: toAttribute,
         priority: grant.priority,
         type: grant.type,
       })
 
-      grant.consumed += toConsume
-      remaining -= toConsume
+      remaining -= toAttribute
     }
 
-    const newUsage = state.currentUsage + (amount - remaining)
-    const withinLimit = state.limit === null || newUsage <= state.limit
+    return attribution
+  }
 
-    return {
-      success: remaining === 0 || withinLimit,
-      message: remaining === 0 ? "Consumed" : "Insufficient capacity",
-      usage: newUsage,
-      limit: state.limit,
-      consumedFrom,
+  /**
+   * Checks if a timestamp falls within any active grant period
+   */
+  private isGrantActiveAtTimestamp(params: {
+    grant: z.infer<typeof entitlementGrantsSnapshotSchema>
+    now: number
+  }): boolean {
+    const { grant, now } = params
+    const grantStart = grant.effectiveAt
+    const grantEnd = grant.expiresAt ?? Number.POSITIVE_INFINITY
+    return now >= grantStart && now < grantEnd
+  }
+
+  /**
+   * Gets the active grant(s) at a specific timestamp
+   */
+  private getActiveGrantsAtTimestamp(params: {
+    grants: z.infer<typeof entitlementGrantsSnapshotSchema>[]
+    now: number
+  }): z.infer<typeof entitlementGrantsSnapshotSchema>[] {
+    const { grants, now } = params
+
+    // sort by priority
+    return grants
+      .filter((grant) => this.isGrantActiveAtTimestamp({ grant, now }))
+      .sort((a, b) => b.priority - a.priority)
+  }
+
+  /**
+   * Validates entitlement access at a specific timestamp
+   */
+  private validateEntitlementAccess(params: { state: EntitlementState; now: number }): Result<
+    EntitlementState,
+    UnPriceGrantError
+  > {
+    const { state, now } = params
+
+    // First check if timestamp is within overall entitlement range
+    if (now < state.effectiveAt) {
+      return Err(
+        new UnPriceGrantError({
+          message: "Entitlement not yet effective",
+          subjectId: state.customerId,
+        })
+      )
     }
+
+    if (state.expiresAt && now >= state.expiresAt) {
+      return Err(
+        new UnPriceGrantError({
+          message: "Entitlement expired",
+          subjectId: state.customerId,
+        })
+      )
+    }
+
+    // Then check if any grant is active at this timestamp
+    const activeGrants = this.getActiveGrantsAtTimestamp({ grants: state.grants, now })
+
+    if (activeGrants.length === 0) {
+      return Err(
+        new UnPriceGrantError({
+          message: "No active grant at this timestamp",
+          subjectId: state.customerId,
+        })
+      )
+    }
+
+    return Ok({
+      ...state,
+      grants: activeGrants,
+    })
   }
 }

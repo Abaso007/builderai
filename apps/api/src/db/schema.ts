@@ -19,6 +19,7 @@ export const usageRecords = pgTableProject(
     subscriptionItemId: text(),
     subscriptionPhaseId: text(),
     subscriptionId: text(),
+    grantId: text().notNull(),
     // time when the usage should be reported
     timestamp: integer().notNull(),
     createdAt: integer().notNull(),
@@ -40,10 +41,6 @@ export const verifications = pgTableProject(
     id: integer().primaryKey({ autoIncrement: true }),
     requestId: text().notNull(),
     projectId: text().notNull(),
-    featurePlanVersionId: text().notNull(),
-    subscriptionItemId: text(),
-    subscriptionPhaseId: text(),
-    subscriptionId: text(),
     entitlementId: text().notNull(),
     deniedReason: text(),
     timestamp: integer().notNull(),

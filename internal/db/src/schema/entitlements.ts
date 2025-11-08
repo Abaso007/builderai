@@ -17,37 +17,51 @@ import { projectID } from "../utils/sql"
 
 import type { z } from "zod"
 import { cuid, timestamps } from "../utils/fields"
-import type { entitlementGrantsSnapshotSchema } from "../validators/entitlements"
-import type { ResetConfig } from "../validators/shared"
+import type {
+  entitlementGrantsSnapshotSchema,
+  entitlementMetadataSchema,
+} from "../validators/entitlements"
+import type { resetConfigSchema } from "../validators/shared"
 import { customers } from "./customers"
-import { typeFeatureEnum } from "./enums"
+import {
+  aggregationMethodEnum,
+  entitlementMergingPolicyEnum,
+  grantTypeEnum,
+  subjectTypeEnum,
+  typeFeatureEnum,
+} from "./enums"
 import { planVersionFeatures } from "./planVersionFeatures"
 import { projects } from "./projects"
 import { subscriptionItems } from "./subscriptions"
 
-// TODO: this should be named customer entitlements
-// entitlements are a snapshot of the grants groupd by subject and feature
+// entitlements are a snapshot of the grants grouped by subject and feature
 // if there are more than one grant for the same subject and feature, the entitlements will be merged using the merging policy
 // but still having them inside grants as json for billing attribution
 // the uniqueness is based on the customerId, featureSlug
-// entitlements need to have the same effectiveLimit, effectiveUnits, effectiveHardLimit and effectiveResetConfig as the grants if not the priority will be used to merge them
+// IMPORTANT: All grants for the same featureSlug MUST have the same:
+//   - featureType
+//   - resetConfig
+//   - aggregationMethod
+// Only limit, units, and hardLimit can differ (merged by priority)
+// The effective values are stored directly in the entitlement for performance
 export const entitlements = pgTableProject(
   "entitlements",
   {
     ...projectID,
     ...timestamps,
     customerId: cuid("customer_id").notNull(),
-    featureSlug: varchar("feature_slug").notNull(),
-    // if feature type is different on different grants, the grant from subscription will be used.
+    featureSlug: varchar("feature_slug", { length: 64 }).notNull(),
+
+    // Effective configuration (must be same across all grants)
     featureType: typeFeatureEnum("feature_type").notNull(),
+    resetConfig: json("reset_config").$type<z.infer<typeof resetConfigSchema>>(),
+    aggregationMethod: aggregationMethodEnum("aggregation_method").notNull(), // ADD THIS
 
     // Computed from active grants
     effectiveAt: bigint("effective_at", { mode: "number" }).notNull(),
     expiresAt: bigint("expires_at", { mode: "number" }),
-    effectiveLimit: integer("effective_limit"), // null = unlimited
-    effectiveUnits: integer("effective_units"),
-    effectiveHardLimit: boolean("effective_hard_limit").notNull().default(false),
-    effectiveResetConfig: json("effective_reset_config").$type<ResetConfig>(),
+    limit: integer("limit"), // null = unlimited
+    hardLimit: boolean("hard_limit").notNull().default(false),
 
     // timezone for the entitlement come from the subscription and help us calculate the reset policy
     timezone: varchar("timezone", { length: 32 }).notNull().default("UTC"),
@@ -56,15 +70,10 @@ export const entitlements = pgTableProject(
     currentCycleUsage: numeric("current_cycle_usage").notNull().default("0"),
     accumulatedUsage: numeric("accumulated_usage").notNull().default("0"),
 
-    // Cycle management
-    cycleStartAt: bigint("cycle_start_at", { mode: "number" }).notNull(),
-    cycleEndAt: bigint("cycle_end_at", { mode: "number" }),
-    lastResetAt: bigint("last_reset_at", { mode: "number" }).notNull(),
-
     // merging policy for the entitlement - sum, max, min, replace, etc.
-    // sum limits and units, max limit, min limit, replace limit and units
+    // sum limits, max limit, min limit, replace limit and units
     // this normally is decided by the feature type
-    mergingPolicy: varchar("merging_policy").notNull().default("sum"),
+    mergingPolicy: entitlementMergingPolicyEnum("merging_policy").notNull().default("sum"),
 
     // Cache invalidation ----------------------------
     computedAt: bigint("computed_at", { mode: "number" })
@@ -74,6 +83,8 @@ export const entitlements = pgTableProject(
     // next revalidate at is the date when the entitlement will be revalidated
     // often times is the same as the cycle end at
     nextRevalidateAt: bigint("next_revalidate_at", { mode: "number" }).notNull(),
+    // last sync at is the date when the entitlement was last synced with the database
+    lastSyncAt: bigint("last_sync_at", { mode: "number" }).notNull(),
 
     // Increments when grants are recomputed, used for split-brain mitigation
     version: integer("version").notNull().default(0),
@@ -81,25 +92,27 @@ export const entitlements = pgTableProject(
     // grants snapshot is the snapshot of the grants that were applied to the customer at the time of the entitlement
     // grants are consumed by priority, so the higher priority will be consumed first
     // usage records are associated to the entitlement and the grant id for billing attribution
-    grants: json("grants").$type<z.infer<typeof entitlementGrantsSnapshotSchema>[]>(),
-
-    lastUsageUpdateAt: bigint("last_usage_update_at", { mode: "number" }).notNull(),
+    grants: json("grants")
+      .$type<z.infer<typeof entitlementGrantsSnapshotSchema>[]>()
+      .notNull()
+      .default([]),
 
     // metadata for the entitlement
-    metadata: json("metadata").$type<{
-      [key: string]: string | number | boolean | null
-    }>(),
+    metadata: json("metadata").$type<z.infer<typeof entitlementMetadataSchema>>(),
   },
   (table) => ({
     primary: primaryKey({
       columns: [table.id, table.projectId],
       name: "pk_entitlement",
     }),
-    // Unique constraint: one entitlement per subject+feature combination
+    // Unique constraint: one entitlement per subject + feature combination and version on a given time range
     uniqueSubjectFeature: unique("unique_subject_feature").on(
       table.projectId,
       table.customerId,
-      table.featureSlug
+      table.featureSlug,
+      table.effectiveAt,
+      table.expiresAt,
+      table.version
     ),
     // Composite index for fast lookups with version checking
     idxSubjectFeatureComputed: index("idx_entitlements_subject_feature_computed").on(
@@ -134,16 +147,14 @@ export const grants = pgTableProject(
     // featurePlanVersionId is the id of the feature plan version that the grant is applied to
     featurePlanVersionId: cuid("feature_plan_version_id").notNull(),
     // what is the source of the grant?
-    // TODO: add enum with subscription, manual, promotion, trial, etc.
-    type: varchar("type").notNull(),
+    type: grantTypeEnum("type").notNull(),
     // subscription item id is the id of the subscription item that the grant is applied to
     subscriptionItemId: cuid("subscription_item_id"),
-    // TODO: add enum with project, plan, plan_version, customer, etc.
-    subjectType: varchar("subject_type").notNull(),
+    subjectType: subjectTypeEnum("subject_type").notNull(),
     // id of the subject to which the grant is applied
     // when project is the subject, the subjectId is the projectId
     // all customers with that subjectId will have the grant applied
-    subjectId: varchar("subject_id").notNull(),
+    subjectId: cuid("subject_id").notNull(),
     // priority defines the merge order higher priority will be consumed first, comes from the type of the grant
     // subscription priority 10
     // trial priority 80
