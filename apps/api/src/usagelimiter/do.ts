@@ -7,7 +7,13 @@ import migrations from "../../drizzle/migrations"
 import { CloudflareStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
-import type { EntitlementState } from "@unprice/db/validators"
+import type {
+  EntitlementState,
+  ReportUsageRequest,
+  ReportUsageResult,
+  VerificationResult,
+  VerifyRequest,
+} from "@unprice/db/validators"
 import { AxiomLogger, ConsoleLogger, type Logger } from "@unprice/logging"
 import { CacheService } from "@unprice/services/cache"
 import type { DenyReason } from "@unprice/services/customers"
@@ -15,7 +21,6 @@ import { EntitlementService } from "@unprice/services/entitlements"
 import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/metrics"
 import type { schema } from "~/db/types"
 import type { Env } from "~/env"
-import type { CanRequest, ReportUsageRequest, ReportUsageResponse } from "./interface"
 import { SqliteDOStorageProvider } from "./sqlite-do-provider"
 
 // colo never change after the object is created
@@ -41,7 +46,7 @@ export class DurableObjectUsagelimiter extends Server {
   // metrics
   private metrics: Metrics
   // Default ttl for the usage records and verifications
-  private readonly TTL_ANALYTICS = 1000 * 30 // 30 secs
+  private TTL_ANALYTICS = 1000 * 60 // 1 minute
   // Debounce delay for the broadcast
   private lastBroadcastTime = 0
   // debounce delay for the broadcast events
@@ -59,12 +64,12 @@ export class DurableObjectUsagelimiter extends Server {
 
     // set a revalidation period of 5 secs for development
     if (env.VERCEL_ENV === "development") {
-      this.TTL_ANALYTICS = 1000 * 60 // 1 minute
+      this.TTL_ANALYTICS = 1000 * 10 // 10 seconds
     }
 
     // set a revalidation period of 5 mins for preview
     if (env.VERCEL_ENV === "preview") {
-      this.TTL_ANALYTICS = 1000 * 60 * 30 // 5 mins
+      this.TTL_ANALYTICS = 1000 * 60 // 1 minute
     }
 
     const emitMetrics = env.EMIT_METRICS_LOGS.toString() === "true"
@@ -275,6 +280,22 @@ export class DurableObjectUsagelimiter extends Server {
     }
   }
 
+  async prewarm({
+    customerId,
+    projectId,
+    now,
+  }: { customerId: string; projectId: string; now: number }) {
+    await this.initialize()
+
+    // if not initialized, return
+    if (!this.initialized) {
+      return
+    }
+
+    // prewarm the entitlement service
+    await this.entitlementService.prewarm({ customerId, projectId, now })
+  }
+
   // when connected through websocket we can broadcast events to the client
   // realtime events are used to debug events in unprice dashboard
   async broadcastEvents(data: {
@@ -300,14 +321,7 @@ export class DurableObjectUsagelimiter extends Server {
     }
   }
 
-  public async can(data: CanRequest): Promise<{
-    success: boolean
-    message: string
-    deniedReason?: DenyReason
-    limit?: number
-    usage?: number
-    latency?: number
-  }> {
+  public async verify(data: VerifyRequest): Promise<VerificationResult> {
     try {
       // make sure the do is initialized
       await this.initialize()
@@ -315,39 +329,24 @@ export class DurableObjectUsagelimiter extends Server {
       // check if all the DO is initialized
       if (!this.initialized) {
         return {
-          success: false,
+          allowed: false,
           message: "DO not initialized",
           deniedReason: "DO_NOT_INITIALIZED",
         }
       }
 
-      const startTime = performance.now()
-
       // All logic handled internally!
-      const result = await this.entitlementService.can({
-        customerId: data.customerId,
-        projectId: data.projectId,
-        featureSlug: data.featureSlug,
-      })
-
-      const latency = performance.now() - startTime
+      const result = await this.entitlementService.verify(data)
 
       // Set alarm to flush buffers
       await this.ensureAlarmIsSet(data.flushTime)
 
-      return {
-        success: result.allowed,
-        message: result.message,
-        deniedReason: result.allowed ? undefined : "LIMIT_EXCEEDED",
-        limit: result.limit ?? undefined,
-        usage: result.usage,
-        latency,
-      }
+      return result
     } catch (error) {
       const err = error as Error
       this.logger.error("error can from do", { error: err.message })
       return {
-        success: false,
+        allowed: false,
         message: err.message,
         deniedReason: "ENTITLEMENT_ERROR",
       }
@@ -356,15 +355,16 @@ export class DurableObjectUsagelimiter extends Server {
     }
   }
 
-  public async reportUsage(data: ReportUsageRequest): Promise<ReportUsageResponse> {
+  public async reportUsage(data: ReportUsageRequest): Promise<ReportUsageResult> {
     try {
       await this.initialize()
 
       if (!this.initialized) {
         return {
-          success: false,
+          allowed: false,
           message: "DO not initialized",
           deniedReason: "DO_NOT_INITIALIZED",
+          consumedFrom: [],
         }
       }
 
@@ -373,32 +373,21 @@ export class DurableObjectUsagelimiter extends Server {
       // - Validates usage
       // - Consumes grants by priority
       // - Buffers with grant attribution
-      const result = await this.entitlementService.reportUsage({
-        customerId: data.customerId,
-        projectId: data.projectId,
-        featureSlug: data.featureSlug,
-        amount: data.usage,
-      })
+      const result = await this.entitlementService.reportUsage(data)
 
       // Set alarm to flush buffers
       await this.ensureAlarmIsSet(data.flushTime)
 
-      return {
-        success: result.success,
-        message: result.message,
-        usage: result.usage,
-        limit: result.limit ?? undefined,
-        deniedReason: result.success ? undefined : "LIMIT_EXCEEDED",
-      }
+      return result
     } catch (error) {
       this.logger.error("error reporting usage from do", {
         error: error instanceof Error ? error.message : "unknown error",
       })
 
       return {
-        success: false,
         message: error instanceof Error ? error.message : "unknown error",
-        deniedReason: "ERROR_INSERTING_USAGE_DO",
+        allowed: false,
+        consumedFrom: [],
       }
     } finally {
       this.ctx.waitUntil(Promise.all([this.metrics.flush(), this.logger.flush()]))
@@ -442,6 +431,8 @@ export class DurableObjectUsagelimiter extends Server {
     // flush the metrics and logs
     this.ctx.waitUntil(Promise.all([this.metrics.flush(), this.logger.flush()]))
     // flush the entitlement service
-    await this.entitlementService.flush()
+    await this.entitlementService.flushUsageRecords()
+    // flush the verifications
+    await this.entitlementService.flushVerifications()
   }
 }

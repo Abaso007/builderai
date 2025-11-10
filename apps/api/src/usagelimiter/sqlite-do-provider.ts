@@ -1,3 +1,4 @@
+import type { AnalyticsUsage, AnalyticsVerification } from "@unprice/analytics"
 import type { EntitlementState } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
@@ -6,13 +7,7 @@ import {
   UnPriceEntitlementStorageError,
 } from "@unprice/services/entitlements"
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite"
-import {
-  type NewUsageRecord,
-  type NewVerification,
-  type UsageRecord,
-  type Verification,
-  schema,
-} from "~/db/types"
+import { schema } from "~/db/types"
 
 /**
  * SQLite Storage Provider for Durable Objects
@@ -129,10 +124,27 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
    * Insert usage record in SQLite
    */
   async insertUsageRecord(
-    record: NewUsageRecord
+    record: AnalyticsUsage
   ): Promise<Result<void, UnPriceEntitlementStorageError>> {
     try {
-      await this.db.insert(schema.usageRecords).values(record)
+      await this.db.insert(schema.usageRecords).values({
+        entitlementId: record.entitlementId,
+        customerId: record.customerId,
+        featureSlug: record.featureSlug,
+        usage: record.usage.toString(),
+        featurePlanVersionId: record.featurePlanVersionId,
+        subscriptionItemId: record.subscriptionItemId,
+        subscriptionPhaseId: record.subscriptionPhaseId,
+        subscriptionId: record.subscriptionId,
+        grantId: record.grantId,
+        timestamp: record.timestamp,
+        createdAt: record.createdAt,
+        metadata: record.metadata ? JSON.stringify(record.metadata) : null,
+        deleted: record.deleted ? 1 : 0,
+        idempotenceKey: record.idempotenceKey,
+        requestId: record.requestId,
+        projectId: record.projectId,
+      })
 
       return Ok(undefined)
     } catch (error) {
@@ -154,10 +166,22 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
    * Buffer verification in SQLite
    */
   async insertVerification(
-    record: NewVerification
+    record: AnalyticsVerification
   ): Promise<Result<void, UnPriceEntitlementStorageError>> {
     try {
-      await this.db.insert(schema.verifications).values(record)
+      await this.db.insert(schema.verifications).values({
+        entitlementId: record.entitlementId,
+        customerId: record.customerId,
+        featureSlug: record.featureSlug,
+        projectId: record.projectId,
+        timestamp: record.timestamp,
+        createdAt: record.createdAt,
+        requestId: record.requestId,
+        deniedReason: record.deniedReason,
+        latency: record.latency ? record.latency.toString() : "0",
+        success: record.allowed ? 1 : 0,
+        metadata: record.metadata ? JSON.stringify(record.metadata) : null,
+      })
 
       return Ok(undefined)
     } catch (error) {
@@ -178,10 +202,27 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   /**
    * Get all verifications
    */
-  async getVerifications(): Promise<Result<Verification[], UnPriceEntitlementStorageError>> {
+  async getAllVerifications(): Promise<
+    Result<AnalyticsVerification[], UnPriceEntitlementStorageError>
+  > {
     try {
       const verifications = await this.db.query.verifications.findMany()
-      return Ok(verifications)
+      return Ok(
+        verifications.map((verification) => ({
+          ...verification,
+          allowed: verification.success === 1,
+          metadata: verification.metadata ? JSON.parse(verification.metadata) : null,
+          latency: verification.latency ? Number(verification.latency) : 0,
+          createdAt: verification.createdAt,
+          requestId: verification.requestId,
+          entitlementId: verification.entitlementId,
+          customerId: verification.customerId,
+          featureSlug: verification.featureSlug,
+          projectId: verification.projectId,
+          timestamp: verification.timestamp,
+          deniedReason: verification.deniedReason ?? undefined,
+        }))
+      )
     } catch (error) {
       this.logger.error("Failed to get verifications", {
         error: error instanceof Error ? error.message : "unknown",
@@ -201,10 +242,19 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   /**
    * Get all usage records
    */
-  async getUsageRecords(): Promise<Result<UsageRecord[], UnPriceEntitlementStorageError>> {
+  async getAllUsageRecords(): Promise<Result<AnalyticsUsage[], UnPriceEntitlementStorageError>> {
     try {
       const usage = await this.db.query.usageRecords.findMany()
-      return Ok(usage)
+      return Ok(
+        usage.map((usage) => ({
+          ...usage,
+          metadata: usage.metadata ? JSON.parse(usage.metadata) : null,
+          usage: usage.usage ? Number(usage.usage) : 0,
+          createdAt: usage.createdAt,
+          requestId: usage.requestId,
+          entitlementId: usage.entitlementId,
+        }))
+      )
     } catch (error) {
       this.logger.error("Failed to get usage records", {
         error: error instanceof Error ? error.message : "unknown",

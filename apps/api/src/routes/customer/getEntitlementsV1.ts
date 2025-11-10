@@ -5,9 +5,9 @@ import { jsonContent } from "stoker/openapi/helpers"
 
 import { z } from "zod"
 import { keyAuth } from "~/auth/key"
-import { getEntitlementsResponseSchema } from "~/entitlement/interface"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { getEntitlementsResponseSchema } from "~/usagelimiter/interface"
 
 const tags = ["customer"]
 

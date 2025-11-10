@@ -13,8 +13,11 @@ import {
   startOfUtcHour,
 } from "@unprice/db/validators"
 import type {
+  Consumption,
   EntitlementMergingPolicy,
   EntitlementState,
+  ReportUsageResult,
+  VerificationResult,
   grantSchemaExtended,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
@@ -23,7 +26,6 @@ import type z from "zod"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
 import { UnPriceGrantError } from "./errors"
-import type { ConsumptionResult, VerificationResult } from "./types"
 
 interface SubjectGrantQuery {
   subjectId: string
@@ -491,9 +493,10 @@ export class GrantsManager {
       priority: g.priority,
       realtime: g.featurePlanVersion.metadata?.realtime ?? false,
       hardLimit: g.hardLimit,
-      subscriptionItemId: g.subscriptionItem?.id,
-      subscriptionPhaseId: g.subscriptionItem?.subscriptionPhaseId,
-      subscriptionId: g.subscriptionItem?.subscription?.id,
+      featurePlanVersionId: g.featurePlanVersionId,
+      subscriptionItemId: g.subscriptionItem?.id ?? null,
+      subscriptionPhaseId: g.subscriptionItem?.subscriptionPhaseId ?? null,
+      subscriptionId: g.subscriptionItem?.subscription?.id ?? null,
     }))
 
     // Merge grants according to merging policy
@@ -910,7 +913,6 @@ export class GrantsManager {
         message: err.message,
         deniedReason: "ENTITLEMENT_ERROR",
         usage: 0,
-        limit: null,
       }
     }
 
@@ -935,7 +937,7 @@ export class GrantsManager {
       message: withinLimit ? "Allowed" : "Limit exceeded",
       deniedReason: withinLimit ? undefined : "LIMIT_EXCEEDED",
       usage: Number(validatedState.currentCycleUsage),
-      limit: validatedState.limit,
+      limit: validatedState.limit ?? undefined,
     }
   }
 
@@ -947,7 +949,7 @@ export class GrantsManager {
     state: EntitlementState
     amount: number
     now: number
-  }): ConsumptionResult {
+  }): ReportUsageResult {
     const { state, amount, now } = params
 
     // 1. Get active grants at this timestamp
@@ -958,9 +960,9 @@ export class GrantsManager {
 
     if (err) {
       return {
-        success: false,
+        allowed: false,
         usage: 0,
-        limit: null,
+        limit: undefined,
         consumedFrom: [],
         message: err.message,
       }
@@ -979,33 +981,39 @@ export class GrantsManager {
     const withinLimit = effectiveLimit === null || newUsage <= effectiveLimit
 
     // 4. Determine which grants would be consumed for billing attribution
-    const consumedFrom = this.attributeConsumption(activeGrants, amount)
+    const consumedFrom = this.attributeConsumption({
+      grants: activeGrants,
+      amount,
+    })
 
-    const success = withinLimit || !hardLimit
+    const allowed = withinLimit || !hardLimit
 
     return {
-      success,
+      allowed,
       usage: newUsage,
-      limit: effectiveLimit,
+      limit: effectiveLimit ?? undefined,
       consumedFrom,
-      message: success ? "Allowed" : "Limit exceeded",
+      message: allowed ? "Allowed" : "Limit exceeded",
+      deniedReason: allowed ? undefined : "LIMIT_EXCEEDED",
+      // TODO: handle notified over limit
+      notifiedOverLimit: !allowed,
     }
   }
 
   /**
    * Determine which grants would be consumed for billing attribution
    */
-  private attributeConsumption(
-    grants: z.infer<typeof entitlementGrantsSnapshotSchema>[],
+  private attributeConsumption(params: {
+    grants: z.infer<typeof entitlementGrantsSnapshotSchema>[]
     amount: number
-  ): Array<{ grantId: string; amount: number; priority: number; type: string }> {
+  }): Consumption[] {
+    const { grants, amount } = params
     // Sort by priority
     const sorted = [...grants].sort((a, b) => b.priority - a.priority)
 
     // Attribute consumption by priority (for billing records)
     // This is just for attribution, not for limit checking
-    const attribution: Array<{ grantId: string; amount: number; priority: number; type: string }> =
-      []
+    const attribution: Consumption[] = []
     let remaining = amount
 
     for (const grant of sorted) {
@@ -1020,6 +1028,10 @@ export class GrantsManager {
         amount: toAttribute,
         priority: grant.priority,
         type: grant.type,
+        featurePlanVersionId: grant.featurePlanVersionId,
+        subscriptionItemId: grant.subscriptionItemId,
+        subscriptionPhaseId: grant.subscriptionPhaseId,
+        subscriptionId: grant.subscriptionId,
       })
 
       remaining -= toAttribute

@@ -1,8 +1,14 @@
-import type { Analytics } from "@unprice/analytics"
+import type { Analytics, AnalyticsUsage, AnalyticsVerification } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { and, eq } from "@unprice/db"
 import { entitlements } from "@unprice/db/schema"
-import type { EntitlementState } from "@unprice/db/validators"
+import type {
+  EntitlementState,
+  ReportUsageRequest,
+  ReportUsageResult,
+  VerificationResult,
+  VerifyRequest,
+} from "@unprice/db/validators"
 import { Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import type { Cache } from "../cache/service"
@@ -10,12 +16,6 @@ import type { Metrics } from "../metrics"
 import type { UnPriceEntitlementStorageError } from "./errors"
 import { GrantsManager } from "./grants"
 import type { UnPriceEntitlementStorage } from "./storage-provider"
-import type {
-  ConsumptionResult,
-  UsageRecord,
-  VerificationRecord,
-  VerificationResult,
-} from "./types"
 
 /**
  * Simplified Entitlement Service
@@ -29,6 +29,7 @@ import type {
 export class EntitlementService {
   private readonly grantsManager: GrantsManager
   private readonly revalidateInterval: number
+  private readonly syncToDBInterval: number
   private readonly db: Database
   public readonly storage: UnPriceEntitlementStorage
   private readonly logger: Logger
@@ -49,9 +50,12 @@ export class EntitlementService {
     metrics: Metrics
     config?: {
       revalidateInterval?: number // How often to check for version changes
+      syncToDBInterval?: number // How often to sync to DB
     }
   }) {
     this.revalidateInterval = opts.config?.revalidateInterval ?? 300000 // 5 minutes default
+    this.syncToDBInterval = opts.config?.syncToDBInterval ?? 30000 // 30 seconds default
+
     this.grantsManager = new GrantsManager({
       db: opts.db,
       logger: opts.logger,
@@ -73,19 +77,12 @@ export class EntitlementService {
    * Check if usage is allowed (low latency)
    * Handles cache miss and revalidation internally (single network call)
    */
-  async can(params: {
-    customerId: string
-    projectId: string
-    featureSlug: string
-    requestId: string
-    now: number
-    startTime: number
-  }): Promise<VerificationResult> {
+  async verify(params: VerifyRequest): Promise<VerificationResult> {
     const state = await this.getStateWithRevalidation({
       customerId: params.customerId,
       projectId: params.projectId,
       featureSlug: params.featureSlug,
-      now: params.now,
+      now: params.timestamp,
     })
 
     if (!state) {
@@ -93,11 +90,11 @@ export class EntitlementService {
         customerId: params.customerId,
         projectId: params.projectId,
         featureSlug: params.featureSlug,
-        timestamp: params.now,
-        success: 0,
+        timestamp: params.timestamp,
+        allowed: false,
         deniedReason: "ENTITLEMENT_NOT_FOUND",
-        metadata: JSON.stringify({}),
-        latency: (performance.now() - params.startTime).toString(),
+        metadata: params.metadata,
+        latency: performance.now() - params.performanceStart,
         entitlementId: "",
         requestId: params.requestId,
         createdAt: Date.now(),
@@ -108,22 +105,22 @@ export class EntitlementService {
         message: "No entitlement found",
         deniedReason: "ENTITLEMENT_NOT_FOUND",
         usage: 0,
-        limit: null,
+        limit: undefined,
       }
     }
 
-    const result = this.grantsManager.verify({ state, now: params.now })
+    const result = this.grantsManager.verify({ state, now: params.timestamp })
 
     // Insert verification record
     await this.storage.insertVerification({
       customerId: params.customerId,
       projectId: params.projectId,
       featureSlug: params.featureSlug,
-      timestamp: params.now,
-      success: result.allowed ? 1 : 0,
-      deniedReason: result.deniedReason ?? null,
-      metadata: JSON.stringify({}),
-      latency: (performance.now() - params.startTime).toString(),
+      timestamp: params.timestamp,
+      allowed: result.allowed,
+      deniedReason: result.deniedReason ?? undefined,
+      metadata: params.metadata,
+      latency: performance.now() - params.performanceStart,
       entitlementId: state.id,
       requestId: params.requestId,
       createdAt: Date.now(),
@@ -138,57 +135,61 @@ export class EntitlementService {
    * Report usage with priority-based consumption
    * Handles revalidation internally (single network call)
    */
-  async reportUsage(params: {
-    customerId: string
-    projectId: string
-    featureSlug: string
-    amount: number
-  }): Promise<ConsumptionResult> {
+  async reportUsage(params: ReportUsageRequest): Promise<ReportUsageResult> {
     // Get state with automatic revalidation (handles cache miss internally)
-    const now = Date.now()
     const state = await this.getStateWithRevalidation({
       customerId: params.customerId,
       projectId: params.projectId,
       featureSlug: params.featureSlug,
-      now: now,
+      now: params.timestamp,
     })
 
     if (!state) {
       return {
-        success: false,
+        allowed: false,
         message: "No entitlement found",
+        deniedReason: "ENTITLEMENT_NOT_FOUND",
         usage: 0,
-        limit: null,
+        limit: undefined,
         consumedFrom: [],
       }
     }
 
     // Consume with priority
-    const result = this.grantsManager.consume({ state, amount: params.amount, now })
+    const result = this.grantsManager.consume({
+      state,
+      amount: params.usage,
+      now: params.timestamp,
+    })
 
     // Update state in cache
-    if (result.success) {
-      state.currentCycleUsage = result.usage.toString()
+    if (result.allowed) {
+      state.currentCycleUsage = result.usage?.toString() ?? "0"
       await this.storage.set({ state })
 
-      // Buffer usage records if provider supports it
-      // for (const consumed of result.consumedFrom) {
-      //   await this.storage.bufferUsageRecord({
-      //     customerId: params.customerId,
-      //     projectId: params.projectId,
-      //     featureSlug: params.featureSlug,
-      //     usage: consumed.amount.toString(),
-      //     timestamp: Date.now(),
-      //     grantId: consumed.grantId,
-      //     grantType: consumed.type,
-      //     grantPriority: consumed.priority,
-      //   })
-      // }
+      for (const consumed of result.consumedFrom ?? []) {
+        await this.storage.insertUsageRecord({
+          customerId: params.customerId,
+          projectId: params.projectId,
+          featureSlug: params.featureSlug,
+          usage: consumed.amount,
+          timestamp: params.timestamp,
+          grantId: consumed.grantId,
+          idempotenceKey: params.idempotenceKey,
+          requestId: params.requestId,
+          entitlementId: state.id,
+          featurePlanVersionId: consumed.featurePlanVersionId,
+          subscriptionItemId: consumed.subscriptionItemId,
+          subscriptionPhaseId: consumed.subscriptionPhaseId,
+          subscriptionId: consumed.subscriptionId,
+          createdAt: Date.now(),
+          metadata: params.metadata,
+          deleted: 0,
+        })
+      }
 
       // Async sync to DB (don't block)
-      // this.syncToDB(state).catch((err) => {
-      //   this.logger.error("Failed to sync to DB", { error: err.message })
-      // })
+      this.waitUntil(this.syncToDB(state))
     }
 
     return result
@@ -200,7 +201,7 @@ export class EntitlementService {
   private async sendVerificationsToAnalytics({
     verifications,
   }: {
-    verifications: VerificationRecord[]
+    verifications: AnalyticsVerification[]
   }): Promise<
     Result<
       {
@@ -218,10 +219,10 @@ export class EntitlementService {
         projectId: event.projectId,
         timestamp: event.timestamp,
         status: event.deniedReason,
-        metadata: event.metadata ? JSON.parse(event.metadata) : {},
+        metadata: event.metadata,
         latency: event.latency ? Number(event.latency) : 0,
         requestId: event.requestId,
-        success: event.success === 1,
+        allowed: event.allowed,
       }))
 
       const data = await this.analytics
@@ -289,7 +290,7 @@ export class EntitlementService {
   private async sendUsageRecordsToAnalytics({
     usageRecords,
   }: {
-    usageRecords: UsageRecord[]
+    usageRecords: AnalyticsUsage[]
   }): Promise<
     Result<
       {
@@ -305,7 +306,7 @@ export class EntitlementService {
       if (!uniqueEvents.has(event.idempotenceKey)) {
         uniqueEvents.set(event.idempotenceKey, {
           ...event,
-          metadata: event.metadata ? JSON.parse(event.metadata) : {},
+          metadata: event.metadata,
         })
       }
     }
@@ -379,8 +380,25 @@ export class EntitlementService {
   /**
    * Prewarm cache with entitlement snapshots
    */
-  async prewarm(states: EntitlementState[]): Promise<void> {
-    const now = Date.now()
+  async prewarm({
+    customerId,
+    projectId,
+    now,
+  }: {
+    customerId: string
+    projectId: string
+    now: number
+  }): Promise<void> {
+    const states = await this.db.query.entitlements.findMany({
+      where: (e, { and, eq, or, isNull, lte, gte }) =>
+        and(
+          eq(e.customerId, customerId),
+          eq(e.projectId, projectId),
+          gte(e.effectiveAt, now),
+          or(isNull(e.expiresAt), lte(e.expiresAt, now))
+        ),
+    })
+
     for (const state of states) {
       // Ensure revalidation fields are set
       if (!state.nextRevalidateAt) {
@@ -390,6 +408,10 @@ export class EntitlementService {
         state.computedAt = now
       }
       await this.storage.set({ state })
+      await this.cache.customerEntitlement.set(
+        `${state.projectId}:${state.customerId}:${state.featureSlug}`,
+        state
+      )
     }
   }
 
@@ -397,7 +419,7 @@ export class EntitlementService {
    * Flush usage records to analytics
    */
   async flushUsageRecords(): Promise<Result<void, UnPriceEntitlementStorageError>> {
-    const usageRecords = await this.storage.getUsageRecords()
+    const usageRecords = await this.storage.getAllUsageRecords()
 
     if (usageRecords.err) {
       this.logger.error("Failed to get usage records", { error: usageRecords.err.message })
@@ -422,7 +444,7 @@ export class EntitlementService {
    * Flush verifications to analytics
    */
   async flushVerifications(): Promise<Result<void, UnPriceEntitlementStorageError>> {
-    const verifications = await this.storage.getVerifications()
+    const verifications = await this.storage.getAllVerifications()
 
     if (verifications.err) {
       this.logger.error("Failed to get verifications", { error: verifications.err.message })
@@ -451,6 +473,10 @@ export class EntitlementService {
     projectId: string
     featureSlug: string
   }): Promise<void> {
+    await this.cache.customerEntitlement.remove(
+      `${params.projectId}:${params.customerId}:${params.featureSlug}`
+    )
+
     // flush buffered records first
     const verificationsResult = await this.flushVerifications()
     const usageRecordsResult = await this.flushUsageRecords()
@@ -515,7 +541,11 @@ export class EntitlementService {
 
       if (!dbVersion) {
         // Entitlement deleted, invalidate cache
-        await this.storage.delete(params)
+        await this.invalidate({
+          customerId: params.customerId,
+          projectId: params.projectId,
+          featureSlug: params.featureSlug,
+        })
         return null
       }
 
@@ -534,6 +564,14 @@ export class EntitlementService {
       // Version matches - just update revalidation time
       cached.nextRevalidateAt = params.now + this.revalidateInterval
       await this.storage.set({ state: cached })
+
+      // Update cache in background
+      this.waitUntil(
+        this.cache.customerEntitlement.set(
+          `${params.projectId}:${params.customerId}:${params.featureSlug}`,
+          cached
+        )
+      )
     }
 
     return cached
@@ -588,6 +626,13 @@ export class EntitlementService {
 
     // Update cache
     await this.storage.set({ state })
+    // Update cache in background
+    this.waitUntil(
+      this.cache.customerEntitlement.set(
+        `${params.projectId}:${params.customerId}:${params.featureSlug}`,
+        state
+      )
+    )
 
     return state
   }
@@ -596,12 +641,28 @@ export class EntitlementService {
    * Sync usage back to DB (async, non-blocking)
    */
   public async syncToDB(state: EntitlementState): Promise<void> {
-    await this.db
+    if (Date.now() - state.lastSyncAt < this.syncToDBInterval) {
+      return
+    }
+
+    const updated = await this.db
       .update(entitlements)
       .set({
         currentCycleUsage: state.currentCycleUsage.toString(),
         lastSyncAt: Date.now(),
       })
       .where(and(eq(entitlements.id, state.id), eq(entitlements.projectId, state.projectId)))
+      .returning()
+      .then((res) => res[0])
+
+    if (!updated) {
+      return
+    }
+
+    // Update cache in background
+    await this.cache.customerEntitlement.set(
+      `${state.projectId}:${state.customerId}:${state.featureSlug}`,
+      updated
+    )
   }
 }

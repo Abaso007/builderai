@@ -4,7 +4,7 @@ import { env as envDb } from "@unprice/db/env"
 import { env as envLogging } from "@unprice/logging/env"
 import { env as envServices } from "@unprice/services/env"
 import { z } from "zod"
-import type { DurableObjectUsagelimiter } from "~/entitlement/do"
+import type { DurableObjectUsagelimiter } from "~/usagelimiter/do"
 import type { DurableObjectProject } from "./project/do"
 
 export const cloudflareRatelimiter = z.custom<{

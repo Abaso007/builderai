@@ -10,7 +10,7 @@ export const reportUsageEvents = async (
   const requestId = c.get("requestId")
   const stats = c.get("stats")
 
-  const { customer, entitlement, logger } = c.get("services")
+  const { customer, usagelimiter, logger } = c.get("services")
 
   if (unPriceCustomerId) {
     const { val: unPriceCustomer, err: unPriceCustomerErr } =
@@ -36,7 +36,7 @@ export const reportUsageEvents = async (
       return
     }
 
-    await entitlement
+    await usagelimiter
       .reportUsage({
         customerId: unPriceCustomer.id,
         featureSlug: FEATURE_SLUGS.EVENTS,

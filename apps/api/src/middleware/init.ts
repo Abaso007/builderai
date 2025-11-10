@@ -8,12 +8,13 @@ import { CacheService } from "@unprice/services/cache"
 import { CustomerService } from "@unprice/services/customers"
 import { LogdrainMetrics, NoopMetrics } from "@unprice/services/metrics"
 import type { MiddlewareHandler } from "hono"
-import { EntitlementService } from "~/entitlement/service"
 import type { HonoEnv } from "~/hono/env"
 import { ApiProjectService } from "~/project"
+import { UsageLimiterService } from "~/usagelimiter/service"
 
 import { SubscriptionService } from "@unprice/services/subscriptions"
 import { endTime, startTime } from "hono/timing"
+import { NoopUsageLimiter } from "~/usagelimiter/noop"
 
 /**
  * These maps persist between worker executions and are used for caching
@@ -228,25 +229,27 @@ export function init(): MiddlewareHandler<HonoEnv> {
 
     endTime(c, "initSubscription")
     // start a new timer
-    startTime(c, "initEntitlement")
+    startTime(c, "initUsageLimiter")
 
-    const entitlement = new EntitlementService({
-      namespace: c.env.usagelimit,
-      projectNamespace: c.env.projectdo,
-      requestId,
-      logger,
-      metrics,
-      analytics,
-      cache,
-      db,
-      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
-      customer,
-      stats: c.get("stats"),
-      hashCache,
-    })
+    const usageLimiterService = c.env.usagelimit
+      ? new UsageLimiterService({
+          namespace: c.env.usagelimit,
+          projectNamespace: c.env.projectdo,
+          requestId,
+          logger,
+          metrics,
+          analytics,
+          cache,
+          db,
+          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+          waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
+          customer,
+          stats: c.get("stats"),
+          hashCache,
+        })
+      : new NoopUsageLimiter()
 
-    endTime(c, "initEntitlement")
+    endTime(c, "initUsageLimiter")
 
     // start a new timer
     startTime(c, "initProject")
@@ -282,7 +285,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
 
     c.set("services", {
       version: "1.0.0",
-      entitlement,
+      usagelimiter: usageLimiterService,
       subscription,
       analytics,
       project,

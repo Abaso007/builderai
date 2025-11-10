@@ -1,4 +1,5 @@
 import { createRoute } from "@hono/zod-openapi"
+import { reportUsageResultSchema } from "@unprice/db/validators"
 import { endTime, startTime } from "hono/timing"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
@@ -56,15 +57,7 @@ export const route = createRoute({
     ),
   },
   responses: {
-    [HttpStatusCodes.OK]: jsonContent(
-      z.object({
-        success: z.boolean(),
-        message: z.string().optional(),
-        cacheHit: z.boolean().optional(),
-        remaining: z.number().optional(),
-      }),
-      "The result of the report usage"
-    ),
+    [HttpStatusCodes.OK]: jsonContent(reportUsageResultSchema, "The result of the report usage"),
     ...openApiErrorResponses,
   },
 })
@@ -79,7 +72,7 @@ export type ReportUsageResponse = z.infer<
 export const registerReportUsageV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customerId, featureSlug, usage, idempotenceKey, metadata } = c.req.valid("json")
-    const { entitlement } = c.get("services")
+    const { usagelimiter } = c.get("services")
     const stats = c.get("stats")
     const requestId = c.get("requestId")
 
@@ -90,7 +83,7 @@ export const registerReportUsageV1 = (app: App) =>
     startTime(c, "reportUsage")
 
     // validate usage from db
-    const { err, val: result } = await entitlement.reportUsage({
+    const { err, val: result } = await usagelimiter.reportUsage({
       customerId,
       featureSlug,
       usage,

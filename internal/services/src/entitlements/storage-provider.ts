@@ -1,7 +1,7 @@
+import type { AnalyticsUsage, AnalyticsVerification } from "@unprice/analytics"
 import type { EntitlementState } from "@unprice/db/validators"
 import type { Result } from "@unprice/error"
 import type { UnPriceEntitlementStorageError } from "./errors"
-import type { UsageRecord, VerificationRecord } from "./types"
 
 /**
  * Simple storage provider interface for plug-and-play backends
@@ -41,13 +41,13 @@ export interface UnPriceEntitlementStorage {
    * Insert usage record for batch sending
    * Useful for DO with alarms or Redis with pipelines
    */
-  insertUsageRecord(record: UsageRecord): Promise<Result<void, UnPriceEntitlementStorageError>>
+  insertUsageRecord(record: AnalyticsUsage): Promise<Result<void, UnPriceEntitlementStorageError>>
 
   /**
    * Insert verification record for batch sending
    */
   insertVerification(
-    record: Omit<VerificationRecord, "id">
+    record: AnalyticsVerification
   ): Promise<Result<void, UnPriceEntitlementStorageError>>
 
   /**
@@ -63,10 +63,10 @@ export interface UnPriceEntitlementStorage {
   /**
    * Get all verifications
    */
-  getVerifications(): Promise<Result<VerificationRecord[], UnPriceEntitlementStorageError>>
+  getAllVerifications(): Promise<Result<AnalyticsVerification[], UnPriceEntitlementStorageError>>
 
   /**
    * Get all usage records
    */
-  getUsageRecords(): Promise<Result<UsageRecord[], UnPriceEntitlementStorageError>>
+  getAllUsageRecords(): Promise<Result<AnalyticsUsage[], UnPriceEntitlementStorageError>>
 }

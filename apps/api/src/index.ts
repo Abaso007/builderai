@@ -7,7 +7,7 @@ import { metrics } from "~/middleware/metrics"
 
 import serveEmojiFavicon from "stoker/middlewares/serve-emoji-favicon"
 
-export { DurableObjectUsagelimiter } from "~/entitlement/do"
+export { DurableObjectUsagelimiter } from "~/usagelimiter/do"
 export { DurableObjectProject } from "~/project/do"
 
 import { registerReportUsageV1 } from "~/routes/customer/reportUsageV1"

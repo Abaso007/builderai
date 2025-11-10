@@ -4,7 +4,12 @@ import { extendZodWithOpenApi } from "zod-openapi"
 import * as schema from "../schema"
 import { featureSelectBaseSchema } from "./features"
 import { planVersionFeatureSelectBaseSchema } from "./planVersionFeatures"
-import { billingConfigSchema, entitlementMergingPolicySchema, resetConfigSchema } from "./shared"
+import {
+  billingConfigSchema,
+  deniedReasonSchema,
+  entitlementMergingPolicySchema,
+  resetConfigSchema,
+} from "./shared"
 import { aggregationMethodSchema, typeFeatureSchema } from "./shared"
 import {
   subscriptionItemsSelectSchema,
@@ -38,6 +43,74 @@ export const grantSchemaExtended = grantSchema.extend({
     .optional(),
 })
 
+export const reportUsageSchema = z.object({
+  customerId: z.string(),
+  featureSlug: z.string(),
+  usage: z.number(),
+  idempotenceKey: z.string(),
+  flushTime: z.number().optional(),
+  timestamp: z.number(),
+  projectId: z.string(),
+  sync: z.boolean().optional(),
+  requestId: z.string(),
+  metadata: z.record(z.string(), z.any()).nullable(),
+})
+
+export const verifySchema = z.object({
+  timestamp: z.number(),
+  customerId: z.string(),
+  featureSlug: z.string(),
+  projectId: z.string(),
+  requestId: z.string(),
+  metadata: z.record(z.string(), z.any()).nullable(),
+  flushTime: z.number().optional(),
+  performanceStart: z.number(),
+  fromCache: z
+    .boolean()
+    .optional()
+    .describe(
+      "if true will check the entitlement from cache. This will reduce latency for the request but won't have 100% accuracy. If false, the entitlement will be validated synchronously 100% accurate but will have a higher latency"
+    ),
+})
+
+export type ReportUsageRequest = z.infer<typeof reportUsageSchema>
+export type VerifyRequest = z.infer<typeof verifySchema>
+
+export const verificationResultSchema = z.object({
+  allowed: z.boolean(),
+  message: z.string().optional(),
+  deniedReason: deniedReasonSchema.optional(),
+  cacheHit: z.boolean().optional(),
+  remaining: z.number().optional(),
+  limit: z.number().optional(),
+  usage: z.number().optional(),
+  latency: z.number().optional(),
+})
+export type VerificationResult = z.infer<typeof verificationResultSchema>
+
+export const consumptionSchema = z.object({
+  grantId: z.string(),
+  amount: z.number(),
+  priority: z.number(),
+  type: z.string(),
+  featurePlanVersionId: z.string(),
+  subscriptionItemId: z.string().nullable(),
+  subscriptionPhaseId: z.string().nullable(),
+  subscriptionId: z.string().nullable(),
+})
+export type Consumption = z.infer<typeof consumptionSchema>
+
+export const reportUsageResultSchema = z.object({
+  allowed: z.boolean(),
+  message: z.string().optional(),
+  limit: z.number().optional(),
+  usage: z.number().optional(),
+  notifiedOverLimit: z.boolean().optional(),
+  deniedReason: deniedReasonSchema.optional(),
+  consumedFrom: consumptionSchema.array(),
+})
+export type ReportUsageResult = z.infer<typeof reportUsageResultSchema>
+
 export const entitlementGrantsSnapshotSchema = z.object({
   id: z.string(),
   type: z.string(),
@@ -49,10 +122,11 @@ export const entitlementGrantsSnapshotSchema = z.object({
   limit: z.number().nullable(),
   realtime: z.boolean(),
   hardLimit: z.boolean(),
+  featurePlanVersionId: z.string(),
   // let us keep track in analytics
-  subscriptionItemId: z.string().optional(),
-  subscriptionPhaseId: z.string().optional(),
-  subscriptionId: z.string().optional(),
+  subscriptionItemId: z.string().nullable(),
+  subscriptionPhaseId: z.string().nullable(),
+  subscriptionId: z.string().nullable(),
 })
 
 export const entitlementSchema = createSelectSchema(schema.entitlements, {
@@ -130,3 +204,4 @@ export type CustomerEntitlement = z.infer<typeof customerEntitlementSchema>
 export type InsertCustomerEntitlement = z.infer<typeof customerEntitlementInsertSchema>
 export type CustomerEntitlementExtended = z.infer<typeof customerEntitlementExtendedSchema>
 export type EntitlementState = z.infer<typeof entitlementStateSchema>
+export type Grant = z.infer<typeof grantSchema>

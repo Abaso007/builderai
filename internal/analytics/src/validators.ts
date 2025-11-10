@@ -45,7 +45,7 @@ export const stringToUInt32 = z.union([z.string(), z.number()]).transform((s) =>
 export const booleanToUInt8 = z.boolean().transform((b) => (b ? 1 : 0))
 
 export const metadataSchema = z
-  .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
+  .record(z.string(), z.any())
   .nullable()
   .transform((m) => {
     // tinybird receives a Map<string, string>
@@ -60,7 +60,7 @@ export const featureVerificationSchemaV1 = z.object({
   projectId: z.string(),
   entitlementId: z.string(),
   deniedReason: z.string().optional(),
-  success: z.boolean(),
+  allowed: z.boolean(),
   timestamp: z
     .number()
     .default(Date.now())
@@ -91,6 +91,7 @@ export const featureUsageSchemaV1 = z.object({
   projectId: z.string(),
   featurePlanVersionId: z.string(),
   usage: stringToUInt32,
+  grantId: z.string(),
   createdAt: z
     .number()
     .default(Date.now())
@@ -275,6 +276,9 @@ export type PageAnalyticsEvent = z.infer<typeof pageEventSchema>
 export type AnalyticsEvent = z.infer<typeof analyticsEventSchema>
 export type AnalyticsEventAction = z.infer<typeof analyticsEventSchema>["action"]
 export type GetUsageResponse = z.infer<typeof getUsageResponseSchema>
+
+export type AnalyticsVerification = z.infer<typeof featureVerificationSchemaV1>
+export type AnalyticsUsage = z.infer<typeof featureUsageSchemaV1>
 
 // Plan conversion response schemas
 export const planConversionResponseSchema = z.object({
