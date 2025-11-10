@@ -407,6 +407,7 @@ export class EntitlementService {
       if (!state.computedAt) {
         state.computedAt = now
       }
+
       await this.storage.set({ state })
       await this.cache.customerEntitlement.set(
         `${state.projectId}:${state.customerId}:${state.featureSlug}`,
@@ -473,10 +474,6 @@ export class EntitlementService {
     projectId: string
     featureSlug: string
   }): Promise<void> {
-    await this.cache.customerEntitlement.remove(
-      `${params.projectId}:${params.customerId}:${params.featureSlug}`
-    )
-
     // flush buffered records first
     const verificationsResult = await this.flushVerifications()
     const usageRecordsResult = await this.flushUsageRecords()
@@ -493,6 +490,13 @@ export class EntitlementService {
 
     // delete the entitlement from the storage
     await this.storage.delete(params)
+
+    // delete the entitlement from the cache in background
+    this.waitUntil(
+      this.cache.customerEntitlement.remove(
+        `${params.projectId}:${params.customerId}:${params.featureSlug}`
+      )
+    )
   }
 
   /**
