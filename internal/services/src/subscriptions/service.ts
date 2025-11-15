@@ -1,12 +1,6 @@
 import type { Analytics } from "@unprice/analytics"
 import { type Database, type SQL, and, eq, inArray, sql } from "@unprice/db"
-import {
-  customerEntitlements,
-  grants,
-  subscriptionItems,
-  subscriptionPhases,
-  subscriptions,
-} from "@unprice/db/schema"
+import { subscriptionItems, subscriptionPhases, subscriptions } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import {
   type InsertSubscription,
@@ -24,6 +18,7 @@ import type { Logger } from "@unprice/logging"
 import { BillingService } from "../billing/service"
 import type { Cache } from "../cache"
 import { CustomerService } from "../customers/service"
+import { GrantsManager } from "../entitlements/grants"
 import type { Metrics } from "../metrics"
 import { UnPriceSubscriptionError } from "./errors"
 import { SubscriptionMachine } from "./machine"
@@ -40,6 +35,7 @@ export class SubscriptionService {
   private readonly waitUntil: (promise: Promise<any>) => void
   private customerService: CustomerService
   private billingService: BillingService
+  private grantService: GrantsManager
 
   constructor({
     db,
@@ -79,49 +75,47 @@ export class SubscriptionService {
       cache,
       metrics,
     })
+
+    this.grantService = new GrantsManager({
+      db: db ?? this.db,
+      logger: this.logger,
+    })
   }
 
   // create the entitlements for the new phase
-  public async createEntitlementsForPhase({
-    phaseId,
+  public async computeGrantsForPhase({
+    itemsIds,
     projectId,
     customerId,
     db,
   }: {
-    phaseId: string
+    itemsIds: string[]
     projectId: string
     customerId: string
     db?: Database
   }): Promise<Result<void, UnPriceSubscriptionError>> {
     // get the active phase for the subscription with the customer entitlements
-    const phase = await (db ?? this.db).query.subscriptionPhases.findFirst({
+    const items = await (db ?? this.db).query.subscriptionItems.findMany({
       with: {
-        items: {
+        subscriptionPhase: true,
+        featurePlanVersion: {
           with: {
-            featurePlanVersion: {
-              with: {
-                feature: true,
-              },
-            },
+            feature: true,
           },
         },
       },
-      where: (phase, { eq, and }) => and(eq(phase.id, phaseId), eq(phase.projectId, projectId)),
+      where: (item, { eq, and, inArray }) =>
+        and(inArray(item.id, itemsIds), eq(item.projectId, projectId)),
     })
 
-    if (!phase) {
-      return Err(
-        new UnPriceSubscriptionError({
-          message: "Phase not found",
-        })
-      )
+    if (!items?.length) {
+      return Ok(undefined)
     }
 
-    const { items, ...phaseData } = phase
-
-    // TODO: add create grants for the entitlements in service
-    await (db ?? this.db).insert(grants).values(
-      items.map((item) => {
+    // TODO: should I take them from here or from billing periods?
+    const { err } = await this.grantService.createGrants({
+      projectId,
+      grants: items.map((item) => {
         return {
           id: newId("grant"),
           projectId,
@@ -133,48 +127,25 @@ export class SubscriptionService {
           // grant directly tied to the customer
           subjectType: "customer" as const,
           subjectId: customerId,
-          effectiveAt: phaseData.startAt,
+          effectiveAt: item.subscriptionPhase.startAt,
           // grant is valid for the entire phase
-          expiresAt: phaseData.endAt,
+          expiresAt: item.subscriptionPhase.endAt,
           deleted: false,
           limit: item.units ?? item.featurePlanVersion.limit,
           hardLimit: false,
           units: item.units,
           metadata: {},
         }
-      })
-    )
+      }),
+    })
 
-    await (db ?? this.db)
-      .insert(customerEntitlements)
-      .values(
-        items.map((item) => ({
-          id: newId("customer_entitlement"),
-          projectId,
-          customerId,
-          subscriptionId: phaseData.subscriptionId,
-          featurePlanVersionId: item.featurePlanVersionId,
-          subscriptionItemId: item.id,
-          units: item.units,
-          usage: "0",
-          accumulatedUsage: "0",
-          // if there are defined units thats the limit
-          limit: item.units ?? item.featurePlanVersion.limit,
-          subscriptionPhaseId: phaseData.id,
-          validFrom: phaseData.startAt,
-          validTo: phaseData.endAt,
-          resetedAt: Date.now(),
-          active: true,
-          isCustom: false,
-          lastUsageUpdateAt: Date.now(),
-        }))
-      )
-      .catch((e) => {
-        this.logger.error(e.message)
-        throw new UnPriceSubscriptionError({
-          message: `Error while creating customer entitlements: ${e.message}`,
+    if (err) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: err.message,
         })
-      })
+      )
+    }
 
     return Ok(undefined)
   }
@@ -472,23 +443,25 @@ export class SubscriptionService {
       }
 
       // add items to the subscription
-      await Promise.all(
-        // this is important because every item has the configuration of the quantity of a feature in the subscription
-        configItemsSubscription.map((item) =>
-          trx.insert(subscriptionItems).values({
+      // TODO: create a function to create the items and use it here this is important because every item has the configuration of the quantity of a feature in the subscription
+      const itemsCreated = await trx
+        .insert(subscriptionItems)
+        .values(
+          configItemsSubscription.map((item) => ({
             id: newId("subscription_item"),
             subscriptionPhaseId: phase.id,
             projectId: projectId,
             featurePlanVersionId: item.featurePlanId,
             units: item.units,
             subscriptionId,
-          })
+          }))
         )
-      ).catch((e) => {
-        this.logger.error(e.message)
-        trx.rollback()
-        throw e
-      })
+        .returning()
+        .catch((e) => {
+          this.logger.error(e.message)
+          trx.rollback()
+          throw e
+        })
 
       // update the status of the subscription if the phase is active
       const isActivePhase =
@@ -509,17 +482,17 @@ export class SubscriptionService {
       }
 
       // we create the entitlements for the new phase
-      const createEntitlementsResult = await this.createEntitlementsForPhase({
-        phaseId: phase.id,
+      const computeGrantsResult = await this.computeGrantsForPhase({
+        itemsIds: itemsCreated.map((item) => item.id),
         projectId,
         customerId: subscriptionWithPhases.customerId,
         db: trx,
       })
 
-      if (createEntitlementsResult.err) {
-        this.logger.error(createEntitlementsResult.err.message)
+      if (computeGrantsResult.err) {
+        this.logger.error(computeGrantsResult.err.message)
         trx.rollback()
-        throw createEntitlementsResult.err
+        throw computeGrantsResult.err
       }
 
       return Ok(phase)
@@ -579,6 +552,8 @@ export class SubscriptionService {
       )
     }
 
+    // TODO: handle this
+    // TODO: remove the grants for the customer
     const result = await this.db.transaction(async (trx) => {
       // removing the phase will cascade to the subscription items and entitlements
       const subscriptionPhase = await trx
@@ -594,6 +569,8 @@ export class SubscriptionService {
           })
         )
       }
+
+      // remove
 
       return Ok(true)
     })
@@ -614,7 +591,7 @@ export class SubscriptionService {
     db?: Database
     now: number
   }): Promise<Result<SubscriptionPhase, UnPriceSubscriptionError | SchemaError>> {
-    const { startAt, endAt, items } = input
+    const { startAt, endAt, items, id: phaseId } = input
 
     let endAtToUse = endAt ?? undefined
 
@@ -630,6 +607,9 @@ export class SubscriptionService {
       with: {
         phases: {
           where: (phase, { gte }) => gte(phase.startAt, startAt),
+          with: {
+            items: true,
+          },
         },
       },
     })
@@ -710,8 +690,21 @@ export class SubscriptionService {
         return true
       }
 
-      const previousPhase = orderedPhases[index - 1]
-      return previousPhase ? previousPhase.endAt === phaseToCheck.startAt + 1 : false
+      const previousPhaseOriginal = orderedPhases[index - 1]
+      if (!previousPhaseOriginal) {
+        return false
+      }
+
+      let previousPhase = previousPhaseOriginal
+      if (previousPhaseOriginal.id === phaseToUpdate.id) {
+        previousPhase = {
+          ...previousPhaseOriginal,
+          startAt,
+          endAt: endAtToUse ?? null,
+        } as typeof previousPhaseOriginal
+      }
+
+      return previousPhase.endAt !== null && previousPhase.endAt + 1 === phaseToCheck.startAt
     })
 
     if (consecutivePhases.length !== orderedPhases.length) {
@@ -753,34 +746,34 @@ export class SubscriptionService {
         )
       }
 
-      // add items to the subscription
-      if (items?.length) {
+      // add items to the subscription if they are different from the current items
+      const itemsFromPhase =
+        subscriptionWithPhases.phases.find((p) => p.id === phaseId)?.items ?? []
+
+      // if the items units are different we need to add them
+      const itemsToChange = items?.filter((item) => {
+        const itemFromPhase = itemsFromPhase.find((i) => i.id === item.id)
+        return itemFromPhase?.units !== item.units
+      })
+
+      if (itemsToChange?.length) {
         const sqlChunksItems: SQL[] = []
-        const sqlChunksEntitlements: SQL[] = []
 
         const ids: string[] = []
         sqlChunksItems.push(sql`(case`)
-        sqlChunksEntitlements.push(sql`(case`)
 
-        for (const item of items) {
+        for (const item of itemsToChange) {
           sqlChunksItems.push(
             item.units === null
               ? sql`when ${subscriptionItems.id} = ${item.id} then NULL`
               : sql`when ${subscriptionItems.id} = ${item.id} then cast(${item.units} as int)`
           )
-          sqlChunksEntitlements.push(
-            item.units === null
-              ? sql`when ${customerEntitlements.subscriptionItemId} = ${item.id} then NULL`
-              : sql`when ${customerEntitlements.subscriptionItemId} = ${item.id} then cast(${item.units} as int)`
-          )
           ids.push(item.id)
         }
 
         sqlChunksItems.push(sql`end)`)
-        sqlChunksEntitlements.push(sql`end)`)
 
         const finalSqlItems: SQL = sql.join(sqlChunksItems, sql.raw(" "))
-        const finalSqlEntitlements: SQL = sql.join(sqlChunksEntitlements, sql.raw(" "))
 
         await (db ?? this.db)
           .update(subscriptionItems)
@@ -796,16 +789,12 @@ export class SubscriptionService {
           })
 
         // update the units for the entitlements
-        await (db ?? this.db)
-          .update(customerEntitlements)
-          .set({ units: finalSqlEntitlements })
-          .where(inArray(customerEntitlements.subscriptionItemId, ids))
-          .catch((e) => {
-            this.logger.error(e.message)
-            throw new UnPriceSubscriptionError({
-              message: `Error while updating customer entitlements: ${e.message}`,
-            })
-          })
+        await this.computeGrantsForPhase({
+          itemsIds: itemsToChange.map((item) => item.id),
+          projectId,
+          customerId: subscriptionWithPhases.customerId,
+          db: trx,
+        })
       }
 
       return Ok(subscriptionPhase)

@@ -1,5 +1,5 @@
 {
-  "id": "2c829138-d90d-44ab-95ea-7cafac29a734",
+  "id": "f5e8cf78-908e-4635-9772-a3adc25c0358",
   "prevId": "35c936e5-ca76-46b5-9302-0549d0eb58cb",
   "version": "7",
   "dialect": "postgresql",
@@ -457,251 +457,6 @@
           "columns": [
             "identifier",
             "token"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.unprice_customer_entitlements": {
-      "name": "unprice_customer_entitlements",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at_m": {
-          "name": "created_at_m",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "updated_at_m": {
-          "name": "updated_at_m",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "customer_id": {
-          "name": "customer_id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "subscription_id": {
-          "name": "subscription_id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "feature_plan_version_id": {
-          "name": "feature_plan_version_id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "subscription_phase_id": {
-          "name": "subscription_phase_id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "subscription_item_id": {
-          "name": "subscription_item_id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "limit": {
-          "name": "limit",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "units": {
-          "name": "units",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "current_cycle_usage": {
-          "name": "current_cycle_usage",
-          "type": "numeric",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'0'"
-        },
-        "accumulated_usage": {
-          "name": "accumulated_usage",
-          "type": "numeric",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'0'"
-        },
-        "realtime": {
-          "name": "realtime",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "reseted_at": {
-          "name": "reseted_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "active": {
-          "name": "active",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "is_custom": {
-          "name": "is_custom",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "last_usage_update_at": {
-          "name": "last_usage_update_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "metadata": {
-          "name": "metadata",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "unprice_customer_entitlements_project_id_unprice_projects_id_fk": {
-          "name": "unprice_customer_entitlements_project_id_unprice_projects_id_fk",
-          "tableFrom": "unprice_customer_entitlements",
-          "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "feature_plan_version_id_fkey": {
-          "name": "feature_plan_version_id_fkey",
-          "tableFrom": "unprice_customer_entitlements",
-          "tableTo": "unprice_plan_versions_features",
-          "columnsFrom": [
-            "feature_plan_version_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "subscription_item_id_fkey": {
-          "name": "subscription_item_id_fkey",
-          "tableFrom": "unprice_customer_entitlements",
-          "tableTo": "unprice_subscription_items",
-          "columnsFrom": [
-            "subscription_item_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "customer_id_fkey": {
-          "name": "customer_id_fkey",
-          "tableFrom": "unprice_customer_entitlements",
-          "tableTo": "unprice_customers",
-          "columnsFrom": [
-            "customer_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "subscription_phase_id_fkey": {
-          "name": "subscription_phase_id_fkey",
-          "tableFrom": "unprice_customer_entitlements",
-          "tableTo": "unprice_subscription_phases",
-          "columnsFrom": [
-            "subscription_phase_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "subscription_id_fkey": {
-          "name": "subscription_id_fkey",
-          "tableFrom": "unprice_customer_entitlements",
-          "tableTo": "unprice_subscriptions",
-          "columnsFrom": [
-            "subscription_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "project_id_fkey": {
-          "name": "project_id_fkey",
-          "tableFrom": "unprice_customer_entitlements",
-          "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "pk_customer_entitlement": {
-          "name": "pk_customer_entitlement",
-          "columns": [
-            "id",
-            "project_id"
           ]
         }
       },
@@ -4539,13 +4294,26 @@
         },
         "feature_slug": {
           "name": "feature_slug",
-          "type": "varchar",
+          "type": "varchar(64)",
           "primaryKey": false,
           "notNull": true
         },
         "feature_type": {
           "name": "feature_type",
           "type": "feature_types",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reset_config": {
+          "name": "reset_config",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "aggregation_method": {
+          "name": "aggregation_method",
+          "type": "aggregation_method",
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true
@@ -4562,30 +4330,18 @@
           "primaryKey": false,
           "notNull": false
         },
-        "effective_limit": {
-          "name": "effective_limit",
+        "limit": {
+          "name": "limit",
           "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
-        "effective_units": {
-          "name": "effective_units",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "effective_hard_limit": {
-          "name": "effective_hard_limit",
+        "hard_limit": {
+          "name": "hard_limit",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
           "default": false
-        },
-        "effective_reset_config": {
-          "name": "effective_reset_config",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": false
         },
         "timezone": {
           "name": "timezone",
@@ -4608,27 +4364,10 @@
           "notNull": true,
           "default": "'0'"
         },
-        "cycle_start_at": {
-          "name": "cycle_start_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "cycle_end_at": {
-          "name": "cycle_end_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_reset_at": {
-          "name": "last_reset_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
         "merging_policy": {
           "name": "merging_policy",
-          "type": "varchar",
+          "type": "merging_policy",
+          "typeSchema": "public",
           "primaryKey": false,
           "notNull": true,
           "default": "'sum'"
@@ -4645,24 +4384,25 @@
           "primaryKey": false,
           "notNull": true
         },
+        "last_sync_at": {
+          "name": "last_sync_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
         "version": {
           "name": "version",
-          "type": "integer",
+          "type": "varchar(64)",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": "''"
         },
         "grants": {
           "name": "grants",
           "type": "json",
           "primaryKey": false,
-          "notNull": false
-        },
-        "last_usage_update_at": {
-          "name": "last_usage_update_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "default": "'[]'::json"
         },
         "metadata": {
           "name": "metadata",
@@ -4786,7 +4526,10 @@
           "columns": [
             "project_id",
             "customer_id",
-            "feature_slug"
+            "feature_slug",
+            "effective_at",
+            "expires_at",
+            "version"
           ]
         }
       },
@@ -4832,7 +4575,8 @@
         },
         "type": {
           "name": "type",
-          "type": "varchar",
+          "type": "grant_type",
+          "typeSchema": "public",
           "primaryKey": false,
           "notNull": true
         },
@@ -4844,13 +4588,14 @@
         },
         "subject_type": {
           "name": "subject_type",
-          "type": "varchar",
+          "type": "subject_type",
+          "typeSchema": "public",
           "primaryKey": false,
           "notNull": true
         },
         "subject_id": {
           "name": "subject_id",
-          "type": "varchar",
+          "type": "varchar(36)",
           "primaryKey": false,
           "notNull": true
         },
@@ -4879,6 +4624,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
         },
         "limit": {
           "name": "limit",
@@ -5127,6 +4878,26 @@
         "downgrade"
       ]
     },
+    "public.merging_policy": {
+      "name": "merging_policy",
+      "schema": "public",
+      "values": [
+        "sum",
+        "max",
+        "min",
+        "replace"
+      ]
+    },
+    "public.grant_type": {
+      "name": "grant_type",
+      "schema": "public",
+      "values": [
+        "subscription",
+        "manual",
+        "promotion",
+        "trial"
+      ]
+    },
     "public.invoice_item_kind": {
       "name": "invoice_item_kind",
       "schema": "public",
@@ -5182,6 +4953,16 @@
       "values": [
         "draft",
         "published"
+      ]
+    },
+    "public.subject_type": {
+      "name": "subject_type",
+      "schema": "public",
+      "values": [
+        "project",
+        "plan",
+        "plan_version",
+        "customer"
       ]
     },
     "public.subscription_status_v3": {

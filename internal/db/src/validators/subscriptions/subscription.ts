@@ -3,10 +3,8 @@ import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import { z } from "zod"
 
 import type { Result } from "@unprice/error"
-import { customerEntitlements } from "../../schema/customers"
 import { subscriptionPhases, subscriptions } from "../../schema/subscriptions"
 import { customerSelectSchema } from "../customer"
-import { featureSelectBaseSchema } from "../features"
 import {
   type PlanVersionExtended,
   planVersionExtendedSchema,
@@ -15,7 +13,7 @@ import {
 import { planSelectBaseSchema } from "../plans"
 import { projectSelectBaseSchema } from "../project"
 import { UnPriceCalculationError } from "./../errors"
-import { configPackageSchema, planVersionFeatureSelectBaseSchema } from "./../planVersionFeatures"
+import { configPackageSchema } from "./../planVersionFeatures"
 import { subscriptionStatusSchema } from "./../shared"
 import {
   type SubscriptionItem,
@@ -47,15 +45,6 @@ const reasonSchema = z.enum([
   "customer_signout",
   "generate_billing_periods_failed",
 ])
-
-// schema for entitlements this is repeated but avoid circular dependencies
-const entitlementsExtendedSchema = createSelectSchema(customerEntitlements, {
-  metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
-}).extend({
-  featurePlanVersion: planVersionFeatureSelectBaseSchema.extend({
-    feature: featureSelectBaseSchema,
-  }),
-})
 
 export const invoiceMetadataSchema = z.object({
   note: z.string().optional().describe("Note about the invoice"),
@@ -103,7 +92,6 @@ export const subscriptionPhaseSelectSchema = createSelectSchema(subscriptionPhas
 
 export const subscriptionPhaseExtendedSchema = subscriptionPhaseSelectSchema.extend({
   items: subscriptionItemExtendedSchema.array(),
-  entitlements: entitlementsExtendedSchema.array(),
   planVersion: planVersionSelectBaseSchema.extend({
     plan: planSelectBaseSchema,
   }),
@@ -251,7 +239,6 @@ export const subscriptionChangePlanSchema = subscriptionSelectSchema
 
 export const subscriptionPhaseCacheSchema = subscriptionPhaseSelectSchema.extend({
   planVersion: planVersionSelectBaseSchema,
-  customerEntitlements: z.array(entitlementsExtendedSchema),
 })
 
 export const subscriptionCacheSchema = subscriptionSelectSchema.extend({

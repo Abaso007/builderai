@@ -115,6 +115,7 @@ export const deniedReasonSchema = z.enum([
   "ENTITLEMENT_NOT_FOUND",
   "SUBSCRIPTION_NOT_FOUND",
   "INVALID_ENTITLEMENT_TYPE",
+  "NO_ACTIVE_PHASE_FOUND",
 ])
 
 // --- Helper Function ---

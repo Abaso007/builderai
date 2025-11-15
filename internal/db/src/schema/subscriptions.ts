@@ -21,7 +21,7 @@ import type {
   subscriptionPhaseMetadataSchema,
 } from "../validators/subscriptions"
 import { billingPeriods } from "./billingPeriods"
-import { customerEntitlements, customers } from "./customers"
+import { customers } from "./customers"
 import { subscriptionStatusEnum } from "./enums"
 import { invoices } from "./invoices"
 import { planVersionFeatures } from "./planVersionFeatures"
@@ -204,7 +204,6 @@ export const subscriptionRelations = relations(subscriptions, ({ one, many }) =>
     references: [customers.id, customers.projectId],
   }),
   phases: many(subscriptionPhases),
-  customerEntitlements: many(customerEntitlements),
 }))
 
 export const subscriptionPhaseRelations = relations(subscriptionPhases, ({ one, many }) => ({
@@ -223,5 +222,4 @@ export const subscriptionPhaseRelations = relations(subscriptionPhases, ({ one, 
     references: [versions.id, versions.projectId],
   }),
   items: many(subscriptionItems),
-  customerEntitlements: many(customerEntitlements),
 }))

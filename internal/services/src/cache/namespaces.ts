@@ -42,7 +42,6 @@ export type CacheNamespaces = {
   customerSubscription: SubscriptionCache | null
   customer: CustomerCache | null
   customerEntitlement: EntitlementState | null
-  customerEntitlements: EntitlementState[] | null
   customerPaymentMethods: CustomerPaymentMethod[] | null
   projectFeatures: ProjectFeatureCache | null
   idempotentRequestUsageByHash: ReportUsageResult | null

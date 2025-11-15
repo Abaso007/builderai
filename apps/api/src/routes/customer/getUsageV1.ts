@@ -39,13 +39,13 @@ export type GetSubscriptionResponse = z.infer<
 export const registerGetUsageV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customerId } = c.req.valid("param")
-    const { entitlement } = c.get("services")
+    const { usagelimiter } = c.get("services")
     const now = Date.now()
 
     // validate the request
     const key = await keyAuth(c)
 
-    const { err, val: result } = await entitlement.getCurrentUsage({
+    const { err, val: result } = await usagelimiter.getCurrentUsage({
       customerId,
       projectId: key.projectId,
       now,

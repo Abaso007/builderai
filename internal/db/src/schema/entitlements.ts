@@ -86,8 +86,9 @@ export const entitlements = pgTableProject(
     // last sync at is the date when the entitlement was last synced with the database
     lastSyncAt: bigint("last_sync_at", { mode: "number" }).notNull(),
 
-    // Increments when grants are recomputed, used for split-brain mitigation
-    version: integer("version").notNull().default(0),
+    // Version is string because it's a hash of the grants
+    // every time the grants are recomputed, the version is updated
+    version: varchar("version", { length: 64 }).notNull().default(""),
 
     // grants snapshot is the snapshot of the grants that were applied to the customer at the time of the entitlement
     // grants are consumed by priority, so the higher priority will be consumed first
@@ -166,6 +167,8 @@ export const grants = pgTableProject(
     // when updating a grant, we set the deleted flag to true and create a new one
     // this is useful to keep append only history of the grants and reproduce any entitlement state at any time
     deleted: boolean("deleted").notNull().default(false),
+    // when the grant is deleted, we store the date when it was deleted
+    deletedAt: bigint("deleted_at", { mode: "number" }),
 
     // ****************** overrides from plan version feature ******************
     // we have it here so we can override them if needed

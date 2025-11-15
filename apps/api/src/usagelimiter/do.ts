@@ -1,9 +1,5 @@
 import { type Connection, Server } from "partyserver"
 
-import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
-import { migrate } from "drizzle-orm/durable-sqlite/migrator"
-import migrations from "../../drizzle/migrations"
-
 import { CloudflareStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
@@ -14,12 +10,12 @@ import type {
   VerificationResult,
   VerifyRequest,
 } from "@unprice/db/validators"
+import type { BaseError, Result } from "@unprice/error"
 import { AxiomLogger, ConsoleLogger, type Logger } from "@unprice/logging"
 import { CacheService } from "@unprice/services/cache"
 import type { DenyReason } from "@unprice/services/customers"
 import { EntitlementService } from "@unprice/services/entitlements"
 import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/metrics"
-import type { schema } from "~/db/types"
 import type { Env } from "~/env"
 import { SqliteDOStorageProvider } from "./sqlite-do-provider"
 
@@ -32,25 +28,18 @@ interface UsageLimiterConfig {
 // It is used to validate the usage of a feature and to report the usage to tinybird.
 // think of it as a queue that will be flushed to the db periodically
 export class DurableObjectUsagelimiter extends Server {
-  // if the do is initialized
-  private initialized = false
-  // once the durable object is initialized we can avoid
-  // querying the db for usage on each request
-  private featuresUsage: Map<string, EntitlementState> = new Map()
-  // internal database of the do
-  private db: DrizzleSqliteDODatabase<typeof schema>
-  // logger
+  // logger service
   private logger: Logger
   // entitlement service
   private entitlementService: EntitlementService
-  // metrics
+  // metrics service
   private metrics: Metrics
-  // Default ttl for the usage records and verifications
+  // default ttl for the usage records and verifications
   private TTL_ANALYTICS = 1000 * 60 // 1 minute
-  // Debounce delay for the broadcast
-  private lastBroadcastTime = 0
+  // last broadcast message time
+  private LAST_BROADCAST_MSG = Date.now()
   // debounce delay for the broadcast events
-  private readonly DEBOUNCE_DELAY = 1000 * 1 // 1 second
+  private readonly DEBOUNCE_DELAY = 1000 * 1 // 1 second (1 per second)
 
   // hibernate the do when no websocket nor connections are active
   static options = {
@@ -59,8 +48,6 @@ export class DurableObjectUsagelimiter extends Server {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
-
-    this.db = drizzle(ctx.storage, { logger: false })
 
     // set a revalidation period of 5 secs for development
     if (env.VERCEL_ENV === "development") {
@@ -148,10 +135,17 @@ export class DurableObjectUsagelimiter extends Server {
       singleton: false, // Don't use singleton for hibernating DOs
     })
 
-    // ADD: Initialize storage provider with your tables
-    const storage = new SqliteDOStorageProvider(this.db, this.ctx.storage, this.logger)
+    // initialize the storage provider
+    const storage = new SqliteDOStorageProvider({
+      storage: this.ctx.storage,
+      state: this.ctx,
+      logger: this.logger,
+    })
 
-    // ADD: Initialize entitlement service
+    // initialize the storage provider if it is not initialized
+    storage.initialize()
+
+    // initialize the entitlement service
     this.entitlementService = new EntitlementService({
       db: db,
       storage: storage,
@@ -170,21 +164,21 @@ export class DurableObjectUsagelimiter extends Server {
           env.NODE_ENV === "development"
             ? 60000 // 1 minute
             : 300000, // 5 minutes
+        syncToDBInterval:
+          env.NODE_ENV === "development"
+            ? 60000 // 1 minute
+            : 600000, // 10 minutes
       },
     })
-
-    // initialize the do
-    this.initialize()
 
     // set the colo of the do
     this.setColo()
   }
 
+  // set colo for metrics and analytics
   async setColo() {
     const config = await this.getConfig()
 
-    // if not initialized, set the colo
-    // localtion shouldn't change after the object is created
     if (config.colo === "" || config.colo === undefined) {
       let colo = "UNK"
 
@@ -212,48 +206,6 @@ export class DurableObjectUsagelimiter extends Server {
     })
   }
 
-  async initialize() {
-    // if already initialized, return
-    if (this.initialized) {
-      return
-    }
-
-    // block concurrency while initializing
-    await this.ctx.blockConcurrencyWhile(async () => {
-      // all happen in a try catch to avoid crashing the do
-      try {
-        // migrate first
-        await this._migrate()
-
-        // save the config in the do storage
-        const { err, val: entitlements } = await this.entitlementService.storage.getAll()
-
-        if (err) {
-          this.logger.error("error getting entitlements", {
-            error: err.message,
-          })
-          return
-        }
-
-        // user can't have the same feature slug at the same time
-        entitlements.forEach((e: EntitlementState) => {
-          this.featuresUsage.set(e.featureSlug, e)
-        })
-
-        this.initialized = true
-      } catch (e) {
-        // all the initialization happens in a try catch to avoid crashing the do
-        this.logger.error("error initializing do", {
-          error: e instanceof Error ? e.message : "unknown error",
-        })
-
-        this.featuresUsage.clear()
-        this.initialized = false
-        this.ctx.storage.delete("config")
-      }
-    })
-  }
-
   private async getConfig(): Promise<UsageLimiterConfig> {
     const raw = (await this.ctx.storage.get("config")) as UsageLimiterConfig | undefined
     return {
@@ -267,37 +219,23 @@ export class DurableObjectUsagelimiter extends Server {
     })
   }
 
-  async _migrate() {
-    try {
-      await migrate(this.db, migrations)
-    } catch (error) {
-      // Log the error
-      this.logger.error("error migrating DO", {
-        error: error instanceof Error ? error.message : "unknown error",
-      })
-
-      throw error
-    }
-  }
-
   async prewarm({
     customerId,
     projectId,
     now,
   }: { customerId: string; projectId: string; now: number }) {
-    await this.initialize()
-
-    // if not initialized, return
-    if (!this.initialized) {
-      return
-    }
-
     // prewarm the entitlement service
     await this.entitlementService.prewarm({ customerId, projectId, now })
   }
 
+  async getEntitlements(data: { customerId: string; projectId: string; now: number }): Promise<
+    Result<EntitlementState[], BaseError>
+  > {
+    return await this.entitlementService.getEntitlements(data)
+  }
+
   // when connected through websocket we can broadcast events to the client
-  // realtime events are used to debug events in unprice dashboard
+  // realtime events are used to debug events in dashboard
   async broadcastEvents(data: {
     customerId: string
     featureSlug: string
@@ -312,29 +250,17 @@ export class DurableObjectUsagelimiter extends Server {
 
     // Only broadcast if enough time has passed since last broadcast
     // defailt 1 per second
-    // this is used to debug events in real time in unprice dashboard
-    if (now - this.lastBroadcastTime >= this.DEBOUNCE_DELAY) {
+    // this is used to debug events in real time in dashboard
+    if (now - this.LAST_BROADCAST_MSG >= this.DEBOUNCE_DELAY) {
       // under the hood this validates if there are connections
       // and sends the event to all of them
       this.broadcast(JSON.stringify(data))
-      this.lastBroadcastTime = now
+      this.LAST_BROADCAST_MSG = now
     }
   }
 
   public async verify(data: VerifyRequest): Promise<VerificationResult> {
     try {
-      // make sure the do is initialized
-      await this.initialize()
-
-      // check if all the DO is initialized
-      if (!this.initialized) {
-        return {
-          allowed: false,
-          message: "DO not initialized",
-          deniedReason: "DO_NOT_INITIALIZED",
-        }
-      }
-
       // All logic handled internally!
       const result = await this.entitlementService.verify(data)
 
@@ -357,22 +283,6 @@ export class DurableObjectUsagelimiter extends Server {
 
   public async reportUsage(data: ReportUsageRequest): Promise<ReportUsageResult> {
     try {
-      await this.initialize()
-
-      if (!this.initialized) {
-        return {
-          allowed: false,
-          message: "DO not initialized",
-          deniedReason: "DO_NOT_INITIALIZED",
-          consumedFrom: [],
-        }
-      }
-
-      // All logic handled internally!
-      // - Gets entitlement from cache/DB
-      // - Validates usage
-      // - Consumes grants by priority
-      // - Buffers with grant attribution
       const result = await this.entitlementService.reportUsage(data)
 
       // Set alarm to flush buffers
@@ -394,12 +304,13 @@ export class DurableObjectUsagelimiter extends Server {
     }
   }
 
+  // ensure the alarm is set to flush the usage records and verifications
   private async ensureAlarmIsSet(flushTime?: number): Promise<void> {
     const alarm = await this.ctx.storage.getAlarm()
     const now = Date.now()
 
-    // min 5s, max 5m
-    const flushSec = Math.min(Math.max(flushTime ?? this.TTL_ANALYTICS / 1000, 5), 300)
+    // min 5s, max 30m
+    const flushSec = Math.min(Math.max(flushTime ?? this.TTL_ANALYTICS / 1000, 5), 30 * 60)
     const nextAlarm = now + flushSec * 1000
 
     if (!alarm) this.ctx.storage.setAlarm(nextAlarm)
@@ -409,14 +320,17 @@ export class DurableObjectUsagelimiter extends Server {
     }
   }
 
+  // websocket events handlers
   onStart(): void | Promise<void> {
     this.logger.debug("onStart initializing do")
   }
 
+  // when a websocket connection is established
   onConnect(): void | Promise<void> {
     this.logger.debug("onConnect")
   }
 
+  // when a websocket connection is closed
   onClose(): void | Promise<void> {
     // flush the metrics and logs
     this.ctx.waitUntil(Promise.all([this.metrics.flush(), this.logger.flush()]))
@@ -427,12 +341,13 @@ export class DurableObjectUsagelimiter extends Server {
     this.logger.debug(`onMessage ${message}`)
   }
 
+  // when the alarm is triggered
   async onAlarm(): Promise<void> {
     // flush the metrics and logs
     this.ctx.waitUntil(Promise.all([this.metrics.flush(), this.logger.flush()]))
-    // flush the entitlement service
+    // flush the usage records
     await this.entitlementService.flushUsageRecords()
-    // flush the verifications
+    // flush the verifications (usage verifications)
     await this.entitlementService.flushVerifications()
   }
 }

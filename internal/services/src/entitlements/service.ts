@@ -9,11 +9,12 @@ import type {
   VerificationResult,
   VerifyRequest,
 } from "@unprice/db/validators"
-import { Ok, type Result } from "@unprice/error"
+import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
-import type { UnPriceEntitlementStorageError } from "./errors"
+import { retry } from "../utils/retry"
+import { UnPriceEntitlementError, type UnPriceEntitlementStorageError } from "./errors"
 import { GrantsManager } from "./grants"
 import type { UnPriceEntitlementStorage } from "./storage-provider"
 
@@ -31,7 +32,7 @@ export class EntitlementService {
   private readonly revalidateInterval: number
   private readonly syncToDBInterval: number
   private readonly db: Database
-  public readonly storage: UnPriceEntitlementStorage
+  private readonly storage: UnPriceEntitlementStorage
   private readonly logger: Logger
   private readonly analytics: Analytics
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
@@ -54,15 +55,11 @@ export class EntitlementService {
     }
   }) {
     this.revalidateInterval = opts.config?.revalidateInterval ?? 300000 // 5 minutes default
-    this.syncToDBInterval = opts.config?.syncToDBInterval ?? 30000 // 30 seconds default
+    this.syncToDBInterval = opts.config?.syncToDBInterval ?? 60000 // 1 minute default
 
     this.grantsManager = new GrantsManager({
       db: opts.db,
       logger: opts.logger,
-      analytics: opts.analytics,
-      waitUntil: opts.waitUntil,
-      cache: opts.cache,
-      metrics: opts.metrics,
     })
     this.db = opts.db
     this.storage = opts.storage
@@ -83,6 +80,8 @@ export class EntitlementService {
       projectId: params.projectId,
       featureSlug: params.featureSlug,
       now: params.timestamp,
+      // if fromCache is false, we load from cache with swr and if not found, we load from DB
+      skipCache: !params.fromCache,
     })
 
     if (!state) {
@@ -129,8 +128,6 @@ export class EntitlementService {
     return result
   }
 
-  // TODO can and reportUsage as one function as well
-
   /**
    * Report usage with priority-based consumption
    * Handles revalidation internally (single network call)
@@ -142,6 +139,8 @@ export class EntitlementService {
       projectId: params.projectId,
       featureSlug: params.featureSlug,
       now: params.timestamp,
+      // if fromCache is false, we load from cache with swr and if not found, we load from DB
+      skipCache: !params.fromCache,
     })
 
     if (!state) {
@@ -404,13 +403,14 @@ export class EntitlementService {
       if (!state.nextRevalidateAt) {
         state.nextRevalidateAt = now + this.revalidateInterval
       }
-      if (!state.computedAt) {
-        state.computedAt = now
-      }
 
       await this.storage.set({ state })
       await this.cache.customerEntitlement.set(
-        `${state.projectId}:${state.customerId}:${state.featureSlug}`,
+        this.makeEntitlementKey({
+          customerId: state.customerId,
+          projectId: state.projectId,
+          featureSlug: state.featureSlug,
+        }),
         state
       )
     }
@@ -419,7 +419,7 @@ export class EntitlementService {
   /**
    * Flush usage records to analytics
    */
-  async flushUsageRecords(): Promise<Result<void, UnPriceEntitlementStorageError>> {
+  public async flushUsageRecords(): Promise<Result<void, UnPriceEntitlementStorageError>> {
     const usageRecords = await this.storage.getAllUsageRecords()
 
     if (usageRecords.err) {
@@ -444,7 +444,7 @@ export class EntitlementService {
   /**
    * Flush verifications to analytics
    */
-  async flushVerifications(): Promise<Result<void, UnPriceEntitlementStorageError>> {
+  public async flushVerifications(): Promise<Result<void, UnPriceEntitlementStorageError>> {
     const verifications = await this.storage.getAllVerifications()
 
     if (verifications.err) {
@@ -469,7 +469,7 @@ export class EntitlementService {
   /**
    * Invalidate cache (force refresh from DB)
    */
-  async invalidate(params: {
+  public async invalidateEntitlement(params: {
     customerId: string
     projectId: string
     featureSlug: string
@@ -492,11 +492,7 @@ export class EntitlementService {
     await this.storage.delete(params)
 
     // delete the entitlement from the cache in background
-    this.waitUntil(
-      this.cache.customerEntitlement.remove(
-        `${params.projectId}:${params.customerId}:${params.featureSlug}`
-      )
-    )
+    await this.cache.customerEntitlement.remove(this.makeEntitlementKey(params))
   }
 
   /**
@@ -517,13 +513,32 @@ export class EntitlementService {
     projectId: string
     featureSlug: string
     now: number
+    skipCache?: boolean
   }): Promise<EntitlementState | null> {
+    // get the entitlement from the storage
+    // this is tier storage to get the entitlement from memory and if missed from kv storage
     const { val: cached } = await this.storage.get(params)
 
-    // Cache miss - load from DB
+    // cache miss - load from DB or cache if skipCache is true
     if (!cached) {
       this.logger.debug("Cache miss, loading from DB", params)
-      return this.loadFromDB(params, params.now)
+
+      // get the entitlement
+      const { val, err } = await this.getActiveEntitlement({
+        ...params,
+        opts: {
+          skipCache: params.skipCache,
+        },
+      })
+
+      if (err) {
+        throw err
+      }
+
+      // set storage
+      await this.storage.set({ state: val })
+
+      return val
     }
 
     // Cache hit - check if we need to revalidate
@@ -531,6 +546,8 @@ export class EntitlementService {
       this.logger.debug("Revalidation time, checking version", params)
 
       // Lightweight version check (just query version number)
+      // TODO: here we need to check if getting the versions and the last one
+      // maybe add a latest version? or maybe hashing grants as version?
       const dbVersion = await this.db.query.entitlements.findFirst({
         where: (e, { and, eq, gte, lte, isNull, or }) =>
           and(
@@ -543,61 +560,131 @@ export class EntitlementService {
         columns: { version: true, computedAt: true },
       })
 
+      // no version found, entitlement deleted
       if (!dbVersion) {
         // Entitlement deleted, invalidate cache
-        await this.invalidate({
+        await this.invalidateEntitlement({
           customerId: params.customerId,
           projectId: params.projectId,
           featureSlug: params.featureSlug,
         })
+
         return null
       }
 
       // Version mismatch or snapshot updated - reload
-      if (dbVersion.version !== cached.version || dbVersion.computedAt !== cached.computedAt) {
+      if (dbVersion.version !== cached.version) {
         this.logger.info("Version mismatch detected, reloading", {
           ...params,
           cachedVersion: cached.version,
           dbVersion: dbVersion.version,
-          cachedComputedAt: cached.computedAt,
-          dbComputedAt: dbVersion.computedAt,
         })
-        return this.loadFromDB(params, params.now)
+
+        const { val, err } = await this.getActiveEntitlement({
+          ...params,
+          opts: {
+            skipCache: params.skipCache,
+          },
+        })
+
+        if (err) {
+          throw err
+        }
+
+        // set storage
+        await this.storage.set({ state: val })
+
+        return val
       }
 
       // Version matches - just update revalidation time
       cached.nextRevalidateAt = params.now + this.revalidateInterval
       await this.storage.set({ state: cached })
 
-      // Update cache in background
-      this.waitUntil(
-        this.cache.customerEntitlement.set(
-          `${params.projectId}:${params.customerId}:${params.featureSlug}`,
-          cached
-        )
-      )
+      // Update cache
+      this.waitUntil(this.cache.customerEntitlement.set(this.makeEntitlementKey(params), cached))
     }
 
     return cached
   }
 
   /**
-   * Load full entitlement from DB
+   * Make entitlement key
+   * @param customerId - Customer id
+   * @param projectId - Project id
+   * @param featureSlug - Feature slug
+   * @returns Entitlement key
    */
-  private async loadFromDB(
-    params: {
-      customerId: string
-      projectId: string
-      featureSlug: string
-    },
+  private makeEntitlementKey({
+    customerId,
+    projectId,
+    featureSlug,
+  }: {
+    customerId: string
+    projectId: string
+    featureSlug: string
+  }): string {
+    return `${projectId}:${customerId}:${featureSlug}`
+  }
+
+  /**
+   * Sync usage back to DB (async, non-blocking)
+   */
+  public async syncToDB(state: EntitlementState): Promise<void> {
+    if (Date.now() - state.lastSyncAt < this.syncToDBInterval) {
+      return
+    }
+
+    const updated = await this.db
+      .update(entitlements)
+      .set({
+        currentCycleUsage: state.currentCycleUsage.toString(),
+        lastSyncAt: Date.now(),
+      })
+      .where(and(eq(entitlements.id, state.id), eq(entitlements.projectId, state.projectId)))
+      .returning()
+      .then((res) => res[0])
+
+    if (!updated) {
+      return
+    }
+
+    // Update cache
+    await this.cache.customerEntitlement.set(
+      this.makeEntitlementKey({
+        customerId: state.customerId,
+        projectId: state.projectId,
+        featureSlug: state.featureSlug,
+      }),
+      updated
+    )
+  }
+
+  /**
+   * Load full entitlement from DB
+   * @param customerId - Customer id
+   * @param projectId - Project id
+   * @param featureSlug - Feature slug
+   * @param now - Current time
+   * @returns Entitlement state
+   */
+  private async getActiveEntitlementFromDB({
+    customerId,
+    projectId,
+    featureSlug,
+    now,
+  }: {
+    customerId: string
+    projectId: string
+    featureSlug: string
     now: number
-  ): Promise<EntitlementState | null> {
+  }): Promise<EntitlementState | null> {
     const entitlement = await this.db.query.entitlements.findFirst({
       where: (e, { and, eq, or, isNull, lte, gte }) =>
         and(
-          eq(e.customerId, params.customerId),
-          eq(e.projectId, params.projectId),
-          eq(e.featureSlug, params.featureSlug),
+          eq(e.customerId, customerId),
+          eq(e.projectId, projectId),
+          eq(e.featureSlug, featureSlug),
           gte(e.effectiveAt, now),
           or(isNull(e.expiresAt), lte(e.expiresAt, now))
         ),
@@ -623,50 +710,149 @@ export class EntitlementService {
       hardLimit: entitlement.hardLimit,
       grants: entitlement.grants,
       version: entitlement.version,
-      lastSyncAt: now,
-      nextRevalidateAt: now + this.revalidateInterval,
+      // TODO: check this if it's correct
+      lastSyncAt: entitlement.lastSyncAt,
+      nextRevalidateAt: entitlement.nextRevalidateAt,
       computedAt: entitlement.computedAt,
     }
-
-    // Update cache
-    await this.storage.set({ state })
-    // Update cache in background
-    this.waitUntil(
-      this.cache.customerEntitlement.set(
-        `${params.projectId}:${params.customerId}:${params.featureSlug}`,
-        state
-      )
-    )
 
     return state
   }
 
   /**
-   * Sync usage back to DB (async, non-blocking)
+   * Get active entitlements for a customer
+   * @param customerId - Customer id
+   * @param projectId - Project id
+   * @param now - Current time
+   * @param opts - Options
+   * @returns Active entitlements
    */
-  public async syncToDB(state: EntitlementState): Promise<void> {
-    if (Date.now() - state.lastSyncAt < this.syncToDBInterval) {
-      return
+  public async getActiveEntitlement({
+    customerId,
+    projectId,
+    featureSlug,
+    now,
+    opts,
+  }: {
+    customerId: string
+    projectId: string
+    featureSlug: string
+    now: number
+    opts?: {
+      skipCache?: boolean // skip cache to force revalidation
     }
+  }): Promise<Result<EntitlementState, FetchError | UnPriceEntitlementError>> {
+    const cacheKey = this.makeEntitlementKey({
+      customerId,
+      projectId,
+      featureSlug,
+    })
 
-    const updated = await this.db
-      .update(entitlements)
-      .set({
-        currentCycleUsage: state.currentCycleUsage.toString(),
-        lastSyncAt: Date.now(),
+    if (opts?.skipCache) {
+      this.logger.debug("skipping cache for getActiveEntitlement and loading from DB", {
+        customerId,
+        projectId,
+        featureSlug,
       })
-      .where(and(eq(entitlements.id, state.id), eq(entitlements.projectId, state.projectId)))
-      .returning()
-      .then((res) => res[0])
-
-    if (!updated) {
-      return
     }
 
-    // Update cache in background
-    await this.cache.customerEntitlement.set(
-      `${state.projectId}:${state.customerId}:${state.featureSlug}`,
-      updated
-    )
+    // first try to get the entitlement from cache, if not found try to get it from DO,
+    const { val, err } = opts?.skipCache
+      ? await wrapResult(
+          this.getActiveEntitlementFromDB({
+            customerId,
+            projectId,
+            featureSlug,
+            now,
+          }),
+          (err) =>
+            new FetchError({
+              message: `unable to query entitlement from db in getActiveEntitlementFromDB - ${err.message}`,
+              retry: false,
+              context: {
+                error: err.message,
+                url: "",
+                customerId: customerId,
+                projectId: projectId,
+                featureSlug: featureSlug,
+                method: "getActiveEntitlementFromDB",
+              },
+            })
+        )
+      : await retry(
+          3,
+          async () =>
+            this.cache.customerEntitlement.swr(cacheKey, () =>
+              this.getActiveEntitlementFromDB({
+                customerId,
+                projectId,
+                featureSlug,
+                now,
+              })
+            ),
+          (attempt, err) => {
+            this.logger.warn("Failed to fetch entitlement data from cache, retrying...", {
+              customerId: customerId,
+              featureSlug,
+              projectId: projectId,
+              method: "getActiveEntitlementFromDB",
+              attempt,
+              error: err.message,
+            })
+          }
+        )
+
+    if (err) {
+      return Err(
+        new FetchError({
+          message: err.message,
+          retry: true,
+          cause: err,
+        })
+      )
+    }
+
+    // set the cache
+    this.waitUntil(this.cache.customerEntitlement.set(cacheKey, val ?? null))
+
+    if (!val) {
+      return Err(
+        new UnPriceEntitlementError({
+          message: "entitlement not found",
+        })
+      )
+    }
+
+    return Ok(val)
+  }
+
+  public async getEntitlements({
+    customerId,
+    projectId,
+    now,
+  }: {
+    customerId: string
+    projectId: string
+    now: number
+  }): Promise<
+    Result<EntitlementState[], UnPriceEntitlementError | UnPriceEntitlementStorageError>
+  > {
+    // the entitlement should be prewarmed in the service
+    const { val: entitlements, err } = await this.storage.getAll()
+
+    if (err) {
+      throw err
+    }
+
+    // small validation to check if the entitlements are valid
+    // and belongs to the customer and project
+    const validEntitlements = entitlements.filter((entitlement) => {
+      const isValid = entitlement.customerId === customerId && entitlement.projectId === projectId
+      const isExpired = entitlement.expiresAt && entitlement.expiresAt < now
+      const isEffective = entitlement.effectiveAt <= now
+      return isValid && !isExpired && isEffective
+    })
+
+    return Ok(validEntitlements)
   }
 }

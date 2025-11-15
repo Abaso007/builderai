@@ -1,18 +1,13 @@
-import {
-  type ReportUsageRequest,
-  type ReportUsageResult,
-  type VerificationResult,
-  type VerifyRequest,
-  customerEntitlementExtendedSchema,
+import type {
+  EntitlementState,
+  GetCurrentUsage,
+  ReportUsageRequest,
+  ReportUsageResult,
+  VerificationResult,
+  VerifyRequest,
 } from "@unprice/db/validators"
 import type { BaseError, Result } from "@unprice/error"
 import { z } from "zod"
-
-export const getEntitlementsResponseSchema = z.object({
-  entitlements: customerEntitlementExtendedSchema.array(),
-})
-
-export type GetEntitlementsResponse = z.infer<typeof getEntitlementsResponseSchema>
 
 export const getEntitlementsRequestSchema = z.object({
   customerId: z.string(),
@@ -29,7 +24,11 @@ export const getUsageRequestSchema = z.object({
 export type GetUsageRequest = z.infer<typeof getUsageRequestSchema>
 
 export interface UsageLimiter {
-  prewarm(params: { customerId: string; projectId: string; now: number }): Promise<void>
   verify(data: VerifyRequest): Promise<Result<VerificationResult, BaseError>>
   reportUsage(data: ReportUsageRequest): Promise<Result<ReportUsageResult, BaseError>>
+  getEntitlements(data: GetEntitlementsRequest): Promise<Result<EntitlementState[], BaseError>>
+  getCurrentUsage(data: GetUsageRequest): Promise<Result<GetCurrentUsage, BaseError>>
+  prewarmEntitlements(params: { customerId: string; projectId: string; now: number }): Promise<
+    Result<void, BaseError>
+  >
 }

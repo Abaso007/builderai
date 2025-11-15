@@ -38,8 +38,6 @@ export const route = createRoute({
     [HttpStatusCodes.OK]: jsonContent(
       z.object({
         success: z.boolean(),
-        message: z.string().optional(),
-        slugs: z.array(z.string()).optional(),
       }),
       "The result of the prewarm entitlements"
     ),
@@ -57,7 +55,7 @@ export type PrewarmEntitlementsResponse = z.infer<
 export const registerPrewarmEntitlementsV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customerId, projectId } = c.req.valid("json")
-    const { entitlement } = c.get("services")
+    const { usagelimiter } = c.get("services")
 
     // validate the request
     const key = await keyAuth(c)
@@ -76,11 +74,11 @@ export const registerPrewarmEntitlementsV1 = (app: App) =>
     startTime(c, "prewarmEntitlements")
 
     // delete the customer from the DO
-    const { err, val: result } = await entitlement.prewarmEntitlements(
+    const { err } = await usagelimiter.prewarmEntitlements({
       customerId,
-      finalProjectId,
-      Date.now()
-    )
+      projectId: finalProjectId,
+      now: Date.now(),
+    })
 
     // end the timer
     endTime(c, "prewarmEntitlements")
@@ -89,5 +87,5 @@ export const registerPrewarmEntitlementsV1 = (app: App) =>
       throw err
     }
 
-    return c.json(result, HttpStatusCodes.OK)
+    return c.json({ success: true }, HttpStatusCodes.OK)
   })

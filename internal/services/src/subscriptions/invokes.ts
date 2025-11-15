@@ -29,15 +29,6 @@ export async function loadSubscription(payload: {
               plan: true,
             },
           },
-          customerEntitlements: {
-            with: {
-              featurePlanVersion: {
-                with: {
-                  feature: true,
-                },
-              },
-            },
-          },
           items: {
             with: {
               featurePlanVersion: {
@@ -90,11 +81,10 @@ export async function loadSubscription(payload: {
   let resultPhase = null
 
   if (currentPhase) {
-    const { items, customerEntitlements, planVersion, ...phase } = currentPhase
+    const { items, planVersion, ...phase } = currentPhase
     resultPhase = {
       ...phase,
       items: items ?? [],
-      entitlements: customerEntitlements ?? [],
       planVersion: planVersion ?? null,
     }
   }

@@ -10,6 +10,11 @@ export interface UnPriceEntitlementStorage {
   readonly name: string
 
   /**
+   * Initialize the storage provider
+   */
+  initialize(): Promise<Result<void, UnPriceEntitlementStorageError>>
+
+  /**
    * Get an entitlement state
    */
   get(params: {
@@ -22,6 +27,11 @@ export interface UnPriceEntitlementStorage {
    * Get all entitlement states
    */
   getAll(): Promise<Result<EntitlementState[], UnPriceEntitlementStorageError>>
+
+  /**
+   * Delete all entitlement states
+   */
+  deleteAll(): Promise<Result<void, UnPriceEntitlementStorageError>>
 
   /**
    * Set an entitlement state

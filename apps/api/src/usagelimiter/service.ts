@@ -3,20 +3,22 @@ import type { Analytics } from "@unprice/analytics"
 import type { Stats } from "@unprice/analytics/utils"
 import type { Database } from "@unprice/db"
 import type {
+  EntitlementState,
+  GetCurrentUsage,
   ReportUsageRequest,
   ReportUsageResult,
   VerificationResult,
   VerifyRequest,
 } from "@unprice/db/validators"
-import { type FetchError, Ok, type Result } from "@unprice/error"
+import { type BaseError, Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import type { Cache } from "@unprice/services/cache"
 import type { CustomerService } from "@unprice/services/customers"
-import type { UnPriceCustomerError } from "@unprice/services/customers"
+import { UnPriceCustomerError } from "@unprice/services/customers"
 import type { Metrics } from "@unprice/services/metrics"
 import type { DurableObjectProject } from "~/project/do"
 import type { DurableObjectUsagelimiter } from "./do"
-import type { UsageLimiter } from "./interface"
+import type { GetEntitlementsRequest, GetUsageRequest, UsageLimiter } from "./interface"
 
 // you would understand entitlements service if you think about it as feature flag system
 // it's totally separated from billing system and you can give entitlements to customers
@@ -167,12 +169,109 @@ export class UsageLimiterService implements UsageLimiter {
     return Ok(result)
   }
 
-  public async prewarm(params: {
+  public async prewarmEntitlements(params: {
     customerId: string
     projectId: string
     now: number
-  }): Promise<void> {
+  }): Promise<Result<void, BaseError>> {
     const durableObject = this.getStub(this.getDurableObjectCustomerId(params.customerId))
-    await durableObject.prewarm(params)
+    const prewarmResult = await durableObject.prewarm(params)
+    return Ok(prewarmResult)
+  }
+
+  public async getEntitlements(
+    data: GetEntitlementsRequest
+  ): Promise<Result<EntitlementState[], BaseError>> {
+    const durableObject = this.getStub(this.getDurableObjectCustomerId(data.customerId))
+    const { val: entitlements, err } = await durableObject.getEntitlements(data)
+
+    if (err) {
+      throw err
+    }
+
+    return Ok(entitlements)
+  }
+
+  public async getCurrentUsage(
+    data: GetUsageRequest
+  ): Promise<Result<GetCurrentUsage, FetchError | BaseError>> {
+    // validate subscription is active
+    const { val: subscription, err: subscriptionErr } =
+      await this.customerService.getActiveSubscription({
+        customerId: data.customerId,
+        projectId: data.projectId,
+        now: data.now,
+      })
+
+    if (subscriptionErr) {
+      throw subscriptionErr
+    }
+
+    const phase = subscription.activePhase
+
+    if (!phase) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "NO_ACTIVE_PHASE_FOUND",
+          message: "Subscription doesn't have an active phase",
+        })
+      )
+    }
+
+    const durableObject = this.getStub(this.getDurableObjectCustomerId(data.customerId))
+    const { val: currentUsage, err: currentUsageErr } = await durableObject.getEntitlements(data)
+
+    if (currentUsageErr) {
+      throw currentUsageErr
+    }
+
+    // TODO: check this and see if we can simplify this
+    return Ok({
+      planVersion: {
+        description: phase.planVersion.description,
+        flatPrice: "0",
+        currentTotalPrice: "0",
+        billingConfig: phase.planVersion.billingConfig,
+      },
+      subscription: {
+        planSlug: subscription.planSlug,
+        status: subscription.status,
+        currentCycleEndAt: subscription.currentCycleEndAt,
+        timezone: subscription.timezone,
+        currentCycleStartAt: subscription.currentCycleStartAt,
+        prorationFactor: 0,
+        prorated: false,
+      },
+      phase: {
+        trialEndsAt: phase.trialEndsAt,
+        endAt: phase.endAt,
+        trialUnits: phase.trialUnits,
+        isTrial: false,
+      },
+      entitlement: currentUsage.map((entitlement) => ({
+        featureSlug: entitlement.featureSlug,
+        featureType: entitlement.featureType,
+        isCustom: false,
+        limit: entitlement.limit,
+        usage: Number(entitlement.currentCycleUsage),
+        max: entitlement.limit,
+        freeUnits: 0,
+        units: entitlement.limit,
+        included: 0,
+        price: "0",
+        featureVersion: {
+          id: entitlement.id,
+          featureSlug: entitlement.featureSlug,
+          featureType: entitlement.featureType,
+          feature: {
+            id: entitlement.id,
+            slug: entitlement.featureSlug,
+            name: entitlement.featureSlug,
+            description: entitlement.featureSlug,
+            type: entitlement.featureType,
+          },
+        },
+      })),
+    } as unknown as GetCurrentUsage)
   }
 }

@@ -18,6 +18,7 @@ import {
 import { UnPriceMachineError } from "./errors"
 
 import type { CustomerService } from "../customers/service"
+import { GrantsManager } from "../entitlements/grants"
 import sendCustomerNotification, { logTransition, updateSubscription } from "./actions"
 import {
   canRenew,
@@ -61,6 +62,7 @@ export class SubscriptionMachine {
   private db: Database
   private now: number
   private customerService: CustomerService
+  private grantService: GrantsManager
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private machine: any
   // Serializes event sends to this actor to avoid concurrent transitions/races.
@@ -94,6 +96,7 @@ export class SubscriptionMachine {
     this.customerService = customer
     this.db = db
     this.machine = this.createMachineSubscription()
+    this.grantService = new GrantsManager({ db: db, logger: logger })
   }
 
   /**
@@ -449,6 +452,26 @@ export class SubscriptionMachine {
                 }),
                 "logStateTransition",
                 "notifyCustomer",
+                async ({ context }) => {
+                  // compute the grants for the customer
+                  const computeGrantsResult = await this.grantService.computeGrantsForCustomer({
+                    customerId: context.customer.id,
+                    projectId: context.projectId,
+                    now: context.now,
+                  })
+
+                  if (computeGrantsResult.err) {
+                    // don't throw the error, just log it
+                    this.logger.error(computeGrantsResult.err.message)
+                  } else {
+                    this.logger.info("Grants computed after renewal", {
+                      customerId: context.customer.id,
+                      projectId: context.projectId,
+                      now: context.now,
+                      grants: computeGrantsResult.val.map((grant) => grant.id),
+                    })
+                  }
+                },
               ],
             },
             onError: {

@@ -1,4 +1,5 @@
 import { createRoute } from "@hono/zod-openapi"
+import { entitlementStateSchema } from "@unprice/db/validators"
 import { endTime, startTime } from "hono/timing"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent } from "stoker/openapi/helpers"
@@ -7,7 +8,6 @@ import { z } from "zod"
 import { keyAuth } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import { getEntitlementsResponseSchema } from "~/usagelimiter/interface"
 
 const tags = ["customer"]
 
@@ -28,8 +28,8 @@ export const route = createRoute({
   },
   responses: {
     [HttpStatusCodes.OK]: jsonContent(
-      getEntitlementsResponseSchema,
-      "The result of the delete customer"
+      entitlementStateSchema.array(),
+      "The result of the get entitlements"
     ),
     ...openApiErrorResponses,
   },
@@ -43,7 +43,7 @@ export type GetEntitlementsResponse = z.infer<
 export const registerGetEntitlementsV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customerId } = c.req.valid("param")
-    const { entitlement } = c.get("services")
+    const { usagelimiter } = c.get("services")
 
     // validate the request
     const key = await keyAuth(c)
@@ -52,7 +52,7 @@ export const registerGetEntitlementsV1 = (app: App) =>
     startTime(c, "getEntitlements")
 
     // validate usage from db
-    const { err, val: result } = await entitlement.getEntitlements({
+    const { err, val: result } = await usagelimiter.getEntitlements({
       customerId,
       projectId: key.projectId,
       now: Date.now(),

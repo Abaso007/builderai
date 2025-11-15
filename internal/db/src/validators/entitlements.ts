@@ -1,15 +1,10 @@
-import { createInsertSchema, createSelectSchema } from "drizzle-zod"
+import { createSelectSchema } from "drizzle-zod"
 import { z } from "zod"
 import { extendZodWithOpenApi } from "zod-openapi"
 import * as schema from "../schema"
 import { featureSelectBaseSchema } from "./features"
 import { planVersionFeatureSelectBaseSchema } from "./planVersionFeatures"
-import {
-  billingConfigSchema,
-  deniedReasonSchema,
-  entitlementMergingPolicySchema,
-  resetConfigSchema,
-} from "./shared"
+import { deniedReasonSchema, entitlementMergingPolicySchema, resetConfigSchema } from "./shared"
 import { aggregationMethodSchema, typeFeatureSchema } from "./shared"
 import {
   subscriptionItemsSelectSchema,
@@ -54,6 +49,12 @@ export const reportUsageSchema = z.object({
   sync: z.boolean().optional(),
   requestId: z.string(),
   metadata: z.record(z.string(), z.any()).nullable(),
+  fromCache: z
+    .boolean()
+    .optional()
+    .describe(
+      "if true will check the entitlement from cache. This will reduce latency for the request but won't have 100% accuracy. If false, the entitlement will be validated synchronously 100% accurate but will have a higher latency"
+    ),
 })
 
 export const verifySchema = z.object({
@@ -161,47 +162,5 @@ export const entitlementStateSchema = entitlementSchema.pick({
   timezone: true,
 })
 
-export const customerEntitlementSchema = createSelectSchema(schema.customerEntitlements, {
-  metadata: customerEntitlementMetadataSchema,
-})
-
-export const customerEntitlementInsertSchema = createInsertSchema(
-  schema.customerEntitlements
-).partial({
-  id: true,
-  projectId: true,
-})
-
-export const customerEntitlementExtendedSchema = customerEntitlementSchema.extend({
-  featureType: typeFeatureSchema,
-  aggregationMethod: aggregationMethodSchema,
-  featureSlug: z.string(),
-  project: z.object({
-    enabled: z.boolean(),
-  }),
-  customer: z.object({
-    active: z.boolean(),
-  }),
-  subscription: z.object({
-    active: z.boolean(),
-    currentCycleStartAt: z.number(),
-    currentCycleEndAt: z.number(),
-  }),
-  activePhase: subscriptionPhaseSelectSchema
-    .pick({
-      startAt: true,
-      endAt: true,
-      billingAnchor: true,
-      trialUnits: true,
-      trialEndsAt: true,
-    })
-    .extend({
-      billingConfig: billingConfigSchema,
-    }),
-})
-
-export type CustomerEntitlement = z.infer<typeof customerEntitlementSchema>
-export type InsertCustomerEntitlement = z.infer<typeof customerEntitlementInsertSchema>
-export type CustomerEntitlementExtended = z.infer<typeof customerEntitlementExtendedSchema>
 export type EntitlementState = z.infer<typeof entitlementStateSchema>
 export type Grant = z.infer<typeof grantSchema>

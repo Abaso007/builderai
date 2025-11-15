@@ -1,7 +1,6 @@
-import type { Analytics } from "@unprice/analytics"
-import { type Database, and, eq } from "@unprice/db"
+import { type Database, and, eq, isNull, or } from "@unprice/db"
 import { entitlements, grants } from "@unprice/db/schema"
-import { newId } from "@unprice/db/utils"
+import { hashStringSHA256, newId } from "@unprice/db/utils"
 import {
   type FeatureType,
   type ResetConfig,
@@ -13,6 +12,7 @@ import {
   startOfUtcHour,
 } from "@unprice/db/validators"
 import type {
+  AggregationMethod,
   Consumption,
   EntitlementMergingPolicy,
   EntitlementState,
@@ -23,8 +23,6 @@ import type {
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import type z from "zod"
-import type { Cache } from "../cache/service"
-import type { Metrics } from "../metrics"
 import { UnPriceGrantError } from "./errors"
 
 interface SubjectGrantQuery {
@@ -35,47 +33,34 @@ interface SubjectGrantQuery {
 export class GrantsManager {
   private readonly db: Database
   private readonly logger: Logger
-  private readonly analytics: Analytics
-  private readonly cache: Cache
-  private readonly metrics: Metrics
-  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-  private readonly waitUntil: (promise: Promise<any>) => void
 
   constructor({
     db,
     logger,
-    analytics,
-    waitUntil,
-    cache,
-    metrics,
   }: {
     db: Database
     logger: Logger
-    analytics: Analytics
-    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-    waitUntil: (promise: Promise<any>) => void
-    cache: Cache
-    metrics: Metrics
   }) {
     this.db = db
     this.logger = logger
-    this.analytics = analytics
-    this.waitUntil = waitUntil
-    this.cache = cache
-    this.metrics = metrics
   }
 
   /**
    * Creates grants with validation to ensure configuration consistency.
-   *
-   * Validates that all grants for the same feature within overlapping date ranges
-   * have the same featureType, resetConfig, and aggregationMethod.
+   * Grants are append only, so if new grants are created that are already present, we need to delete the old ones
+   * Grants are duplicated if they shared the same subjectId, subjectType, featurePlanVersionId, and effectiveAt and expiresAt
+   * Grants with different subjectId and subsjecttype are not duplicated and we need to check for configuration consistency with overlapping grants
+   * @param params - The parameters for creating grants
+   * @param params.grants - The grants to create
+   * @returns The result of creating grants
+   * @throws UnPriceGrantError if the grants cannot be created
+   * @throws FetchError if the grants cannot be created
    */
-  public async createGrant(params: {
-    grant: (typeof grants.$inferInsert)[]
+  public async createGrants(params: {
+    grants: (typeof grants.$inferInsert)[]
     projectId: string
   }): Promise<Result<(typeof grants.$inferSelect)[], UnPriceGrantError>> {
-    const { grant: grantsToCreate, projectId } = params
+    const { grants: grantsToCreate, projectId } = params
 
     if (grantsToCreate.length === 0) {
       return Err(
@@ -107,20 +92,50 @@ export class GrantsManager {
       return JSON.stringify(config1) === JSON.stringify(config2)
     }
 
+    // to avoid N+1 queries, we will store the featurePlanVersion in a map
+    const featurePlanVersionMap: Map<
+      string,
+      {
+        id: string
+        featureType: FeatureType
+        resetConfig: ResetConfig | null
+        aggregationMethod: AggregationMethod
+        featureSlug: string
+      }
+    > = new Map()
+
+    const featurePlanVersionsProject = await this.db.query.planVersionFeatures.findMany({
+      columns: {
+        id: true,
+        featureType: true,
+        resetConfig: true,
+        aggregationMethod: true,
+      },
+      with: {
+        feature: {
+          columns: {
+            slug: true,
+          },
+        },
+      },
+      where: (fpv, { eq }) => eq(fpv.projectId, projectId),
+    })
+
+    for (const featurePlanVersion of featurePlanVersionsProject) {
+      featurePlanVersionMap.set(featurePlanVersion.id, {
+        id: featurePlanVersion.id,
+        featureType: featurePlanVersion.featureType,
+        resetConfig: featurePlanVersion.resetConfig,
+        aggregationMethod: featurePlanVersion.aggregationMethod,
+        featureSlug: featurePlanVersion.feature.slug,
+      })
+    }
+
+    // TODO: should we use a transaction here
     // Validate each grant before insertion
     for (const newGrant of grantsToCreate) {
       // Get the featurePlanVersion to access feature configuration
-      const featurePlanVersion = await this.db.query.planVersionFeatures.findFirst({
-        with: {
-          feature: {
-            columns: {
-              slug: true,
-            },
-          },
-        },
-        where: (fpv, { and, eq }) =>
-          and(eq(fpv.id, newGrant.featurePlanVersionId), eq(fpv.projectId, projectId)),
-      })
+      const featurePlanVersion = featurePlanVersionMap.get(newGrant.featurePlanVersionId)
 
       if (!featurePlanVersion) {
         return Err(
@@ -131,18 +146,34 @@ export class GrantsManager {
         )
       }
 
-      const featureSlug = featurePlanVersion.feature.slug
-      const newGrantConfig = {
-        featureType: featurePlanVersion.featureType,
-        resetConfig: featurePlanVersion.resetConfig,
-        aggregationMethod: featurePlanVersion.aggregationMethod,
-      }
+      // grants are append only, so if new grants are created that are already present, we need to delete the old ones
+      // grants are duplicated if they shared the same subjectId, subjectType, featurePlanVersionId, and effectiveAt and expiresAt
+      // delete the existing grants
+      await this.db
+        .update(grants)
+        .set({ deleted: true, updatedAtM: Date.now(), deletedAt: Date.now() })
+        .where(
+          and(
+            eq(grants.subjectId, newGrant.subjectId),
+            eq(grants.subjectType, newGrant.subjectType),
+            eq(grants.featurePlanVersionId, newGrant.featurePlanVersionId),
+            eq(grants.effectiveAt, newGrant.effectiveAt),
+            or(
+              isNull(grants.expiresAt),
+              eq(grants.expiresAt, newGrant.expiresAt ?? Number.MAX_SAFE_INTEGER)
+            ),
+            eq(grants.projectId, newGrant.projectId)
+          )
+        )
 
-      // Find all existing grants that:
-      // 1. Are in the same project
-      // 2. Are for the same subject (subjectId + subjectType)
-      // 3. Have overlapping date ranges
-      // 4. Reference a featurePlanVersion with the same feature slug
+      // After deleting the existing grants, we need to find all existing grants that:
+      // 1. Are in the same project with the same subject (subjectId + subjectType)
+      // 2. Have overlapping date ranges
+      // 3. Reference a featurePlanVersion with the same feature slug
+
+      // why?
+      // because the entitlements are computed and grouped by feature slug
+      //  having an entitlement for the same feature slug with different configuration is not allowed
       const existingGrants = await this.db.query.grants.findMany({
         with: {
           featurePlanVersion: {
@@ -157,7 +188,7 @@ export class GrantsManager {
         },
         where: (grant, { and, eq, not, or, isNull, lt, gt }) =>
           and(
-            eq(grant.projectId, projectId),
+            eq(grant.projectId, newGrant.projectId),
             eq(grant.subjectId, newGrant.subjectId),
             eq(grant.subjectType, newGrant.subjectType),
             not(eq(grant.deleted, true)),
@@ -176,15 +207,14 @@ export class GrantsManager {
 
       // Filter to only grants with the same feature slug
       const overlappingGrants = existingGrants.filter(
-        (grant) => grant.featurePlanVersion.feature.slug === featureSlug
+        (grant) => grant.featurePlanVersion.feature.slug === featurePlanVersion.featureSlug
       )
 
       // Validate configuration consistency with overlapping grants
       for (const existingGrant of overlappingGrants) {
-        const existingFeaturePlanVersion = await this.db.query.planVersionFeatures.findFirst({
-          where: (fpv, { and, eq }) =>
-            and(eq(fpv.id, existingGrant.featurePlanVersionId), eq(fpv.projectId, projectId)),
-        })
+        const existingFeaturePlanVersion = featurePlanVersionMap.get(
+          existingGrant.featurePlanVersionId
+        )
 
         if (!existingFeaturePlanVersion) {
           continue // Skip if feature plan version not found
@@ -194,6 +224,7 @@ export class GrantsManager {
           featureType: existingFeaturePlanVersion.featureType,
           resetConfig: existingFeaturePlanVersion.resetConfig,
           aggregationMethod: existingFeaturePlanVersion.aggregationMethod,
+          featureSlug: existingFeaturePlanVersion.featureSlug,
         }
 
         // Verify date ranges actually overlap (double-check)
@@ -209,30 +240,30 @@ export class GrantsManager {
         }
 
         // Validate configuration matches
-        if (newGrantConfig.featureType !== existingGrantConfig.featureType) {
+        if (featurePlanVersion.featureType !== existingGrantConfig.featureType) {
           return Err(
             new UnPriceGrantError({
-              message: `Cannot create grant: featureType mismatch. New grant has featureType "${newGrantConfig.featureType}" but existing grant (${existingGrant.id}) has featureType "${existingGrantConfig.featureType}" for feature "${featureSlug}". All grants for the same feature within overlapping date ranges must have the same featureType.`,
+              message: `Cannot create grant: featureType mismatch. New grant has featureType "${featurePlanVersion.featureType}" but existing grant (${existingGrant.id}) has featureType "${existingGrantConfig.featureType}" for feature "${featurePlanVersion.featureSlug}". All grants for the same feature within overlapping date ranges must have the same featureType.`,
               grantId: newGrant.id,
               subjectId: newGrant.subjectId,
             })
           )
         }
 
-        if (newGrantConfig.aggregationMethod !== existingGrantConfig.aggregationMethod) {
+        if (featurePlanVersion.aggregationMethod !== existingGrantConfig.aggregationMethod) {
           return Err(
             new UnPriceGrantError({
-              message: `Cannot create grant: aggregationMethod mismatch. New grant has aggregationMethod "${newGrantConfig.aggregationMethod}" but existing grant (${existingGrant.id}) has aggregationMethod "${existingGrantConfig.aggregationMethod}" for feature "${featureSlug}". All grants for the same feature within overlapping date ranges must have the same aggregationMethod.`,
+              message: `Cannot create grant: aggregationMethod mismatch. New grant has aggregationMethod "${featurePlanVersion.aggregationMethod}" but existing grant (${existingGrant.id}) has aggregationMethod "${existingGrantConfig.aggregationMethod}" for feature "${featurePlanVersion.featureSlug}". All grants for the same feature within overlapping date ranges must have the same aggregationMethod.`,
               grantId: newGrant.id,
               subjectId: newGrant.subjectId,
             })
           )
         }
 
-        if (!resetConfigsEqual(newGrantConfig.resetConfig, existingGrantConfig.resetConfig)) {
+        if (!resetConfigsEqual(featurePlanVersion.resetConfig, existingGrantConfig.resetConfig)) {
           return Err(
             new UnPriceGrantError({
-              message: `Cannot create grant: resetConfig mismatch. New grant and existing grant (${existingGrant.id}) have different resetConfig values for feature "${featureSlug}". All grants for the same feature within overlapping date ranges must have the same resetConfig.`,
+              message: `Cannot create grant: resetConfig mismatch. New grant and existing grant (${existingGrant.id}) have different resetConfig values for feature "${featurePlanVersion.featureSlug}". All grants for the same feature within overlapping date ranges must have the same resetConfig.`,
               grantId: newGrant.id,
               subjectId: newGrant.subjectId,
             })
@@ -248,7 +279,6 @@ export class GrantsManager {
         .values(
           grantsToCreate.map((grant) => ({
             ...grant,
-            projectId,
           }))
         )
         .returning()
@@ -257,7 +287,6 @@ export class GrantsManager {
     } catch (error) {
       this.logger.error("Error creating grants", {
         error: error instanceof Error ? error.message : String(error),
-        projectId,
         grantCount: grantsToCreate.length,
       })
 
@@ -276,14 +305,22 @@ export class GrantsManager {
    * - Plan-level grants (subjectSource: "plan") from customer's subscription
    *
    * Creates versioned snapshots that are valid until the next cycle end.
+   * @param customerId - Customer id to compute the entitlements for
+   * @param projectId - Project id to compute the entitlements for
+   * @param now - Current time to compute the entitlements for
+   * @returns Result<typeof entitlements.$inferSelect, FetchError | UnPriceGrantError>
+   * @throws UnPriceGrantError if the entitlements cannot be computed
+   * @throws FetchError if the entitlements cannot be computed
    */
-  public async computeEntitlementsForCustomer(params: {
+  public async computeGrantsForCustomer({
+    customerId,
+    projectId,
+    now,
+  }: {
     customerId: string
     projectId: string
     now: number
   }): Promise<Result<(typeof entitlements.$inferSelect)[], FetchError | UnPriceGrantError>> {
-    const { customerId, projectId, now } = params
-
     try {
       // Get customer's subscription to find planId
       const subscription = await this.db.query.subscriptions.findFirst({
@@ -343,11 +380,12 @@ export class GrantsManager {
                 },
               },
             },
-            where: (grant, { and, eq, lte, gt, or, isNull }) =>
+            where: (grant, { and, eq, lte, gt, or, isNull, not }) =>
               and(
                 eq(grant.projectId, projectId),
                 eq(grant.subjectId, subject.subjectId),
                 eq(grant.subjectType, subject.subjectType),
+                not(eq(grant.deleted, true)),
                 lte(grant.effectiveAt, now), // effectiveAt <= now
                 or(isNull(grant.expiresAt), gt(grant.expiresAt, now)) // expiresAt > now or null
               ),
@@ -387,18 +425,19 @@ export class GrantsManager {
           projectId,
           featureSlug,
           now,
-          timezone: subscription?.timezone ?? "UTC",
-          cycleEndAt: subscription?.currentCycleEndAt,
+          timezone: subscription.timezone,
+          cycleEndAt: subscription.currentCycleEndAt,
         })
 
         if (entitlementResult.err) {
-          this.logger.warn("Failed to compute entitlement for feature", {
+          this.logger.error("Failed to compute entitlement for feature", {
             featureSlug,
             error: entitlementResult.err.message,
             customerId,
             projectId,
           })
-          continue
+
+          return Err(entitlementResult.err)
         }
 
         computedEntitlements.push(entitlementResult.val)
@@ -424,8 +463,26 @@ export class GrantsManager {
   /**
    * Computes a single entitlement from a list of grants for a feature.
    * This is the core merging logic.
+   * @param grants - List of grants to compute the entitlement from
+   * @param customerId - Customer id
+   * @param projectId - Project id
+   * @param featureSlug - Feature slug to compute the entitlement for
+   * @param now - Current time
+   * @param timezone - Timezone to use for the entitlement
+   * @param cycleEndAt - Cycle end at to use for the entitlement
+   * @returns Result<typeof entitlements.$inferSelect, FetchError | UnPriceGrantError>
+   * @throws UnPriceGrantError if no grants are provided
+   * @throws FetchError if the entitlement cannot be computed
    */
-  private async computeEntitlementFromGrants(params: {
+  private async computeEntitlementFromGrants({
+    grants,
+    customerId,
+    projectId,
+    featureSlug,
+    now,
+    timezone,
+    cycleEndAt,
+  }: {
     grants: z.infer<typeof grantSchemaExtended>[]
     customerId: string
     projectId: string
@@ -434,17 +491,7 @@ export class GrantsManager {
     timezone: string
     cycleEndAt?: number
   }): Promise<Result<typeof entitlements.$inferSelect, FetchError | UnPriceGrantError>> {
-    const {
-      grants: featureGrants,
-      customerId,
-      projectId,
-      featureSlug,
-      now,
-      timezone,
-      cycleEndAt,
-    } = params
-
-    if (featureGrants.length === 0) {
+    if (grants.length === 0) {
       return Err(
         new UnPriceGrantError({
           message: `No grants provided for feature ${featureSlug}`,
@@ -455,31 +502,36 @@ export class GrantsManager {
 
     // Get the best priority grant's feature metadata (all should have same feature)
     // if not they are going to be overridden by the best priority grant
-    const bestPriorityGrant = featureGrants.sort((a, b) => b.priority - a.priority)[0]!
+    const bestPriorityGrant = grants.sort((a, b) => b.priority - a.priority)[0]!
 
     // Determine merging policy from the feature type
     let mergingPolicy: EntitlementMergingPolicy = "sum"
 
     switch (bestPriorityGrant.featurePlanVersion.featureType) {
       case "flat":
+        // for flat feature we use replace policy to override the previous entitlements
         mergingPolicy = "replace"
         break
       case "tier":
+        // for tier feature we use max policy to get the highest limit
         mergingPolicy = "max"
         break
       case "usage":
+        // for usage feature we use sum policy to sum the limits
         mergingPolicy = "sum"
         break
       case "package":
+        // for package feature we use max policy to get the highest limit
         mergingPolicy = "max"
         break
       default:
+        // for unknown feature type we use sum policy to sum the limits
         mergingPolicy = "sum"
         break
     }
 
     // Sort by priority (higher first) to preserve consumption order
-    const ordered = [...featureGrants].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
+    const ordered = [...grants].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
 
     // Prepare grants snapshot (preserve priority order)
     const grantsSnapshot = ordered.map((g) => ({
@@ -571,78 +623,64 @@ export class GrantsManager {
       nextRevalidateAt: nextBoundary,
     }
 
-    let result: typeof entitlements.$inferSelect
+    const version = await hashStringSHA256(JSON.stringify(grantsSnapshot))
 
-    if (existingEntitlement) {
-      // Update existing entitlement
-      const updated = await this.db
-        .update(entitlements)
-        .set({
+    // Create new entitlement or update if it already exists
+    const newEntitlement = await this.db
+      .insert(entitlements)
+      .values({
+        id: newId("entitlement"),
+        ...entitlementData,
+        version,
+      })
+      .onConflictDoUpdate({
+        target: [
+          entitlements.projectId,
+          entitlements.customerId,
+          entitlements.featureSlug,
+          entitlements.version,
+          entitlements.effectiveAt,
+          entitlements.expiresAt,
+        ],
+        set: {
           ...entitlementData,
-          version: existingEntitlement.version + 1,
-          computedAt: now,
+          version,
+          computedAt: Date.now(),
           effectiveAt,
           expiresAt: resolvedExpiresAt,
-          lastSyncAt: now,
-          updatedAtM: now,
-        })
-        .where(
-          and(eq(entitlements.id, existingEntitlement.id), eq(entitlements.projectId, projectId))
-        )
-        .returning()
-        .catch((error) => {
-          this.logger.error("Error updating entitlement", {
-            error: error instanceof Error ? error.message : String(error),
-            entitlementId: existingEntitlement.id,
-            projectId,
-          })
-
-          throw error
-        })
-        .then((rows) => rows[0])
-
-      if (!updated) {
-        return Err(
-          new FetchError({
-            message: "Failed to update entitlement",
-            retry: true,
-          })
-        )
-      }
-
-      result = updated
-    } else {
-      // Create new entitlement
-      const created = await this.db
-        .insert(entitlements)
-        .values({
-          id: newId("entitlement"),
-          ...entitlementData,
-        })
-        .returning()
-        .then((rows) => rows[0])
-        .catch((error) => {
-          this.logger.error("Error creating entitlement", {
-            error: error instanceof Error ? error.message : String(error),
-            projectId,
-          })
-          throw error
+          lastSyncAt: Date.now(),
+          updatedAtM: Date.now(),
+          nextRevalidateAt: nextBoundary,
+        },
+      })
+      .returning()
+      .then((rows) => rows[0])
+      .catch((error) => {
+        this.logger.error("Error creating entitlement", {
+          error: error instanceof Error ? error.message : String(error),
+          projectId,
         })
 
-      if (!created) {
-        return Err(
-          new FetchError({
-            message: "Failed to create entitlement",
-            retry: true,
-          })
-        )
-      }
+        throw new UnPriceGrantError({
+          message: `Failed to create entitlement: ${error instanceof Error ? error.message : String(error)}`,
+          subjectId: customerId,
+        })
+      })
 
-      result = created
+    if (!newEntitlement) {
+      return Err(
+        new UnPriceGrantError({
+          message: "Failed to create entitlement",
+          subjectId: customerId,
+        })
+      )
     }
 
-    return Ok(result)
+    return Ok(newEntitlement)
   }
+
+  // TODO: can and reportUsage as one method as well
+  // something like try and consume
 
   /**
    * Invalidates entitlements affected by grant changes.
@@ -660,7 +698,8 @@ export class GrantsManager {
     try {
       // Find all entitlements that reference these grants
       const affectedGrants = await this.db.query.grants.findMany({
-        where: (grant, { and, inArray }) => and(inArray(grant.id, grantIds)),
+        where: (grant, { and, inArray, eq }) =>
+          and(inArray(grant.id, grantIds), eq(grant.deleted, false)),
         columns: {
           projectId: true,
           subjectId: true,
