@@ -389,13 +389,7 @@ export class EntitlementService {
     now: number
   }): Promise<void> {
     const states = await this.db.query.entitlements.findMany({
-      where: (e, { and, eq, or, isNull, lte, gte }) =>
-        and(
-          eq(e.customerId, customerId),
-          eq(e.projectId, projectId),
-          gte(e.effectiveAt, now),
-          or(isNull(e.expiresAt), lte(e.expiresAt, now))
-        ),
+      where: (e, { and, eq }) => and(eq(e.customerId, customerId), eq(e.projectId, projectId)),
     })
 
     for (const state of states) {
@@ -542,20 +536,21 @@ export class EntitlementService {
     }
 
     // Cache hit - check if we need to revalidate
-    if (params.now >= cached.nextRevalidateAt) {
+    if (params.now >= cached.nextRevalidateAt || params.now >= cached.currentCycleEndAt) {
       this.logger.debug("Revalidation time, checking version", params)
+      // Check if cycle boundary crossed (needs reset)
+      const cycleBoundaryCrossed =
+        cached.currentCycleEndAt && params.now >= cached.currentCycleEndAt
 
       // Lightweight version check (just query version number)
       // TODO: here we need to check if getting the versions and the last one
       // maybe add a latest version? or maybe hashing grants as version?
       const dbVersion = await this.db.query.entitlements.findFirst({
-        where: (e, { and, eq, gte, lte, isNull, or }) =>
+        where: (e, { and, eq }) =>
           and(
             eq(e.customerId, params.customerId),
             eq(e.projectId, params.projectId),
-            eq(e.featureSlug, params.featureSlug),
-            gte(e.effectiveAt, params.now),
-            or(isNull(e.expiresAt), lte(e.expiresAt, params.now))
+            eq(e.featureSlug, params.featureSlug)
           ),
         columns: { version: true, computedAt: true },
       })
@@ -595,6 +590,35 @@ export class EntitlementService {
         await this.storage.set({ state: val })
 
         return val
+      }
+
+      // Version matches but cycle boundary might have crossed - normalize in memory
+      if (cycleBoundaryCrossed) {
+        this.logger.info("Cycle boundary crossed, recomputing grants", {
+          ...params,
+          cycleBoundaryCrossed,
+        })
+
+        // Use GrantsManager to normalize (this will be called in verify/consume anyway)
+
+        // But we can also trigger async recomputation
+        this.waitUntil(
+          this.grantsManager
+            .computeGrantsForCustomer({
+              customerId: params.customerId,
+              projectId: params.projectId,
+              currentCycleStartAt: cached.currentCycleStartAt,
+              currentCycleEndAt: cached.currentCycleEndAt,
+            })
+            .then((result) => {
+              if (result.err) {
+                this.logger.error("Failed to recompute grants after cycle reset", {
+                  error: result.err.message,
+                  ...params,
+                })
+              }
+            })
+        )
       }
 
       // Version matches - just update revalidation time
@@ -672,21 +696,17 @@ export class EntitlementService {
     customerId,
     projectId,
     featureSlug,
-    now,
   }: {
     customerId: string
     projectId: string
     featureSlug: string
-    now: number
   }): Promise<EntitlementState | null> {
     const entitlement = await this.db.query.entitlements.findFirst({
-      where: (e, { and, eq, or, isNull, lte, gte }) =>
+      where: (e, { and, eq }) =>
         and(
           eq(e.customerId, customerId),
           eq(e.projectId, projectId),
-          eq(e.featureSlug, featureSlug),
-          gte(e.effectiveAt, now),
-          or(isNull(e.expiresAt), lte(e.expiresAt, now))
+          eq(e.featureSlug, featureSlug)
         ),
     })
 
@@ -697,8 +717,6 @@ export class EntitlementService {
       customerId: entitlement.customerId,
       timezone: entitlement.timezone,
       resetConfig: entitlement.resetConfig,
-      effectiveAt: entitlement.effectiveAt,
-      expiresAt: entitlement.expiresAt,
       mergingPolicy: entitlement.mergingPolicy,
       aggregationMethod: entitlement.aggregationMethod,
       projectId: entitlement.projectId,
@@ -714,6 +732,8 @@ export class EntitlementService {
       lastSyncAt: entitlement.lastSyncAt,
       nextRevalidateAt: entitlement.nextRevalidateAt,
       computedAt: entitlement.computedAt,
+      currentCycleStartAt: entitlement.currentCycleStartAt,
+      currentCycleEndAt: entitlement.currentCycleEndAt,
     }
 
     return state
@@ -731,13 +751,11 @@ export class EntitlementService {
     customerId,
     projectId,
     featureSlug,
-    now,
     opts,
   }: {
     customerId: string
     projectId: string
     featureSlug: string
-    now: number
     opts?: {
       skipCache?: boolean // skip cache to force revalidation
     }
@@ -763,7 +781,6 @@ export class EntitlementService {
             customerId,
             projectId,
             featureSlug,
-            now,
           }),
           (err) =>
             new FetchError({
@@ -787,7 +804,6 @@ export class EntitlementService {
                 customerId,
                 projectId,
                 featureSlug,
-                now,
               })
             ),
           (attempt, err) => {
@@ -829,11 +845,9 @@ export class EntitlementService {
   public async getEntitlements({
     customerId,
     projectId,
-    now,
   }: {
     customerId: string
     projectId: string
-    now: number
   }): Promise<
     Result<EntitlementState[], UnPriceEntitlementError | UnPriceEntitlementStorageError>
   > {
@@ -848,9 +862,7 @@ export class EntitlementService {
     // and belongs to the customer and project
     const validEntitlements = entitlements.filter((entitlement) => {
       const isValid = entitlement.customerId === customerId && entitlement.projectId === projectId
-      const isExpired = entitlement.expiresAt && entitlement.expiresAt < now
-      const isEffective = entitlement.effectiveAt <= now
-      return isValid && !isExpired && isEffective
+      return isValid
     })
 
     return Ok(validEntitlements)

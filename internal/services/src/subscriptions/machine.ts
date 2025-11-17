@@ -457,7 +457,8 @@ export class SubscriptionMachine {
                   const computeGrantsResult = await this.grantService.computeGrantsForCustomer({
                     customerId: context.customer.id,
                     projectId: context.projectId,
-                    now: context.now,
+                    currentCycleStartAt: context.subscription.currentCycleStartAt,
+                    currentCycleEndAt: context.subscription.currentCycleEndAt,
                   })
 
                   if (computeGrantsResult.err) {

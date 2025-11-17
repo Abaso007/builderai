@@ -58,13 +58,13 @@ export const entitlements = pgTableProject(
     aggregationMethod: aggregationMethodEnum("aggregation_method").notNull(), // ADD THIS
 
     // Computed from active grants
-    effectiveAt: bigint("effective_at", { mode: "number" }).notNull(),
-    expiresAt: bigint("expires_at", { mode: "number" }),
     limit: integer("limit"), // null = unlimited
     hardLimit: boolean("hard_limit").notNull().default(false),
 
     // timezone for the entitlement come from the subscription and help us calculate the reset policy
     timezone: varchar("timezone", { length: 32 }).notNull().default("UTC"),
+    currentCycleStartAt: bigint("current_cycle_start_at", { mode: "number" }).notNull(),
+    currentCycleEndAt: bigint("current_cycle_end_at", { mode: "number" }).notNull(),
 
     // Usage tracking (mutable)
     currentCycleUsage: numeric("current_cycle_usage").notNull().default("0"),
@@ -106,21 +106,11 @@ export const entitlements = pgTableProject(
       columns: [table.id, table.projectId],
       name: "pk_entitlement",
     }),
-    // Unique constraint: one entitlement per subject + feature combination and version on a given time range
+    // Unique constraint: one entitlement per subject + feature
     uniqueSubjectFeature: unique("unique_subject_feature").on(
       table.projectId,
       table.customerId,
-      table.featureSlug,
-      table.effectiveAt,
-      table.expiresAt,
-      table.version
-    ),
-    // Composite index for fast lookups with version checking
-    idxSubjectFeatureComputed: index("idx_entitlements_subject_feature_computed").on(
-      table.projectId,
-      table.customerId,
-      table.featureSlug,
-      table.computedAt
+      table.featureSlug
     ),
     // Index for grant version checking
     idxVersion: index("idx_entitlements_version").on(table.projectId, table.version),

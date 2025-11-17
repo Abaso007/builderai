@@ -161,7 +161,12 @@ export async function renewSubscription(opts: {
     subscription.currentCycleEndAt === current.end &&
     subscription.renewAt === next.start
   ) {
-    return { subscription }
+    return {
+      subscription,
+      currentCycleStartAt: current.start,
+      currentCycleEndAt: current.end,
+      renewAt: next.start,
+    }
   }
 
   try {
@@ -213,6 +218,8 @@ export async function renewSubscription(opts: {
 
     return {
       subscription: subscriptionUpdated,
+      currentCycleStartAt: current.start,
+      currentCycleEndAt: current.end,
     }
   } catch (error) {
     logger.error(
