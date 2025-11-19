@@ -24,6 +24,8 @@ export const billingPeriods = pgTableProject(
     ...timestamps,
     // Is it necessary to have the subscription id?
     subscriptionId: cuid("subscription_id").notNull(),
+    // grant id is the id of the grant that is applied to the billing period
+    grantId: cuid("grant_id").notNull(),
     subscriptionPhaseId: cuid("subscription_phase_id").notNull(),
     subscriptionItemId: cuid("subscription_item_id").notNull(),
     status: billingPeriodStatusEnum("status").notNull().default("pending"),

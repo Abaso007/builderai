@@ -725,7 +725,8 @@ export class EntitlementService {
       currentCycleUsage: entitlement.currentCycleUsage,
       accumulatedUsage: entitlement.accumulatedUsage,
       limit: entitlement.limit,
-      hardLimit: entitlement.hardLimit,
+      allowOverage: entitlement.allowOverage,
+      anchor: entitlement.anchor,
       grants: entitlement.grants,
       version: entitlement.version,
       // TODO: check this if it's correct

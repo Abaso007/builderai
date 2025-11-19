@@ -82,72 +82,6 @@ export class SubscriptionService {
     })
   }
 
-  // create the entitlements for the new phase
-  public async computeGrantsForPhase({
-    itemsIds,
-    projectId,
-    customerId,
-    db,
-    type,
-  }: {
-    itemsIds: string[]
-    projectId: string
-    customerId: string
-    db?: Database
-    type: "subscription" | "trial"
-  }): Promise<Result<void, UnPriceSubscriptionError>> {
-    // get the active phase for the subscription with the customer entitlements
-    const items = await (db ?? this.db).query.subscriptionItems.findMany({
-      with: {
-        subscriptionPhase: true,
-        featurePlanVersion: {
-          with: {
-            feature: true,
-          },
-        },
-      },
-      where: (item, { eq, and, inArray }) =>
-        and(inArray(item.id, itemsIds), eq(item.projectId, projectId)),
-    })
-
-    if (!items?.length) {
-      return Ok(undefined)
-    }
-
-    const { err } = await this.grantService.createGrants({
-      projectId,
-      grants: items.map((item) => {
-        return {
-          id: newId("grant"),
-          projectId,
-          featurePlanVersionId: item.featurePlanVersionId,
-          subscriptionItemId: item.id,
-          type: type,
-          subjectType: "customer" as const,
-          subjectId: customerId,
-          effectiveAt: item.subscriptionPhase.startAt,
-          // grant is valid for the entire phase until the end of the phase
-          expiresAt: item.subscriptionPhase.endAt,
-          deleted: false,
-          limit: item.units ?? item.featurePlanVersion.limit,
-          hardLimit: false,
-          units: item.units,
-          metadata: {},
-        }
-      }),
-    })
-
-    if (err) {
-      return Err(
-        new UnPriceSubscriptionError({
-          message: err.message,
-        })
-      )
-    }
-
-    return Ok(undefined)
-  }
-
   private validatePhasesAction({
     phases,
     phase,
@@ -526,7 +460,7 @@ export class SubscriptionService {
       }
 
       // add items to the subscription
-      const itemsCreated = await trx
+      await trx
         .insert(subscriptionItems)
         .values(
           configItemsSubscription.map((item) => ({
@@ -561,21 +495,6 @@ export class SubscriptionService {
             renewAt: calculatedBillingCycle.start, // we schedule the renewal for the start of the cycle always
           })
           .where(and(eq(subscriptions.id, subscriptionId), eq(subscriptions.projectId, projectId)))
-      }
-
-      // we create the entitlements for the new phase
-      const computeGrantsResult = await this.computeGrantsForPhase({
-        itemsIds: itemsCreated.map((item) => item.id),
-        projectId,
-        customerId: subscriptionWithPhases.customerId,
-        db: trx,
-        type: Number(trialUnitsToUse) > 0 ? "trial" : "subscription",
-      })
-
-      if (computeGrantsResult.err) {
-        this.logger.error(computeGrantsResult.err.message)
-        trx.rollback()
-        throw computeGrantsResult.err
       }
 
       return Ok(phase)
@@ -659,9 +578,9 @@ export class SubscriptionService {
         )
       }
 
-      // remove the grants for the customer
+      // TODO: remove the grants for the customer
       await this.grantService.deleteGrants({
-        itemIds: phase.items.map((item) => item.id) ?? [],
+        grantIds: phase.items.map((item) => item.id) ?? [],
         projectId,
         subjectType: "customer",
         subjectId: phase.subscription.customerId,
@@ -829,13 +748,13 @@ export class SubscriptionService {
           })
 
         // update the units for the entitlements
-        await this.computeGrantsForPhase({
-          itemsIds: itemsToChange.map((item) => item.id),
-          projectId,
-          customerId: subscriptionWithPhases.customerId,
-          db: trx,
-          type: "subscription",
-        })
+        // await this.computeGrantsForPhase({
+        //   itemsIds: itemsToChange.map((item) => item.id),
+        //   projectId,
+        //   customerId: subscriptionWithPhases.customerId,
+        //   db: trx,
+        //   type: "subscription",
+        // })
       }
 
       return Ok(subscriptionPhase)

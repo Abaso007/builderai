@@ -32,7 +32,6 @@ import {
 } from "./enums"
 import { planVersionFeatures } from "./planVersionFeatures"
 import { projects } from "./projects"
-import { subscriptionItems } from "./subscriptions"
 
 // entitlements are a snapshot of the grants grouped by subject and feature
 // if there are more than one grant for the same subject and feature, the entitlements will be merged using the merging policy
@@ -56,10 +55,16 @@ export const entitlements = pgTableProject(
     featureType: typeFeatureEnum("feature_type").notNull(),
     resetConfig: json("reset_config").$type<z.infer<typeof resetConfigSchema>>(),
     aggregationMethod: aggregationMethodEnum("aggregation_method").notNull(), // ADD THIS
+    anchor: integer("anchor").notNull().default(0),
+
+    // merging policy for the entitlement - sum, max, min, replace, etc.
+    // sum limits, max limit, min limit, replace limit and units
+    // this normally is decided by the feature type
+    mergingPolicy: entitlementMergingPolicyEnum("merging_policy").notNull().default("sum"),
 
     // Computed from active grants
     limit: integer("limit"), // null = unlimited
-    hardLimit: boolean("hard_limit").notNull().default(false),
+    allowOverage: boolean("allow_overage").notNull().default(false),
 
     // timezone for the entitlement come from the subscription and help us calculate the reset policy
     timezone: varchar("timezone", { length: 32 }).notNull().default("UTC"),
@@ -69,11 +74,6 @@ export const entitlements = pgTableProject(
     // Usage tracking (mutable)
     currentCycleUsage: numeric("current_cycle_usage").notNull().default("0"),
     accumulatedUsage: numeric("accumulated_usage").notNull().default("0"),
-
-    // merging policy for the entitlement - sum, max, min, replace, etc.
-    // sum limits, max limit, min limit, replace limit and units
-    // this normally is decided by the feature type
-    mergingPolicy: entitlementMergingPolicyEnum("merging_policy").notNull().default("sum"),
 
     // Cache invalidation ----------------------------
     computedAt: bigint("computed_at", { mode: "number" })
@@ -139,8 +139,6 @@ export const grants = pgTableProject(
     featurePlanVersionId: cuid("feature_plan_version_id").notNull(),
     // what is the source of the grant?
     type: grantTypeEnum("type").notNull(),
-    // subscription item id is the id of the subscription item that the grant is applied to
-    subscriptionItemId: cuid("subscription_item_id"),
     subjectType: subjectTypeEnum("subject_type").notNull(),
     // id of the subject to which the grant is applied
     // when project is the subject, the subjectId is the projectId
@@ -154,10 +152,15 @@ export const grants = pgTableProject(
     priority: integer("priority").notNull().default(0),
     effectiveAt: bigint("effective_at", { mode: "number" }).notNull(),
     expiresAt: bigint("expires_at", { mode: "number" }),
-    // when updating a grant, we set the deleted flag to true and create a new one
+    // whether the grant is auto renewed or not
+    // grants with auto renew true must have a subscription item id
+    autoRenew: boolean("auto_renew").notNull().default(true),
+    // deleted flag is used to delete a grant
+    // when deleting a grant, we set the deleted flag to true and create a new one
     // this is useful to keep append only history of the grants and reproduce any entitlement state at any time
     deleted: boolean("deleted").notNull().default(false),
     // when the grant is deleted, we store the date when it was deleted
+    // grants can be changed mid cycle and we need to keep the history of the changes
     deletedAt: bigint("deleted_at", { mode: "number" }),
 
     // ****************** overrides from plan version feature ******************
@@ -165,9 +168,11 @@ export const grants = pgTableProject(
     // limit is the limit of the feature that the customer is entitled to
     limit: integer("limit"),
     // hard limit is true if the limit is hard and cannot be exceeded
-    hardLimit: boolean("hard_limit").notNull().default(false),
+    allowOverage: boolean("allow_overage").notNull().default(false),
     // amount of units the grant gives to the subject
     units: integer("units"),
+    // anchor is the anchor of the grant to calculate the cycle boundaries
+    anchor: integer("anchor").notNull().default(0),
     // ****************** end overrides from plan version feature ******************
 
     metadata: json("metadata").$type<{
@@ -190,6 +195,16 @@ export const grants = pgTableProject(
         table.expiresAt
       )
       .where(not(table.deleted)),
+    // unique index for the grant
+    uniqueGrant: unique("unique_grant").on(
+      table.projectId,
+      table.subjectId,
+      table.subjectType,
+      table.type,
+      table.featurePlanVersionId,
+      table.effectiveAt,
+      table.expiresAt
+    ),
     // Index for grant invalidation queries by featurePlanVersion
     idxFeatureVersionEffective: index("idx_grants_feature_version_effective").on(
       table.projectId,
@@ -202,11 +217,6 @@ export const grants = pgTableProject(
       foreignColumns: [planVersionFeatures.id, planVersionFeatures.projectId],
       name: "feature_plan_version_id_fkey",
     }).onDelete("no action"),
-    subscriptionItemfk: foreignKey({
-      columns: [table.subscriptionItemId, table.projectId],
-      foreignColumns: [subscriptionItems.id, subscriptionItems.projectId],
-      name: "subscription_item_id_fkey",
-    }).onDelete("cascade"),
     projectfk: foreignKey({
       columns: [table.projectId],
       foreignColumns: [projects.id],
@@ -234,9 +244,5 @@ export const grantsRelations = relations(grants, ({ one }) => ({
   featurePlanVersion: one(planVersionFeatures, {
     fields: [grants.featurePlanVersionId, grants.projectId],
     references: [planVersionFeatures.id, planVersionFeatures.projectId],
-  }),
-  subscriptionItem: one(subscriptionItems, {
-    fields: [grants.subscriptionItemId, grants.projectId],
-    references: [subscriptionItems.id, subscriptionItems.projectId],
   }),
 }))

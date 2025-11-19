@@ -180,3 +180,4 @@ export type PlanType = z.infer<typeof planTypeSchema>
 export type BillingConfig = z.infer<typeof billingConfigSchema>
 export type ResetConfig = z.infer<typeof resetConfigSchema>
 export type EntitlementMergingPolicy = z.infer<typeof entitlementMergingPolicySchema>
+export type GrantType = z.infer<typeof grantTypeSchema>

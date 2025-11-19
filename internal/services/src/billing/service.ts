@@ -24,6 +24,7 @@ import type { Logger } from "@unprice/logging"
 import { addDays } from "date-fns"
 import type { Cache } from "../cache"
 import { CustomerService } from "../customers/service"
+import { GrantsManager } from "../entitlements"
 import type { Metrics } from "../metrics"
 import { SubscriptionMachine } from "../subscriptions/machine"
 import { SubscriptionLock } from "../subscriptions/subscriptionLock"
@@ -50,6 +51,7 @@ export class BillingService {
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
   private customerService: CustomerService
+  private grantsManager: GrantsManager
 
   constructor({
     db,
@@ -80,6 +82,10 @@ export class BillingService {
       waitUntil,
       cache,
       metrics,
+    })
+    this.grantsManager = new GrantsManager({
+      db,
+      logger,
     })
   }
 
@@ -1732,70 +1738,103 @@ export class BillingService {
 
         if (windows.length === 0) continue
 
-        // Insert periods idempotently with unique index protection
-        const values = await Promise.all(
-          windows.map(async (w) => {
-            const whenToBill = phase.planVersion.whenToBill
-            // handles when to invoice this way pay in advance aligns with the cycle start
-            // and pay in arrear aligns with the cycle end
-            const invoiceAt = whenToBill === "pay_in_advance" ? w.start : w.end
-            const statementKey = await this.computeStatementKey({
-              projectId: phase.projectId,
-              customerId: phase.subscription.customerId,
+        // all happens in a single transaction
+        await this.db.transaction(async (tx) => {
+          try {
+            // Insert periods idempotently with unique index protection
+            const values = await Promise.all(
+              windows.map(async (w) => {
+                const whenToBill = phase.planVersion.whenToBill
+                // handles when to invoice this way pay in advance aligns with the cycle start
+                // and pay in arrear aligns with the cycle end
+                const invoiceAt = whenToBill === "pay_in_advance" ? w.start : w.end
+                const statementKey = await this.computeStatementKey({
+                  projectId: phase.projectId,
+                  customerId: phase.subscription.customerId,
+                  subscriptionId: phase.subscriptionId,
+                  invoiceAt: invoiceAt,
+                  currency: phase.planVersion.currency,
+                  paymentProvider: phase.planVersion.paymentProvider,
+                  collectionMethod: phase.planVersion.collectionMethod,
+                })
+
+                // first we need to create the grant for the billing period
+                const createGrantResult = await this.grantsManager.createGrant({
+                  grant: {
+                    id: newId("grant"),
+                    projectId: phase.projectId,
+                    effectiveAt: w.start,
+                    expiresAt: w.end,
+                    type: w.isTrial ? ("trial" as const) : ("subscription" as const),
+                    subjectType: "customer",
+                    subjectId: phase.subscription.customerId,
+                    featurePlanVersionId: item.featurePlanVersion.id,
+                    autoRenew: false, // we don't auto renew subscriptions grants, they are renewed from here
+                    limit: item.units ?? item.featurePlanVersion.limit ?? null,
+                    allowOverage: item.featurePlanVersion.allowOverage,
+                    units: item.units,
+                    anchor: phase.billingAnchor,
+                    metadata: {
+                      note: "Billing period grant created by billing service",
+                    },
+                  },
+                })
+
+                if (createGrantResult.err) {
+                  this.logger.error("Failed to create grant", {
+                    error: createGrantResult.err.message,
+                  })
+                  throw createGrantResult.err
+                }
+
+                // create the billing period
+                await this.db
+                  .insert(billingPeriods)
+                  .values({
+                    id: newId("billing_period"),
+                    projectId: phase.projectId,
+                    subscriptionId: phase.subscriptionId,
+                    subscriptionPhaseId: phase.id,
+                    subscriptionItemId: item.id,
+                    status: "pending" as const,
+                    type: w.isTrial ? ("trial" as const) : ("normal" as const),
+                    cycleStartAt: w.start,
+                    cycleEndAt: w.end,
+                    statementKey: statementKey,
+                    // if trial, we invoice at the end always
+                    invoiceAt: w.isTrial ? w.end : invoiceAt,
+                    whenToBill: whenToBill,
+                    invoiceId: null,
+                    amountEstimateCents: null,
+                    reason: w.isTrial ? ("trial" as const) : ("normal" as const),
+                    grantId: createGrantResult.val.id,
+                  })
+                  .onConflictDoNothing({
+                    target: [
+                      billingPeriods.projectId,
+                      billingPeriods.subscriptionId,
+                      billingPeriods.subscriptionPhaseId,
+                      billingPeriods.subscriptionItemId,
+                      billingPeriods.cycleStartAt,
+                      billingPeriods.cycleEndAt,
+                    ],
+                  })
+              })
+            )
+
+            cyclesCreated += values.length
+          } catch (e) {
+            this.logger.warn("Skipping existing billing periods (likely conflict)", {
+              phaseId: phase.id,
               subscriptionId: phase.subscriptionId,
-              invoiceAt: invoiceAt,
-              currency: phase.planVersion.currency,
-              paymentProvider: phase.planVersion.paymentProvider,
-              collectionMethod: phase.planVersion.collectionMethod,
-            })
-
-            return {
-              id: newId("billing_period"),
               projectId: phase.projectId,
-              subscriptionId: phase.subscriptionId,
-              subscriptionPhaseId: phase.id,
-              subscriptionItemId: item.id,
-              status: "pending" as const,
-              type: w.isTrial ? ("trial" as const) : ("normal" as const),
-              cycleStartAt: w.start,
-              cycleEndAt: w.end,
-              statementKey: statementKey,
-              // if trial, we invoice at the end always
-              invoiceAt: w.isTrial ? w.end : invoiceAt,
-              whenToBill: whenToBill,
-              invoiceId: null,
-              amountEstimateCents: null,
-              reason: w.isTrial ? ("trial" as const) : ("normal" as const),
-              createdAt: Date.now(),
-              updatedAt: Date.now(),
-            }
-          })
-        )
-
-        cyclesCreated += values.length
-
-        try {
-          await this.db
-            .insert(billingPeriods)
-            .values(values)
-            .onConflictDoNothing({
-              target: [
-                billingPeriods.projectId,
-                billingPeriods.subscriptionId,
-                billingPeriods.subscriptionPhaseId,
-                billingPeriods.subscriptionItemId,
-                billingPeriods.cycleStartAt,
-                billingPeriods.cycleEndAt,
-              ],
+              error: (e as Error)?.message,
             })
-        } catch (e) {
-          this.logger.warn("Skipping existing billing periods (likely conflict)", {
-            phaseId: phase.id,
-            subscriptionId: phase.subscriptionId,
-            projectId: phase.projectId,
-            error: (e as Error)?.message,
-          })
-        }
+            throw e
+          } finally {
+            tx.rollback()
+          }
+        })
       }
     }
 

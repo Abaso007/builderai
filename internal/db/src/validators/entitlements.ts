@@ -122,7 +122,7 @@ export const entitlementGrantsSnapshotSchema = z.object({
   expiresAt: z.number().nullable(),
   limit: z.number().nullable(),
   realtime: z.boolean(),
-  hardLimit: z.boolean(),
+  allowOverage: z.boolean(),
   featurePlanVersionId: z.string(),
   // let us keep track in analytics
   subscriptionItemId: z.string().nullable(),
@@ -156,10 +156,11 @@ export const entitlementStateSchema = entitlementSchema.pick({
   aggregationMethod: true,
   limit: true,
   resetConfig: true,
-  hardLimit: true,
+  allowOverage: true,
   nextRevalidateAt: true,
   lastSyncAt: true,
   timezone: true,
+  anchor: true,
 })
 
 export type EntitlementState = z.infer<typeof entitlementStateSchema>
