@@ -159,6 +159,7 @@ export const resetConfigSchema = z.object({
   resetInterval: billingIntervalSchema,
   resetIntervalCount: billingIntervalCountSchema,
   resetAnchor: billingAnchorSchema,
+  planType: planTypeSchema,
 })
 
 export const entitlementMergingPolicySchema = z.enum(ENTITLEMENT_MERGING_POLICY)

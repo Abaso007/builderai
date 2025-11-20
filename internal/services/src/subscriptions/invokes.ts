@@ -122,10 +122,12 @@ export async function renewSubscription(opts: {
     now: context.now,
     trialEndsAt: currentPhase.trialEndsAt,
     effectiveEndDate: currentPhase.endAt ?? null,
-    billingConfig: {
-      ...currentPhase.planVersion.billingConfig,
-      // always align the billing anchor to the phase anchor
-      billingAnchor: currentPhase.billingAnchor,
+    config: {
+      name: currentPhase.planVersion.billingConfig.name,
+      interval: currentPhase.planVersion.billingConfig.billingInterval,
+      intervalCount: currentPhase.planVersion.billingConfig.billingIntervalCount,
+      planType: currentPhase.planVersion.billingConfig.planType,
+      anchor: currentPhase.billingAnchor,
     },
     effectiveStartDate: currentPhase.startAt,
   })
@@ -141,10 +143,12 @@ export async function renewSubscription(opts: {
     now: current.end + 1,
     trialEndsAt: currentPhase.trialEndsAt,
     effectiveEndDate: currentPhase.endAt ?? null,
-    billingConfig: {
-      ...currentPhase.planVersion.billingConfig,
-      // always align the billing anchor to the phase anchor
-      billingAnchor: currentPhase.billingAnchor,
+    config: {
+      name: currentPhase.planVersion.billingConfig.name,
+      interval: currentPhase.planVersion.billingConfig.billingInterval,
+      intervalCount: currentPhase.planVersion.billingConfig.billingIntervalCount,
+      planType: currentPhase.planVersion.billingConfig.planType,
+      anchor: currentPhase.billingAnchor,
     },
     effectiveStartDate: currentPhase.startAt,
   })

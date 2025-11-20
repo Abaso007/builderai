@@ -133,7 +133,9 @@ export const entitlementGrantsSnapshotSchema = z.object({
 export const entitlementSchema = createSelectSchema(schema.entitlements, {
   metadata: entitlementMetadataSchema,
   grants: entitlementGrantsSnapshotSchema.array(),
-  resetConfig: resetConfigSchema,
+  resetConfig: resetConfigSchema.extend({
+    resetAnchor: z.number(),
+  }),
   aggregationMethod: aggregationMethodSchema,
   featureType: typeFeatureSchema,
   mergingPolicy: entitlementMergingPolicySchema,
@@ -149,18 +151,16 @@ export const entitlementStateSchema = entitlementSchema.pick({
   grants: true,
   version: true,
   computedAt: true,
-  currentCycleStartAt: true,
-  currentCycleEndAt: true,
   currentCycleUsage: true,
   accumulatedUsage: true,
   aggregationMethod: true,
+  effectiveAt: true,
+  expiresAt: true,
   limit: true,
   resetConfig: true,
   allowOverage: true,
   nextRevalidateAt: true,
   lastSyncAt: true,
-  timezone: true,
-  anchor: true,
 })
 
 export type EntitlementState = z.infer<typeof entitlementStateSchema>

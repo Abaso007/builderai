@@ -416,7 +416,13 @@ export class SubscriptionService {
       effectiveEndDate: endAtToUse ?? null,
       trialEndsAt: trialsEndAt,
       now: startAtToUse, // we use the start date to calculate the billing cycle
-      billingConfig: versionData.billingConfig,
+      config: {
+        name: versionData.billingConfig.name,
+        interval: versionData.billingConfig.billingInterval,
+        intervalCount: versionData.billingConfig.billingIntervalCount,
+        planType: versionData.billingConfig.planType,
+        anchor: billingAnchorToUse,
+      },
     })
 
     if (!calculatedBillingCycle) {

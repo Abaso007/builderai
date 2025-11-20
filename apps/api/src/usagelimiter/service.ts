@@ -68,9 +68,18 @@ export class UsageLimiterService implements UsageLimiter {
     this.hashCache = opts.hashCache
   }
 
-  // in memory cache
+  // in memory cache with size and TTL limits
   private updateCache(key: string, result: VerificationResult) {
     if (env.VERCEL_ENV === "production" && !result.allowed) {
+      // enforce max size - remove oldest entry if at limit
+      if (this.hashCache.size >= 1000) {
+        // remove first (oldest) entry
+        const firstKey = this.hashCache.keys().next().value
+        if (firstKey) {
+          this.hashCache.delete(firstKey)
+        }
+      }
+
       this.hashCache.set(key, JSON.stringify(result))
     }
   }

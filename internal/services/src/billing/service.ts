@@ -1728,10 +1728,12 @@ export class BillingService {
           effectiveStartDate: cursorStart,
           trialEndsAt: phase.trialEndsAt,
           effectiveEndDate: phase.endAt,
-          billingConfig: {
-            ...itemBillingConfig,
-            // always align the billing anchor to the phase anchor
-            billingAnchor: phase.billingAnchor,
+          config: {
+            name: itemBillingConfig.name,
+            interval: itemBillingConfig.billingInterval,
+            intervalCount: itemBillingConfig.billingIntervalCount,
+            planType: itemBillingConfig.planType,
+            anchor: phase.billingAnchor,
           },
           count: 0, // we only need until the end of the current cycle
         })

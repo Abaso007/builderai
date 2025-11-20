@@ -52,10 +52,13 @@ export const entitlements = pgTableProject(
     featureSlug: varchar("feature_slug", { length: 64 }).notNull(),
 
     // Effective configuration (must be same across all grants)
+    // if grants don't share the same config then we take the highest priority grant config
     featureType: typeFeatureEnum("feature_type").notNull(),
-    resetConfig: json("reset_config").$type<z.infer<typeof resetConfigSchema>>(),
+    // null here mean reset happens at the end of the cycle
+    resetConfig: json("reset_config").$type<
+      z.infer<typeof resetConfigSchema> & { resetAnchor: number }
+    >(),
     aggregationMethod: aggregationMethodEnum("aggregation_method").notNull(), // ADD THIS
-    anchor: integer("anchor").notNull().default(0),
 
     // merging policy for the entitlement - sum, max, min, replace, etc.
     // sum limits, max limit, min limit, replace limit and units
@@ -66,10 +69,10 @@ export const entitlements = pgTableProject(
     limit: integer("limit"), // null = unlimited
     allowOverage: boolean("allow_overage").notNull().default(false),
 
-    // timezone for the entitlement come from the subscription and help us calculate the reset policy
-    timezone: varchar("timezone", { length: 32 }).notNull().default("UTC"),
-    currentCycleStartAt: bigint("current_cycle_start_at", { mode: "number" }).notNull(),
-    currentCycleEndAt: bigint("current_cycle_end_at", { mode: "number" }).notNull(),
+    // effective at is the date when the entitlement was created
+    effectiveAt: bigint("effective_at", { mode: "number" }).notNull(),
+    // expires at is the date when the entitlement will expire
+    expiresAt: bigint("expires_at", { mode: "number" }),
 
     // Usage tracking (mutable)
     currentCycleUsage: numeric("current_cycle_usage").notNull().default("0"),
@@ -200,8 +203,8 @@ export const grants = pgTableProject(
       table.projectId,
       table.subjectId,
       table.subjectType,
-      table.type,
       table.featurePlanVersionId,
+      table.type,
       table.effectiveAt,
       table.expiresAt
     ),

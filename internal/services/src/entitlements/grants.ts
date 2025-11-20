@@ -1,18 +1,12 @@
-import { type Database, and, eq, inArray, sql } from "@unprice/db"
+import { type Database, and, eq, inArray } from "@unprice/db"
 import { entitlements, grants } from "@unprice/db/schema"
 import { hashStringSHA256, newId } from "@unprice/db/utils"
 import {
   type FeatureType,
-  type ResetConfig,
-  addByInterval,
+  calculateCycleWindow,
   type entitlementGrantsSnapshotSchema,
-  setUtc,
-  setUtcDay,
-  startOfUtcDay,
-  startOfUtcHour,
 } from "@unprice/db/validators"
 import type {
-  AggregationMethod,
   Consumption,
   EntitlementMergingPolicy,
   EntitlementState,
@@ -85,40 +79,6 @@ export class GrantsManager {
   }): Promise<Result<typeof grants.$inferSelect, UnPriceGrantError>> {
     const { grant: newGrant } = params
 
-    // Helper function to check if two date ranges overlap
-    const dateRangesOverlap = (
-      start1: number,
-      end1: number | null,
-      start2: number,
-      end2: number | null
-    ): boolean => {
-      const end1Value = end1 ?? Number.POSITIVE_INFINITY
-      const end2Value = end2 ?? Number.POSITIVE_INFINITY
-      return start1 < end2Value && start2 < end1Value
-    }
-
-    // Helper function to compare resetConfig objects
-    const resetConfigsEqual = (
-      config1: ResetConfig | null,
-      config2: ResetConfig | null
-    ): boolean => {
-      if (config1 === null && config2 === null) return true
-      if (config1 === null || config2 === null) return false
-      return JSON.stringify(config1) === JSON.stringify(config2)
-    }
-
-    // to avoid N+1 queries, we will store the featurePlanVersion in a map
-    const featurePlanVersionMap: Map<
-      string,
-      {
-        id: string
-        featureType: FeatureType
-        resetConfig: ResetConfig | null
-        aggregationMethod: AggregationMethod
-        featureSlug: string
-      }
-    > = new Map()
-
     // priority map for the grants types
     const priorityMap = {
       subscription: 10,
@@ -127,170 +87,8 @@ export class GrantsManager {
       manual: 100,
     } as const
 
-    const featurePlanVersionsProject = await this.db.query.planVersionFeatures.findMany({
-      columns: {
-        id: true,
-        featureType: true,
-        resetConfig: true,
-        aggregationMethod: true,
-      },
-      with: {
-        feature: {
-          columns: {
-            slug: true,
-          },
-        },
-      },
-      where: (fpv, { eq }) => eq(fpv.projectId, newGrant.projectId),
-    })
-
-    for (const featurePlanVersion of featurePlanVersionsProject) {
-      featurePlanVersionMap.set(featurePlanVersion.id, {
-        id: featurePlanVersion.id,
-        featureType: featurePlanVersion.featureType,
-        resetConfig: featurePlanVersion.resetConfig,
-        aggregationMethod: featurePlanVersion.aggregationMethod,
-        featureSlug: featurePlanVersion.feature.slug,
-      })
-    }
-
-    // TODO: should we use a transaction here
-    // Validate each grant before insertion
-    // Get the featurePlanVersion to access feature configuration
-    const featurePlanVersion = featurePlanVersionMap.get(newGrant.featurePlanVersionId)
-
-    if (!featurePlanVersion) {
-      return Err(
-        new UnPriceGrantError({
-          message: `Feature plan version not found: ${newGrant.featurePlanVersionId}`,
-          grantId: newGrant.id,
-        })
-      )
-    }
-
-    // grants are append only, so if new grants are created that are already present, we need to delete the old ones
-    // grants are duplicated if they shared the same subjectId, subjectType, featurePlanVersionId, and effectiveAt and expiresAt
-    // delete the existing grants
-    await this.db
-      .update(grants)
-      .set({ deleted: true, updatedAtM: Date.now(), deletedAt: Date.now() })
-      .where(
-        and(
-          eq(grants.subjectId, newGrant.subjectId),
-          eq(grants.subjectType, newGrant.subjectType),
-          eq(grants.type, newGrant.type),
-          eq(grants.featurePlanVersionId, newGrant.featurePlanVersionId),
-          eq(grants.projectId, newGrant.projectId),
-          eq(grants.deleted, false)
-        )
-      )
-
-    // After deleting the existing grants, we need to find all existing grants that:
-    // 1. Are in the same project with the same subject (subjectId + subjectType)
-    // 2. Have overlapping date ranges
-    // 3. Reference a featurePlanVersion with the same feature slug
-
-    // why?
-    // because the entitlements are computed and grouped by feature slug
-    //  having an entitlement for the same feature slug with different configuration is not allowed
-    const existingGrants = await this.db.query.grants.findMany({
-      with: {
-        featurePlanVersion: {
-          with: {
-            feature: {
-              columns: {
-                slug: true,
-              },
-            },
-          },
-        },
-      },
-      where: (grant, { and, eq, not, or, isNull, lt, gt }) =>
-        and(
-          eq(grant.projectId, newGrant.projectId),
-          eq(grant.subjectId, newGrant.subjectId),
-          eq(grant.subjectType, newGrant.subjectType),
-          not(eq(grant.deleted, true)),
-          // Check for date range overlap:
-          // The new grant's effectiveAt must be before existing grant's expiresAt (or null)
-          // AND existing grant's effectiveAt must be before new grant's expiresAt (or null)
-          or(
-            // Case 1: New grant starts before existing grant ends
-            and(
-              lt(grant.effectiveAt, newGrant.expiresAt ?? Number.MAX_SAFE_INTEGER),
-              or(isNull(grant.expiresAt), gt(grant.expiresAt, newGrant.effectiveAt))
-            )
-          )
-        ),
-    })
-
-    // Filter to only grants with the same feature slug
-    const overlappingGrants = existingGrants.filter(
-      (grant) => grant.featurePlanVersion.feature.slug === featurePlanVersion.featureSlug
-    )
-
-    // Validate configuration consistency with overlapping grants
-    for (const existingGrant of overlappingGrants) {
-      const existingFeaturePlanVersion = featurePlanVersionMap.get(
-        existingGrant.featurePlanVersionId
-      )
-
-      if (!existingFeaturePlanVersion) {
-        continue // Skip if feature plan version not found
-      }
-
-      const existingGrantConfig = {
-        featureType: existingFeaturePlanVersion.featureType,
-        resetConfig: existingFeaturePlanVersion.resetConfig,
-        aggregationMethod: existingFeaturePlanVersion.aggregationMethod,
-        featureSlug: existingFeaturePlanVersion.featureSlug,
-      }
-
-      // Verify date ranges actually overlap (double-check)
-      const rangesOverlap = dateRangesOverlap(
-        newGrant.effectiveAt,
-        newGrant.expiresAt ?? null,
-        existingGrant.effectiveAt,
-        existingGrant.expiresAt ?? null
-      )
-
-      if (!rangesOverlap) {
-        continue // Skip if ranges don't actually overlap
-      }
-
-      // Validate configuration matches
-      if (featurePlanVersion.featureType !== existingGrantConfig.featureType) {
-        return Err(
-          new UnPriceGrantError({
-            message: `Cannot create grant: featureType mismatch. New grant has featureType "${featurePlanVersion.featureType}" but existing grant (${existingGrant.id}) has featureType "${existingGrantConfig.featureType}" for feature "${featurePlanVersion.featureSlug}". All grants for the same feature within overlapping date ranges must have the same featureType.`,
-            grantId: newGrant.id,
-            subjectId: newGrant.subjectId,
-          })
-        )
-      }
-
-      if (featurePlanVersion.aggregationMethod !== existingGrantConfig.aggregationMethod) {
-        return Err(
-          new UnPriceGrantError({
-            message: `Cannot create grant: aggregationMethod mismatch. New grant has aggregationMethod "${featurePlanVersion.aggregationMethod}" but existing grant (${existingGrant.id}) has aggregationMethod "${existingGrantConfig.aggregationMethod}" for feature "${featurePlanVersion.featureSlug}". All grants for the same feature within overlapping date ranges must have the same aggregationMethod.`,
-            grantId: newGrant.id,
-            subjectId: newGrant.subjectId,
-          })
-        )
-      }
-
-      if (!resetConfigsEqual(featurePlanVersion.resetConfig, existingGrantConfig.resetConfig)) {
-        return Err(
-          new UnPriceGrantError({
-            message: `Cannot create grant: resetConfig mismatch. New grant and existing grant (${existingGrant.id}) have different resetConfig values for feature "${featurePlanVersion.featureSlug}". All grants for the same feature within overlapping date ranges must have the same resetConfig.`,
-            grantId: newGrant.id,
-            subjectId: newGrant.subjectId,
-          })
-        )
-      }
-    }
-
-    // All validations passed, insert the grants
+    // We don't care which grant is inserted, we just want to make sure it's unique
+    // the merging logic will handle the rest
     try {
       const insertedGrants = await this.db
         .insert(grants)
@@ -337,6 +135,143 @@ export class GrantsManager {
     }
   }
 
+  public async renewGrantsForCustomer(params: {
+    customerId: string
+    projectId: string
+    now: number
+  }): Promise<Result<(typeof grants.$inferSelect)[], FetchError | UnPriceGrantError>> {
+    const { customerId, projectId, now } = params
+
+    // get all grants for a project and customer
+    // Get customer's subscription to find planId
+    const customerSubscription = await this.db.query.customers.findFirst({
+      with: {
+        subscriptions: {
+          with: {
+            phases: {
+              where: (phase, { and, lte, or, isNull, gte }) =>
+                and(lte(phase.startAt, now), or(isNull(phase.endAt), gte(phase.endAt, now))),
+              limit: 1,
+              with: {
+                planVersion: {
+                  with: {
+                    plan: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      where: (customer, { and, eq }) =>
+        and(eq(customer.id, customerId), eq(customer.projectId, projectId)),
+    })
+
+    if (!customerSubscription) {
+      return Err(
+        new UnPriceGrantError({
+          message: "No customer found for project",
+          subjectId: customerId,
+        })
+      )
+    }
+
+    const subscription = customerSubscription?.subscriptions[0] ?? null
+    const currentPhase = subscription?.phases[0] ?? null
+    const planId = currentPhase?.planVersion?.plan?.id ?? null
+    const planVersionId = currentPhase?.planVersion?.id ?? null
+
+    // Build list of subjects to query grants for
+    const subjects: SubjectGrantQuery[] = [
+      { subjectId: customerId, subjectType: "customer" },
+      { subjectId: projectId, subjectType: "project" },
+    ]
+
+    if (planId) {
+      subjects.push({ subjectId: planId, subjectType: "plan" })
+    }
+
+    if (planVersionId) {
+      subjects.push({ subjectId: planVersionId, subjectType: "plan_version" })
+    }
+
+    // Query all active grants for all subjects in the period of the current cycle
+    const allGrants = await Promise.all(
+      subjects.map((subject) =>
+        this.db.query.grants.findMany({
+          with: {
+            featurePlanVersion: {
+              with: {
+                feature: true,
+              },
+            },
+          },
+          where: (grant, { and, eq, gte, or, isNull, not, notInArray }) =>
+            and(
+              eq(grant.projectId, projectId),
+              eq(grant.subjectId, subject.subjectId),
+              eq(grant.subjectType, subject.subjectType),
+              eq(grant.autoRenew, true),
+              // we only renew subscriptions and trials through the subscription renew
+              notInArray(grant.type, ["subscription", "trial"]),
+              not(eq(grant.deleted, true)),
+              // already expired
+              or(isNull(grant.expiresAt), gte(grant.expiresAt, now)) // expiresAt >= now or null
+            ),
+          orderBy: (grant, { desc }) => desc(grant.priority),
+        })
+      )
+    )
+
+    const renewedGrants = []
+    for (const grant of allGrants.flat()) {
+      const cycle = calculateCycleWindow({
+        now: now,
+        effectiveStartDate: grant.effectiveAt,
+        effectiveEndDate: grant.expiresAt ?? null,
+        config: {
+          name: grant.featurePlanVersion.billingConfig.name,
+          interval: grant.featurePlanVersion.billingConfig.billingInterval,
+          intervalCount: grant.featurePlanVersion.billingConfig.billingIntervalCount,
+          anchor: grant.anchor,
+          planType: grant.featurePlanVersion.billingConfig.planType,
+        },
+        trialEndsAt: null,
+      })
+
+      if (!cycle) {
+        return Err(
+          new UnPriceGrantError({
+            message: "Failed to calculate cycle window",
+            subjectId: grant.subjectId,
+          })
+        )
+      }
+
+      // create the grant
+      const createGrantResult = await this.createGrant({
+        grant: {
+          ...grant,
+          effectiveAt: cycle.start,
+          expiresAt: cycle.end,
+        },
+      })
+
+      if (createGrantResult.err) {
+        this.logger.error("Failed to renew grant", {
+          error: createGrantResult.err.message,
+          grantId: grant.id,
+          subjectId: grant.subjectId,
+        })
+        continue
+      }
+
+      renewedGrants.push(createGrantResult.val)
+    }
+
+    return Ok(renewedGrants)
+  }
+
   /**
    * Computes all entitlements for a customer by aggregating grants from:
    * - Customer-level grants (subjectSource: "customer")
@@ -354,14 +289,12 @@ export class GrantsManager {
   public async computeGrantsForCustomer({
     customerId,
     projectId,
-    currentCycleStartAt,
-    currentCycleEndAt,
+    now,
   }: {
     customerId: string
     projectId: string
-    currentCycleStartAt: number
-    currentCycleEndAt: number
-  }): Promise<Result<(typeof entitlements.$inferSelect)[], FetchError | UnPriceGrantError>> {
+    now: number
+  }): Promise<Result<EntitlementState[], FetchError | UnPriceGrantError>> {
     try {
       // Get customer's subscription to find planId
       const customerSubscription = await this.db.query.customers.findFirst({
@@ -370,10 +303,7 @@ export class GrantsManager {
             with: {
               phases: {
                 where: (phase, { and, lte, or, isNull, gte }) =>
-                  and(
-                    lte(phase.startAt, currentCycleEndAt),
-                    or(isNull(phase.endAt), gte(phase.endAt, currentCycleEndAt))
-                  ),
+                  and(lte(phase.startAt, now), or(isNull(phase.endAt), gte(phase.endAt, now))),
                 limit: 1,
                 with: {
                   planVersion: {
@@ -418,7 +348,7 @@ export class GrantsManager {
         subjects.push({ subjectId: planVersionId, subjectType: "plan_version" })
       }
 
-      // Query all active grants for all subjects
+      // Query all active grants for all subjects in the period of the current cycle
       const allGrants = await Promise.all(
         subjects.map((subject) =>
           this.db.query.grants.findMany({
@@ -429,14 +359,14 @@ export class GrantsManager {
                 },
               },
             },
-            where: (grant, { and, eq, lte, gt, or, isNull, not }) =>
+            where: (grant, { and, eq, lt, gte, or, isNull, not }) =>
               and(
                 eq(grant.projectId, projectId),
                 eq(grant.subjectId, subject.subjectId),
                 eq(grant.subjectType, subject.subjectType),
                 not(eq(grant.deleted, true)),
-                lte(grant.effectiveAt, currentCycleEndAt), // effectiveAt <= now
-                or(isNull(grant.expiresAt), gt(grant.expiresAt, currentCycleEndAt)) // expiresAt > now or null
+                gte(grant.effectiveAt, now), // effectiveAt >= now
+                or(isNull(grant.expiresAt), lt(grant.expiresAt, now)) // expiresAt <= now or null
               ),
             orderBy: (grant, { desc }) => desc(grant.priority),
           })
@@ -468,16 +398,13 @@ export class GrantsManager {
       for (const [featureSlug, featureGrants] of grantsByFeature.entries()) {
         if (featureGrants.length === 0) continue
 
+        // compute the entitlement for each feature in the current cycle
+        // this is idempotent, so if the entitlement already exists, it will be updated
         const entitlementResult = await this.computeEntitlementFromGrants({
           grants: featureGrants,
           customerId,
           projectId,
-          featureSlug,
-          timezone: subscription?.timezone ?? customerSubscription.timezone,
-          // if there are no active phase, we use the day of creation of the subscription
-          anchor: currentPhase?.billingAnchor ?? null,
-          currentCycleStartAt,
-          currentCycleEndAt,
+          now,
         })
 
         if (entitlementResult.err) {
@@ -494,7 +421,7 @@ export class GrantsManager {
         computedEntitlements.push(entitlementResult.val)
       }
 
-      return Ok(computedEntitlements)
+      return Ok(computedEntitlements as EntitlementState[])
     } catch (error) {
       this.logger.error("Error computing entitlements for customer", {
         error: error instanceof Error ? error.message : String(error),
@@ -529,33 +456,25 @@ export class GrantsManager {
     grants,
     customerId,
     projectId,
-    featureSlug,
-    timezone,
-    anchor,
-    currentCycleStartAt,
-    currentCycleEndAt,
+    now,
   }: {
     grants: z.infer<typeof grantSchemaExtended>[]
     customerId: string
     projectId: string
-    featureSlug: string
-    currentCycleStartAt: number
-    currentCycleEndAt: number
-    timezone: string
-    anchor: number | null
+    now: number
   }): Promise<Result<typeof entitlements.$inferSelect, FetchError | UnPriceGrantError>> {
     if (grants.length === 0) {
       return Err(
         new UnPriceGrantError({
-          message: `No grants provided for feature ${featureSlug}`,
+          message: "No grants provided",
           subjectId: customerId,
         })
       )
     }
 
-    // Get the best priority grant's feature metadata (all should have same feature)
-    // if not they are going to be overridden by the best priority grant
-    const bestPriorityGrant = grants.sort((a, b) => b.priority - a.priority)[0]!
+    // Sort by priority (higher first) to preserve consumption order and get the best priority grant
+    const ordered = [...grants].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
+    const bestPriorityGrant = ordered[0]!
 
     // Determine merging policy from the feature type
     let mergingPolicy: EntitlementMergingPolicy = "sum"
@@ -578,13 +497,10 @@ export class GrantsManager {
         mergingPolicy = "max"
         break
       default:
-        // for unknown feature type we use sum policy to sum the limits
-        mergingPolicy = "sum"
+        // for unknown feature type we use replace policy to override the previous entitlements
+        mergingPolicy = "replace"
         break
     }
-
-    // Sort by priority (higher first) to preserve consumption order
-    const ordered = [...grants].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
 
     // Prepare grants snapshot (preserve priority order)
     const grantsSnapshot = ordered.map((g) => ({
@@ -604,18 +520,37 @@ export class GrantsManager {
       subscriptionId: g.subscriptionItem?.subscription?.id ?? null,
     }))
 
+    // get the range of the grants date start and end
+    const minEffectiveAt = Math.min(...grants.map((g) => g.effectiveAt))
+    const maxExpiresAt = Math.max(...grants.map((g) => g.expiresAt ?? Date.now()))
+
     // Merge grants according to merging policy
     const merged = this.mergeGrants({
       grants: grantsSnapshot,
       policy: mergingPolicy,
     })
 
+    // all feature grants must have the same feature slug
+    const featureSlug = bestPriorityGrant.featurePlanVersion.feature.slug
+
     // Derive overall effective/expires for cycle computation
     // Compute cycle window from reset config (half-open style via bounds)
     const resetConfig = bestPriorityGrant.featurePlanVersion.resetConfig
+      ? {
+          ...bestPriorityGrant.featurePlanVersion.resetConfig,
+          resetAnchor: bestPriorityGrant.anchor,
+        }
+      : null
 
-    // Get existing entitlement to check cycle boundary
-    const existingEntitlement = await this.db.query.entitlements.findFirst({
+    // Compute version hash + current cycle boundaries
+    const version = await hashStringSHA256(
+      JSON.stringify({
+        grants: grantsSnapshot,
+      })
+    )
+
+    // get the current entitlement for the customer and feature
+    const currentEntitlement = await this.db.query.entitlements.findFirst({
       where: (entitlement, { and, eq }) =>
         and(
           eq(entitlement.projectId, projectId),
@@ -624,21 +559,9 @@ export class GrantsManager {
         ),
     })
 
-    // Determine if cycle boundary was crossed
-    const cycleBoundaryCrossed =
-      existingEntitlement && existingEntitlement.currentCycleStartAt !== currentCycleStartAt
-
-    // Compute version hash + current cycle boundaries
-    const version = await hashStringSHA256(
-      JSON.stringify({
-        grants: grantsSnapshot,
-        currentCycleStartAt: currentCycleStartAt,
-        currentCycleEndAt: currentCycleEndAt,
-      })
-    )
-
     // Prepare base entitlement data
     const entitlementData = {
+      id: currentEntitlement?.id ?? newId("entitlement"),
       projectId,
       customerId,
       featureSlug,
@@ -647,98 +570,38 @@ export class GrantsManager {
       allowOverage: merged.allowOverage,
       aggregationMethod: bestPriorityGrant.featurePlanVersion.aggregationMethod,
       resetConfig,
-      timezone,
       mergingPolicy,
       grants: grantsSnapshot,
       version,
+      effectiveAt: minEffectiveAt,
+      expiresAt: maxExpiresAt,
+      nextRevalidateAt: maxExpiresAt,
+      lastSyncAt: Date.now(),
       computedAt: Date.now(),
-      currentCycleStartAt: currentCycleStartAt,
-      currentCycleEndAt: currentCycleEndAt,
-      nextRevalidateAt: currentCycleEndAt,
-      lastSyncAt: existingEntitlement?.lastSyncAt ?? Date.now(),
-      accumulatedUsage: existingEntitlement?.accumulatedUsage ?? "0",
-      currentCycleUsage: existingEntitlement?.currentCycleUsage ?? "0",
+      currentCycleUsage: "0",
+      accumulatedUsage: "0",
     }
 
-    // ATOMIC UPDATE: Handle cycle reset atomically in database
-    if (existingEntitlement) {
-      // Use PostgreSQL conditional update to atomically handle cycle reset
-      const updated = await this.db
-        .update(entitlements)
-        .set({
-          ...entitlementData,
-          // CRITICAL: Atomic cycle reset logic
-          // If cycle boundary crossed: add currentCycleUsage to accumulatedUsage, then reset
-          // If same cycle: preserve currentCycleUsage
-          currentCycleUsage: cycleBoundaryCrossed
-            ? "0" // Reset to 0 for new cycle
-            : existingEntitlement.currentCycleUsage, // Preserve if same cycle
-          accumulatedUsage: cycleBoundaryCrossed
-            ? sql`${entitlements.accumulatedUsage} + ${existingEntitlement.currentCycleUsage}`
-            : existingEntitlement.accumulatedUsage, // Preserve if same cycle
-          lastSyncAt: Date.now(),
-          updatedAtM: Date.now(),
-        })
-        .where(
-          and(
-            eq(entitlements.id, existingEntitlement.id),
-            eq(entitlements.projectId, projectId),
-            // Optimistic locking: ensure cycle hasn't changed since we read it
-            // This prevents double-counting if multiple recomputations happen concurrently
-            eq(entitlements.currentCycleStartAt, existingEntitlement.currentCycleStartAt)
-          )
-        )
-        .returning()
-        .then((rows) => rows[0])
+    // normalize the cycle usage to handle reset cycles
+    const normalizedState = this.normalizeCycleUsage({ state: entitlementData, now })
 
-      // If update affected 0 rows, cycle boundary was crossed by another process
-      // Re-read and retry, or handle gracefully
-      if (!updated) {
-        // Cycle was reset by another process - reload and retry
-        this.logger.warn("Cycle boundary crossed during update, retrying", {
-          customerId,
-          featureSlug,
-          oldCycleStart: existingEntitlement.currentCycleStartAt,
-          newCycleStart: currentCycleStartAt,
-        })
-
-        // Retry once by reloading
-        const retryEntitlement = await this.db.query.entitlements.findFirst({
-          where: (entitlement, { and, eq }) =>
-            and(
-              eq(entitlement.projectId, projectId),
-              eq(entitlement.customerId, customerId),
-              eq(entitlement.featureSlug, featureSlug)
-            ),
-        })
-
-        if (retryEntitlement) {
-          // Recursive call with updated state
-          return this.computeEntitlementFromGrants({
-            grants,
-            customerId,
-            projectId,
-            featureSlug,
-            currentCycleStartAt,
-            currentCycleEndAt,
-            timezone,
-            anchor,
-          })
-        }
-      }
-
-      return Ok(updated!)
-    }
-
-    // New entitlement - no existing cycle to preserve
+    // New entitlement - no existing entitlement to preserve
     const newEntitlement = await this.db
       .insert(entitlements)
-      .values({
-        id: newId("entitlement"),
-        ...entitlementData,
-        currentCycleUsage: "0",
-        accumulatedUsage: "0",
-        lastSyncAt: Date.now(),
+      .values(entitlementData)
+      .onConflictDoUpdate({
+        target: [entitlements.projectId, entitlements.customerId, entitlements.featureSlug],
+        set: {
+          ...entitlementData,
+          // update usage
+          currentCycleUsage: normalizedState.currentCycleUsage,
+          accumulatedUsage: normalizedState.accumulatedUsage,
+          nextRevalidateAt: normalizedState.nextRevalidateAt,
+          // update the last sync at and the updated at to now
+          lastSyncAt: Date.now(),
+          updatedAtM: Date.now(),
+          computedAt: Date.now(),
+        },
       })
       .returning()
       .then((rows) => rows[0])
@@ -757,100 +620,6 @@ export class GrantsManager {
 
   // TODO: can and reportUsage as one method as well
   // something like try and consume
-
-  /**
-   * Invalidates entitlements affected by grant changes.
-   * Marks entitlements for recomputation by incrementing grantVersion.
-   * TODO: implement this
-   */
-  public async invalidateEntitlements(grantIds: string[]): Promise<
-    Result<
-      {
-        invalidatedCount: number
-      },
-      FetchError
-    >
-  > {
-    try {
-      // Find all entitlements that reference these grants
-      const affectedGrants = await this.db.query.grants.findMany({
-        where: (grant, { and, inArray, eq }) =>
-          and(inArray(grant.id, grantIds), eq(grant.deleted, false)),
-        columns: {
-          projectId: true,
-          subjectId: true,
-          subjectType: true,
-          id: true,
-        },
-        with: {
-          featurePlanVersion: {
-            with: {
-              feature: {
-                columns: {
-                  slug: true,
-                },
-              },
-            },
-          },
-        },
-      })
-
-      if (affectedGrants.length === 0) {
-        return Ok({ invalidatedCount: 0 })
-      }
-
-      // Update grantVersion to trigger recomputation
-      const now = Date.now()
-      const updatePromises = affectedGrants.map((grant) =>
-        this.db
-          .update(grants)
-          .set({
-            updatedAtM: now,
-          })
-          .where(and(eq(grants.id, grant.id), eq(grants.projectId, grant.projectId)))
-      )
-
-      await Promise.all(updatePromises)
-
-      // Find affected entitlements and mark for recomputation
-      const affectedEntitlements = await Promise.all(
-        affectedGrants.map((grant) =>
-          this.db.query.entitlements.findFirst({
-            where: (entitlement, { and, eq }) =>
-              and(
-                eq(entitlement.projectId, grant.projectId),
-                eq(entitlement.customerId, grant.subjectId),
-                eq(entitlement.featureSlug, grant.featurePlanVersion.feature.slug)
-              ),
-          })
-        )
-      )
-
-      const validEntitlements = affectedEntitlements.filter(
-        (e): e is NonNullable<typeof e> => e !== null && e !== undefined
-      )
-
-      if (validEntitlements.length > 0) {
-        // TODO: Invalidate cache for these entitlements
-        // Note: Cache invalidation will be handled by the cache service
-        // This is just marking entitlements as needing recomputation
-      }
-
-      return Ok({ invalidatedCount: validEntitlements.length })
-    } catch (error) {
-      this.logger.error("Error invalidating entitlements", {
-        error: error instanceof Error ? error.message : String(error),
-        grantIds,
-      })
-
-      return Err(
-        new FetchError({
-          message: `Failed to invalidate entitlements: ${error instanceof Error ? error.message : String(error)}`,
-          retry: true,
-        })
-      )
-    }
-  }
 
   /**
    * Merges grants according to the specified merging policy.
@@ -921,92 +690,13 @@ export class GrantsManager {
   }
 
   /**
-   * Computes cycle boundaries from reset config, similar to billing cycle calculation.
-   * Computes the cycle boundaries purely from now and resetConfig, without needing
-   * any existing cycle boundaries.
-   */
-  private computeCycleBoundaries(params: {
-    now: number
-    resetConfig: ResetConfig | null
-    effectiveStartDate: number
-    effectiveEndDate: number | null
-  }): {
-    start: number
-    end: number
-  } {
-    const { now, resetConfig, effectiveStartDate, effectiveEndDate } = params
-
-    if (!resetConfig) {
-      return { start: effectiveStartDate, end: effectiveEndDate ?? Number.POSITIVE_INFINITY }
-    }
-
-    // Similar logic to calculateCycleWindow but for reset intervals
-    const { resetInterval, resetIntervalCount, resetAnchor } = resetConfig
-
-    // Calculate effective date with the anchor applied to the now date
-    const effectiveDate = new Date(now)
-    let anchorDate: Date
-
-    switch (resetInterval) {
-      case "minute": {
-        const c = Math.max(1, resetIntervalCount)
-        const y = effectiveDate.getUTCFullYear()
-        const m = effectiveDate.getUTCMonth()
-        const d = effectiveDate.getUTCDate()
-        const h = effectiveDate.getUTCHours()
-        const minute = effectiveDate.getUTCMinutes()
-        const alignedMinute = minute - (minute % c)
-        const anchorValue = typeof resetAnchor === "number" ? resetAnchor : 0
-        anchorDate = new Date(Date.UTC(y, m, d, h, alignedMinute, anchorValue, 0))
-        break
-      }
-      case "day": {
-        const anchorValue = typeof resetAnchor === "number" ? resetAnchor : 0
-        anchorDate = startOfUtcHour(setUtc(effectiveDate, { hours: anchorValue }))
-        break
-      }
-      case "week": {
-        const anchorValue = typeof resetAnchor === "number" ? resetAnchor : 0
-        anchorDate = startOfUtcDay(setUtcDay(effectiveDate, anchorValue, 0))
-        break
-      }
-      case "month":
-      case "year": {
-        const anchorValue = typeof resetAnchor === "number" ? resetAnchor : 1
-        anchorDate = startOfUtcDay(setUtc(effectiveDate, { date: anchorValue }))
-        break
-      }
-      default:
-        // Unknown interval - return infinite cycle
-        return { start: now, end: Number.POSITIVE_INFINITY }
-    }
-
-    // Find the first anchor date on or before now
-    // If anchor is after now, go back one interval
-    if (anchorDate.getTime() > now) {
-      anchorDate = addByInterval(anchorDate, resetInterval, -resetIntervalCount)
-    }
-
-    // Find current cycle starting from anchor
-    let cycleStart = anchorDate
-    let cycleEnd = addByInterval(cycleStart, resetInterval, resetIntervalCount)
-
-    // Find the cycle containing 'now'
-    while (now >= cycleEnd.getTime()) {
-      cycleStart = cycleEnd
-      cycleEnd = addByInterval(cycleStart, resetInterval, resetIntervalCount)
-    }
-
-    const start = cycleStart.getTime()
-    const end = cycleEnd.getTime()
-
-    return { start, end }
-  }
-
-  /**
-   * Normalizes entitlement state by checking if cycle boundary crossed.
+   * Normalizes entitlement state by checking if reset boundary has been crossed.
    * This is a safety net - the database update should handle it, but this
    * ensures correctness even if recomputation hasn't happened yet.
+   * @param params - The parameters for the normalization
+   * @param params.state - The entitlement state to normalize
+   * @param params.now - The current time
+   * @returns The normalized entitlement state
    */
   private normalizeCycleUsage(params: {
     state: EntitlementState
@@ -1014,34 +704,78 @@ export class GrantsManager {
   }): EntitlementState {
     const { state, now } = params
 
-    // Check if cycle boundary crossed
-    const cycleBoundaryCrossed = state.currentCycleEndAt && now >= state.currentCycleEndAt
-
-    if (!cycleBoundaryCrossed || !state.resetConfig) {
+    if (!state.resetConfig) {
       return state
     }
 
-    // Recompute cycle boundaries
-    const cycleBoundaries = this.computeCycleBoundaries({
-      now,
-      resetConfig: {
-        ...state.resetConfig,
-        resetAnchor: state.anchor,
+    // Calculate which reset cycle slice "now" falls into
+    // This uses the existing calculateCycleWindow which already handles
+    // all the anchor/interval logic correctly
+    const resetCycleForNow = calculateCycleWindow({
+      now: now,
+      trialEndsAt: null,
+      effectiveStartDate: state.effectiveAt,
+      effectiveEndDate: state.expiresAt,
+      config: {
+        name: state.resetConfig.name,
+        interval: state.resetConfig.resetInterval,
+        intervalCount: state.resetConfig.resetIntervalCount,
+        anchor: state.resetConfig.resetAnchor,
+        planType: state.resetConfig.planType,
       },
-      effectiveStartDate: state.currentCycleStartAt,
-      effectiveEndDate: state.currentCycleEndAt,
     })
 
-    // Return normalized state (but don't persist - let recomputation handle it)
+    if (!resetCycleForNow) {
+      return state
+    }
+
+    // The key insight: We need to track what reset cycle slice we were last in
+    // Since we don't store this separately, we can infer it by checking:
+    // If currentCycleUsage > 0, we were tracking usage for SOME reset cycle
+    // We can calculate what reset cycle the billing cycle started in, and
+    // compare with what reset cycle "now" is in
+
+    // Calculate what reset cycle the billing cycle start falls into
+    const resetCycleAtBillingStart = calculateCycleWindow({
+      now: state.effectiveAt,
+      trialEndsAt: null,
+      effectiveStartDate: state.effectiveAt,
+      effectiveEndDate: state.expiresAt,
+      config: {
+        name: state.resetConfig.name,
+        interval: state.resetConfig.resetInterval,
+        intervalCount: state.resetConfig.resetIntervalCount,
+        anchor: state.resetConfig.resetAnchor,
+        planType: state.resetConfig.planType,
+      },
+    })
+
+    if (!resetCycleAtBillingStart) {
+      return state
+    }
+
+    // Check if we've crossed into a different reset cycle slice
+    // If now is in a different reset cycle than the billing start, we've crossed
+    // (assuming we started tracking at billing start)
+    const resetBoundaryCrossed =
+      resetCycleForNow.start !== resetCycleAtBillingStart.start ||
+      resetCycleForNow.end !== resetCycleAtBillingStart.end
+
+    if (!resetBoundaryCrossed) {
+      return state
+    }
+
+    // Reset boundary crossed - but we can't update currentCycleStartAt/currentCycleEndAt
+    // because those represent billing cycles, not reset cycles!
+    // This is the fundamental problem - you need separate fields for reset cycle boundaries
     return {
       ...state,
-      currentCycleUsage: "0", // Reset for new cycle
+      currentCycleUsage: "0",
       accumulatedUsage: (
         BigInt(state.accumulatedUsage) + BigInt(state.currentCycleUsage)
-      ).toString(), // Add previous cycle to accumulated
-      currentCycleStartAt: cycleBoundaries.start,
-      currentCycleEndAt: cycleBoundaries.end ?? Number.POSITIVE_INFINITY,
-      nextRevalidateAt: cycleBoundaries.end ?? Number.POSITIVE_INFINITY,
+      ).toString(),
+      // TODO: You need separate fields for reset cycle boundaries!
+      // For now, this won't work correctly because we're overwriting billing cycle boundaries
     }
   }
 

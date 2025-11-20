@@ -535,12 +535,46 @@ export class EntitlementService {
       return val
     }
 
-    // Cache hit - check if we need to revalidate
-    if (params.now >= cached.nextRevalidateAt || params.now >= cached.currentCycleEndAt) {
+    // if already experied we need to reload the entitlement
+    if (cached.expiresAt && params.now >= cached.expiresAt) {
+      this.logger.debug("Current cycle ended, recomputing grants", params)
+
+      const result = await this.grantsManager.computeGrantsForCustomer({
+        customerId: params.customerId,
+        projectId: params.projectId,
+        now: params.now,
+      })
+
+      if (result.err) {
+        this.logger.error("Failed to recompute grants after cycle reset", {
+          error: result.err.message,
+          ...params,
+        })
+
+        return null
+      }
+
+      // get entitlements from the result
+      const entitlement = result.val.find((e) => e.featureSlug === params.featureSlug)
+
+      if (!entitlement) {
+        this.logger.error("Failed to find entitlement after cycle reset", {
+          error: "Entitlement not found after cycle reset",
+          ...params,
+        })
+
+        return null
+      }
+
+      // set storage
+      await this.storage.set({ state: entitlement })
+
+      return entitlement
+    }
+
+    // Cache hit - no cycle boundary crossed, check if we need to revalidate
+    if (params.now >= cached.nextRevalidateAt) {
       this.logger.debug("Revalidation time, checking version", params)
-      // Check if cycle boundary crossed (needs reset)
-      const cycleBoundaryCrossed =
-        cached.currentCycleEndAt && params.now >= cached.currentCycleEndAt
 
       // Lightweight version check (just query version number)
       // TODO: here we need to check if getting the versions and the last one
@@ -568,6 +602,7 @@ export class EntitlementService {
       }
 
       // Version mismatch or snapshot updated - reload
+      // entitlement was recomputed with changes in grants
       if (dbVersion.version !== cached.version) {
         this.logger.info("Version mismatch detected, reloading", {
           ...params,
@@ -575,6 +610,7 @@ export class EntitlementService {
           dbVersion: dbVersion.version,
         })
 
+        // reload the entitlement from cache
         const { val, err } = await this.getActiveEntitlement({
           ...params,
           opts: {
@@ -583,42 +619,18 @@ export class EntitlementService {
         })
 
         if (err) {
-          throw err
+          this.logger.error("Failed to reload entitlement from cache", {
+            error: err.message,
+            ...params,
+          })
+
+          return null
         }
 
         // set storage
         await this.storage.set({ state: val })
 
         return val
-      }
-
-      // Version matches but cycle boundary might have crossed - normalize in memory
-      if (cycleBoundaryCrossed) {
-        this.logger.info("Cycle boundary crossed, recomputing grants", {
-          ...params,
-          cycleBoundaryCrossed,
-        })
-
-        // Use GrantsManager to normalize (this will be called in verify/consume anyway)
-
-        // But we can also trigger async recomputation
-        this.waitUntil(
-          this.grantsManager
-            .computeGrantsForCustomer({
-              customerId: params.customerId,
-              projectId: params.projectId,
-              currentCycleStartAt: cached.currentCycleStartAt,
-              currentCycleEndAt: cached.currentCycleEndAt,
-            })
-            .then((result) => {
-              if (result.err) {
-                this.logger.error("Failed to recompute grants after cycle reset", {
-                  error: result.err.message,
-                  ...params,
-                })
-              }
-            })
-        )
       }
 
       // Version matches - just update revalidation time
@@ -715,7 +727,6 @@ export class EntitlementService {
     const state: EntitlementState = {
       id: entitlement.id,
       customerId: entitlement.customerId,
-      timezone: entitlement.timezone,
       resetConfig: entitlement.resetConfig,
       mergingPolicy: entitlement.mergingPolicy,
       aggregationMethod: entitlement.aggregationMethod,
@@ -726,15 +737,14 @@ export class EntitlementService {
       accumulatedUsage: entitlement.accumulatedUsage,
       limit: entitlement.limit,
       allowOverage: entitlement.allowOverage,
-      anchor: entitlement.anchor,
       grants: entitlement.grants,
       version: entitlement.version,
       // TODO: check this if it's correct
       lastSyncAt: entitlement.lastSyncAt,
       nextRevalidateAt: entitlement.nextRevalidateAt,
       computedAt: entitlement.computedAt,
-      currentCycleStartAt: entitlement.currentCycleStartAt,
-      currentCycleEndAt: entitlement.currentCycleEndAt,
+      effectiveAt: entitlement.effectiveAt,
+      expiresAt: entitlement.expiresAt,
     }
 
     return state

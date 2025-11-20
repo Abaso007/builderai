@@ -14,12 +14,12 @@ describe("calculateCycleWindow", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now,
-      billingConfig: {
+      config: {
         name: "test",
-        billingInterval: "onetime",
-        billingIntervalCount: 1,
+        interval: "onetime",
+        intervalCount: 1,
         planType: "onetime",
-        billingAnchor: "dayOfCreation",
+        anchor: "dayOfCreation",
       },
     })
 
@@ -36,12 +36,12 @@ describe("calculateCycleWindow", () => {
       effectiveEndDate: endMs,
       trialEndsAt: null,
       now,
-      billingConfig: {
+      config: {
         name: "test",
-        billingInterval: "month",
-        billingIntervalCount: 1,
+        interval: "month",
+        intervalCount: 1,
         planType: "recurring",
-        billingAnchor: 1,
+        anchor: 1,
       },
     })
 
@@ -58,12 +58,12 @@ describe("calculateCycleWindow", () => {
         effectiveEndDate: null,
         trialEndsAt: null,
         now,
-        billingConfig: {
+        config: {
           name: "test",
-          billingInterval: "onetime",
-          billingIntervalCount: 1,
+          interval: "onetime",
+          intervalCount: 1,
           planType: "onetime",
-          billingAnchor: "dayOfCreation",
+          anchor: "dayOfCreation",
         },
       })
 
@@ -83,12 +83,12 @@ describe("calculateCycleWindow", () => {
         effectiveEndDate: null,
         trialEndsAt: trialEndMs,
         now,
-        billingConfig: {
+        config: {
           name: "test",
-          billingInterval: "onetime",
-          billingIntervalCount: 1,
+          interval: "onetime",
+          intervalCount: 1,
           planType: "onetime",
-          billingAnchor: "dayOfCreation",
+          anchor: "dayOfCreation",
         },
       })
 
@@ -109,12 +109,12 @@ describe("calculateCycleWindow", () => {
         effectiveEndDate: null,
         trialEndsAt: null,
         now,
-        billingConfig: {
+        config: {
           name: "test",
-          billingInterval: "month",
-          billingIntervalCount: 1,
+          interval: "month",
+          intervalCount: 1,
           planType: "recurring",
-          billingAnchor: 1,
+          anchor: 1,
         },
       })
 
@@ -134,12 +134,12 @@ describe("calculateCycleWindow", () => {
         effectiveEndDate: null,
         trialEndsAt: null,
         now,
-        billingConfig: {
+        config: {
           name: "test",
-          billingInterval: "month",
-          billingIntervalCount: 1,
+          interval: "month",
+          intervalCount: 1,
           planType: "recurring",
-          billingAnchor: 15,
+          anchor: 15,
         },
       })
 
@@ -159,12 +159,12 @@ describe("calculateCycleWindow", () => {
         effectiveEndDate: endMs,
         trialEndsAt: null,
         now,
-        billingConfig: {
+        config: {
           name: "test",
-          billingInterval: "month",
-          billingIntervalCount: 1,
+          interval: "month",
+          intervalCount: 1,
           planType: "recurring",
-          billingAnchor: 1,
+          anchor: 1,
         },
       })
 
@@ -180,15 +180,13 @@ describe("calculateCycleWindow", () => {
 describe("edge cases - months, leap years, boundaries", () => {
   const utc = (d: string, t = "00:00:00.000") => new Date(`${d}T${t}Z`).getTime()
 
-  function buildConfig(
-    anchor: number
-  ): Parameters<typeof calculateCycleWindow>[0]["billingConfig"] {
+  function buildConfig(anchor: number): Parameters<typeof calculateCycleWindow>[0]["config"] {
     return {
       name: "test",
-      billingInterval: "month",
-      billingIntervalCount: 1,
+      interval: "month",
+      intervalCount: 1,
       planType: "recurring",
-      billingAnchor: anchor,
+      anchor: anchor,
     }
   }
 
@@ -201,7 +199,7 @@ describe("edge cases - months, leap years, boundaries", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now,
-      billingConfig: buildConfig(29),
+      config: buildConfig(29),
     })
     expect(result).not.toBeNull()
     // First stub: 2024-01-10 -> 2024-01-29
@@ -221,7 +219,7 @@ describe("edge cases - months, leap years, boundaries", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now,
-      billingConfig: buildConfig(29),
+      config: buildConfig(29),
     })
     expect(result).not.toBeNull()
     // Cycle should be [2025-01-29, 2025-03-01) because Feb 29 does not exist -> rolled to Mar 1
@@ -241,7 +239,7 @@ describe("edge cases - months, leap years, boundaries", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now,
-      billingConfig: buildConfig(31),
+      config: buildConfig(31),
     })
     expect(result).not.toBeNull()
     // Jan has 31 -> first anchor 2024-01-31, next end attempts 2024-02-31 -> rolls to Mar 2 (since Feb has 29 in 2024)
@@ -262,7 +260,7 @@ describe("edge cases - months, leap years, boundaries", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now,
-      billingConfig: buildConfig(30),
+      config: buildConfig(30),
     })
     expect(result).not.toBeNull()
     // Now is before first anchor -> stub window from effective start to first anchor
@@ -280,7 +278,7 @@ describe("edge cases - months, leap years, boundaries", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now: utc("2024-01-01"),
-      billingConfig: cfg,
+      config: cfg,
     })!
     expect(first.end).toBe(utc("2024-01-15"))
 
@@ -290,7 +288,7 @@ describe("edge cases - months, leap years, boundaries", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now: first.end,
-      billingConfig: cfg,
+      config: cfg,
     })!
     expect(atEnd.start).toBe(first.end)
     expect(atEnd.end).toBe(utc("2024-02-15"))
@@ -308,7 +306,7 @@ describe("edge cases - months, leap years, boundaries", () => {
       effectiveEndDate: null,
       trialEndsAt: trialEnd,
       now,
-      billingConfig: cfg,
+      config: cfg,
     })!
     // Paid period starts at trialEnd; first anchor after that is Jan 15
     expect(result.start).toBe(trialEnd)
@@ -321,10 +319,10 @@ describe("edge cases - months, leap years, boundaries", () => {
       const start = utc("2024-01-01", "00:00:00.000")
       const cfg = {
         name: "test",
-        billingInterval: "day" as const,
-        billingIntervalCount: 1,
+        interval: "day" as const,
+        intervalCount: 1,
         planType: "recurring" as const,
-        billingAnchor: 0,
+        anchor: 0,
       }
       const now = utc("2024-01-02", "00:00:00.000") - 1
       const res = calculateCycleWindow({
@@ -332,7 +330,7 @@ describe("edge cases - months, leap years, boundaries", () => {
         effectiveEndDate: null,
         trialEndsAt: null,
         now,
-        billingConfig: cfg,
+        config: cfg,
       })!
       expect(res.end).toBe(utc("2024-01-02", "00:00:00.000"))
       // no proration/billableSeconds on cycle window
@@ -342,7 +340,7 @@ describe("edge cases - months, leap years, boundaries", () => {
         effectiveEndDate: null,
         trialEndsAt: null,
         now: res.end,
-        billingConfig: cfg,
+        config: cfg,
       })!
       expect(res2.start).toBe(res.end)
       expect(res2.end).toBe(utc("2024-01-03", "00:00:00.000"))
@@ -353,10 +351,10 @@ describe("edge cases - months, leap years, boundaries", () => {
       const start = utc("2024-01-01") // Mon Jan 1, 2024
       const cfg = {
         name: "test",
-        billingInterval: "week" as const,
-        billingIntervalCount: 1,
+        interval: "week" as const,
+        intervalCount: 1,
         planType: "recurring" as const,
-        billingAnchor: 1,
+        anchor: 1,
       }
       // Find a time just before next Monday 00:00:00
       const now = utc("2024-01-07", "23:59:59.000")
@@ -365,7 +363,7 @@ describe("edge cases - months, leap years, boundaries", () => {
         effectiveEndDate: null,
         trialEndsAt: null,
         now,
-        billingConfig: cfg,
+        config: cfg,
       })!
       // Cycle should end at Monday 00:00 -> 2024-01-08
       expect(res.end).toBe(utc("2024-01-08", "00:00:00.000"))
@@ -376,10 +374,10 @@ describe("edge cases - months, leap years, boundaries", () => {
       const start = utc("2024-01-01", "00:00:00.000")
       const cfg = {
         name: "test",
-        billingInterval: "minute" as const,
-        billingIntervalCount: 1,
+        interval: "minute" as const,
+        intervalCount: 1,
         planType: "recurring" as const,
-        billingAnchor: 30,
+        anchor: 30,
       }
       const now = utc("2024-01-01", "00:00:30.500")
       const res = calculateCycleWindow({
@@ -387,7 +385,7 @@ describe("edge cases - months, leap years, boundaries", () => {
         effectiveEndDate: null,
         trialEndsAt: null,
         now,
-        billingConfig: cfg,
+        config: cfg,
       })!
       // The minute anchored at second 30: [00:00:30, 00:01:30)
       expect(res.start).toBe(utc("2024-01-01", "00:00:30.000"))
@@ -399,7 +397,7 @@ describe("edge cases - months, leap years, boundaries", () => {
         effectiveEndDate: null,
         trialEndsAt: null,
         now: res.end,
-        billingConfig: cfg,
+        config: cfg,
       })!
       expect(res2.start).toBe(res.end)
       expect(res2.end).toBe(utc("2024-01-01", "00:02:30.000"))
@@ -420,12 +418,12 @@ describe("minute interval with intervalCount > 1", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now,
-      billingConfig: {
+      config: {
         name: "test",
-        billingInterval: "minute",
-        billingIntervalCount: 15,
+        interval: "minute",
+        intervalCount: 15,
         planType: "recurring",
-        billingAnchor: 20,
+        anchor: 20,
       },
     })!
     // Aligned windows: [..., 23:45:20, 00:00:20), [00:00:20, 00:15:20), ...
@@ -443,12 +441,12 @@ describe("minute interval with intervalCount > 1", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now,
-      billingConfig: {
+      config: {
         name: "test",
-        billingInterval: "minute",
-        billingIntervalCount: 15,
+        interval: "minute",
+        intervalCount: 15,
         planType: "recurring",
-        billingAnchor: 20,
+        anchor: 20,
       },
     })!
     // Now >= first boundary -> window [00:00:20, 00:15:20)

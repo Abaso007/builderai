@@ -22,7 +22,13 @@ describe("cycles using calculateCycleWindow", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now: startAt,
-      billingConfig,
+      config: {
+        name: billingConfig.name,
+        interval: billingConfig.billingInterval,
+        intervalCount: billingConfig.billingIntervalCount,
+        anchor: billingConfig.billingAnchor,
+        planType: billingConfig.planType,
+      },
     })
     expect(first).not.toBeNull()
     expect(first!.start).toBe(startAt)
@@ -34,7 +40,13 @@ describe("cycles using calculateCycleWindow", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now: first!.end,
-      billingConfig,
+      config: {
+        name: billingConfig.name,
+        interval: billingConfig.billingInterval,
+        intervalCount: billingConfig.billingIntervalCount,
+        anchor: billingConfig.billingAnchor,
+        planType: billingConfig.planType,
+      },
     })
 
     expect(second).not.toBeNull()
@@ -52,11 +64,11 @@ describe("cycles using calculateCycleWindow", () => {
       effectiveEndDate: endAt,
       trialEndsAt,
       now: utcDate("2024-01-05", "00:00:00.000"),
-      billingConfig: {
+      config: {
         name: "test",
-        billingInterval: "month",
-        billingIntervalCount: 1,
-        billingAnchor: 15,
+        interval: "month",
+        intervalCount: 1,
+        anchor: 15,
         planType: "recurring",
       },
     })
@@ -78,11 +90,11 @@ describe("calculateCycleWindow (utility coverage)", () => {
       effectiveEndDate: null,
       trialEndsAt: trialEnd,
       now,
-      billingConfig: {
+      config: {
         name: "test",
-        billingInterval: "month",
-        billingIntervalCount: 1,
-        billingAnchor: 1,
+        interval: "month",
+        intervalCount: 1,
+        anchor: 1,
         planType: "recurring",
       },
     })
@@ -99,9 +111,9 @@ describe("calculateNextNCycles sequences", () => {
   function monthlyCfg(anchor: number) {
     return {
       name: "test",
-      billingInterval: "month" as const,
-      billingIntervalCount: 1,
-      billingAnchor: anchor,
+      interval: "month" as const,
+      intervalCount: 1,
+      anchor: anchor,
       planType: "recurring" as const,
     }
   }
@@ -116,7 +128,7 @@ describe("calculateNextNCycles sequences", () => {
       effectiveStartDate: start,
       effectiveEndDate: null,
       trialEndsAt: null,
-      billingConfig: cfg,
+      config: cfg,
       count: 2,
     })
 
@@ -146,7 +158,7 @@ describe("calculateNextNCycles sequences", () => {
       effectiveStartDate: start,
       effectiveEndDate: null,
       trialEndsAt: null,
-      billingConfig: cfg,
+      config: cfg,
       count: 0,
     })
 
@@ -173,7 +185,7 @@ describe("calculateNextNCycles sequences", () => {
       effectiveStartDate: start,
       effectiveEndDate: null,
       trialEndsAt: null,
-      billingConfig: cfg,
+      config: cfg,
       count: 3,
     })
 
@@ -191,7 +203,7 @@ describe("calculateNextNCycles sequences", () => {
       effectiveStartDate: start,
       effectiveEndDate: endAt,
       trialEndsAt: null,
-      billingConfig: cfg,
+      config: cfg,
       count: 5,
     })
 
@@ -224,7 +236,7 @@ describe("calculateNextNCycles sequences", () => {
       effectiveStartDate: start,
       effectiveEndDate: null,
       trialEndsAt: trialEnd,
-      billingConfig: cfg,
+      config: cfg,
       count: 1,
     })
 
@@ -247,9 +259,9 @@ describe("calculateNextNCycles sequences (minute interval, 5-minute windows)", (
   function cfg5m(anchor: number) {
     return {
       name: "test",
-      billingInterval: "minute" as const,
-      billingIntervalCount: 5,
-      billingAnchor: anchor,
+      interval: "minute" as const,
+      intervalCount: 5,
+      anchor: anchor,
       planType: "recurring" as const,
     }
   }
@@ -264,7 +276,7 @@ describe("calculateNextNCycles sequences (minute interval, 5-minute windows)", (
       effectiveStartDate: start,
       effectiveEndDate: null,
       trialEndsAt: null,
-      billingConfig: cfg5m(0),
+      config: cfg5m(0),
       count: 2,
     })
 
@@ -293,7 +305,7 @@ describe("calculateNextNCycles sequences (minute interval, 5-minute windows)", (
       effectiveStartDate: start,
       effectiveEndDate: null,
       trialEndsAt: null,
-      billingConfig: cfg5m(0),
+      config: cfg5m(0),
       count: 0,
     })
 
@@ -321,7 +333,7 @@ describe("calculateNextNCycles sequences (minute interval, 5-minute windows)", (
       effectiveStartDate: start,
       effectiveEndDate: endAt,
       trialEndsAt: null,
-      billingConfig: cfg5m(0),
+      config: cfg5m(0),
       count: 5,
     })
 
@@ -349,7 +361,7 @@ describe("calculateNextNCycles sequences (minute interval, 5-minute windows)", (
       effectiveStartDate: start,
       effectiveEndDate: null,
       trialEndsAt: null,
-      billingConfig: cfg5m(30),
+      config: cfg5m(30),
       count: 1,
     })
 

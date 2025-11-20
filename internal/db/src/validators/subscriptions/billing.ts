@@ -12,7 +12,13 @@ export interface CalculateCycleWindowParams {
   effectiveEndDate: number | null
   trialEndsAt: number | null
   now: number
-  billingConfig: BillingConfig
+  config: {
+    name: BillingConfig["name"]
+    interval: BillingConfig["billingInterval"]
+    intervalCount: BillingConfig["billingIntervalCount"]
+    anchor: BillingConfig["billingAnchor"]
+    planType: BillingConfig["planType"]
+  }
 }
 
 // =================================================================================
@@ -27,7 +33,7 @@ export interface CalculateCycleWindowParams {
  * @returns The calculated CycleWindow with proration, or null if `now` is not in an active cycle.
  */
 export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleWindow | null {
-  const { effectiveStartDate, effectiveEndDate, trialEndsAt, now, billingConfig } = params
+  const { effectiveStartDate, effectiveEndDate, trialEndsAt, now, config } = params
 
   if (now < effectiveStartDate || (effectiveEndDate && now >= effectiveEndDate)) {
     return null
@@ -42,7 +48,7 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
   }
 
   // --- 2. Handle Onetime Plan Cycle (No changes needed) ---
-  if (billingConfig.planType === "onetime") {
+  if (config.planType === "onetime") {
     const start = effectiveStartDate
     const end = effectiveEndDate ?? Number.POSITIVE_INFINITY
     // For onetime without effectiveEndDate, tests expect infinite window with
@@ -54,9 +60,9 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
   }
 
   // --- 3. Recurring Plan Validation and Setup (No changes needed) ---
-  const { billingInterval, billingIntervalCount, billingAnchor } = billingConfig
+  const { interval, intervalCount, anchor } = config
 
-  const anchor = getAnchor(effectiveStartDate, billingInterval, billingAnchor)
+  const anchorValue = getAnchor(effectiveStartDate, interval, anchor)
 
   const paidPeriodStart = trialEndsAt
     ? Math.max(effectiveStartDate, trialEndsAt)
@@ -73,35 +79,35 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
 
   // This logic correctly finds the first anchor date on or after the paid period starts.
   const tempDate = paidPeriodStartDateObj
-  switch (billingInterval) {
+  switch (interval) {
     case "minute": {
       // Align minutes to multiples of `billingIntervalCount` and seconds to `anchor`.
-      const c = Math.max(1, billingIntervalCount)
+      const c = Math.max(1, intervalCount)
       const y = tempDate.getUTCFullYear()
       const m = tempDate.getUTCMonth()
       const d = tempDate.getUTCDate()
       const h = tempDate.getUTCHours()
       const minute = tempDate.getUTCMinutes()
       const alignedMinute = minute - (minute % c)
-      firstPaidCycleStart = new Date(Date.UTC(y, m, d, h, alignedMinute, anchor, 0))
+      firstPaidCycleStart = new Date(Date.UTC(y, m, d, h, alignedMinute, anchorValue, 0))
       break
     }
     case "day":
-      firstPaidCycleStart = startOfUtcHour(setUtc(tempDate, { hours: anchor }))
+      firstPaidCycleStart = startOfUtcHour(setUtc(tempDate, { hours: anchorValue }))
       break
     case "week":
-      firstPaidCycleStart = startOfUtcDay(setUtcDay(tempDate, anchor, 0))
+      firstPaidCycleStart = startOfUtcDay(setUtcDay(tempDate, anchorValue, 0))
       break
     case "month":
     case "year":
-      firstPaidCycleStart = startOfUtcDay(setUtc(tempDate, { date: anchor }))
+      firstPaidCycleStart = startOfUtcDay(setUtc(tempDate, { date: anchorValue }))
       break
     default:
-      throw new Error(`Invalid billing interval: ${billingInterval}`)
+      throw new Error(`Invalid billing interval: ${interval}`)
   }
 
   if (firstPaidCycleStart.getTime() < paidPeriodStartDateObj.getTime()) {
-    firstPaidCycleStart = addByInterval(firstPaidCycleStart, billingInterval, billingIntervalCount)
+    firstPaidCycleStart = addByInterval(firstPaidCycleStart, interval, intervalCount)
   }
 
   // --- 5. Iterate to Find the Current Window (No changes needed) ---
@@ -112,8 +118,8 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
   if (now < firstPaidCycleStart.getTime()) {
     // For minute intervals with count > 1, return the full aligned window and
     // compute proration from the paid start to avoid tiny stub windows.
-    if (billingInterval === "minute" && billingIntervalCount > 1) {
-      const fullStartDate = addByInterval(firstPaidCycleStart, "minute", -billingIntervalCount)
+    if (interval === "minute" && intervalCount > 1) {
+      const fullStartDate = addByInterval(firstPaidCycleStart, "minute", -intervalCount)
       const fullStart = fullStartDate.getTime()
       const end = Math.min(
         firstPaidCycleStart.getTime(),
@@ -133,10 +139,10 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
   }
 
   // If we are past the first anchor, find the correct cycle.
-  let nextCycleStart = addByInterval(currentCycleStart, billingInterval, billingIntervalCount)
+  let nextCycleStart = addByInterval(currentCycleStart, interval, intervalCount)
   while (now >= nextCycleStart.getTime()) {
     currentCycleStart = nextCycleStart
-    nextCycleStart = addByInterval(currentCycleStart, billingInterval, billingIntervalCount)
+    nextCycleStart = addByInterval(currentCycleStart, interval, intervalCount)
   }
 
   // --- 6. Construct, Cap, and Return the Final Window ---
@@ -161,13 +167,19 @@ export interface CalculateNextCyclesParams {
   /** The date the trial ends, or null if there is no trial. */
   trialEndsAt: number | null
   /** The recurring billing configuration with a required numeric anchor. */
-  billingConfig: Omit<BillingConfig, "billingAnchor"> & { billingAnchor: number }
+  config: {
+    name: BillingConfig["name"]
+    interval: BillingConfig["billingInterval"]
+    intervalCount: BillingConfig["billingIntervalCount"]
+    anchor: number
+    planType: BillingConfig["planType"]
+  }
   /** The total number of cycles to generate. */
   count: number
 }
 
 /**
- * Calculates the next N billing cycles for a subscription, starting from a given date.
+ * Calculates the next N cycles for a subscription, starting from a given date.
  * This function intelligently handles trial periods and reuses the core cycle logic
  * to ensure consistency and robustness.
  *
@@ -177,17 +189,16 @@ export interface CalculateNextCyclesParams {
 export function calculateNextNCycles(
   params: CalculateNextCyclesParams
 ): { end: number; start: number; isTrial?: boolean }[] {
-  const { referenceDate, effectiveStartDate, effectiveEndDate, trialEndsAt, billingConfig, count } =
-    params
+  const { referenceDate, effectiveStartDate, effectiveEndDate, trialEndsAt, config, count } = params
 
   // Onetime plans have a single window; return it if applicable
-  if (billingConfig.planType === "onetime") {
+  if (config.planType === "onetime") {
     const single = calculateCycleWindow({
       now: referenceDate,
       effectiveStartDate,
       effectiveEndDate,
       trialEndsAt,
-      billingConfig: billingConfig,
+      config,
     })
     return single ? [single] : []
   }
@@ -195,7 +206,7 @@ export function calculateNextNCycles(
   // If reference is before the subscription starts, nothing to return
   if (referenceDate < effectiveStartDate) return []
 
-  const core = { effectiveStartDate, effectiveEndDate, trialEndsAt, billingConfig }
+  const core = { effectiveStartDate, effectiveEndDate, trialEndsAt, config }
 
   const results: { end: number; start: number; isTrial?: boolean }[] = []
 
