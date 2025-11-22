@@ -360,14 +360,14 @@ export class GrantsManager {
                 },
               },
             },
-            where: (grant, { and, eq, lt, gte, or, isNull, not }) =>
+            where: (grant, { and, eq, lte, gt, or, isNull, not }) =>
               and(
                 eq(grant.projectId, projectId),
                 eq(grant.subjectId, subject.subjectId),
                 eq(grant.subjectType, subject.subjectType),
                 not(eq(grant.deleted, true)),
-                gte(grant.effectiveAt, now), // effectiveAt >= now
-                or(isNull(grant.expiresAt), lt(grant.expiresAt, now)) // expiresAt <= now or null
+                lte(grant.effectiveAt, now), // effectiveAt >= now
+                or(isNull(grant.expiresAt), gt(grant.expiresAt, now)) // expiresAt <= now or null
               ),
             orderBy: (grant, { desc }) => desc(grant.priority),
           })
@@ -556,7 +556,8 @@ export class GrantsManager {
       version,
       effectiveAt: merged.effectiveAt,
       expiresAt: merged.expiresAt,
-      nextRevalidateAt: merged.expiresAt,
+      // revalidate every hour
+      nextRevalidateAt: Date.now() + 1000 * 60 * 60,
       lastSyncAt: Date.now(),
       computedAt: Date.now(),
       currentCycleUsage: "0",
@@ -615,7 +616,7 @@ export class GrantsManager {
     allowOverage: boolean
     grants: z.infer<typeof entitlementGrantsSnapshotSchema>[]
     effectiveAt: number
-    expiresAt: number
+    expiresAt: number | null
     mergingPolicy: EntitlementMergingPolicy
   } {
     const { grants, featureType, policy: explicitPolicy } = params
@@ -626,7 +627,7 @@ export class GrantsManager {
         allowOverage: false,
         grants: [],
         effectiveAt: 0,
-        expiresAt: 0,
+        expiresAt: null,
         mergingPolicy: "replace",
       }
     }
@@ -674,12 +675,8 @@ export class GrantsManager {
 
         // For sum, the validity range is the union of all grants
         const minStart = Math.min(...sorted.map((g) => g.effectiveAt))
-        // Treat null expiresAt as Infinity for max calculation?
-        // Existing logic used Date.now() fallback, let's stick to that for consistency or fix it.
-        // Actually, if expiresAt is null it means infinite.
-        // Let's assume null means "no expiry" so it's effectively infinite.
-        // But we need a number. Let's use the max of numbers.
-        const maxEnd = Math.max(...sorted.map((g) => g.expiresAt ?? Date.now()))
+        // max end or null if no expires at
+        const maxEnd = Math.max(...sorted.map((g) => g.expiresAt ?? Number.NEGATIVE_INFINITY))
 
         return {
           limit: limit > 0 ? limit : null,
@@ -687,7 +684,7 @@ export class GrantsManager {
           // we take all the grants that were used to calculate the limit
           grants: sorted,
           effectiveAt: minStart,
-          expiresAt: maxEnd,
+          expiresAt: maxEnd === Number.NEGATIVE_INFINITY ? null : maxEnd,
           mergingPolicy: policy,
         }
       }
@@ -707,7 +704,7 @@ export class GrantsManager {
           // we take the highest limit grant that was used to calculate the limit
           grants: [winningGrant],
           effectiveAt: winningGrant.effectiveAt,
-          expiresAt: winningGrant.expiresAt ?? Date.now(),
+          expiresAt: winningGrant.expiresAt,
           mergingPolicy: policy,
         }
       }
@@ -726,7 +723,7 @@ export class GrantsManager {
           // we take the lowest limit grant that was used to calculate the limit
           grants: [winningGrant],
           effectiveAt: winningGrant.effectiveAt,
-          expiresAt: winningGrant.expiresAt ?? Date.now(),
+          expiresAt: winningGrant.expiresAt,
           mergingPolicy: policy,
         }
       }
@@ -740,7 +737,7 @@ export class GrantsManager {
           // grants are replaced, so we take the highest priority grant
           grants: [highest],
           effectiveAt: highest.effectiveAt,
-          expiresAt: highest.expiresAt ?? Date.now(),
+          expiresAt: highest.expiresAt,
           mergingPolicy: policy,
         }
       }
@@ -754,7 +751,7 @@ export class GrantsManager {
           // grants are replaced, so we take the highest priority grant
           grants: [highest],
           effectiveAt: highest.effectiveAt,
-          expiresAt: highest.expiresAt ?? Date.now(),
+          expiresAt: highest.expiresAt,
           mergingPolicy: policy,
         }
       }
@@ -847,8 +844,7 @@ export class GrantsManager {
         BigInt(state.accumulatedUsage) + BigInt(state.currentCycleUsage)
       ).toString(),
       effectiveAt: resetCycleForNow.start,
-      // TODO: You need separate fields for reset cycle boundaries!
-      // For now, this won't work correctly because we're overwriting billing cycle boundaries
+      nextRevalidateAt: Date.now() + 1000 * 60 * 60,
     }
   }
 
@@ -909,7 +905,8 @@ export class GrantsManager {
     amount: number
     now: number
   }): ReportUsageResult & {
-    effectiveAt?: number
+    effectiveAt?: number | null
+    expiresAt?: number | null
     accumulatedUsage?: string
   } {
     const { state, amount, now } = params
@@ -936,7 +933,12 @@ export class GrantsManager {
     const activeGrants = validatedState.grants
 
     // 2. Recalculate effective limit from active grants (in case grants expired)
-    const { limit: effectiveLimit, allowOverage } = this.mergeGrants({
+    const {
+      limit: effectiveLimit,
+      allowOverage,
+      expiresAt,
+      effectiveAt,
+    } = this.mergeGrants({
       grants: activeGrants,
       policy: validatedState.mergingPolicy,
     })
@@ -970,7 +972,8 @@ export class GrantsManager {
       allowed,
       usage: newUsage,
       accumulatedUsage: normalizedState.accumulatedUsage,
-      effectiveAt: normalizedState.effectiveAt,
+      effectiveAt: effectiveAt,
+      expiresAt: expiresAt,
       limit: effectiveLimit ?? undefined,
       consumedFrom,
       message: allowed ? "Allowed" : "Limit exceeded",
@@ -1104,7 +1107,7 @@ export class GrantsManager {
     if (activeGrants.length === 0) {
       return Err(
         new UnPriceGrantError({
-          message: "No active grant at this timestamp",
+          message: `No active grant found for customer ${state.customerId} and project ${state.projectId} and feature ${state.featureSlug}`,
           subjectId: state.customerId,
         })
       )

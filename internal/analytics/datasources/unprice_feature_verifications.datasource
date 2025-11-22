@@ -14,7 +14,7 @@ SCHEMA >
     `featurePlanVersionId` String `json:$.featurePlanVersionId`,
     `requestId` String `json:$.requestId`,
     `projectId` String `json:$.projectId`,
-    `entitlementId` String `json:$.entitlementId`,
+    `grantId` String `json:$.grantId`,
     `subscriptionId` Nullable(String) `json:$.subscriptionId`,
     `subscriptionItemId` Nullable(String) `json:$.subscriptionItemId`,
     `subscriptionPhaseId` Nullable(String) `json:$.subscriptionPhaseId`,
@@ -24,4 +24,4 @@ SCHEMA >
 
 ENGINE MergeTree
 ENGINE_PARTITION_KEY toYYYYMM(fromUnixTimestamp64Milli(timestamp, 'UTC'))
-ENGINE_SORTING_KEY (timestamp, projectId, customerId, featureSlug, entitlementId)
+ENGINE_SORTING_KEY (timestamp, projectId, customerId, featureSlug)

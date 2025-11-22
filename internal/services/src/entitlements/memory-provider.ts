@@ -41,7 +41,11 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
       this.logger.error("Insert verification failed", {
         error: error instanceof Error ? error.message : "unknown",
       })
-      return Err(new UnPriceEntitlementStorageError({ message: "Insert verification failed" }))
+      return Err(
+        new UnPriceEntitlementStorageError({
+          message: `Insert verification failed: ${error instanceof Error ? error.message : "unknown"}`,
+        })
+      )
     }
   }
 
@@ -66,7 +70,7 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
       this.verifications = []
       return Err(
         new UnPriceEntitlementStorageError({
-          message: "Initialize failed",
+          message: `Initialize failed: ${error instanceof Error ? error.message : "unknown"}`,
           context: { error: error instanceof Error ? error.message : "unknown" },
         })
       )
@@ -84,7 +88,11 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
       return Ok(this.states.get(key) ?? null)
     } catch (error) {
       this.logger.error("Get failed", { error: error instanceof Error ? error.message : "unknown" })
-      return Err(new UnPriceEntitlementStorageError({ message: "Get failed" }))
+      return Err(
+        new UnPriceEntitlementStorageError({
+          message: `Get failed: ${error instanceof Error ? error.message : "unknown"}`,
+        })
+      )
     }
   }
 
@@ -96,7 +104,11 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
       this.logger.error("Get all failed", {
         error: error instanceof Error ? error.message : "unknown",
       })
-      return Err(new UnPriceEntitlementStorageError({ message: "Get all failed" }))
+      return Err(
+        new UnPriceEntitlementStorageError({
+          message: `Get all failed: ${error instanceof Error ? error.message : "unknown"}`,
+        })
+      )
     }
   }
 
@@ -111,7 +123,11 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
       this.logger.error("Delete all failed", {
         error: error instanceof Error ? error.message : "unknown",
       })
-      return Err(new UnPriceEntitlementStorageError({ message: "Delete all failed" }))
+      return Err(
+        new UnPriceEntitlementStorageError({
+          message: `Delete all failed: ${error instanceof Error ? error.message : "unknown"}`,
+        })
+      )
     }
   }
 
@@ -129,7 +145,11 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
       return Ok(undefined)
     } catch (error) {
       this.logger.error("Set failed", { error: error instanceof Error ? error.message : "unknown" })
-      return Err(new UnPriceEntitlementStorageError({ message: "Set failed" }))
+      return Err(
+        new UnPriceEntitlementStorageError({
+          message: `Set failed: ${error instanceof Error ? error.message : "unknown"}`,
+        })
+      )
     }
   }
 
@@ -146,7 +166,11 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
       this.logger.error("Delete failed", {
         error: error instanceof Error ? error.message : "unknown",
       })
-      return Err(new UnPriceEntitlementStorageError({ message: "Delete failed" }))
+      return Err(
+        new UnPriceEntitlementStorageError({
+          message: `Delete failed: ${error instanceof Error ? error.message : "unknown"}`,
+        })
+      )
     }
   }
 
@@ -160,8 +184,7 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
     } catch (error) {
       return Err(
         new UnPriceEntitlementStorageError({
-          message: "Insert usage record failed",
-          context: { error: error instanceof Error ? error.message : "unknown" },
+          message: `Insert usage record failed: ${error instanceof Error ? error.message : "unknown"}`,
         })
       )
     }
@@ -175,8 +198,7 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
     } catch (error) {
       return Err(
         new UnPriceEntitlementStorageError({
-          message: "Delete all verifications failed",
-          context: { error: error instanceof Error ? error.message : "unknown" },
+          message: `Delete all verifications failed: ${error instanceof Error ? error.message : "unknown"}`,
         })
       )
     }
@@ -190,8 +212,7 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
     } catch (error) {
       return Err(
         new UnPriceEntitlementStorageError({
-          message: "Delete all usage records failed",
-          context: { error: error instanceof Error ? error.message : "unknown" },
+          message: `Delete all usage records failed: ${error instanceof Error ? error.message : "unknown"}`,
         })
       )
     }
@@ -206,8 +227,7 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
     } catch (error) {
       return Err(
         new UnPriceEntitlementStorageError({
-          message: "Get verifications failed",
-          context: { error: error instanceof Error ? error.message : "unknown" },
+          message: `Get verifications failed: ${error instanceof Error ? error.message : "unknown"}`,
         })
       )
     }
@@ -220,8 +240,7 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
     } catch (error) {
       return Err(
         new UnPriceEntitlementStorageError({
-          message: "Get usage records failed",
-          context: { error: error instanceof Error ? error.message : "unknown" },
+          message: `Get usage records failed: ${error instanceof Error ? error.message : "unknown"}`,
         })
       )
     }

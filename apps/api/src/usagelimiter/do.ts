@@ -142,7 +142,7 @@ export class DurableObjectUsagelimiter extends Server {
       logger: this.logger,
     })
 
-    // initialize the storage provider if it is not initialized
+    // initialize the storage provider
     storage.initialize()
 
     // initialize the entitlement service
@@ -156,7 +156,7 @@ export class DurableObjectUsagelimiter extends Server {
         tinybirdUrl: env.TINYBIRD_URL,
         logger: this.logger,
       }),
-      waitUntil: this.ctx.waitUntil,
+      waitUntil: (promise) => this.ctx.waitUntil(promise),
       cache: cache,
       metrics: this.metrics,
       config: {
@@ -343,11 +343,11 @@ export class DurableObjectUsagelimiter extends Server {
 
   // when the alarm is triggered
   async onAlarm(): Promise<void> {
-    // flush the metrics and logs
-    this.ctx.waitUntil(Promise.all([this.metrics.flush(), this.logger.flush()]))
     // flush the usage records
     await this.entitlementService.flushUsageRecords()
     // flush the verifications (usage verifications)
     await this.entitlementService.flushVerifications()
+    // flush the metrics and logs
+    this.ctx.waitUntil(Promise.all([this.metrics.flush(), this.logger.flush()]))
   }
 }

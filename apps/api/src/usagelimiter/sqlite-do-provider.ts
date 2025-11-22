@@ -41,7 +41,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     this.storage = args.storage
     this.state = args.state
     this.logger = args.logger
-    this.db = drizzle(args.storage, { logger: false })
+    this.db = drizzle(args.storage, { schema, logger: false })
   }
 
   /**
@@ -53,15 +53,15 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         // first migrate the database
         await this._migrate()
 
+        // then set the initialized flag
+        this.initialized = true
+
         // then memoize the states
         const { err } = await this.getAll()
 
         if (err) {
           return Err(err)
         }
-
-        // then set the initialized flag
-        this.initialized = true
 
         // return ok
         return Ok(undefined)
@@ -76,7 +76,11 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           error: error instanceof Error ? error.message : "unknown",
         })
 
-        return Err(new UnPriceEntitlementStorageError({ message: "Initialize failed" }))
+        return Err(
+          new UnPriceEntitlementStorageError({
+            message: `Initialize failed: ${error instanceof Error ? error.message : "unknown"}`,
+          })
+        )
       }
     })
   }
@@ -86,11 +90,9 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       await migrate(this.db, migrations)
     } catch (error) {
       // Log the error
-      this.logger.error("error migrating DO", {
-        error: error instanceof Error ? error.message : "unknown error",
+      this.logger.error(`SQLite DO ${this.state.id.toString()} migrate failed`, {
+        error: error instanceof Error ? error.message : "unknown",
       })
-
-      throw error
     }
   }
 
@@ -110,15 +112,12 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       this.isInitialized()
 
       await this.storage.deleteAll()
-      await this.state.blockConcurrencyWhile(async () => {
-        this.memoizedStates.clear()
-      })
+      this.memoizedStates.clear()
       return Ok(undefined)
     } catch (error) {
       return Err(
         new UnPriceEntitlementStorageError({
-          message: "Delete all failed",
-          context: { error: error instanceof Error ? error.message : "unknown" },
+          message: `Delete all failed: ${error instanceof Error ? error.message : "unknown"}`,
         })
       )
     }
@@ -135,16 +134,14 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       const states = await this.storage.list<EntitlementState>()
 
       // memoize the states
-      await this.state.blockConcurrencyWhile(async () => {
-        // clear the memoized states
-        this.memoizedStates.clear()
+      // clear the memoized states
+      this.memoizedStates.clear()
 
-        // memoize the new states
-        states.forEach((value, key) => {
-          if (value) {
-            this.memoizedStates.set(key, value)
-          }
-        })
+      // memoize the new states
+      states.forEach((value, key) => {
+        if (value) {
+          this.memoizedStates.set(key, value)
+        }
       })
 
       // return the states
@@ -155,8 +152,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       })
       return Err(
         new UnPriceEntitlementStorageError({
-          message: "Get all failed",
-          context: { error: error instanceof Error ? error.message : "unknown" },
+          message: `Get all failed: ${error instanceof Error ? error.message : "unknown"}`,
         })
       )
     }
@@ -188,9 +184,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
 
       // memoize the state
       if (value) {
-        await this.state.blockConcurrencyWhile(async () => {
-          this.memoizedStates.set(key, value)
-        })
+        this.memoizedStates.set(key, value)
       }
 
       // return the state
@@ -201,10 +195,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       })
       return Err(
         new UnPriceEntitlementStorageError({
-          message: "Get failed",
-          context: {
-            error: error instanceof Error ? error.message : "unknown",
-          },
+          message: `Get failed: ${error instanceof Error ? error.message : "unknown"}`,
         })
       )
     }
@@ -229,9 +220,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       await this.storage.put(key, params.state)
 
       // memoize the state
-      await this.state.blockConcurrencyWhile(async () => {
-        this.memoizedStates.set(key, params.state)
-      })
+      this.memoizedStates.set(key, params.state)
 
       // return ok
       return Ok(undefined)
@@ -241,10 +230,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       })
       return Err(
         new UnPriceEntitlementStorageError({
-          message: "Set failed",
-          context: {
-            error: error instanceof Error ? error.message : "unknown",
-          },
+          message: `Set failed: ${error instanceof Error ? error.message : "unknown"}`,
         })
       )
     }
@@ -268,9 +254,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       await this.storage.delete(key)
 
       // delete the state from the memoized states
-      await this.state.blockConcurrencyWhile(async () => {
-        this.memoizedStates.delete(key)
-      })
+      this.memoizedStates.delete(key)
 
       // return ok
       return Ok(undefined)
@@ -280,10 +264,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       })
       return Err(
         new UnPriceEntitlementStorageError({
-          message: "Delete failed",
-          context: {
-            error: error instanceof Error ? error.message : "unknown",
-          },
+          message: `Delete failed: ${error instanceof Error ? error.message : "unknown"}`,
         })
       )
     }
@@ -300,7 +281,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
 
       // insert the usage record into the database
       await this.db.insert(schema.usageRecords).values({
-        entitlementId: record.entitlementId,
+        grantId: record.grantId,
         customerId: record.customerId,
         featureSlug: record.featureSlug,
         usage: record.usage.toString(),
@@ -308,7 +289,6 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         subscriptionItemId: record.subscriptionItemId,
         subscriptionPhaseId: record.subscriptionPhaseId,
         subscriptionId: record.subscriptionId,
-        grantId: record.grantId,
         timestamp: record.timestamp,
         createdAt: record.createdAt,
         metadata: record.metadata ? JSON.stringify(record.metadata) : null,
@@ -325,10 +305,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       })
       return Err(
         new UnPriceEntitlementStorageError({
-          message: "Insert usage record failed",
-          context: {
-            error: error instanceof Error ? error.message : "unknown",
-          },
+          message: `Insert usage record failed: ${error instanceof Error ? error.message : "unknown"}`,
         })
       )
     }
@@ -345,7 +322,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
 
       // insert the verification into the database
       await this.db.insert(schema.verifications).values({
-        entitlementId: record.entitlementId,
+        grantId: record.grantId,
         customerId: record.customerId,
         featureSlug: record.featureSlug,
         projectId: record.projectId,
@@ -365,10 +342,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       })
       return Err(
         new UnPriceEntitlementStorageError({
-          message: "Insert verification failed",
-          context: {
-            error: error instanceof Error ? error.message : "unknown",
-          },
+          message: `Insert verification failed: ${error instanceof Error ? error.message : "unknown"}`,
         })
       )
     }
@@ -384,7 +358,10 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       this.isInitialized()
 
       // get the verifications from the database
-      const verifications = await this.db.query.verifications.findMany()
+      const verifications = await this.db.query.verifications.findMany({
+        orderBy: (verification, { desc }) => [desc(verification.createdAt)],
+      })
+
       return Ok(
         verifications.map((verification) => ({
           ...verification,
@@ -393,7 +370,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           latency: verification.latency ? Number(verification.latency) : 0,
           createdAt: verification.createdAt,
           requestId: verification.requestId,
-          entitlementId: verification.entitlementId,
+          grantId: verification.grantId,
           customerId: verification.customerId,
           featureSlug: verification.featureSlug,
           projectId: verification.projectId,
@@ -408,10 +385,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
 
       return Err(
         new UnPriceEntitlementStorageError({
-          message: "Get verifications failed",
-          context: {
-            error: error instanceof Error ? error.message : "unknown",
-          },
+          message: `Get verifications failed: ${error instanceof Error ? error.message : "unknown"}`,
         })
       )
     }
@@ -425,7 +399,10 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       this.isInitialized()
 
       // get the usage records from the database
-      const usage = await this.db.query.usageRecords.findMany()
+      const usage = await this.db.query.usageRecords.findMany({
+        orderBy: (usage, { desc }) => [desc(usage.createdAt)],
+      })
+
       return Ok(
         usage.map((usage) => ({
           ...usage,
@@ -433,7 +410,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           usage: usage.usage ? Number(usage.usage) : 0,
           createdAt: usage.createdAt,
           requestId: usage.requestId,
-          entitlementId: usage.entitlementId,
+          grantId: usage.grantId,
         }))
       )
     } catch (error) {
@@ -442,10 +419,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       })
       return Err(
         new UnPriceEntitlementStorageError({
-          message: "Get usage records failed",
-          context: {
-            error: error instanceof Error ? error.message : "unknown",
-          },
+          message: `Get usage records failed: ${error instanceof Error ? error.message : "unknown"}`,
         })
       )
     }
@@ -467,10 +441,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       })
       return Err(
         new UnPriceEntitlementStorageError({
-          message: "Delete all usage records failed",
-          context: {
-            error: error instanceof Error ? error.message : "unknown",
-          },
+          message: `Delete all usage records failed: ${error instanceof Error ? error.message : "unknown"}`,
         })
       )
     }
@@ -492,10 +463,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       })
       return Err(
         new UnPriceEntitlementStorageError({
-          message: "Delete all verifications failed",
-          context: {
-            error: error instanceof Error ? error.message : "unknown",
-          },
+          message: `Delete all verifications failed: ${error instanceof Error ? error.message : "unknown"}`,
         })
       )
     }

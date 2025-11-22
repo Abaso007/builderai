@@ -1,7 +1,6 @@
 import {
   EntitlementService,
-  type EntitlementState,
-  MemoryStorageProvider,
+  MemoryEntitlementStorageProvider,
 } from "@unprice/services/entitlements"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -18,8 +17,7 @@ export const test = protectedProjectProcedure
 
     const entitlementService = new EntitlementService({
       db: opts.ctx.db,
-      storage: new MemoryStorageProvider({
-        memory: new Map<string, EntitlementState>(),
+      storage: new MemoryEntitlementStorageProvider({
         logger: opts.ctx.logger,
       }),
       logger: opts.ctx.logger,
@@ -36,7 +34,11 @@ export const test = protectedProjectProcedure
       customerId,
       projectId: project.id,
       featureSlug: "tokens",
-      amount: 1,
+      usage: 1,
+      requestId: "test",
+      metadata: null,
+      idempotenceKey: "test",
+      timestamp: Date.now(),
     })
 
     return entitlements

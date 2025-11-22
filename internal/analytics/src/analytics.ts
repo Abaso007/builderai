@@ -299,14 +299,14 @@ export class Analytics {
       parameters: z.object({
         projectId: z.string().optional(),
         customerId: z.string().optional(),
-        entitlementId: z.string().optional(),
+        grantId: z.string().optional(),
         featureSlug: z.string().optional(),
         intervalDays: z.number().optional(),
       }),
       data: z.object({
         projectId: z.string(),
         customerId: z.string().optional(),
-        entitlementId: z.string().optional(),
+        grantId: z.string().optional(),
         featureSlug: z.string(),
         count: z.number(),
         p50_latency: z.number(),
@@ -356,7 +356,7 @@ export class Analytics {
       parameters: z.object({
         projectId: z.string(),
         customerId: z.string().optional(),
-        entitlementId: z.string().optional(),
+        grantId: z.string().optional(),
         intervalDays: z.number().optional(),
         start: z.number().optional(),
         end: z.number().optional(),
@@ -364,7 +364,7 @@ export class Analytics {
       data: z.object({
         projectId: z.string(),
         customerId: z.string().optional(),
-        entitlementId: z.string().optional(),
+        grantId: z.string().optional(),
         featureSlug: z.string(),
         count: z.number(),
         sum: z.number(),
@@ -386,12 +386,12 @@ export class Analytics {
       parameters: z.object({
         projectId: z.string(),
         customerId: z.string(),
-        entitlementIds: z.array(z.string()),
+        grantIds: z.array(z.string()),
       }),
       data: z.object({
         projectId: z.string(),
         customerId: z.string(),
-        entitlementId: z.string(),
+        grantId: z.string(),
         featureSlug: z.string(),
         count_all: z.number(),
         sum_all: z.number(),
@@ -410,7 +410,7 @@ export class Analytics {
     return this.readClient.buildPipe({
       pipe: "v1_get_feature_usage_no_duplicates",
       parameters: z.object({
-        entitlementIds: z.array(z.string()).optional(),
+        grantIds: z.array(z.string()).optional(),
         subscriptionItemIds: z.array(z.string()).optional(),
         customerId: z.string(),
         projectId: z.string(),
@@ -420,7 +420,7 @@ export class Analytics {
       data: z.object({
         projectId: z.string(),
         customerId: z.string(),
-        entitlementId: z.string().optional(),
+        grantId: z.string().optional(),
         subscriptionItemId: z.string().optional(),
         featureSlug: z.string(),
         sum_all: z.number().optional(),
@@ -495,9 +495,9 @@ export class Analytics {
       ["usage", "package", "tier"].includes(entitlement.featureType)
     )
 
-    const entitlementIdsArray = entitlementsUsage.map((entitlement) => entitlement.entitlementId)
+    const grantIdsArray = entitlementsUsage.map((entitlement) => entitlement.entitlementId)
 
-    if (entitlementIdsArray.length === 0) {
+    if (grantIdsArray.length === 0) {
       return Ok([])
     }
 
@@ -505,14 +505,14 @@ export class Analytics {
     // more accurate one
     const [totalAccumulatedUsages, totalPeriodUsages] = await Promise.all([
       includeAccumulatedUsage
-        ? this.getBillingUsage({ customerId, projectId, entitlementIds: entitlementIdsArray })
+        ? this.getBillingUsage({ customerId, projectId, grantIds: grantIdsArray })
             .then((usage) => usage.data ?? [])
             .catch((error) => {
               this.logger.error("error getting features usage total", {
                 error: JSON.stringify(error),
                 customerId,
                 projectId,
-                entitlementIds: entitlementIdsArray,
+                grantIds: grantIdsArray,
                 startAt,
                 endAt,
                 includeAccumulatedUsage,
@@ -523,7 +523,7 @@ export class Analytics {
       this.getBillingUsage({
         customerId,
         projectId,
-        entitlementIds: entitlementIdsArray,
+        grantIds: grantIdsArray,
         start: startAt,
         end: endAt,
       })
@@ -533,7 +533,7 @@ export class Analytics {
             error: JSON.stringify(error),
             customerId,
             projectId,
-            entitlementIds: entitlementIdsArray,
+            grantIds: grantIdsArray,
             startAt,
             endAt,
           })
@@ -556,10 +556,10 @@ export class Analytics {
       const isAccumulated = entitlement.aggregationMethod.endsWith("_all")
 
       const totalUsage = totalPeriodUsages.find(
-        (usage) => usage.entitlementId === entitlement.entitlementId
+        (usage) => usage.grantId === entitlement.entitlementId
       )
       const totalAccumulatedUsage = totalAccumulatedUsages.find(
-        (usage) => usage.entitlementId === entitlement.entitlementId
+        (usage) => usage.grantId === entitlement.entitlementId
       )
 
       if (totalUsage) {

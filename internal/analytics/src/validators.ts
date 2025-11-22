@@ -58,7 +58,7 @@ export const metadataSchema = z
 
 export const featureVerificationSchemaV1 = z.object({
   projectId: z.string(),
-  entitlementId: z.string(),
+  grantId: z.string(),
   deniedReason: z.string().optional(),
   allowed: z.boolean(),
   timestamp: z
@@ -81,7 +81,7 @@ export const featureUsageSchemaV1 = z.object({
   subscriptionItemId: z.string().nullable(),
   subscriptionPhaseId: z.string().nullable(),
   subscriptionId: z.string().nullable(),
-  entitlementId: z.string(),
+  grantId: z.string(),
   featureSlug: z.string(),
   customerId: z.string(),
   timestamp: z
@@ -91,7 +91,6 @@ export const featureUsageSchemaV1 = z.object({
   projectId: z.string(),
   featurePlanVersionId: z.string(),
   usage: stringToUInt32,
-  grantId: z.string(),
   createdAt: z
     .number()
     .default(Date.now())
@@ -131,7 +130,7 @@ export const auditLogSchemaV1 = z.object({
 export const getAnalyticsVerificationsResponseSchema = z.object({
   projectId: z.string(),
   customerId: z.string().optional(),
-  entitlementId: z.string().optional(),
+  grantId: z.string().optional(),
   featureSlug: z.string(),
   count: z.number(),
   p50_latency: z.number(),
@@ -142,7 +141,7 @@ export const getAnalyticsVerificationsResponseSchema = z.object({
 export const getUsageResponseSchema = z.object({
   projectId: z.string(),
   customerId: z.string().optional(),
-  entitlementId: z.string().optional(),
+  grantId: z.string().optional(),
   featureSlug: z.string(),
   count: z.number(),
   sum: z.number(),

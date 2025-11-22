@@ -9,8 +9,8 @@ SQL >
         projectId,
         customerId,
         featureSlug,
-        {% if defined(entitlementIds) %}
-            entitlementId,
+        {% if defined(grantIds) %}
+            grantId,
         {% end %}
         {% if defined(subscriptionItemIds) %}
             subscriptionItemId,
@@ -33,14 +33,14 @@ SQL >
             AND timestamp BETWEEN {{ Int64(start) }}
             AND {{ Int64(end) }}
         {% end %}
-        {% if defined(entitlementIds) %}
-            AND entitlementId IN {{ Array(entitlementIds, 'String') }}
+        {% if defined(grantIds) %}
+            AND grantId IN {{ Array(grantIds, 'String') }}
         {% end %}
         {% if defined(subscriptionItemIds) %}
             AND subscriptionItemId IN {{ Array(subscriptionItemIds, 'String') }}
         {% end %}
-    {% if defined(entitlementIds) %}
-        GROUP BY projectId, customerId, featureSlug, entitlementId
+    {% if defined(grantIds) %}
+        GROUP BY projectId, customerId, featureSlug, grantId
     {% else %}
         {% if defined(subscriptionItemIds) %}
             GROUP BY projectId, customerId, featureSlug, subscriptionItemId

@@ -5,14 +5,14 @@ SQL >
         projectId,
         customerId,
         featureSlug,
-        entitlementId,
+        grantId,
         countState() AS count,
         sumState(usage) AS sum,
         maxState(usage) AS max,
         argMaxState(usage, timestamp) AS last_during_period
     FROM unprice_feature_usage_records
     WHERE deleted = 0
-    GROUP BY date, projectId, customerId, featureSlug, entitlementId
+    GROUP BY date, projectId, customerId, featureSlug, grantId
     ORDER BY date DESC
 
 TYPE MATERIALIZED

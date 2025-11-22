@@ -94,7 +94,7 @@ export class EntitlementService {
         deniedReason: "ENTITLEMENT_NOT_FOUND",
         metadata: params.metadata,
         latency: performance.now() - params.performanceStart,
-        entitlementId: "",
+        grantId: "",
         requestId: params.requestId,
         createdAt: Date.now(),
       })
@@ -120,7 +120,7 @@ export class EntitlementService {
       deniedReason: result.deniedReason ?? undefined,
       metadata: params.metadata,
       latency: performance.now() - params.performanceStart,
-      entitlementId: state.id,
+      grantId: state.grants[0]!.id,
       requestId: params.requestId,
       createdAt: Date.now(),
     })
@@ -172,6 +172,7 @@ export class EntitlementService {
       if (result.effectiveAt) {
         state.effectiveAt = result.effectiveAt
       }
+
       await this.storage.set({ state })
 
       for (const consumed of result.consumedFrom ?? []) {
@@ -184,7 +185,6 @@ export class EntitlementService {
           grantId: consumed.grantId,
           idempotenceKey: params.idempotenceKey,
           requestId: params.requestId,
-          entitlementId: state.id,
           featurePlanVersionId: consumed.featurePlanVersionId,
           subscriptionItemId: consumed.subscriptionItemId,
           subscriptionPhaseId: consumed.subscriptionPhaseId,
@@ -221,7 +221,7 @@ export class EntitlementService {
     try {
       const transformedEvents = verifications.map((event) => ({
         featureSlug: event.featureSlug,
-        entitlementId: event.entitlementId,
+        grantId: event.grantId,
         customerId: event.customerId,
         projectId: event.projectId,
         timestamp: event.timestamp,
@@ -232,6 +232,13 @@ export class EntitlementService {
         allowed: event.allowed,
       }))
 
+      if (transformedEvents.length === 0) {
+        return Ok({
+          success: true,
+          quarantined: 0,
+        })
+      }
+
       const data = await this.analytics
         .ingestFeaturesVerification(transformedEvents)
         .catch((e) => {
@@ -240,6 +247,7 @@ export class EntitlementService {
             customerId: transformedEvents[0]?.customerId,
             projectId: transformedEvents[0]?.projectId,
           })
+
           throw e
         })
         .then(async (data) => {
@@ -320,67 +328,67 @@ export class EntitlementService {
 
     const deduplicatedEvents = Array.from(uniqueEvents.values())
 
-    if (deduplicatedEvents.length > 0) {
-      try {
-        const data = await this.analytics
-          .ingestFeaturesUsage(deduplicatedEvents)
-          .catch((e) => {
-            this.logger.error(`Failed to send ${deduplicatedEvents.length} events to Analytics:`, {
-              error: e.message,
-              customerId: deduplicatedEvents[0]?.customerId,
-              projectId: deduplicatedEvents[0]?.projectId,
-            })
-            throw e
-          })
-          .then(async (data) => {
-            const rows = data?.successful_rows ?? 0
-            const quarantined = data?.quarantined_rows ?? 0
-            const total = rows + quarantined
-
-            if (total >= deduplicatedEvents.length) {
-              this.logger.debug(
-                `successfully sent ${deduplicatedEvents.length} usage records to Analytics`,
-                {
-                  rows: total,
-                }
-              )
-            } else {
-              this.logger.debug(
-                "the total of usage records sent to Analytics are not the same as the total of usage records in the db",
-                {
-                  total,
-                  expected: deduplicatedEvents.length,
-                  customerId: deduplicatedEvents[0]?.customerId,
-                  projectId: deduplicatedEvents[0]?.projectId,
-                }
-              )
-            }
-
-            this.logger.info(`Processed ${total} usage events`, {
-              customerId: deduplicatedEvents[0]?.customerId,
-              projectId: deduplicatedEvents[0]?.projectId,
-            })
-
-            return data
-          })
-
-        return Ok({
-          success: true,
-          quarantined: data?.quarantined_rows ?? 0,
-        })
-      } catch (error) {
-        this.logger.error("Failed to send usage records to Analytics:", {
-          error: error instanceof Error ? error.message : "unknown error",
-          customerId: usageRecords[0]?.customerId,
-          projectId: usageRecords[0]?.projectId,
-        })
-        throw error
-      }
-    } else {
+    if (deduplicatedEvents.length === 0) {
       return Ok({
         success: true,
         quarantined: 0,
       })
+    }
+
+    try {
+      const data = await this.analytics
+        .ingestFeaturesUsage(deduplicatedEvents)
+        .catch((e) => {
+          this.logger.error(`Failed to send ${deduplicatedEvents.length} events to Analytics:`, {
+            error: e.message,
+            customerId: deduplicatedEvents[0]?.customerId,
+            projectId: deduplicatedEvents[0]?.projectId,
+          })
+          throw e
+        })
+        .then(async (data) => {
+          const rows = data?.successful_rows ?? 0
+          const quarantined = data?.quarantined_rows ?? 0
+          const total = rows + quarantined
+
+          if (total >= deduplicatedEvents.length) {
+            this.logger.debug(
+              `successfully sent ${deduplicatedEvents.length} usage records to Analytics`,
+              {
+                rows: total,
+              }
+            )
+          } else {
+            this.logger.debug(
+              "the total of usage records sent to Analytics are not the same as the total of usage records in the db",
+              {
+                total,
+                expected: deduplicatedEvents.length,
+                customerId: deduplicatedEvents[0]?.customerId,
+                projectId: deduplicatedEvents[0]?.projectId,
+              }
+            )
+          }
+
+          this.logger.info(`Processed ${total} usage events`, {
+            customerId: deduplicatedEvents[0]?.customerId,
+            projectId: deduplicatedEvents[0]?.projectId,
+          })
+
+          return data
+        })
+
+      return Ok({
+        success: true,
+        quarantined: data?.quarantined_rows ?? 0,
+      })
+    } catch (error) {
+      this.logger.error("Failed to send usage records to Analytics:", {
+        error: error instanceof Error ? error.message : "unknown error",
+        customerId: usageRecords[0]?.customerId,
+        projectId: usageRecords[0]?.projectId,
+      })
+      throw error
     }
   }
 
@@ -396,24 +404,27 @@ export class EntitlementService {
     projectId: string
     now: number
   }): Promise<void> {
-    const states = await this.db.query.entitlements.findMany({
-      where: (e, { and, eq }) => and(eq(e.customerId, customerId), eq(e.projectId, projectId)),
+    // compute the grants for the customer
+    const { val: entitlements, err } = await this.grantsManager.computeGrantsForCustomer({
+      customerId,
+      projectId,
+      now,
     })
 
-    for (const state of states) {
-      // Ensure revalidation fields are set
-      if (!state.nextRevalidateAt) {
-        state.nextRevalidateAt = now + this.revalidateInterval
-      }
+    if (err) {
+      this.logger.error("Failed to compute grants for customer", { error: err.message })
+      throw err
+    }
 
-      await this.storage.set({ state })
+    for (const entitlement of entitlements) {
+      await this.storage.set({ state: entitlement })
       await this.cache.customerEntitlement.set(
         this.makeEntitlementKey({
-          customerId: state.customerId,
-          projectId: state.projectId,
-          featureSlug: state.featureSlug,
+          customerId: entitlement.customerId,
+          projectId: entitlement.projectId,
+          featureSlug: entitlement.featureSlug,
         }),
-        state
+        entitlement
       )
     }
   }
@@ -422,6 +433,7 @@ export class EntitlementService {
    * Flush usage records to analytics
    */
   public async flushUsageRecords(): Promise<Result<void, UnPriceEntitlementStorageError>> {
+    // initialize the storage provider
     const usageRecords = await this.storage.getAllUsageRecords()
 
     if (usageRecords.err) {
@@ -545,7 +557,7 @@ export class EntitlementService {
 
     // if already experied we need to reload the entitlement
     if (cached.expiresAt && params.now >= cached.expiresAt) {
-      this.logger.debug("Current cycle ended, recomputing grants", params)
+      this.logger.info("Current cycle ended, recomputing grants", params)
 
       const result = await this.grantsManager.computeGrantsForCustomer({
         customerId: params.customerId,
@@ -566,7 +578,7 @@ export class EntitlementService {
       const entitlement = result.val.find((e) => e.featureSlug === params.featureSlug)
 
       if (!entitlement) {
-        this.logger.error("Failed to find entitlement after cycle reset", {
+        this.logger.warn("Failed to find entitlement after cycle reset", {
           error: "Entitlement not found after cycle reset",
           ...params,
         })
@@ -582,23 +594,26 @@ export class EntitlementService {
 
     // Cache hit - no cycle boundary crossed, check if we need to revalidate
     if (params.now >= cached.nextRevalidateAt) {
-      this.logger.debug("Revalidation time, checking version", params)
+      this.logger.info("Revalidation time, checking version", params)
 
       // Lightweight version check (just query version number)
-      // TODO: here we need to check if getting the versions and the last one
-      // maybe add a latest version? or maybe hashing grants as version?
-      const dbVersion = await this.db.query.entitlements.findFirst({
-        where: (e, { and, eq }) =>
-          and(
-            eq(e.customerId, params.customerId),
-            eq(e.projectId, params.projectId),
-            eq(e.featureSlug, params.featureSlug)
-          ),
-        columns: { version: true, computedAt: true },
+      const { val: entitlement, err } = await this.getActiveEntitlement({
+        ...params,
+        opts: {
+          skipCache: params.skipCache,
+        },
       })
 
+      if (err) {
+        this.logger.error("Failed to get entitlement from DB", {
+          error: err.message,
+          ...params,
+        })
+        return null
+      }
+
       // no version found, entitlement deleted
-      if (!dbVersion) {
+      if (!entitlement) {
         // Entitlement deleted, invalidate cache
         await this.invalidateEntitlement({
           customerId: params.customerId,
@@ -611,18 +626,18 @@ export class EntitlementService {
 
       // Version mismatch or snapshot updated - reload
       // entitlement was recomputed with changes in grants
-      if (dbVersion.version !== cached.version) {
-        this.logger.info("Version mismatch detected, reloading", {
+      if (entitlement.version !== cached.version) {
+        this.logger.warn("Version mismatch detected, reloading", {
           ...params,
           cachedVersion: cached.version,
-          dbVersion: dbVersion.version,
+          dbVersion: entitlement.version,
         })
 
         // reload the entitlement from cache
-        const { val, err } = await this.getActiveEntitlement({
+        const { val: entitlementFromDB, err } = await this.getActiveEntitlement({
           ...params,
           opts: {
-            skipCache: params.skipCache,
+            skipCache: true,
           },
         })
 
@@ -636,9 +651,9 @@ export class EntitlementService {
         }
 
         // set storage
-        await this.storage.set({ state: val })
+        await this.storage.set({ state: entitlementFromDB })
 
-        return val
+        return entitlementFromDB
       }
 
       // Version matches - just update revalidation time

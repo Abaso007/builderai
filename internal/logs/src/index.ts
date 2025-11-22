@@ -38,6 +38,6 @@ export class Log<TLog extends LogSchema = LogSchema> {
   }
 
   public toString(): string {
-    return JSON.stringify(this.log)
+    return JSON.stringify({ ...this.log, time: Date.now() }, null, 2)
   }
 }

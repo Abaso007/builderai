@@ -6,13 +6,13 @@ SQL >
         metadata['colo'] AS region,
         customerId,
         featureSlug,
-        entitlementId,
+        grantId,
         countState() AS count,
         quantileTDigestState(0.50)(latency) AS p50_latency,
         quantileTDigestState(0.95)(latency) AS p95_latency,
         quantileTDigestState(0.99)(latency) AS p99_latency
     FROM unprice_feature_verifications
-    GROUP BY date, projectId, region, customerId, featureSlug, entitlementId
+    GROUP BY date, projectId, region, customerId, featureSlug, grantId
     ORDER BY date DESC
 
 TYPE MATERIALIZED
