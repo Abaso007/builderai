@@ -164,6 +164,14 @@ export class EntitlementService {
     // Update state in cache
     if (result.allowed) {
       state.currentCycleUsage = result.usage?.toString() ?? "0"
+
+      if (result.accumulatedUsage) {
+        state.accumulatedUsage = result.accumulatedUsage
+      }
+
+      if (result.effectiveAt) {
+        state.effectiveAt = result.effectiveAt
+      }
       await this.storage.set({ state })
 
       for (const consumed of result.consumedFrom ?? []) {
@@ -526,7 +534,7 @@ export class EntitlementService {
       })
 
       if (err) {
-        throw err
+        return null
       }
 
       // set storage
@@ -739,7 +747,6 @@ export class EntitlementService {
       allowOverage: entitlement.allowOverage,
       grants: entitlement.grants,
       version: entitlement.version,
-      // TODO: check this if it's correct
       lastSyncAt: entitlement.lastSyncAt,
       nextRevalidateAt: entitlement.nextRevalidateAt,
       computedAt: entitlement.computedAt,

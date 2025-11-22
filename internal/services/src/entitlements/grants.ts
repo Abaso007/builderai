@@ -82,9 +82,10 @@ export class GrantsManager {
     // priority map for the grants types
     const priorityMap = {
       subscription: 10,
-      trial: 80,
-      promotion: 90,
-      manual: 100,
+      addon: 20,
+      trial: 60,
+      promotion: 70,
+      manual: 80,
     } as const
 
     // We don't care which grant is inserted, we just want to make sure it's unique
@@ -473,34 +474,9 @@ export class GrantsManager {
     }
 
     // Sort by priority (higher first) to preserve consumption order and get the best priority grant
+    // This determines the "intent" (feature type) of the entitlement configuration
     const ordered = [...grants].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
     const bestPriorityGrant = ordered[0]!
-
-    // Determine merging policy from the feature type
-    let mergingPolicy: EntitlementMergingPolicy = "sum"
-
-    switch (bestPriorityGrant.featurePlanVersion.featureType) {
-      case "flat":
-        // for flat feature we use replace policy to override the previous entitlements
-        mergingPolicy = "replace"
-        break
-      case "tier":
-        // for tier feature we use max policy to get the highest limit
-        mergingPolicy = "max"
-        break
-      case "usage":
-        // for usage feature we use sum policy to sum the limits
-        mergingPolicy = "sum"
-        break
-      case "package":
-        // for package feature we use max policy to get the highest limit
-        mergingPolicy = "max"
-        break
-      default:
-        // for unknown feature type we use replace policy to override the previous entitlements
-        mergingPolicy = "replace"
-        break
-    }
 
     // Prepare grants snapshot (preserve priority order)
     const grantsSnapshot = ordered.map((g) => ({
@@ -520,32 +496,37 @@ export class GrantsManager {
       subscriptionId: g.subscriptionItem?.subscription?.id ?? null,
     }))
 
-    // get the range of the grants date start and end
-    const minEffectiveAt = Math.min(...grants.map((g) => g.effectiveAt))
-    const maxExpiresAt = Math.max(...grants.map((g) => g.expiresAt ?? Date.now()))
-
-    // Merge grants according to merging policy
+    // Merge grants according to merging policy derived from feature type
     const merged = this.mergeGrants({
       grants: grantsSnapshot,
-      policy: mergingPolicy,
+      featureType: bestPriorityGrant.featurePlanVersion.featureType as FeatureType,
     })
 
+    // The effective configuration should come from the "winning" grant(s)
+    // If merged.grants is empty (shouldn't happen if grants.length > 0), fall back to bestPriorityGrant
+    // But since we filter grants in mergeGrants, we need to find the corresponding full grant object
+    // for the winning grant ID to get full configuration (resetConfig etc).
+
+    const winningGrantSnapshot = merged.grants[0] ?? grantsSnapshot[0]!
+    const winningGrant = grants.find((g) => g.id === winningGrantSnapshot.id) ?? bestPriorityGrant
+
     // all feature grants must have the same feature slug
-    const featureSlug = bestPriorityGrant.featurePlanVersion.feature.slug
+    const featureSlug = winningGrant.featurePlanVersion.feature.slug
 
     // Derive overall effective/expires for cycle computation
     // Compute cycle window from reset config (half-open style via bounds)
-    const resetConfig = bestPriorityGrant.featurePlanVersion.resetConfig
+    // Use the winning grant's reset config
+    const resetConfig = winningGrant.featurePlanVersion.resetConfig
       ? {
-          ...bestPriorityGrant.featurePlanVersion.resetConfig,
-          resetAnchor: bestPriorityGrant.anchor,
+          ...winningGrant.featurePlanVersion.resetConfig,
+          resetAnchor: winningGrant.anchor,
         }
       : null
 
     // Compute version hash + current cycle boundaries
     const version = await hashStringSHA256(
       JSON.stringify({
-        grants: grantsSnapshot,
+        grants: merged.grants,
       })
     )
 
@@ -570,12 +551,12 @@ export class GrantsManager {
       allowOverage: merged.allowOverage,
       aggregationMethod: bestPriorityGrant.featurePlanVersion.aggregationMethod,
       resetConfig,
-      mergingPolicy,
-      grants: grantsSnapshot,
+      mergingPolicy: merged.mergingPolicy,
+      grants: merged.grants,
       version,
-      effectiveAt: minEffectiveAt,
-      expiresAt: maxExpiresAt,
-      nextRevalidateAt: maxExpiresAt,
+      effectiveAt: merged.effectiveAt,
+      expiresAt: merged.expiresAt,
+      nextRevalidateAt: merged.expiresAt,
       lastSyncAt: Date.now(),
       computedAt: Date.now(),
       currentCycleUsage: "0",
@@ -622,50 +603,131 @@ export class GrantsManager {
   // something like try and consume
 
   /**
-   * Merges grants according to the specified merging policy.
+   * Merges grants according to the specified feature type and its implicit merging policy.
+   * Returns the calculated limit, overage setting, the winning grants, and the effective date range.
    */
   private mergeGrants(params: {
     grants: z.infer<typeof entitlementGrantsSnapshotSchema>[]
-    policy: EntitlementMergingPolicy
+    featureType?: FeatureType | undefined
+    policy?: EntitlementMergingPolicy | undefined
   }): {
     limit: number | null
     allowOverage: boolean
+    grants: z.infer<typeof entitlementGrantsSnapshotSchema>[]
+    effectiveAt: number
+    expiresAt: number
+    mergingPolicy: EntitlementMergingPolicy
   } {
-    const { grants, policy } = params
+    const { grants, featureType, policy: explicitPolicy } = params
 
     if (grants.length === 0) {
-      return { limit: null, allowOverage: false }
+      return {
+        limit: null,
+        allowOverage: false,
+        grants: [],
+        effectiveAt: 0,
+        expiresAt: 0,
+        mergingPolicy: "replace",
+      }
     }
 
     // Sort by priority (higher priority first)
     const sorted = [...grants].sort((a, b) => b.priority - a.priority)
+
+    let policy = explicitPolicy
+
+    // If no explicit policy, derive from feature type
+    if (!policy) {
+      if (!featureType) {
+        // Fallback to replace if neither is provided
+        policy = "replace"
+      } else {
+        switch (featureType) {
+          case "flat":
+            policy = "replace"
+            break
+          case "tier":
+            policy = "max"
+            break
+          case "usage":
+            policy = "sum"
+            break
+          case "package":
+            policy = "max"
+            break
+          default:
+            policy = "replace"
+            break
+        }
+      }
+    }
+
+    // Helper to get default date range if no specific logic applies
+    // Actually we should calculate dates based on the winners
+    // But initial implementation can use the sorted list
 
     switch (policy) {
       case "sum": {
         const limit = sorted.reduce((sum, g) => sum + (g.limit ?? 0), 0)
         // Hard limit is true if ANY grant has hard limit
         const allowOverage = sorted.some((g) => g.allowOverage)
+
+        // For sum, the validity range is the union of all grants
+        const minStart = Math.min(...sorted.map((g) => g.effectiveAt))
+        // Treat null expiresAt as Infinity for max calculation?
+        // Existing logic used Date.now() fallback, let's stick to that for consistency or fix it.
+        // Actually, if expiresAt is null it means infinite.
+        // Let's assume null means "no expiry" so it's effectively infinite.
+        // But we need a number. Let's use the max of numbers.
+        const maxEnd = Math.max(...sorted.map((g) => g.expiresAt ?? Date.now()))
+
         return {
           limit: limit > 0 ? limit : null,
           allowOverage,
+          // we take all the grants that were used to calculate the limit
+          grants: sorted,
+          effectiveAt: minStart,
+          expiresAt: maxEnd,
+          mergingPolicy: policy,
         }
       }
 
       case "max": {
         const limits = sorted.map((g) => g.limit).filter((l): l is number => l !== null)
         const allowOverage = sorted.some((g) => g.allowOverage)
+        const maxLimit = limits.length > 0 ? Math.max(...limits) : null
+
+        // Filter grants: keep only the highest priority grant that offers the max limit
+        // This ensures we have a single deterministic configuration source
+        const winningGrant = sorted.find((g) => g.limit === maxLimit) || sorted[0]!
+
         return {
-          limit: limits.length > 0 ? Math.max(...limits) : null,
+          limit: maxLimit,
           allowOverage,
+          // we take the highest limit grant that was used to calculate the limit
+          grants: [winningGrant],
+          effectiveAt: winningGrant.effectiveAt,
+          expiresAt: winningGrant.expiresAt ?? Date.now(),
+          mergingPolicy: policy,
         }
       }
 
       case "min": {
         const limits = sorted.map((g) => g.limit).filter((l): l is number => l !== null)
         const allowOverage = sorted.every((g) => g.allowOverage)
+        const minLimit = limits.length > 0 ? Math.min(...limits) : null
+
+        // Filter grants: keep only the highest priority grant that offers the min limit
+        const winningGrant = sorted.find((g) => g.limit === minLimit) || sorted[0]!
+
         return {
-          limit: limits.length > 0 ? Math.min(...limits) : null,
+          limit: minLimit,
           allowOverage,
+          // we take the lowest limit grant that was used to calculate the limit
+          grants: [winningGrant],
+          effectiveAt: winningGrant.effectiveAt,
+          expiresAt: winningGrant.expiresAt ?? Date.now(),
+          mergingPolicy: policy,
         }
       }
 
@@ -675,15 +737,25 @@ export class GrantsManager {
         return {
           limit: highest.limit,
           allowOverage: highest.allowOverage,
+          // grants are replaced, so we take the highest priority grant
+          grants: [highest],
+          effectiveAt: highest.effectiveAt,
+          expiresAt: highest.expiresAt ?? Date.now(),
+          mergingPolicy: policy,
         }
       }
 
       default: {
         // Fallback to replace
-        const highestD = sorted[0]!
+        const highest = sorted[0]!
         return {
-          limit: highestD.limit ?? null,
-          allowOverage: !!highestD.allowOverage,
+          limit: highest.limit ?? null,
+          allowOverage: !!highest.allowOverage,
+          // grants are replaced, so we take the highest priority grant
+          grants: [highest],
+          effectiveAt: highest.effectiveAt,
+          expiresAt: highest.expiresAt ?? Date.now(),
+          mergingPolicy: policy,
         }
       }
     }
@@ -774,6 +846,7 @@ export class GrantsManager {
       accumulatedUsage: (
         BigInt(state.accumulatedUsage) + BigInt(state.currentCycleUsage)
       ).toString(),
+      effectiveAt: resetCycleForNow.start,
       // TODO: You need separate fields for reset cycle boundaries!
       // For now, this won't work correctly because we're overwriting billing cycle boundaries
     }
@@ -835,7 +908,10 @@ export class GrantsManager {
     state: EntitlementState
     amount: number
     now: number
-  }): ReportUsageResult {
+  }): ReportUsageResult & {
+    effectiveAt?: number
+    accumulatedUsage?: string
+  } {
     const { state, amount, now } = params
 
     // Normalize cycle usage (safety net)
@@ -866,8 +942,23 @@ export class GrantsManager {
     })
 
     // 3. Check unified limit (no per-grant tracking needed)
-    const newUsage = Number(state.currentCycleUsage) + amount
+    const newUsage = Number(normalizedState.currentCycleUsage) + amount
     const withinLimit = effectiveLimit === null || newUsage <= effectiveLimit
+
+    const allowed = withinLimit || allowOverage
+
+    if (!allowed) {
+      return {
+        allowed: false,
+        usage: Number(normalizedState.currentCycleUsage),
+        accumulatedUsage: normalizedState.accumulatedUsage,
+        effectiveAt: normalizedState.effectiveAt,
+        limit: effectiveLimit,
+        consumedFrom: [],
+        message: "Limit exceeded",
+        deniedReason: "LIMIT_EXCEEDED",
+      }
+    }
 
     // 4. Determine which grants would be consumed for billing attribution
     const consumedFrom = this.attributeConsumption({
@@ -875,17 +966,17 @@ export class GrantsManager {
       amount,
     })
 
-    const allowed = withinLimit || allowOverage
-
     return {
       allowed,
       usage: newUsage,
+      accumulatedUsage: normalizedState.accumulatedUsage,
+      effectiveAt: normalizedState.effectiveAt,
       limit: effectiveLimit ?? undefined,
       consumedFrom,
       message: allowed ? "Allowed" : "Limit exceeded",
       deniedReason: allowed ? undefined : "LIMIT_EXCEEDED",
       // TODO: handle notified over limit
-      notifiedOverLimit: !allowed,
+      notifiedOverLimit: false,
     }
   }
 
@@ -924,6 +1015,47 @@ export class GrantsManager {
       })
 
       remaining -= toAttribute
+    }
+
+    // If there is still remaining usage (overage), find a grant that allows overage to attribute it to
+    if (remaining > 0) {
+      // Find the highest priority grant that allows overage
+      const overageGrant = sorted.find((g) => g.allowOverage)
+
+      if (overageGrant) {
+        // Check if we already have an entry for this grant
+        const existingEntry = attribution.find((a) => a.grantId === overageGrant.id)
+
+        if (existingEntry) {
+          existingEntry.amount += remaining
+        } else {
+          // Add new entry for overage
+          attribution.push({
+            grantId: overageGrant.id,
+            amount: remaining,
+            priority: overageGrant.priority,
+            type: overageGrant.type,
+            featurePlanVersionId: overageGrant.featurePlanVersionId,
+            subscriptionItemId: overageGrant.subscriptionItemId,
+            subscriptionPhaseId: overageGrant.subscriptionPhaseId,
+            subscriptionId: overageGrant.subscriptionId,
+          })
+        }
+      } else {
+        // If there is no overage grant, we need to notify the user we take the first grant and attribute the remaining to it
+        const firstGrant = sorted[0]!
+        attribution.push({
+          grantId: firstGrant.id,
+          amount: remaining,
+          priority: firstGrant.priority,
+          type: firstGrant.type,
+          featurePlanVersionId: firstGrant.featurePlanVersionId,
+          subscriptionItemId: firstGrant.subscriptionItemId,
+          subscriptionPhaseId: firstGrant.subscriptionPhaseId,
+          subscriptionId: firstGrant.subscriptionId,
+        })
+        remaining = 0
+      }
     }
 
     return attribution

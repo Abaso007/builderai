@@ -1,0 +1,509 @@
+import type { Analytics } from "@unprice/analytics"
+import type { Database } from "@unprice/db"
+import type { EntitlementState } from "@unprice/db/validators"
+import type { Logger } from "@unprice/logging"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import type { Cache } from "../cache/service"
+import type { Metrics } from "../metrics"
+import { MemoryEntitlementStorageProvider } from "./memory-provider"
+import { EntitlementService } from "./service"
+
+describe("EntitlementService - verify", () => {
+  let service: EntitlementService
+  let mockDb: Database
+  let mockStorage: MemoryEntitlementStorageProvider
+  let mockLogger: Logger
+  let mockAnalytics: Analytics
+  let mockCache: Cache
+  let mockMetrics: Metrics
+
+  const now = Date.now()
+  const customerId = "cust_123"
+  const projectId = "proj_123"
+  const featureSlug = "test-feature"
+
+  const mockEntitlementState: EntitlementState = {
+    id: "ent_123",
+    customerId,
+    projectId,
+    featureSlug,
+    featureType: "usage",
+    limit: 100,
+    allowOverage: false,
+    aggregationMethod: "sum",
+    mergingPolicy: "sum",
+    currentCycleUsage: "10",
+    accumulatedUsage: "50",
+    grants: [
+      {
+        id: "grant_1",
+        type: "subscription",
+        effectiveAt: now - 10000,
+        expiresAt: now + 10000,
+        limit: 100,
+        priority: 10,
+        subjectType: "customer",
+        subjectId: customerId,
+        allowOverage: false,
+        featurePlanVersionId: "fpv_1",
+        realtime: false,
+        subscriptionId: "sub_1",
+        subscriptionItemId: "si_1",
+        subscriptionPhaseId: "sp_1",
+      },
+    ],
+    version: "v1",
+    effectiveAt: now - 10000,
+    expiresAt: now + 10000,
+    nextRevalidateAt: now + 300000,
+    lastSyncAt: now,
+    computedAt: now,
+    resetConfig: null,
+  }
+
+  beforeEach(async () => {
+    vi.clearAllMocks()
+
+    // Mock Logger
+    mockLogger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      flush: vi.fn(),
+    } as unknown as Logger
+
+    // Mock Analytics
+    mockAnalytics = {
+      ingestFeaturesVerification: vi.fn().mockResolvedValue({ successful_rows: 1 }),
+    } as unknown as Analytics
+
+    // Mock Database
+    mockDb = {
+      query: {
+        entitlements: {
+          findFirst: vi.fn(),
+        },
+      },
+    } as unknown as Database
+
+    // Mock Cache
+    mockCache = {
+      customerEntitlement: {
+        swr: vi.fn().mockImplementation(async (_key, fetcher) => {
+          return await fetcher()
+        }),
+        set: vi.fn(),
+        get: vi.fn(),
+        remove: vi.fn(),
+      },
+    } as unknown as Cache
+
+    // Mock Metrics
+    mockMetrics = {} as unknown as Metrics
+
+    // Initialize Memory Storage
+    mockStorage = new MemoryEntitlementStorageProvider({ logger: mockLogger })
+    await mockStorage.initialize()
+
+    // Initialize Service
+    service = new EntitlementService({
+      db: mockDb,
+      storage: mockStorage,
+      logger: mockLogger,
+      analytics: mockAnalytics,
+      waitUntil: vi.fn(),
+      cache: mockCache,
+      metrics: mockMetrics,
+    })
+  })
+
+  it("should verify entitlement successfully when loaded from DB (cache miss)", async () => {
+    // Setup DB mock to return the entitlement
+    vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue({
+      ...mockEntitlementState,
+      metadata: null,
+      createdAtM: now,
+      updatedAtM: now,
+    })
+
+    const result = await service.verify({
+      customerId,
+      projectId,
+      featureSlug,
+      timestamp: now,
+      requestId: "req_1",
+      fromCache: false,
+      metadata: null,
+      performanceStart: performance.now(),
+    })
+
+    // Assertions
+    expect(result.allowed).toBe(true)
+    expect(result.usage).toBe(10)
+    expect(result.deniedReason).toBeUndefined()
+
+    // Check if it tried to load from DB
+    expect(mockDb.query.entitlements.findFirst).toHaveBeenCalledTimes(1)
+    expect(mockDb.query.entitlements.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.any(Function),
+      })
+    )
+
+    // Check if it stored in memory storage
+    const stored = await mockStorage.get({ customerId, projectId, featureSlug })
+    expect(stored.val).toBeDefined()
+    expect(stored.val?.id).toBe(mockEntitlementState.id)
+
+    // Check if verification was recorded in storage
+    const verifications = await mockStorage.getAllVerifications()
+
+    expect(verifications.val).toHaveLength(1)
+    expect(verifications.val?.[0]).toMatchObject({
+      customerId,
+      projectId,
+      featureSlug,
+      allowed: true,
+    })
+  })
+
+  it("should verify entitlement from memory storage (cache hit)", async () => {
+    // Pre-populate storage
+    await mockStorage.set({ state: mockEntitlementState })
+
+    const result = await service.verify({
+      customerId,
+      projectId,
+      featureSlug,
+      timestamp: now,
+      requestId: "req_2",
+      fromCache: true, // Should use cache/storage
+      metadata: null,
+      performanceStart: performance.now(),
+    })
+
+    expect(result.allowed).toBe(true)
+
+    // DB should NOT be called
+    expect(mockDb.query.entitlements.findFirst).not.toHaveBeenCalled()
+  })
+
+  it("should deny access when usage exceeds limit", async () => {
+    const exceededState = {
+      ...mockEntitlementState,
+      currentCycleUsage: "100", // usage == limit
+      limit: 100,
+      metadata: null,
+      createdAtM: now,
+      updatedAtM: now,
+    }
+
+    // Setup DB mock
+    vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue(exceededState)
+
+    const result = await service.verify({
+      customerId,
+      projectId,
+      featureSlug,
+      timestamp: now,
+      requestId: "req_3",
+      fromCache: false,
+      metadata: null,
+      performanceStart: performance.now(),
+    })
+
+    expect(result.allowed).toBe(false)
+    expect(result.deniedReason).toBe("LIMIT_EXCEEDED")
+
+    // Check if verification was recorded as denied
+    const verifications = await mockStorage.getAllVerifications()
+    expect(verifications.val).toHaveLength(1)
+    expect(verifications.val?.[0]).toMatchObject({
+      allowed: false,
+      deniedReason: "LIMIT_EXCEEDED",
+    })
+  })
+
+  it("should return not found when entitlement does not exist", async () => {
+    // DB returns null
+    vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue(undefined)
+
+    const result = await service.verify({
+      customerId,
+      projectId,
+      featureSlug: "non-existent",
+      timestamp: now,
+      requestId: "req_4",
+      fromCache: false,
+      metadata: null,
+      performanceStart: performance.now(),
+    })
+
+    expect(result.allowed).toBe(false)
+    expect(result.deniedReason).toBe("ENTITLEMENT_NOT_FOUND")
+
+    // Check if verification was recorded as denied
+    const verifications = await mockStorage.getAllVerifications()
+    expect(verifications.val).toHaveLength(1)
+    expect(verifications.val?.[0]).toMatchObject({
+      featureSlug: "non-existent",
+      allowed: false,
+      deniedReason: "ENTITLEMENT_NOT_FOUND",
+    })
+  })
+})
+
+describe("EntitlementService - reportUsage", () => {
+  let service: EntitlementService
+  let mockDb: Database
+  let mockStorage: MemoryEntitlementStorageProvider
+  let mockLogger: Logger
+  let mockAnalytics: Analytics
+  let mockCache: Cache
+  let mockMetrics: Metrics
+
+  const now = Date.now()
+  const customerId = "cust_usage_123"
+  const projectId = "proj_usage_123"
+  const featureSlug = "usage-feature"
+
+  const mockEntitlementState: EntitlementState = {
+    id: "ent_usage_123",
+    customerId,
+    projectId,
+    featureSlug,
+    featureType: "usage",
+    limit: 100,
+    allowOverage: false,
+    aggregationMethod: "sum",
+    mergingPolicy: "sum",
+    currentCycleUsage: "10",
+    accumulatedUsage: "50",
+    grants: [
+      {
+        id: "grant_usage_1",
+        type: "subscription",
+        effectiveAt: now - 10000,
+        expiresAt: now + 10000,
+        limit: 100,
+        priority: 10,
+        subjectType: "customer",
+        subjectId: customerId,
+        allowOverage: false,
+        featurePlanVersionId: "fpv_1",
+        realtime: false,
+        subscriptionId: "sub_1",
+        subscriptionItemId: "si_1",
+        subscriptionPhaseId: "sp_1",
+      },
+    ],
+    version: "v1",
+    effectiveAt: now - 10000,
+    expiresAt: now + 10000,
+    nextRevalidateAt: now + 300000,
+    lastSyncAt: now,
+    computedAt: now,
+    resetConfig: null,
+  }
+
+  beforeEach(async () => {
+    vi.clearAllMocks()
+
+    mockLogger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      flush: vi.fn(),
+    } as unknown as Logger
+
+    mockAnalytics = {
+      ingestFeaturesVerification: vi.fn().mockResolvedValue({ successful_rows: 1 }),
+    } as unknown as Analytics
+
+    mockDb = {
+      query: {
+        entitlements: {
+          findFirst: vi.fn(),
+        },
+      },
+      update: vi.fn(() => ({
+        set: vi.fn(() => ({
+          where: vi.fn(() => ({
+            returning: vi.fn().mockResolvedValue([{ ...mockEntitlementState }]),
+          })),
+        })),
+      })),
+    } as unknown as Database
+
+    mockCache = {
+      customerEntitlement: {
+        swr: vi.fn().mockImplementation(async (_key, fetcher) => {
+          return await fetcher()
+        }),
+        set: vi.fn(),
+        get: vi.fn(),
+        remove: vi.fn(),
+      },
+    } as unknown as Cache
+
+    mockMetrics = {} as unknown as Metrics
+
+    mockStorage = new MemoryEntitlementStorageProvider({ logger: mockLogger })
+    await mockStorage.initialize()
+
+    service = new EntitlementService({
+      db: mockDb,
+      storage: mockStorage,
+      logger: mockLogger,
+      analytics: mockAnalytics,
+      waitUntil: vi.fn((promise) => promise), // Execute immediately for testing
+      cache: mockCache,
+      metrics: mockMetrics,
+    })
+  })
+
+  it("should consume usage successfully and update state", async () => {
+    // Setup DB mock
+    vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue({
+      ...mockEntitlementState,
+      metadata: null,
+      createdAtM: now,
+      updatedAtM: now,
+    })
+
+    const usageAmount = 5
+    const result = await service.reportUsage({
+      customerId,
+      projectId,
+      featureSlug,
+      usage: usageAmount,
+      timestamp: now,
+      requestId: "req_usage_1",
+      idempotenceKey: "idem_1",
+      fromCache: false,
+      metadata: null,
+    })
+
+    expect(result.allowed).toBe(true)
+    expect(result.usage).toBe(15) // 10 (initial) + 5
+    expect(result.deniedReason).toBeUndefined()
+
+    // Check storage update
+    const stored = await mockStorage.get({ customerId, projectId, featureSlug })
+    expect(stored.val?.currentCycleUsage).toBe("15")
+
+    // Check usage record
+    const usageRecords = await mockStorage.getAllUsageRecords()
+    expect(usageRecords.val).toHaveLength(1)
+    expect(usageRecords.val?.[0]).toMatchObject({
+      customerId,
+      projectId,
+      featureSlug,
+      usage: usageAmount,
+    })
+  })
+
+  it("should deny usage when limit is exceeded", async () => {
+    const usageAmount = 91 // 10 + 91 = 101 > 100
+    // Setup DB mock
+    vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue({
+      ...mockEntitlementState,
+      metadata: null,
+      createdAtM: now,
+      updatedAtM: now,
+    })
+
+    const result = await service.reportUsage({
+      customerId,
+      projectId,
+      featureSlug,
+      usage: usageAmount,
+      timestamp: now,
+      requestId: "req_usage_2",
+      idempotenceKey: "idem_2",
+      fromCache: false,
+      metadata: null,
+    })
+
+    expect(result.allowed).toBe(false)
+    expect(result.deniedReason).toBe("LIMIT_EXCEEDED")
+
+    // Storage should NOT be updated with new usage
+    const stored = await mockStorage.get({ customerId, projectId, featureSlug })
+    expect(stored.val?.currentCycleUsage).toBe("10")
+
+    // No usage record should be inserted for denied usage
+    const usageRecords = await mockStorage.getAllUsageRecords()
+    expect(usageRecords.val).toHaveLength(0)
+  })
+
+  it("should sync to DB when sync interval passed", async () => {
+    // Modify state to trigger sync (lastSyncAt old enough)
+    const oldSyncState = {
+      ...mockEntitlementState,
+      lastSyncAt: now - 60000 - 1000, // default syncToDBInterval is 60000
+      metadata: null,
+      createdAtM: now,
+      updatedAtM: now,
+    }
+
+    vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue(oldSyncState)
+
+    await service.reportUsage({
+      customerId,
+      projectId,
+      featureSlug,
+      usage: 5,
+      timestamp: now,
+      requestId: "req_usage_3",
+      idempotenceKey: "idem_3",
+      fromCache: false,
+      metadata: null,
+    })
+
+    // Check if DB update was called
+    expect(mockDb.update).toHaveBeenCalled()
+    expect(mockDb.query.entitlements.findFirst).toHaveBeenCalledTimes(1)
+  })
+
+  it("should handle random usage amounts correctly", async () => {
+    vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue({
+      ...mockEntitlementState,
+      metadata: null,
+      createdAtM: now,
+      updatedAtM: now,
+    })
+
+    // Pre-populate storage so we can use fromCache: true and accumulate
+    await mockStorage.set({ state: mockEntitlementState })
+
+    let currentUsage = 10 // Start with 10
+
+    // Random valid usages
+    for (let i = 0; i < 5; i++) {
+      const usage = Math.floor(Math.random() * 5) + 1 // 1 to 5
+
+      const result = await service.reportUsage({
+        customerId,
+        projectId,
+        featureSlug,
+        usage,
+        timestamp: now,
+        requestId: `req_rand_${i}`,
+        idempotenceKey: `idem_rand_${i}`,
+        fromCache: true, // Use memory storage where we are updating state
+        metadata: null,
+      })
+
+      if (currentUsage + usage <= 100) {
+        expect(result.allowed).toBe(true)
+        currentUsage += usage
+        expect(result.usage).toBe(currentUsage)
+      } else {
+        expect(result.allowed).toBe(false)
+      }
+    }
+  })
+})
