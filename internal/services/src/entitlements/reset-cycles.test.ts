@@ -154,12 +154,16 @@ describe("EntitlementService - Reset Cycles", () => {
       fromCache: false,
       metadata: null,
     })
+
     expect(res1.allowed).toBe(true)
     expect(res1.usage).toBe(50)
 
     // Verify storage
     let stored = await mockStorage.get({ customerId, projectId, featureSlug })
     expect(stored.val?.currentCycleUsage).toBe("50")
+
+    // mock the entitlement in cache
+    vi.spyOn(mockCache.customerEntitlement, "swr").mockResolvedValue(Ok(mockEntitlementState))
 
     // 2. Week 1 - Usage 10 (Total 60)
     const res2 = await service.reportUsage({
@@ -173,6 +177,7 @@ describe("EntitlementService - Reset Cycles", () => {
       fromCache: true, // Use cached state
       metadata: null,
     })
+
     expect(res2.allowed).toBe(true)
     expect(res2.usage).toBe(60)
 
@@ -247,6 +252,8 @@ describe("EntitlementService - Reset Cycles", () => {
       createdAtM: monthStart,
       updatedAtM: monthStart,
     })
+
+    vi.spyOn(mockCache.customerEntitlement, "swr").mockResolvedValue(Ok(dailyResetState))
 
     let currentTimestamp = monthStart
 

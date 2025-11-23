@@ -296,7 +296,7 @@ describe("EntitlementService - Multiple Grants", () => {
     })
 
     expect(result.allowed).toBe(true)
-    expect(result.notifiedOverLimit).toBe(false)
+    expect(result.notifiedOverLimit).toBe(true)
 
     // Verify attribution
     // Flexible (Prio 20) takes 10 (its limit)

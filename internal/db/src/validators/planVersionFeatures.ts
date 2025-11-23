@@ -11,6 +11,7 @@ import { featureSelectBaseSchema } from "./features"
 import {
   aggregationMethodSchema,
   billingConfigSchema,
+  featureConfigType,
   resetConfigSchema,
   tierModeSchema,
   typeFeatureSchema,
@@ -357,8 +358,12 @@ export const planVersionFeatureInsertBaseSchema = createInsertSchema(planVersion
   metadata: planVersionFeatureMetadataSchema.optional(),
   aggregationMethod: aggregationMethodSchema.default("count"),
   billingConfig: billingConfigSchema,
+  resetConfig: resetConfigSchema.optional(),
   defaultQuantity: z.coerce.number().int(),
   limit: z.coerce.number().int().optional(),
+  allowOverage: z.boolean().optional(),
+  notifyUsageThreshold: z.coerce.number().int().optional().default(95),
+  type: featureConfigType.optional(),
 })
   .omit({
     createdAtM: true,

@@ -331,7 +331,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         requestId: record.requestId,
         deniedReason: record.deniedReason,
         latency: record.latency ? record.latency.toString() : "0",
-        success: record.allowed ? 1 : 0,
+        allowed: record.allowed,
         metadata: record.metadata ? JSON.stringify(record.metadata) : null,
       })
 
@@ -365,7 +365,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       return Ok(
         verifications.map((verification) => ({
           ...verification,
-          allowed: verification.success === 1,
+          allowed: verification.allowed,
           metadata: verification.metadata ? JSON.parse(verification.metadata) : null,
           latency: verification.latency ? Number(verification.latency) : 0,
           createdAt: verification.createdAt,

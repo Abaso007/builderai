@@ -48,10 +48,7 @@ export const verifications = pgTableProject(
     featureSlug: text().notNull(),
     customerId: text().notNull(),
     metadata: text(),
-    success: integer().notNull().default(0),
+    allowed: integer().notNull().default(0),
   },
-  (table) => [
-    // Indexes for common queries
-    index("verifications_feature_idx").on(table.featureSlug),
-  ]
+  (table) => [index("verifications_feature_idx").on(table.featureSlug)]
 )

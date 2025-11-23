@@ -50,6 +50,20 @@
       "when": 1757409210313,
       "tag": "0006_tricky_squirrel_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1763915187205,
+      "tag": "0007_strange_jocasta",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1763921301469,
+      "tag": "0008_fresh_wind_dancer",
+      "breakpoints": true
     }
   ]
 }

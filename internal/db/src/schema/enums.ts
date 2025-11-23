@@ -9,8 +9,8 @@ import {
   CURRENCIES,
   DUE_BEHAVIOUR,
   ENTITLEMENT_MERGING_POLICY,
+  FEATURE_CONFIG_TYPES,
   FEATURE_TYPES,
-  FEATURE_VERSION_TYPES,
   GRANT_TYPES,
   INVOICE_ITEM_KIND,
   INVOICE_STATUS,
@@ -35,7 +35,7 @@ export const entitlementMergingPolicyEnum = pgEnum("merging_policy", ENTITLEMENT
 export const grantTypeEnum = pgEnum("grant_type", GRANT_TYPES)
 export const subjectTypeEnum = pgEnum("subject_type", SUBJECT_TYPES)
 export const typeFeatureEnum = pgEnum("feature_types", FEATURE_TYPES)
-export const typeFeatureVersionEnum = pgEnum("feature_version_types", FEATURE_VERSION_TYPES)
+export const typeFeatureConfigEnum = pgEnum("feature_config_types", FEATURE_CONFIG_TYPES)
 export const aggregationMethodEnum = pgEnum("aggregation_method", AGGREGATION_METHODS)
 export const tierModeEnum = pgEnum("tier_mode", TIER_MODES)
 export const usageModeEnum = pgEnum("usage_mode", USAGE_MODES)

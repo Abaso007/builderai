@@ -28,6 +28,10 @@ export const create = protectedProjectProcedure
       limit,
       billingConfig,
       hidden,
+      resetConfig,
+      type,
+      allowOverage,
+      notifyUsageThreshold,
     } = opts.input
     const project = opts.ctx.project
 
@@ -91,6 +95,10 @@ export const create = protectedProjectProcedure
         defaultQuantity: defaultQuantity === 0 ? null : defaultQuantity,
         limit: limit === 0 ? null : limit,
         hidden,
+        resetConfig,
+        type,
+        allowOverage,
+        notifyUsageThreshold,
       })
       .returning()
       .then((re) => re[0])

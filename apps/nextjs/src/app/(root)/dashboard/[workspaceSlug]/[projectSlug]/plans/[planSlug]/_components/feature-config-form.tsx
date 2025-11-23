@@ -102,6 +102,16 @@ export function FeatureConfigForm({
       units: defaultValues.config?.units ?? 1,
     },
     billingConfig: defaultValues.billingConfig ?? planVersion?.billingConfig,
+    resetConfig: defaultValues.resetConfig ?? {
+      name: planVersion?.billingConfig.name,
+      planType: planVersion?.billingConfig.planType,
+      resetInterval: planVersion?.billingConfig.billingInterval,
+      resetIntervalCount: planVersion?.billingConfig.billingIntervalCount,
+      resetAnchor: planVersion?.billingConfig.billingAnchor,
+    },
+    type: defaultValues.type ?? "feature",
+    allowOverage: defaultValues.allowOverage ?? false,
+    notifyUsageThreshold: defaultValues.notifyUsageThreshold ?? 95,
     metadata: {
       realtime: defaultValues?.metadata?.realtime ?? false,
     },

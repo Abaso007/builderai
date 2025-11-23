@@ -158,14 +158,9 @@ export class UsageLimiterService implements UsageLimiter {
     }
 
     const durableObject = this.getStub(this.getDurableObjectCustomerId(data.customerId))
-    const result = await durableObject.reportUsage(data).then((result) => {
-      return {
-        allowed: result.allowed,
-        message: result.message,
-        limit: result.limit,
-        usage: result.usage,
-        consumedFrom: result.consumedFrom,
-      }
+    const result = await durableObject.reportUsage({
+      ...data,
+      idempotenceKey: idempotentKey,
     })
 
     this.waitUntil(

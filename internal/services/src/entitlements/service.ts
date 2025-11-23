@@ -90,7 +90,7 @@ export class EntitlementService {
         projectId: params.projectId,
         featureSlug: params.featureSlug,
         timestamp: params.timestamp,
-        allowed: false,
+        allowed: 0,
         deniedReason: "ENTITLEMENT_NOT_FOUND",
         metadata: params.metadata,
         latency: performance.now() - params.performanceStart,
@@ -101,7 +101,7 @@ export class EntitlementService {
 
       return {
         allowed: false,
-        message: "No entitlement found",
+        message: "No entitlement found for the given customer, project and feature",
         deniedReason: "ENTITLEMENT_NOT_FOUND",
         usage: 0,
         limit: undefined,
@@ -116,7 +116,7 @@ export class EntitlementService {
       projectId: params.projectId,
       featureSlug: params.featureSlug,
       timestamp: params.timestamp,
-      allowed: result.allowed,
+      allowed: result.allowed ? 1 : 0,
       deniedReason: result.deniedReason ?? undefined,
       metadata: params.metadata,
       latency: performance.now() - params.performanceStart,
@@ -146,7 +146,7 @@ export class EntitlementService {
     if (!state) {
       return {
         allowed: false,
-        message: "No entitlement found",
+        message: "No entitlement found for the given customer, project and feature",
         deniedReason: "ENTITLEMENT_NOT_FOUND",
         usage: 0,
         limit: undefined,
@@ -169,10 +169,11 @@ export class EntitlementService {
         state.accumulatedUsage = result.accumulatedUsage
       }
 
-      if (result.effectiveAt) {
+      if (result.effectiveAt !== undefined && result.effectiveAt !== null) {
         state.effectiveAt = result.effectiveAt
       }
 
+      // update the usage in the storage
       await this.storage.set({ state })
 
       for (const consumed of result.consumedFrom ?? []) {
@@ -537,7 +538,7 @@ export class EntitlementService {
     if (!cached) {
       this.logger.debug("Cache miss, loading from DB", params)
 
-      // get the entitlement
+      // get the entitlement from cache - if not found in cache it will load from DB
       const { val, err } = await this.getActiveEntitlement({
         ...params,
         opts: {

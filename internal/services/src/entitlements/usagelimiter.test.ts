@@ -164,7 +164,7 @@ describe("EntitlementService - verify", () => {
       customerId,
       projectId,
       featureSlug,
-      allowed: true,
+      allowed: 1,
     })
   })
 
@@ -220,7 +220,7 @@ describe("EntitlementService - verify", () => {
     const verifications = await mockStorage.getAllVerifications()
     expect(verifications.val).toHaveLength(1)
     expect(verifications.val?.[0]).toMatchObject({
-      allowed: false,
+      allowed: 0,
       deniedReason: "LIMIT_EXCEEDED",
     })
   })
@@ -248,7 +248,7 @@ describe("EntitlementService - verify", () => {
     expect(verifications.val).toHaveLength(1)
     expect(verifications.val?.[0]).toMatchObject({
       featureSlug: "non-existent",
-      allowed: false,
+      allowed: 0,
       deniedReason: "ENTITLEMENT_NOT_FOUND",
     })
   })

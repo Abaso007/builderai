@@ -11,8 +11,8 @@ import {
   CURRENCIES,
   DUE_BEHAVIOUR,
   ENTITLEMENT_MERGING_POLICY,
+  FEATURE_CONFIG_TYPES,
   FEATURE_TYPES,
-  FEATURE_VERSION_TYPES,
   GRANT_TYPES,
   INVOICE_STATUS,
   PAYMENT_PROVIDERS,
@@ -36,7 +36,7 @@ export const billingPeriodTypeSchema = z.enum(BILLING_PERIOD_TYPE)
 export const usageModeSchema = z.enum(USAGE_MODES)
 export const aggregationMethodSchema = z.enum(AGGREGATION_METHODS)
 export const tierModeSchema = z.enum(TIER_MODES)
-export const featureVersionType = z.enum(FEATURE_VERSION_TYPES)
+export const featureConfigType = z.enum(FEATURE_CONFIG_TYPES)
 export const unitSchema = z.coerce.number().int().min(1)
 export const collectionMethodSchema = z.enum(COLLECTION_METHODS)
 export const monthsSchema = z.coerce.number().int().min(1).max(12)
@@ -167,7 +167,7 @@ export const entitlementMergingPolicySchema = z.enum(ENTITLEMENT_MERGING_POLICY)
 export type Currency = z.infer<typeof currencySchema>
 export type PaymentProvider = z.infer<typeof paymentProviderSchema>
 export type FeatureType = z.infer<typeof typeFeatureSchema>
-export type FeatureVersionType = z.infer<typeof featureVersionType>
+export type FeatureConfigType = z.infer<typeof featureConfigType>
 export type Year = z.infer<typeof yearsSchema>
 export type Month = z.infer<typeof monthsSchema>
 export type AggregationMethod = z.infer<typeof aggregationMethodSchema>

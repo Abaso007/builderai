@@ -262,34 +262,6 @@ export class Unprice {
         })
       },
 
-      revalidateEntitlement: async (
-        req: paths["/v1/customer/revalidate-entitlement"]["post"]["requestBody"]["content"]["application/json"]
-      ): Promise<
-        Result<
-          paths["/v1/customer/revalidate-entitlement"]["post"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "customer", "revalidate-entitlement"],
-          method: "POST",
-          body: req,
-        })
-      },
-
-      resetEntitlements: async (
-        req: paths["/v1/customer/reset-entitlements"]["post"]["requestBody"]["content"]["application/json"]
-      ): Promise<
-        Result<
-          paths["/v1/customer/reset-entitlements"]["post"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "customer", "reset-entitlements"],
-          method: "POST",
-          body: req,
-        })
-      },
-
       can: async (
         req: paths["/v1/customer/can"]["post"]["requestBody"]["content"]["application/json"]
       ): Promise<

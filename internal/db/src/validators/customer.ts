@@ -4,7 +4,7 @@ import { extendZodWithOpenApi } from "zod-openapi"
 import * as schema from "../schema"
 import { featureSelectBaseSchema } from "./features"
 import { planVersionFeatureSelectBaseSchema } from "./planVersionFeatures"
-import { billingConfigSchema } from "./shared"
+import { billingConfigSchema, featureConfigType, resetConfigSchema } from "./shared"
 import {
   billingIntervalSchema,
   currencySchema,
@@ -230,6 +230,10 @@ export const getCurrentUsageSchema = z.object({
     flatPrice: z.string(),
     currentTotalPrice: z.string(),
     billingConfig: billingConfigSchema,
+    resetConfig: resetConfigSchema,
+    allowOverage: z.boolean(),
+    notifyUsageThreshold: z.number(),
+    type: featureConfigType,
   }),
   subscription: z.object({
     planSlug: z.string(),

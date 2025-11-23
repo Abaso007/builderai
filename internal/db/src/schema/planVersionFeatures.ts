@@ -7,7 +7,6 @@ import {
   json,
   primaryKey,
   unique,
-  varchar,
 } from "drizzle-orm/pg-core"
 import type * as z from "zod"
 
@@ -20,7 +19,7 @@ import type {
   planVersionFeatureMetadataSchema,
 } from "../validators/planVersionFeatures"
 import type { BillingConfig, ResetConfig } from "../validators/shared"
-import { aggregationMethodEnum, typeFeatureEnum } from "./enums"
+import { aggregationMethodEnum, typeFeatureConfigEnum, typeFeatureEnum } from "./enums"
 import { features } from "./features"
 import { versions } from "./planVersions"
 import { projects } from "./projects"
@@ -33,10 +32,9 @@ export const planVersionFeatures = pgTableProject(
   {
     ...projectID,
     ...timestamps,
-    // TODO: add type in order to support addons
     planVersionId: cuid("plan_version_id").notNull(),
-    // TODO: add type of the feature - feature, addon, etc.
-    type: varchar("type").default("feature").notNull(),
+    // type of the feature config - feature, addon, etc.
+    type: typeFeatureConfigEnum("feature_config_type").default("feature").notNull(),
     featureId: cuid("feature_id").notNull(),
     // type of the feature - flat, tier, usage, etc.
     featureType: typeFeatureEnum("feature_type").notNull(),
@@ -45,6 +43,7 @@ export const planVersionFeatures = pgTableProject(
     // billing config for the feature usually the same as the plan version billing config
     billingConfig: json("billing_config").$type<BillingConfig>().notNull(),
     // reset config for the feature usually the same as the plan version reset config
+    // if null it resets at the end of the cycle
     resetConfig: json("reset_config").$type<ResetConfig>(),
     // metadata probably will be useful to save external data, etc.
     metadata: json("metadata").$type<z.infer<typeof planVersionFeatureMetadataSchema>>(),

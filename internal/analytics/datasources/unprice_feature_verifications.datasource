@@ -11,15 +11,11 @@ SCHEMA >
     `featureSlug` LowCardinality(String) `json:$.featureSlug`,
     `customerId` String `json:$.customerId`,
     `latency` Float32 `json:$.latency`,
-    `featurePlanVersionId` String `json:$.featurePlanVersionId`,
     `requestId` String `json:$.requestId`,
     `projectId` String `json:$.projectId`,
     `grantId` String `json:$.grantId`,
-    `subscriptionId` Nullable(String) `json:$.subscriptionId`,
-    `subscriptionItemId` Nullable(String) `json:$.subscriptionItemId`,
-    `subscriptionPhaseId` Nullable(String) `json:$.subscriptionPhaseId`,
     `deniedReason` LowCardinality(Nullable(String)) `json:$.deniedReason`,
-    `success` UInt8 `json:$.success`,
+    `allowed` UInt8 `json:$.allowed`,
     `metadata` Map(String, String) `json:$.metadata`
 
 ENGINE MergeTree

@@ -188,7 +188,7 @@ export const INVOICE_ITEM_KIND = [
   "adjustment",
   "trial",
 ] as const
-export const FEATURE_VERSION_TYPES = ["feature", "addon"] as const
+export const FEATURE_CONFIG_TYPES = ["feature", "addon"] as const
 export const COLLECTION_METHODS = ["charge_automatically", "send_invoice"] as const
 export const BILLING_PERIOD_STATUS = ["pending", "invoiced", "voided"] as const
 export const BILLING_PERIOD_TYPE = ["normal", "trial"] as const

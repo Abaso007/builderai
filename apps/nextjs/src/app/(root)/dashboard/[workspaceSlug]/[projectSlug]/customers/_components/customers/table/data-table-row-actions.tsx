@@ -4,7 +4,6 @@ import type { Row } from "@tanstack/react-table"
 import { MoreHorizontal } from "lucide-react"
 import * as React from "react"
 
-import { useMutation } from "@tanstack/react-query"
 import { customerSelectSchema } from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
 import {
@@ -23,11 +22,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@unprice/ui/dropdown-menu"
-import { useParams, useRouter } from "next/navigation"
-import { startTransition } from "react"
+import { useParams } from "next/navigation"
 import { SuperLink } from "~/components/super-link"
-import { toast } from "~/lib/toast"
-import { useTRPC } from "~/trpc/client"
 import { CustomerForm } from "../customer-form"
 
 interface DataTableRowActionsProps<TData> {
@@ -39,31 +35,6 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
   const [dialogOpen, setDialogOpen] = React.useState(false)
   const { workspaceSlug, projectSlug } = useParams()
   const baseUrl = `/${workspaceSlug}/${projectSlug}/customers/${customer.id}`
-  const router = useRouter()
-
-  const trpc = useTRPC()
-
-  const test = useMutation(
-    trpc.customers.test.mutationOptions({
-      onSuccess: () => {
-        router.refresh()
-      },
-    })
-  )
-
-  function onTest() {
-    startTransition(() => {
-      toast.promise(
-        test.mutateAsync({
-          customerId: customer.id,
-        }),
-        {
-          loading: "Testing...",
-          success: "Test completed",
-        }
-      )
-    })
-  }
 
   return (
     <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -82,12 +53,9 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
           </DialogTrigger>
           <DialogTrigger asChild>
             <DropdownMenuItem>
-              <SuperLink href={baseUrl}>Manage Customer Details</SuperLink>
+              <SuperLink href={baseUrl}>Manage</SuperLink>
             </DropdownMenuItem>
           </DialogTrigger>
-          <DropdownMenuItem onClick={onTest} disabled={test.isPending}>
-            Test
-          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <DialogContent className="max-h-[95vh] md:max-w-screen-md">

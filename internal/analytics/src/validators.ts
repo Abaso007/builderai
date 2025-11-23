@@ -60,7 +60,7 @@ export const featureVerificationSchemaV1 = z.object({
   projectId: z.string(),
   grantId: z.string(),
   deniedReason: z.string().optional(),
-  allowed: z.boolean(),
+  allowed: z.number().int().min(0).max(1).default(0),
   timestamp: z
     .number()
     .default(Date.now())

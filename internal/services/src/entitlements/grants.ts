@@ -600,9 +600,6 @@ export class GrantsManager {
     return Ok(newEntitlement)
   }
 
-  // TODO: can and reportUsage as one method as well
-  // something like try and consume
-
   /**
    * Merges grants according to the specified feature type and its implicit merging policy.
    * Returns the calculated limit, overage setting, the winning grants, and the effective date range.
@@ -759,6 +756,91 @@ export class GrantsManager {
   }
 
   /**
+   * Calculates the usage per feature based on the aggregation method
+   * @param params - The parameters for the calculation
+   * @param params.aggregationMethod - The aggregation method to use
+   * @param params.usage - The usage to calculate
+   * @param params.accumulatedUsage - The accumulated usage
+   * @param params.currentCycleUsage - The current cycle usage
+   * @returns The usage per feature
+   */
+  private calculateUsage({
+    aggregationMethod,
+    usage,
+    accumulatedUsage,
+    currentCycleUsage,
+  }: {
+    aggregationMethod: string
+    usage: number
+    accumulatedUsage: number
+    currentCycleUsage: number
+  }): {
+    usage: number
+    accumulatedUsage: number
+  } {
+    switch (aggregationMethod) {
+      case "sum": {
+        const newUsage = currentCycleUsage + usage
+        return {
+          usage: newUsage,
+          accumulatedUsage: accumulatedUsage,
+        }
+      }
+      case "max": {
+        const newUsage = Math.max(currentCycleUsage, usage)
+        return {
+          usage: newUsage,
+          accumulatedUsage: accumulatedUsage,
+        }
+      }
+
+      case "last_during_period": {
+        const newUsage = usage
+        return {
+          usage: newUsage,
+          accumulatedUsage: accumulatedUsage,
+        }
+      }
+      case "count": {
+        const newUsage = currentCycleUsage + 1
+        return {
+          usage: newUsage,
+          accumulatedUsage: accumulatedUsage,
+        }
+      }
+      case "count_all": {
+        const newUsage = accumulatedUsage + 1
+        const newAccumulatedUsage = accumulatedUsage + 1
+        return {
+          usage: newUsage,
+          accumulatedUsage: newAccumulatedUsage,
+        }
+      }
+      case "max_all": {
+        const newUsage = Math.max(accumulatedUsage, usage)
+        const newAccumulatedUsage = newUsage
+        return {
+          usage: newUsage,
+          accumulatedUsage: newAccumulatedUsage,
+        }
+      }
+      case "sum_all": {
+        const newUsage = accumulatedUsage + usage
+        const newAccumulatedUsage = newUsage
+        return {
+          usage: newUsage,
+          accumulatedUsage: newAccumulatedUsage,
+        }
+      }
+      default:
+        return {
+          usage: currentCycleUsage,
+          accumulatedUsage: accumulatedUsage,
+        }
+    }
+  }
+
+  /**
    * Normalizes entitlement state by checking if reset boundary has been crossed.
    * This is a safety net - the database update should handle it, but this
    * ensures correctness even if recomputation hasn't happened yet.
@@ -834,15 +916,55 @@ export class GrantsManager {
       return state
     }
 
+    // Reset Logic based on aggregation method
+    let newCurrentUsage = "0"
+    let newAccumulatedUsage = state.accumulatedUsage
+
+    const currentUsageNum = Number(state.currentCycleUsage)
+    const accumulatedUsageNum = Number(state.accumulatedUsage)
+
+    switch (state.aggregationMethod) {
+      case "sum":
+      case "count":
+        // Move current usage to accumulated
+        newAccumulatedUsage = (accumulatedUsageNum + currentUsageNum).toString()
+        newCurrentUsage = "0"
+        break
+
+      case "max":
+        // For max, we snapshot the max reached in the cycle
+        newAccumulatedUsage = Math.max(accumulatedUsageNum, currentUsageNum).toString()
+        newCurrentUsage = "0"
+        break
+
+      case "last_during_period":
+        newCurrentUsage = "0"
+        // accumulated doesn't change or tracks history? default to no change for now
+        break
+
+      case "sum_all":
+      case "count_all":
+      case "max_all":
+        // These methods track lifetime usage, so we generally don't reset them on cycle boundaries
+        // to preserve the lifetime count/sum/max.
+        newCurrentUsage = state.currentCycleUsage
+        newAccumulatedUsage = state.accumulatedUsage
+        break
+
+      default:
+        // Default reset behavior (sum-like)
+        newAccumulatedUsage = (accumulatedUsageNum + currentUsageNum).toString()
+        newCurrentUsage = "0"
+        break
+    }
+
     // Reset boundary crossed - but we can't update currentCycleStartAt/currentCycleEndAt
     // because those represent billing cycles, not reset cycles!
     // This is the fundamental problem - you need separate fields for reset cycle boundaries
     return {
       ...state,
-      currentCycleUsage: "0",
-      accumulatedUsage: (
-        BigInt(state.accumulatedUsage) + BigInt(state.currentCycleUsage)
-      ).toString(),
+      currentCycleUsage: newCurrentUsage,
+      accumulatedUsage: newAccumulatedUsage,
       effectiveAt: resetCycleForNow.start,
       nextRevalidateAt: Date.now() + 1000 * 60 * 60,
     }
@@ -857,7 +979,7 @@ export class GrantsManager {
     // Normalize cycle usage (safety net)
     const normalizedState = this.normalizeCycleUsage({ state, now })
 
-    const { err, val: validatedState } = this.validateEntitlementAccess({
+    const { err, val: validatedState } = this.validateEntitlementState({
       state: normalizedState,
       now,
     })
@@ -915,7 +1037,7 @@ export class GrantsManager {
     const normalizedState = this.normalizeCycleUsage({ state, now })
 
     // 1. Get active grants at this timestamp
-    const { err, val: validatedState } = this.validateEntitlementAccess({
+    const { err, val: validatedState } = this.validateEntitlementState({
       state: normalizedState,
       now,
     })
@@ -927,25 +1049,53 @@ export class GrantsManager {
         limit: undefined,
         consumedFrom: [],
         message: err.message,
+        deniedReason: "ENTITLEMENT_ERROR",
       }
     }
 
     const activeGrants = validatedState.grants
 
-    // 2. Recalculate effective limit from active grants (in case grants expired)
+    // 2. Validate usage
+    const { err: usageErr, val: validatedUsage } = this.validateUsage({
+      state: normalizedState,
+      amount: amount,
+    })
+
+    if (usageErr) {
+      return {
+        allowed: false,
+        usage: amount,
+        limit: undefined,
+        consumedFrom: [],
+        message: usageErr.message,
+        deniedReason: "INCORRECT_USAGE_REPORTING",
+      }
+    }
+
+    // 3. Recalculate effective limit from active grants (in case grants expired)
     const {
       limit: effectiveLimit,
       allowOverage,
       expiresAt,
-      effectiveAt,
     } = this.mergeGrants({
       grants: activeGrants,
       policy: validatedState.mergingPolicy,
     })
 
-    // 3. Check unified limit (no per-grant tracking needed)
-    const newUsage = Number(normalizedState.currentCycleUsage) + amount
+    // 3. Calculate the new usage
+    const usage = this.calculateUsage({
+      aggregationMethod: validatedState.aggregationMethod,
+      usage: validatedUsage,
+      accumulatedUsage: Number(normalizedState.accumulatedUsage),
+      currentCycleUsage: Number(normalizedState.currentCycleUsage),
+    })
+
+    const newUsage = usage.usage
     const withinLimit = effectiveLimit === null || newUsage <= effectiveLimit
+    // threshold of 90% to send a notification
+    // TODO: use the notifyUsageThreshold from the plan version feature
+    const threshold = effectiveLimit ? Math.floor(effectiveLimit * 0.9) : null
+    const notifiedOverLimit = threshold !== null && newUsage > threshold
 
     const allowed = withinLimit || allowOverage
 
@@ -959,6 +1109,7 @@ export class GrantsManager {
         consumedFrom: [],
         message: "Limit exceeded",
         deniedReason: "LIMIT_EXCEEDED",
+        notifiedOverLimit: false,
       }
     }
 
@@ -971,16 +1122,43 @@ export class GrantsManager {
     return {
       allowed,
       usage: newUsage,
-      accumulatedUsage: normalizedState.accumulatedUsage,
-      effectiveAt: effectiveAt,
+      accumulatedUsage: usage.accumulatedUsage.toString(),
+      effectiveAt: normalizedState.effectiveAt, // normalizedState has the updated effectiveAt from normalizeCycleUsage
       expiresAt: expiresAt,
       limit: effectiveLimit ?? undefined,
       consumedFrom,
-      message: allowed ? "Allowed" : "Limit exceeded",
-      deniedReason: allowed ? undefined : "LIMIT_EXCEEDED",
-      // TODO: handle notified over limit
-      notifiedOverLimit: false,
+      message: "Allowed",
+      deniedReason: undefined,
+      notifiedOverLimit: notifiedOverLimit,
     }
+  }
+
+  private validateUsage(params: { state: EntitlementState; amount: number }): Result<
+    number,
+    UnPriceGrantError
+  > {
+    const { state, amount } = params
+
+    if (amount < 0 && !["sum", "sum_all"].includes(state.aggregationMethod)) {
+      return Err(
+        new UnPriceGrantError({
+          message: `Usage cannot be negative when the feature type is not sum or sum_all, got ${state.aggregationMethod}. This will disturb aggregations.`,
+          subjectId: state.customerId,
+        })
+      )
+    }
+
+    // check flat features
+    if (state.featureType === "flat") {
+      return Err(
+        new UnPriceGrantError({
+          message: "Flat feature cannot be used to consume usage",
+          subjectId: state.customerId,
+        })
+      )
+    }
+
+    return Ok(amount)
   }
 
   /**
@@ -1000,11 +1178,15 @@ export class GrantsManager {
     let remaining = amount
 
     for (const grant of sorted) {
-      if (remaining <= 0) break
+      if (remaining === 0) break
 
-      // For attribution, we can use grant.limit as a guide
-      // but we don't need to track consumed per-grant
-      const toAttribute = grant.limit === null ? remaining : Math.min(remaining, grant.limit)
+      let toAttribute = 0
+
+      if (remaining > 0) {
+        toAttribute = grant.limit === null ? remaining : Math.min(remaining, grant.limit)
+      } else {
+        toAttribute = grant.limit === null ? remaining : Math.max(remaining, -grant.limit)
+      }
 
       attribution.push({
         grantId: grant.id,
@@ -1021,7 +1203,7 @@ export class GrantsManager {
     }
 
     // If there is still remaining usage (overage), find a grant that allows overage to attribute it to
-    if (remaining > 0) {
+    if (remaining !== 0) {
       // Find the highest priority grant that allows overage
       const overageGrant = sorted.find((g) => g.allowOverage)
 
@@ -1047,17 +1229,22 @@ export class GrantsManager {
       } else {
         // If there is no overage grant, we need to notify the user we take the first grant and attribute the remaining to it
         const firstGrant = sorted[0]!
-        attribution.push({
-          grantId: firstGrant.id,
-          amount: remaining,
-          priority: firstGrant.priority,
-          type: firstGrant.type,
-          featurePlanVersionId: firstGrant.featurePlanVersionId,
-          subscriptionItemId: firstGrant.subscriptionItemId,
-          subscriptionPhaseId: firstGrant.subscriptionPhaseId,
-          subscriptionId: firstGrant.subscriptionId,
-        })
-        remaining = 0
+        const existingEntry = attribution.find((a) => a.grantId === firstGrant.id)
+
+        if (existingEntry) {
+          existingEntry.amount += remaining
+        } else {
+          attribution.push({
+            grantId: firstGrant.id,
+            amount: remaining,
+            priority: firstGrant.priority,
+            type: firstGrant.type,
+            featurePlanVersionId: firstGrant.featurePlanVersionId,
+            subscriptionItemId: firstGrant.subscriptionItemId,
+            subscriptionPhaseId: firstGrant.subscriptionPhaseId,
+            subscriptionId: firstGrant.subscriptionId,
+          })
+        }
       }
     }
 
@@ -1095,7 +1282,7 @@ export class GrantsManager {
   /**
    * Validates entitlement access at a specific timestamp
    */
-  private validateEntitlementAccess(params: { state: EntitlementState; now: number }): Result<
+  private validateEntitlementState(params: { state: EntitlementState; now: number }): Result<
     EntitlementState,
     UnPriceGrantError
   > {
