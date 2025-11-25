@@ -1761,7 +1761,13 @@ export class BillingService {
                 })
 
                 // first we need to create the grant for the billing period
-                const createGrantResult = await this.grantsManager.createGrant({
+                // use a scoped grants manager to ensure transactional integrity
+                const txGrantsManager = new GrantsManager({
+                  db: tx as unknown as Database,
+                  logger: this.logger,
+                })
+
+                const createGrantResult = await txGrantsManager.createGrant({
                   grant: {
                     id: newId("grant"),
                     projectId: phase.projectId,
@@ -1790,7 +1796,7 @@ export class BillingService {
                 }
 
                 // create the billing period
-                await this.db
+                await tx
                   .insert(billingPeriods)
                   .values({
                     id: newId("billing_period"),
@@ -1821,6 +1827,13 @@ export class BillingService {
                       billingPeriods.cycleEndAt,
                     ],
                   })
+                  .catch((error) => {
+                    this.logger.error("Error creating billing period", {
+                      error: error instanceof Error ? error.message : String(error),
+                      billingPeriodId: newId("billing_period"),
+                    })
+                    throw error
+                  })
               })
             )
 
@@ -1833,8 +1846,6 @@ export class BillingService {
               error: (e as Error)?.message,
             })
             throw e
-          } finally {
-            tx.rollback()
           }
         })
       }

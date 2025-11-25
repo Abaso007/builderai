@@ -179,14 +179,16 @@ export class UsageLimiterService implements UsageLimiter {
     now: number
   }): Promise<Result<void, BaseError>> {
     const durableObject = this.getStub(this.getDurableObjectCustomerId(params.customerId))
-    const prewarmResult = await durableObject.prewarm(params)
-    return Ok(prewarmResult)
+    await durableObject.prewarm(params)
+
+    return Ok(undefined)
   }
 
   public async getEntitlements(
     data: GetEntitlementsRequest
   ): Promise<Result<EntitlementState[], BaseError>> {
     const durableObject = this.getStub(this.getDurableObjectCustomerId(data.customerId))
+
     const { val: entitlements, err } = await durableObject.getEntitlements(data)
 
     if (err) {

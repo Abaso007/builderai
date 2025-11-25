@@ -1,4 +1,5 @@
 import { getSession } from "@unprice/auth/server-rsc"
+import { APP_NON_WORKSPACE_ROUTES } from "@unprice/config"
 import { isSlug } from "@unprice/db/utils"
 import { Separator } from "@unprice/ui/separator"
 import { Fragment, Suspense } from "react"
@@ -83,7 +84,9 @@ export default async function Page(props: {
     )
   }
 
-  if (!workspaceSlug && !projectSlug) {
+  const isNonWorkspaceRoute = APP_NON_WORKSPACE_ROUTES.has(`/${workspaceSlug}`)
+
+  if ((!workspaceSlug || isNonWorkspaceRoute) && !projectSlug) {
     return (
       <Header className="px-4">
         <UpdateClientCookie workspaceSlug={workspaceSlug} projectSlug={projectSlug} />

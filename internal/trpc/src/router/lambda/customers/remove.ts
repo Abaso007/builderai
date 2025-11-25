@@ -33,7 +33,7 @@ export const remove = protectedProjectProcedure
       },
     })
 
-    if (!result.success) {
+    if (!result.allowed) {
       throw new TRPCError({
         code: "UNAUTHORIZED",
         message: `You don't have access to this feature ${result.deniedReason}`,

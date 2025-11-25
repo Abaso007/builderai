@@ -23,6 +23,16 @@ import { SubscriptionService } from "../subscriptions/service"
 import { retry } from "../utils/retry"
 import { UnPriceCustomerError } from "./errors"
 
+type SignUpContext = {
+  input: CustomerSignUp
+  projectId: string
+  planVersion: PlanVersion & { project: Project; plan: Plan }
+  pageId: string | null
+  customerId: string
+  successUrl: string
+  cancelUrl: string
+}
+
 export class CustomerService {
   private readonly db: Database
   private readonly logger: Logger
@@ -670,24 +680,55 @@ export class CustomerService {
     >
   > {
     const { input, projectId } = opts
-    const {
-      planVersionId,
-      config,
-      successUrl,
-      cancelUrl,
-      email,
-      name,
-      timezone,
-      defaultCurrency,
-      externalId,
-      planSlug,
-      sessionId,
-      billingInterval,
-      metadata,
-    } = input
 
-    // plan version clould be empty, in which case we have to guess the best plan for the customer
-    // given the currency, the plan slug and the version
+    // Step 1: Resolve the Plan Version (Pure Logic)
+    const planResolution = await this.resolvePlanVersion({
+      input,
+      projectId,
+    })
+
+    if (planResolution.err) {
+      return Err(planResolution.err)
+    }
+
+    const { planVersion, pageId } = planResolution.val
+    const customerId = newId("customer")
+    const successUrl = input.successUrl.replace("{CUSTOMER_ID}", customerId)
+
+    // Step 2: Prepare the Customer Context
+    const context: SignUpContext = {
+      projectId,
+      planVersion,
+      pageId,
+      input,
+      customerId,
+      successUrl,
+      cancelUrl: input.cancelUrl,
+    }
+
+    // Step 3: Branch Logic
+    if (planVersion.paymentMethodRequired) {
+      return this.handlePaymentRequiredFlow(context)
+    }
+
+    return this.handleDirectProvisioningFlow(context)
+  }
+
+  /**
+   * Helper: Encapsulates all the "Plan Guessing" logic
+   */
+  private async resolvePlanVersion(opts: {
+    input: CustomerSignUp
+    projectId: string
+  }): Promise<
+    Result<
+      { planVersion: PlanVersion & { project: Project; plan: Plan }; pageId: string | null },
+      UnPriceCustomerError
+    >
+  > {
+    const { input, projectId } = opts
+    const { planVersionId, defaultCurrency, planSlug, sessionId, billingInterval } = input
+
     let planVersion: (PlanVersion & { project: Project; plan: Plan }) | null = null
     let pageId: string | null = null
 
@@ -855,8 +896,6 @@ export class CustomerService {
     }
 
     const planProject = planVersion.project
-    const paymentProvider = planVersion.paymentProvider
-    const paymentRequired = planVersion.paymentMethodRequired
     const currency = defaultCurrency ?? planProject.defaultCurrency
     const defaultBillingInterval = billingInterval ?? planVersion.billingConfig.billingInterval
 
@@ -883,8 +922,26 @@ export class CustomerService {
       )
     }
 
-    const customerId = newId("customer")
-    const customerSuccessUrl = successUrl.replace("{CUSTOMER_ID}", customerId)
+    return Ok({ planVersion, pageId })
+  }
+
+  /**
+   * Helper: Handles the external Payment Provider interaction
+   */
+  private async handlePaymentRequiredFlow(
+    context: SignUpContext
+  ): Promise<
+    Result<
+      { success: boolean; url: string; error?: string; customerId: string },
+      UnPriceCustomerError | FetchError
+    >
+  > {
+    const { input, projectId, planVersion, customerId, pageId, successUrl, cancelUrl } = context
+    const { email, name, config, timezone, externalId, metadata } = input
+
+    const paymentProvider = planVersion.paymentProvider
+    const paymentRequired = planVersion.paymentMethodRequired
+    const currency = input.defaultCurrency ?? planVersion.project.defaultCurrency
 
     // For the main project we use the default key
     // get config payment provider
@@ -913,109 +970,122 @@ export class CustomerService {
       ciphertext: configPaymentProvider.key,
     })
 
-    // if payment is required, we need to go through payment provider flow first
-    if (paymentRequired) {
-      const paymentProviderService = new PaymentProviderService({
-        logger: this.logger,
-        paymentProvider: paymentProvider,
-        token: decryptedKey,
-      })
+    const paymentProviderService = new PaymentProviderService({
+      logger: this.logger,
+      paymentProvider: paymentProvider,
+      token: decryptedKey,
+    })
 
-      // create a session with the data of the customer, the plan version and the success and cancel urls
-      // pass the session id to stripe metadata and then once the customer adds a payment method, we call our api to create the subscription
-      const customerSessionId = newId("customer_session")
-      const customerSession = await this.db
-        .insert(customerSessions)
-        .values({
-          id: customerSessionId,
-          customer: {
-            id: customerId,
-            name: name,
-            email: email,
-            currency: currency,
-            timezone: timezone || planProject.timezone,
-            projectId: projectId,
-            externalId: externalId,
-            metadata: metadata,
-          },
-          planVersion: {
-            id: planVersion.id,
-            projectId: projectId,
-            config: config,
-            paymentMethodRequired: paymentRequired,
-          },
-          metadata: {
-            sessionId: sessionId ?? undefined,
-            pageId: pageId ?? undefined,
-          },
-        })
-        .returning()
-        .then((data) => data[0])
-
-      if (!customerSession) {
-        return Err(
-          new UnPriceCustomerError({
-            code: "CUSTOMER_SESSION_NOT_CREATED",
-            message: "Error creating customer session",
-          })
-        )
-      }
-
-      const { err, val } = await paymentProviderService.signUp({
-        successUrl: customerSuccessUrl,
-        cancelUrl: cancelUrl,
-        customerSessionId: customerSession.id,
+    // create a session with the data of the customer, the plan version and the success and cancel urls
+    // pass the session id to stripe metadata and then once the customer adds a payment method, we call our api to create the subscription
+    const customerSessionId = newId("customer_session")
+    const customerSession = await this.db
+      .insert(customerSessions)
+      .values({
+        id: customerSessionId,
         customer: {
           id: customerId,
+          name: name,
           email: email,
           currency: currency,
+          timezone: timezone || planVersion.project.timezone,
           projectId: projectId,
+          externalId: externalId,
+          metadata: metadata,
+        },
+        planVersion: {
+          id: planVersion.id,
+          projectId: projectId,
+          config: config,
+          paymentMethodRequired: paymentRequired,
+        },
+        metadata: {
+          sessionId: input.sessionId ?? undefined,
+          pageId: pageId ?? undefined,
         },
       })
+      .returning()
+      .then((data) => data[0])
 
-      if (err) {
-        return Err(
-          new UnPriceCustomerError({
-            code: "PAYMENT_PROVIDER_ERROR",
-            message: err.message,
-          })
-        )
-      }
-
-      if (!val) {
-        return Err(
-          new UnPriceCustomerError({
-            code: "PAYMENT_PROVIDER_ERROR",
-            message: "Error creating payment provider signup",
-          })
-        )
-      }
-
-      // send event to analytics for tracking conversions
-      this.waitUntil(
-        this.analytics.ingestEvents({
-          action: "signup",
-          version: "1",
-          session_id: sessionId ?? "",
-          project_id: projectId,
-          timestamp: new Date().toISOString(),
-          payload: {
-            customer_id: customerId,
-            plan_version_id: planVersion.id,
-            page_id: pageId,
-            status: "waiting_payment_provider_setup",
-          },
+    if (!customerSession) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "CUSTOMER_SESSION_NOT_CREATED",
+          message: "Error creating customer session",
         })
       )
-
-      return Ok({
-        success: true,
-        url: val.url,
-        customerId: val.customerId,
-      })
     }
 
-    // if payment is not required, we can create the customer directly with its subscription
+    const { err, val } = await paymentProviderService.signUp({
+      successUrl: successUrl,
+      cancelUrl: cancelUrl,
+      customerSessionId: customerSession.id,
+      customer: {
+        id: customerId,
+        email: email,
+        currency: currency,
+        projectId: projectId,
+      },
+    })
+
+    if (err) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "PAYMENT_PROVIDER_ERROR",
+          message: err.message,
+        })
+      )
+    }
+
+    if (!val) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "PAYMENT_PROVIDER_ERROR",
+          message: "Error creating payment provider signup",
+        })
+      )
+    }
+
+    // send event to analytics for tracking conversions
+    this.waitUntil(
+      this.analytics.ingestEvents({
+        action: "signup",
+        version: "1",
+        session_id: input.sessionId ?? "",
+        project_id: projectId,
+        timestamp: new Date().toISOString(),
+        payload: {
+          customer_id: customerId,
+          plan_version_id: planVersion.id,
+          page_id: pageId,
+          status: "waiting_payment_provider_setup",
+        },
+      })
+    )
+
+    return Ok({
+      success: true,
+      url: val.url,
+      customerId: val.customerId,
+    })
+  }
+
+  /**
+   * Helper: Handles the Atomic Database Transaction
+   */
+  private async handleDirectProvisioningFlow(
+    context: SignUpContext
+  ): Promise<
+    Result<
+      { success: boolean; url: string; error?: string; customerId: string },
+      UnPriceCustomerError | FetchError
+    >
+  > {
+    const { input, projectId, planVersion, customerId, pageId, successUrl, cancelUrl } = context
+    const { email, name, config, timezone, metadata } = input
+
+    const currency = input.defaultCurrency ?? planVersion.project.defaultCurrency
+
     try {
       await this.db.transaction(async (trx) => {
         const newCustomer = await trx
@@ -1026,7 +1096,7 @@ export class CustomerService {
             email: email,
             projectId: projectId,
             defaultCurrency: currency,
-            timezone: timezone ?? planProject.timezone,
+            timezone: timezone ?? planVersion.project.timezone,
             active: true,
             metadata: metadata,
           })
@@ -1057,7 +1127,7 @@ export class CustomerService {
           input: {
             customerId: newCustomer.id,
             projectId: projectId,
-            timezone: timezone ?? planProject.timezone,
+            timezone: timezone ?? planVersion.project.timezone,
           },
           projectId: projectId,
         })
@@ -1105,7 +1175,7 @@ export class CustomerService {
         this.analytics.ingestEvents({
           action: "signup",
           version: "1",
-          session_id: sessionId ?? "",
+          session_id: input.sessionId ?? "",
           project_id: projectId,
           timestamp: new Date().toISOString(),
           payload: {
@@ -1119,7 +1189,7 @@ export class CustomerService {
 
       return Ok({
         success: true,
-        url: customerSuccessUrl,
+        url: successUrl,
         customerId: customerId,
       })
     } catch (error) {

@@ -109,6 +109,14 @@ export class GrantsManager {
           ],
         })
         .returning()
+        .catch((error) => {
+          this.logger.error("Error creating grants", {
+            error: error instanceof Error ? error.message : String(error),
+            grantId: newGrant.id,
+          })
+
+          throw error
+        })
         .then((rows) => rows[0])
 
       if (!insertedGrants) {

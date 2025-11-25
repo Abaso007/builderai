@@ -417,17 +417,22 @@ export class EntitlementService {
       throw err
     }
 
-    for (const entitlement of entitlements) {
-      await this.storage.set({ state: entitlement })
-      await this.cache.customerEntitlement.set(
-        this.makeEntitlementKey({
-          customerId: entitlement.customerId,
-          projectId: entitlement.projectId,
-          featureSlug: entitlement.featureSlug,
-        }),
-        entitlement
-      )
-    }
+    // create promises to set the entitlements in the storage and cache
+    const promises = entitlements.map((entitlement) => {
+      return Promise.all([
+        this.storage.set({ state: entitlement }),
+        this.cache.customerEntitlement.set(
+          this.makeEntitlementKey({
+            customerId: entitlement.customerId,
+            projectId: entitlement.projectId,
+            featureSlug: entitlement.featureSlug,
+          }),
+          entitlement
+        ),
+      ])
+    })
+
+    await Promise.all(promises)
   }
 
   /**
@@ -892,13 +897,23 @@ export class EntitlementService {
       throw err
     }
 
-    // small validation to check if the entitlements are valid
-    // and belongs to the customer and project
-    const validEntitlements = entitlements.filter((entitlement) => {
-      const isValid = entitlement.customerId === customerId && entitlement.projectId === projectId
-      return isValid
-    })
+    // if null most likely the entitlements are not prewarmed, so we need to prewarm them
+    if (entitlements === null || entitlements?.length === 0) {
+      await this.prewarm({
+        customerId,
+        projectId,
+        now: Date.now(),
+      })
 
-    return Ok(validEntitlements)
+      const { val: entitlements, err } = await this.storage.getAll()
+
+      if (err) {
+        throw err
+      }
+
+      return Ok(entitlements)
+    }
+
+    return Ok(entitlements)
   }
 }

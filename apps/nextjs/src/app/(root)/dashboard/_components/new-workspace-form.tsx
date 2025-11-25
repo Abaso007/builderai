@@ -41,7 +41,7 @@ export default function NewWorkspaceForm({
   const { data, isLoading, error } = useQuery(
     trpc.planVersions.listByProjectUnprice.queryOptions({
       published: true,
-      enterprisePlan: true,
+      enterprisePlan: false,
     })
   )
 

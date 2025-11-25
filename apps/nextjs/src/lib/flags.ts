@@ -6,7 +6,7 @@ import { unprice } from "./unprice"
 
 export type UserEntitlement = NonNullable<
   Awaited<ReturnType<typeof unprice.customers.getEntitlements>>["result"]
->["entitlements"][number]
+>[number]
 
 export type UserIdentity = {
   isMain: boolean
@@ -41,7 +41,7 @@ const identify = dedupe(async (): Promise<UserIdentity> => {
 
   return {
     isMain: currentWorkspace.isMain,
-    entitlements: result.entitlements,
+    entitlements: result,
     customerId: currentWorkspace.unPriceCustomerId,
   }
 })
