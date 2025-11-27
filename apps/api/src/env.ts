@@ -20,6 +20,7 @@ export function createRuntimeEnv(workerEnv: Record<string, string | number | boo
     server: {
       AUTH_SECRET: z.string(),
       VERSION: z.string().default("unknown"),
+      MAIN_PROJECT_ID: z.string().optional(),
       usagelimit: z.custom<DurableObjectNamespace<DurableObjectUsagelimiter>>(
         (ns) => typeof ns === "object"
       ),

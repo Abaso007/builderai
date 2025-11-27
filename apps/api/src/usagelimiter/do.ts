@@ -228,10 +228,12 @@ export class DurableObjectUsagelimiter extends Server {
     await this.entitlementService.prewarm({ customerId, projectId, now })
   }
 
-  async getEntitlements(data: { customerId: string; projectId: string; now: number }): Promise<
-    Result<EntitlementState[], BaseError>
-  > {
-    return await this.entitlementService.getEntitlements(data)
+  public async getActiveEntitlements(data: {
+    customerId: string
+    projectId: string
+    now: number
+  }): Promise<Result<EntitlementState[], BaseError>> {
+    return await this.entitlementService.getActiveEntitlements(data)
   }
 
   // when connected through websocket we can broadcast events to the client

@@ -5,7 +5,7 @@ import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 
 import { z } from "zod"
-import { keyAuth } from "~/auth/key"
+import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { reportUsageEvents } from "~/util/reportUsageEvents"
@@ -82,6 +82,8 @@ export const registerReportUsageV1 = (app: App) =>
     // start a new timer
     startTime(c, "reportUsage")
 
+    const projectId = await resolveContextProjectId(c, key.projectId, customerId)
+
     // validate usage from db
     const { err, val: result } = await usagelimiter.reportUsage({
       customerId,
@@ -92,7 +94,7 @@ export const registerReportUsageV1 = (app: App) =>
       idempotenceKey,
       // short ttl for dev
       flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
-      projectId: key.projectId,
+      projectId,
       requestId,
       metadata: {
         ...metadata,

@@ -64,6 +64,7 @@ if [ "$MODE_ID" = "dev" ]; then
   VERCEL_ENV="development"
   UNPRICE_API_URL="http://localhost:8787"
   UNPRICE_API_KEY="unprice_dev_1234567890"
+  MAIN_PROJECT_ID="proj_1Py3BMYSnv68DhZBz5RQ7"
   DRIZZLE_LOG="true"
   EMIT_METRICS_LOGS="false"
   EMIT_ANALYTICS="true"

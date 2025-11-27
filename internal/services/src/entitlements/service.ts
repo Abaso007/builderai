@@ -109,6 +109,7 @@ export class EntitlementService {
     }
 
     const result = this.grantsManager.verify({ state, now: params.timestamp })
+    const latency = performance.now() - params.performanceStart
 
     // Insert verification record
     await this.storage.insertVerification({
@@ -119,13 +120,13 @@ export class EntitlementService {
       allowed: result.allowed ? 1 : 0,
       deniedReason: result.deniedReason ?? undefined,
       metadata: params.metadata,
-      latency: performance.now() - params.performanceStart,
+      latency,
       grantId: state.grants[0]!.id,
       requestId: params.requestId,
       createdAt: Date.now(),
     })
 
-    return result
+    return { ...result, latency }
   }
 
   /**
@@ -405,6 +406,12 @@ export class EntitlementService {
     projectId: string
     now: number
   }): Promise<void> {
+    // invalidate any entitlements first
+    await this.invalidateEntitlements({
+      customerId,
+      projectId,
+    })
+
     // compute the grants for the customer
     const { val: entitlements, err } = await this.grantsManager.computeGrantsForCustomer({
       customerId,
@@ -489,11 +496,13 @@ export class EntitlementService {
   /**
    * Invalidate cache (force refresh from DB)
    */
-  public async invalidateEntitlement(params: {
+  public async invalidateEntitlements(params: {
     customerId: string
     projectId: string
-    featureSlug: string
+    featureSlug?: string
   }): Promise<void> {
+    const { customerId, projectId, featureSlug } = params
+
     // flush buffered records first
     const verificationsResult = await this.flushVerifications()
     const usageRecordsResult = await this.flushUsageRecords()
@@ -508,11 +517,47 @@ export class EntitlementService {
       throw usageRecordsResult.err
     }
 
-    // delete the entitlement from the storage
-    await this.storage.delete(params)
+    if (featureSlug) {
+      // delete the entitlement from the storage
+      await this.storage.delete({
+        customerId,
+        projectId,
+        featureSlug,
+      })
 
-    // delete the entitlement from the cache in background
-    await this.cache.customerEntitlement.remove(this.makeEntitlementKey(params))
+      // delete the entitlement from the cache in background
+      await this.cache.customerEntitlement.remove(
+        this.makeEntitlementKey({
+          customerId,
+          projectId,
+          featureSlug,
+        })
+      )
+    } else {
+      // get all the entitlements from the storage
+      const { val: entitlements, err: entitlementsErr } = await this.storage.getAll()
+
+      if (entitlementsErr) {
+        this.logger.error("Failed to get entitlements", { error: entitlementsErr.message })
+        throw entitlementsErr
+      }
+
+      // delete all the entitlements from the storage
+      await this.storage.deleteAll()
+
+      // delete the entitlement from the cache in background
+      Promise.all(
+        entitlements.map((entitlement) =>
+          this.cache.customerEntitlement.remove(
+            this.makeEntitlementKey({
+              customerId: entitlement.customerId,
+              projectId: entitlement.projectId,
+              featureSlug: entitlement.featureSlug,
+            })
+          )
+        )
+      )
+    }
   }
 
   /**
@@ -565,10 +610,19 @@ export class EntitlementService {
     if (cached.expiresAt && params.now >= cached.expiresAt) {
       this.logger.info("Current cycle ended, recomputing grants", params)
 
+      const usageOverrides = {
+        [params.featureSlug]: {
+          currentCycleUsage: cached.currentCycleUsage,
+          accumulatedUsage: cached.accumulatedUsage,
+        },
+      }
+
       const result = await this.grantsManager.computeGrantsForCustomer({
         customerId: params.customerId,
         projectId: params.projectId,
         now: params.now,
+        usageOverrides,
+        featureSlug: params.featureSlug,
       })
 
       if (result.err) {
@@ -621,7 +675,7 @@ export class EntitlementService {
       // no version found, entitlement deleted
       if (!entitlement) {
         // Entitlement deleted, invalidate cache
-        await this.invalidateEntitlement({
+        await this.invalidateEntitlements({
           customerId: params.customerId,
           projectId: params.projectId,
           featureSlug: params.featureSlug,
@@ -881,39 +935,101 @@ export class EntitlementService {
     return Ok(val)
   }
 
-  public async getEntitlements({
+  /**
+   * Get active entitlements for a customer from the source of truth
+   * @param customerId - Customer id
+   * @param projectId - Project id
+   * @param now - Current time
+   * @returns Active entitlements
+   */
+  public async getActiveEntitlements({
     customerId,
     projectId,
+    now,
   }: {
     customerId: string
     projectId: string
+    now: number
   }): Promise<
     Result<EntitlementState[], UnPriceEntitlementError | UnPriceEntitlementStorageError>
   > {
-    // the entitlement should be prewarmed in the service
-    const { val: entitlements, err } = await this.storage.getAll()
+    // 1. Get current usage state from storage (Source of Truth for Usage)
+    const { val: storedEntitlements, err: storageErr } = await this.storage.getAll()
 
-    if (err) {
-      throw err
+    if (storageErr) {
+      this.logger.error("Failed to get entitlements from storage", { error: storageErr.message })
+      return Err(storageErr)
     }
 
-    // if null most likely the entitlements are not prewarmed, so we need to prewarm them
-    if (entitlements === null || entitlements?.length === 0) {
-      await this.prewarm({
+    // Map stored usage to overrides
+    const usageOverrides: Record<string, { currentCycleUsage: string; accumulatedUsage: string }> =
+      {}
+
+    if (storedEntitlements && storedEntitlements.length > 0) {
+      for (const e of storedEntitlements) {
+        usageOverrides[e.featureSlug] = {
+          currentCycleUsage: e.currentCycleUsage,
+          accumulatedUsage: e.accumulatedUsage,
+        }
+      }
+    }
+
+    // 2. Compute correct entitlement definitions from DB (Source of Truth for Definitions)
+    // This ensures we:
+    // a) Get new features added to the plan/grants
+    // b) Remove features that were revoked
+    // c) Preserve usage from storage via overrides
+    const { val: computedEntitlements, err: computeErr } =
+      await this.grantsManager.computeGrantsForCustomer({
         customerId,
         projectId,
-        now: Date.now(),
+        now,
+        usageOverrides,
       })
 
-      const { val: entitlements, err } = await this.storage.getAll()
-
-      if (err) {
-        throw err
+    if (computeErr) {
+      this.logger.error("Failed to compute grants", { error: computeErr.message })
+      // Fallback to storage if DB computation fails, to ensure availability
+      if (storedEntitlements && storedEntitlements.length > 0) {
+        this.logger.warn("Falling back to stored entitlements", {
+          customerId,
+          projectId,
+          count: storedEntitlements.length,
+        })
+        return Ok(storedEntitlements)
       }
-
-      return Ok(entitlements)
+      return Err(
+        new UnPriceEntitlementError({
+          message: computeErr.message,
+        })
+      )
     }
 
-    return Ok(entitlements)
+    // 3. Update storage with the fresh authoritative state
+    // We update in parallel to be efficient
+    await Promise.all(computedEntitlements.map((e) => this.storage.set({ state: e })))
+
+    // 4. Remove entitlements that are no longer active
+    if (storedEntitlements) {
+      const computedSlugs = new Set(computedEntitlements.map((e) => e.featureSlug))
+      const toRemove = storedEntitlements.filter((e) => !computedSlugs.has(e.featureSlug))
+      if (toRemove.length > 0) {
+        // invalidate the entitlements
+        // it removes them from storage and cache but sending any buffered records to analytics
+        this.waitUntil(
+          Promise.all(
+            toRemove.map((e) =>
+              this.invalidateEntitlements({
+                customerId: e.customerId,
+                projectId: e.projectId,
+                featureSlug: e.featureSlug,
+              })
+            )
+          )
+        )
+      }
+    }
+
+    return Ok(computedEntitlements)
   }
 }

@@ -299,10 +299,14 @@ export class GrantsManager {
     customerId,
     projectId,
     now,
+    usageOverrides,
+    featureSlug,
   }: {
     customerId: string
     projectId: string
     now: number
+    usageOverrides?: Record<string, { currentCycleUsage: string; accumulatedUsage: string }>
+    featureSlug?: string
   }): Promise<Result<EntitlementState[], FetchError | UnPriceGrantError>> {
     try {
       // Get customer's subscription to find planId
@@ -368,14 +372,14 @@ export class GrantsManager {
                 },
               },
             },
-            where: (grant, { and, eq, lte, gt, or, isNull, not }) =>
+            where: (grant, { and, eq, lte, gte, or, isNull }) =>
               and(
                 eq(grant.projectId, projectId),
                 eq(grant.subjectId, subject.subjectId),
                 eq(grant.subjectType, subject.subjectType),
-                not(eq(grant.deleted, true)),
+                eq(grant.deleted, false),
                 lte(grant.effectiveAt, now), // effectiveAt >= now
-                or(isNull(grant.expiresAt), gt(grant.expiresAt, now)) // expiresAt <= now or null
+                or(isNull(grant.expiresAt), gte(grant.expiresAt, now)) // expiresAt <= now or null
               ),
             orderBy: (grant, { desc }) => desc(grant.priority),
           })
@@ -388,6 +392,12 @@ export class GrantsManager {
       for (const grantList of allGrants) {
         for (const grant of grantList) {
           const featureSlug = grant.featurePlanVersion.feature.slug
+
+          // Optimization: skip if we are looking for a specific feature
+          if (featureSlug && featureSlug !== grant.featurePlanVersion.feature.slug) {
+            continue
+          }
+
           if (!grantsByFeature.has(featureSlug)) {
             grantsByFeature.set(featureSlug, [])
           }
@@ -404,8 +414,13 @@ export class GrantsManager {
       // Compute entitlements for each feature
       const computedEntitlements: (typeof entitlements.$inferSelect)[] = []
 
-      for (const [featureSlug, featureGrants] of grantsByFeature.entries()) {
+      for (const [featureSlugItem, featureGrants] of grantsByFeature.entries()) {
         if (featureGrants.length === 0) continue
+
+        // optimization
+        if (featureSlug && featureSlug !== featureSlugItem) {
+          continue
+        }
 
         // compute the entitlement for each feature in the current cycle
         // this is idempotent, so if the entitlement already exists, it will be updated
@@ -414,11 +429,12 @@ export class GrantsManager {
           customerId,
           projectId,
           now,
+          usageOverride: usageOverrides?.[featureSlugItem],
         })
 
         if (entitlementResult.err) {
           this.logger.error("Failed to compute entitlement for feature", {
-            featureSlug,
+            featureSlug: featureSlugItem,
             error: entitlementResult.err.message,
             customerId,
             projectId,
@@ -466,11 +482,13 @@ export class GrantsManager {
     customerId,
     projectId,
     now,
+    usageOverride,
   }: {
     grants: z.infer<typeof grantSchemaExtended>[]
     customerId: string
     projectId: string
     now: number
+    usageOverride?: { currentCycleUsage: string; accumulatedUsage: string }
   }): Promise<Result<typeof entitlements.$inferSelect, FetchError | UnPriceGrantError>> {
     if (grants.length === 0) {
       return Err(
@@ -548,6 +566,12 @@ export class GrantsManager {
         ),
     })
 
+    // Determine usage base
+    const baseCurrentUsage =
+      usageOverride?.currentCycleUsage ?? currentEntitlement?.currentCycleUsage ?? "0"
+    const baseAccumulatedUsage =
+      usageOverride?.accumulatedUsage ?? currentEntitlement?.accumulatedUsage ?? "0"
+
     // Prepare base entitlement data
     const entitlementData = {
       id: currentEntitlement?.id ?? newId("entitlement"),
@@ -564,12 +588,12 @@ export class GrantsManager {
       version,
       effectiveAt: merged.effectiveAt,
       expiresAt: merged.expiresAt,
-      // revalidate every hour
-      nextRevalidateAt: Date.now() + 1000 * 60 * 60,
+      // revalidate on the next hour after the entitlement is created
+      nextRevalidateAt: Math.floor(Date.now() / 1000) + 60 * 60,
       lastSyncAt: Date.now(),
       computedAt: Date.now(),
-      currentCycleUsage: "0",
-      accumulatedUsage: "0",
+      currentCycleUsage: baseCurrentUsage,
+      accumulatedUsage: baseAccumulatedUsage,
     }
 
     // normalize the cycle usage to handle reset cycles
@@ -974,7 +998,7 @@ export class GrantsManager {
       currentCycleUsage: newCurrentUsage,
       accumulatedUsage: newAccumulatedUsage,
       effectiveAt: resetCycleForNow.start,
-      nextRevalidateAt: Date.now() + 1000 * 60 * 60,
+      nextRevalidateAt: resetCycleForNow.start + 1000 * 60 * 60,
     }
   }
 

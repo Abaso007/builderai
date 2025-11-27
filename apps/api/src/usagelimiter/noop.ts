@@ -36,7 +36,7 @@ export class NoopUsageLimiter implements UsageLimiter {
     return
   }
 
-  public async getEntitlements(
+  public async getActiveEntitlements(
     _req: GetEntitlementsRequest
   ): Promise<Result<EntitlementState[], BaseError>> {
     return Ok([])

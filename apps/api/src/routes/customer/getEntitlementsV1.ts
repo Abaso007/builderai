@@ -5,7 +5,7 @@ import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent } from "stoker/openapi/helpers"
 
 import { z } from "zod"
-import { keyAuth } from "~/auth/key"
+import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 
@@ -51,10 +51,12 @@ export const registerGetEntitlementsV1 = (app: App) =>
     // start a new timer
     startTime(c, "getEntitlements")
 
+    const projectId = await resolveContextProjectId(c, key.projectId, customerId)
+
     // validate usage from db
-    const { err, val: result } = await usagelimiter.getEntitlements({
+    const { err, val: result } = await usagelimiter.getActiveEntitlements({
       customerId,
-      projectId: key.projectId,
+      projectId,
       now: Date.now(),
     })
 

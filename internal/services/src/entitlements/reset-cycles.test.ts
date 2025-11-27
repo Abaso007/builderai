@@ -306,7 +306,7 @@ describe("EntitlementService - Reset Cycles", () => {
       customerId,
       projectId,
       featureSlug,
-      usage: 5,
+      usage: 50,
       timestamp: expiredTimestamp,
       requestId: "req_expired",
       idempotenceKey: "idem_expired",
@@ -318,6 +318,13 @@ describe("EntitlementService - Reset Cycles", () => {
       customerId,
       projectId,
       now: expiredTimestamp,
+      usageOverrides: {
+        [featureSlug]: {
+          currentCycleUsage: (5).toString(),
+          accumulatedUsage: ((30 - 1) * 5).toString(),
+        },
+      },
+      featureSlug,
     })
 
     // Should fail with ENTITLEMENT_NOT_FOUND because recomputation found no grants

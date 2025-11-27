@@ -111,8 +111,14 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     try {
       this.isInitialized()
 
+      // delete all the states from the storage
       await this.storage.deleteAll()
+
+      // clear the memoized states
       this.memoizedStates.clear()
+
+      // migrate the database again
+      await this._migrate()
       return Ok(undefined)
     } catch (error) {
       return Err(
@@ -133,12 +139,16 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       // get the states from the storage
       const states = await this.storage.list<EntitlementState>()
 
-      // memoize the states
       // clear the memoized states
       this.memoizedStates.clear()
 
       // memoize the new states
       states.forEach((value, key) => {
+        // skip config key
+        if (key.includes("config")) {
+          return
+        }
+
         if (value) {
           this.memoizedStates.set(key, value)
         }

@@ -6,7 +6,7 @@ import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 
 import { z } from "zod"
-import { keyAuth } from "~/auth/key"
+import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { reportUsageEvents } from "~/util/reportUsageEvents"
@@ -79,6 +79,7 @@ export const registerCanV1 = (app: App) =>
     const key = await keyAuth(c)
 
     const canType = fromCache ? "canCache" : "can"
+    const projectId = await resolveContextProjectId(c, key.projectId, customerId)
 
     // start a new timer
     startTime(c, canType)
@@ -87,7 +88,7 @@ export const registerCanV1 = (app: App) =>
     const { err, val: result } = await usagelimiter.verify({
       customerId,
       featureSlug,
-      projectId: key.projectId,
+      projectId,
       requestId,
       performanceStart,
       fromCache,

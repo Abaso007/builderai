@@ -184,12 +184,12 @@ export class UsageLimiterService implements UsageLimiter {
     return Ok(undefined)
   }
 
-  public async getEntitlements(
+  public async getActiveEntitlements(
     data: GetEntitlementsRequest
   ): Promise<Result<EntitlementState[], BaseError>> {
     const durableObject = this.getStub(this.getDurableObjectCustomerId(data.customerId))
 
-    const { val: entitlements, err } = await durableObject.getEntitlements(data)
+    const { val: entitlements, err } = await durableObject.getActiveEntitlements(data)
 
     if (err) {
       throw err
@@ -225,7 +225,8 @@ export class UsageLimiterService implements UsageLimiter {
     }
 
     const durableObject = this.getStub(this.getDurableObjectCustomerId(data.customerId))
-    const { val: currentUsage, err: currentUsageErr } = await durableObject.getEntitlements(data)
+    const { val: currentUsage, err: currentUsageErr } =
+      await durableObject.getActiveEntitlements(data)
 
     if (currentUsageErr) {
       throw currentUsageErr

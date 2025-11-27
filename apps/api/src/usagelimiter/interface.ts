@@ -26,7 +26,9 @@ export type GetUsageRequest = z.infer<typeof getUsageRequestSchema>
 export interface UsageLimiter {
   verify(data: VerifyRequest): Promise<Result<VerificationResult, BaseError>>
   reportUsage(data: ReportUsageRequest): Promise<Result<ReportUsageResult, BaseError>>
-  getEntitlements(data: GetEntitlementsRequest): Promise<Result<EntitlementState[], BaseError>>
+  getActiveEntitlements(
+    data: GetEntitlementsRequest
+  ): Promise<Result<EntitlementState[], BaseError>>
   getCurrentUsage(data: GetUsageRequest): Promise<Result<GetCurrentUsage, BaseError>>
   prewarmEntitlements(params: { customerId: string; projectId: string; now: number }): Promise<
     Result<void, BaseError>
