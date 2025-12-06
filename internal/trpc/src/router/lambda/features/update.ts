@@ -7,13 +7,14 @@ import { protectedProjectProcedure } from "#trpc"
 
 export const update = protectedProjectProcedure
   .input(
-    featureSelectBaseSchema.pick({ id: true, title: true, description: true }).partial({
+    featureSelectBaseSchema.pick({ id: true, title: true, description: true, unit: true }).partial({
       description: true,
+      unit: true,
     })
   )
   .output(z.object({ feature: featureSelectBaseSchema }))
   .mutation(async (opts) => {
-    const { title, id, description } = opts.input
+    const { title, id, description, unit } = opts.input
     const project = opts.ctx.project
 
     const featureData = await opts.ctx.db.query.features.findFirst({
@@ -32,6 +33,7 @@ export const update = protectedProjectProcedure
       .set({
         title,
         description: description ?? "",
+        unit: unit ?? "",
         updatedAtM: Date.now(),
       })
       .where(and(eq(schema.features.id, id), eq(schema.features.projectId, project.id)))

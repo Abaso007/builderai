@@ -2,7 +2,7 @@ import { createRoute } from "@hono/zod-openapi"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent } from "stoker/openapi/helpers"
 
-import { getCurrentUsageSchema } from "@unprice/db/validators"
+import { currentUsageSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { keyAuth } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
@@ -26,13 +26,18 @@ export const route = createRoute({
     }),
   },
   responses: {
-    [HttpStatusCodes.OK]: jsonContent(getCurrentUsageSchema, "The result of the get usage"),
+    [HttpStatusCodes.OK]: jsonContent(
+      currentUsageSchema.openapi({
+        description: "The current usage data for the customer",
+      }),
+      "The result of the get usage"
+    ),
     ...openApiErrorResponses,
   },
 })
 
-export type GetSubscriptionRequest = z.infer<typeof route.request.params>
-export type GetSubscriptionResponse = z.infer<
+export type GetUsageRequest = z.infer<typeof route.request.params>
+export type GetUsageResponse = z.infer<
   (typeof route.responses)[200]["content"]["application/json"]["schema"]
 >
 

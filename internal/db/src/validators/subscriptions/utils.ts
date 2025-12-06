@@ -166,10 +166,6 @@ export function addByInterval(date: Date, interval: BillingInterval, count: numb
       throw new Error(`Invalid billing interval: ${interval}`)
   }
 }
-/**
- * A helper to calculate proration metrics based on a cycle's start, end, and a 'now' timestamp.
- */
-// (deprecated) old now-based proration removed in favor of cycle-aware proration
 
 /**
  * Calculates a proration factor for a given service window [serviceStart, serviceEnd),

@@ -20,6 +20,7 @@ export const featureInsertBaseSchema = createInsertSchema(schema.features, {
     .refine((slug) => /^[a-z0-9-]+$/.test(slug), {
       message: "Slug must be a valid slug",
     }),
+  unit: z.string().default("units").optional(),
 })
   .omit({
     createdAtM: true,

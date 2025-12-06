@@ -1,11 +1,11 @@
 import type {
   EntitlementState,
-  GetCurrentUsage,
   ReportUsageRequest,
   ReportUsageResult,
   VerificationResult,
   VerifyRequest,
 } from "@unprice/db/validators"
+import type { CurrentUsage } from "@unprice/db/validators"
 import { type BaseError, Ok, type Result } from "@unprice/error"
 import type { GetEntitlementsRequest, GetUsageRequest, UsageLimiter } from "./interface"
 
@@ -25,7 +25,7 @@ export class NoopUsageLimiter implements UsageLimiter {
   public async reportUsage(
     _req: ReportUsageRequest
   ): Promise<Result<ReportUsageResult, BaseError>> {
-    return Ok({ allowed: true, message: "Allowed", consumedFrom: [] })
+    return Ok({ allowed: true, message: "Allowed" })
   }
 
   public async prewarm(_params: {
@@ -42,7 +42,27 @@ export class NoopUsageLimiter implements UsageLimiter {
     return Ok([])
   }
 
-  public async getCurrentUsage(_req: GetUsageRequest): Promise<Result<GetCurrentUsage, BaseError>> {
-    return Ok({} as GetCurrentUsage)
+  public async getCurrentUsage(_req: GetUsageRequest): Promise<Result<CurrentUsage, BaseError>> {
+    return Ok({
+      planName: "No Plan",
+      basePrice: 0,
+      billingPeriod: "monthly",
+      billingPeriodLabel: "mo",
+      currency: "USD",
+      groups: [],
+      priceSummary: {
+        totalPrice: 0,
+        basePrice: 0,
+        usageCharges: 0,
+        hasUsageCharges: false,
+        flatTotal: 0,
+        tieredTotal: 0,
+        usageTotal: 0,
+        freeGrantsSavings: 0,
+        hasFreeGrantsSavings: false,
+      },
+      renewalDate: undefined,
+      daysRemaining: undefined,
+    } as unknown as CurrentUsage)
   }
 }

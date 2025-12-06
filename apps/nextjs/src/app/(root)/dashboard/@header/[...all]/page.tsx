@@ -86,7 +86,7 @@ export default async function Page(props: {
 
   const isNonWorkspaceRoute = APP_NON_WORKSPACE_ROUTES.has(`/${workspaceSlug}`)
 
-  if ((!workspaceSlug || isNonWorkspaceRoute) && !projectSlug) {
+  if ((!workspaceSlug || isNonWorkspaceRoute) && (!projectSlug || !isSlug(projectSlug))) {
     return (
       <Header className="px-4">
         <UpdateClientCookie workspaceSlug={workspaceSlug} projectSlug={projectSlug} />
@@ -112,7 +112,7 @@ export default async function Page(props: {
             customerId={customerId}
           />
 
-          {projectSlug && (
+          {isSlug(projectSlug) && (
             <Fragment>
               <div className="flex size-4 items-center justify-center px-2">
                 <Separator className="rotate-[30deg]" orientation="vertical" />

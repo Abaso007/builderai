@@ -4,17 +4,17 @@ import type { Stats } from "@unprice/analytics/utils"
 import type { Database } from "@unprice/db"
 import type {
   EntitlementState,
-  GetCurrentUsage,
   ReportUsageRequest,
   ReportUsageResult,
   VerificationResult,
   VerifyRequest,
 } from "@unprice/db/validators"
+import type { CurrentUsage } from "@unprice/db/validators"
 import { type BaseError, Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import type { Cache } from "@unprice/services/cache"
 import type { CustomerService } from "@unprice/services/customers"
-import { UnPriceCustomerError } from "@unprice/services/customers"
+import type { UnPriceCustomerError } from "@unprice/services/customers"
 import type { Metrics } from "@unprice/services/metrics"
 import type { DurableObjectProject } from "~/project/do"
 import type { DurableObjectUsagelimiter } from "./do"
@@ -200,85 +200,14 @@ export class UsageLimiterService implements UsageLimiter {
 
   public async getCurrentUsage(
     data: GetUsageRequest
-  ): Promise<Result<GetCurrentUsage, FetchError | BaseError>> {
-    // validate subscription is active
-    const { val: subscription, err: subscriptionErr } =
-      await this.customerService.getActiveSubscription({
-        customerId: data.customerId,
-        projectId: data.projectId,
-        now: data.now,
-      })
-
-    if (subscriptionErr) {
-      throw subscriptionErr
-    }
-
-    const phase = subscription.activePhase
-
-    if (!phase) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "NO_ACTIVE_PHASE_FOUND",
-          message: "Subscription doesn't have an active phase",
-        })
-      )
-    }
-
+  ): Promise<Result<CurrentUsage, FetchError | BaseError>> {
     const durableObject = this.getStub(this.getDurableObjectCustomerId(data.customerId))
-    const { val: currentUsage, err: currentUsageErr } =
-      await durableObject.getActiveEntitlements(data)
+    const { val: usageDisplay, err } = await durableObject.getCurrentUsage(data)
 
-    if (currentUsageErr) {
-      throw currentUsageErr
+    if (err) {
+      return Err(err)
     }
 
-    // TODO: check this and see if we can simplify this
-    return Ok({
-      planVersion: {
-        description: phase.planVersion.description,
-        flatPrice: "0",
-        currentTotalPrice: "0",
-        billingConfig: phase.planVersion.billingConfig,
-      },
-      subscription: {
-        planSlug: subscription.planSlug,
-        status: subscription.status,
-        currentCycleEndAt: subscription.currentCycleEndAt,
-        timezone: subscription.timezone,
-        currentCycleStartAt: subscription.currentCycleStartAt,
-        prorationFactor: 0,
-        prorated: false,
-      },
-      phase: {
-        trialEndsAt: phase.trialEndsAt,
-        endAt: phase.endAt,
-        trialUnits: phase.trialUnits,
-        isTrial: false,
-      },
-      entitlement: currentUsage.map((entitlement) => ({
-        featureSlug: entitlement.featureSlug,
-        featureType: entitlement.featureType,
-        isCustom: false,
-        limit: entitlement.limit,
-        usage: Number(entitlement.currentCycleUsage),
-        max: entitlement.limit,
-        freeUnits: 0,
-        units: entitlement.limit,
-        included: 0,
-        price: "0",
-        featureVersion: {
-          id: entitlement.id,
-          featureSlug: entitlement.featureSlug,
-          featureType: entitlement.featureType,
-          feature: {
-            id: entitlement.id,
-            slug: entitlement.featureSlug,
-            name: entitlement.featureSlug,
-            description: entitlement.featureSlug,
-            type: entitlement.featureType,
-          },
-        },
-      })),
-    } as unknown as GetCurrentUsage)
+    return Ok(usageDisplay)
   }
 }

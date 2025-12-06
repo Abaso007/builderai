@@ -54,11 +54,11 @@ export const entitlements = pgTableProject(
     // Effective configuration (must be same across all grants)
     // if grants don't share the same config then we take the highest priority grant config
     featureType: typeFeatureEnum("feature_type").notNull(),
-    // null here mean reset happens at the end of the cycle
+    // null here mean the entitlement never resets
     resetConfig: json("reset_config").$type<
       z.infer<typeof resetConfigSchema> & { resetAnchor: number }
     >(),
-    aggregationMethod: aggregationMethodEnum("aggregation_method").notNull(), // ADD THIS
+    aggregationMethod: aggregationMethodEnum("aggregation_method").notNull(),
 
     // merging policy for the entitlement - sum, max, min, replace, etc.
     // sum limits, max limit, min limit, replace limit and units
@@ -138,6 +138,7 @@ export const grants = pgTableProject(
   {
     ...projectID,
     ...timestamps,
+    name: varchar("name", { length: 64 }).notNull(),
     // featurePlanVersionId is the id of the feature plan version that the grant is applied to
     featurePlanVersionId: cuid("feature_plan_version_id").notNull(),
     // what is the source of the grant?
@@ -178,9 +179,7 @@ export const grants = pgTableProject(
     anchor: integer("anchor").notNull().default(0),
     // ****************** end overrides from plan version feature ******************
 
-    metadata: json("metadata").$type<{
-      [key: string]: string | number | boolean | null
-    }>(),
+    metadata: json("metadata").$type<z.infer<typeof entitlementMetadataSchema>>(),
   },
   (table) => ({
     primary: primaryKey({

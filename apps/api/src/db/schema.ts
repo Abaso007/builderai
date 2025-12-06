@@ -9,16 +9,11 @@ export const usageRecords = pgTableProject(
   {
     // Using composite primary key of requestId and projectId for uniqueness
     id: integer().primaryKey({ autoIncrement: true }),
-    grantId: text().notNull(),
     idempotenceKey: text().notNull(),
     requestId: text().notNull(),
     featureSlug: text().notNull(),
     customerId: text().notNull(),
     projectId: text().notNull(),
-    featurePlanVersionId: text().notNull(),
-    subscriptionItemId: text(),
-    subscriptionPhaseId: text(),
-    subscriptionId: text(),
     // time when the usage should be reported
     timestamp: integer().notNull(),
     createdAt: integer().notNull(),
@@ -40,7 +35,6 @@ export const verifications = pgTableProject(
     id: integer().primaryKey({ autoIncrement: true }),
     requestId: text().notNull(),
     projectId: text().notNull(),
-    grantId: text().notNull(),
     deniedReason: text(),
     timestamp: integer().notNull(),
     createdAt: integer().notNull(),

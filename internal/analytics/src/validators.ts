@@ -58,7 +58,6 @@ export const metadataSchema = z
 
 export const featureVerificationSchemaV1 = z.object({
   projectId: z.string(),
-  grantId: z.string(),
   deniedReason: z.string().optional(),
   allowed: z.number().int().min(0).max(1).default(0),
   timestamp: z
@@ -78,10 +77,6 @@ export const featureVerificationSchemaV1 = z.object({
 
 export const featureUsageSchemaV1 = z.object({
   idempotenceKey: z.string(),
-  subscriptionItemId: z.string().nullable(),
-  subscriptionPhaseId: z.string().nullable(),
-  subscriptionId: z.string().nullable(),
-  grantId: z.string(),
   featureSlug: z.string(),
   customerId: z.string(),
   timestamp: z
@@ -89,7 +84,6 @@ export const featureUsageSchemaV1 = z.object({
     .default(Date.now())
     .describe("timestamp of when this usage record should be billed"),
   projectId: z.string(),
-  featurePlanVersionId: z.string(),
   usage: stringToUInt32,
   createdAt: z
     .number()
@@ -130,7 +124,6 @@ export const auditLogSchemaV1 = z.object({
 export const getAnalyticsVerificationsResponseSchema = z.object({
   projectId: z.string(),
   customerId: z.string().optional(),
-  grantId: z.string().optional(),
   featureSlug: z.string(),
   count: z.number(),
   p50_latency: z.number(),
@@ -141,7 +134,6 @@ export const getAnalyticsVerificationsResponseSchema = z.object({
 export const getUsageResponseSchema = z.object({
   projectId: z.string(),
   customerId: z.string().optional(),
-  grantId: z.string().optional(),
   featureSlug: z.string(),
   count: z.number(),
   sum: z.number(),

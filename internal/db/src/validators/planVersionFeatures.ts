@@ -100,6 +100,8 @@ export const tiersSchema = z.object({
   flatPrice: dineroSchema,
   firstUnit: z.coerce.number().int().min(1),
   lastUnit: z.coerce.number().int().min(1).nullable(),
+  // label for the tier - used to display the tier in the UI
+  label: z.string().optional(),
 })
 
 export const configTierSchema = z

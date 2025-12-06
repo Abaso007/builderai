@@ -12,11 +12,11 @@ import type {
 } from "@unprice/analytics"
 import type {
   ApiKeyExtended,
+  CurrentUsage,
   Customer,
   CustomerPaymentMethod,
   EntitlementState,
   Feature,
-  GetCurrentUsage,
   PlanVersionApi,
   Project,
   ReportUsageResult,
@@ -58,7 +58,7 @@ export type CacheNamespaces = {
   getUsage: Usage | null
   getVerifications: Verifications | null
   getVerificationRegions: VerificationRegions | null
-  getCurrentUsage: GetCurrentUsage | null
+  getCurrentUsage: CurrentUsage | null
 }
 
 export type CacheNamespace = keyof CacheNamespaces

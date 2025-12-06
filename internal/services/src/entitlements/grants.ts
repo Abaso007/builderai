@@ -1,17 +1,19 @@
 import { type Database, and, eq, inArray } from "@unprice/db"
 import { entitlements, grants } from "@unprice/db/schema"
-import { hashStringSHA256, newId } from "@unprice/db/utils"
+import { type UsageMode, hashStringSHA256, newId } from "@unprice/db/utils"
 import {
   type FeatureType,
   calculateCycleWindow,
   type entitlementGrantsSnapshotSchema,
 } from "@unprice/db/validators"
 import type {
-  Consumption,
+  AggregationMethod,
   EntitlementMergingPolicy,
   EntitlementState,
   ReportUsageResult,
   VerificationResult,
+  grantInsertSchema,
+  grantSchema,
   grantSchemaExtended,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
@@ -27,16 +29,20 @@ interface SubjectGrantQuery {
 export class GrantsManager {
   private readonly db: Database
   private readonly logger: Logger
+  private readonly revalidateInterval: number
 
   constructor({
     db,
     logger,
+    revalidateInterval,
   }: {
     db: Database
     logger: Logger
+    revalidateInterval?: number
   }) {
     this.db = db
     this.logger = logger
+    this.revalidateInterval = revalidateInterval ?? 300000 // 5 minutes default
   }
 
   public async deleteGrants(params: {
@@ -63,6 +69,110 @@ export class GrantsManager {
     return Ok(undefined)
   }
 
+  public async getGrantsForCustomer(params: {
+    customerId: string
+    projectId: string
+    now: number
+  }): Promise<Result<z.infer<typeof grantSchemaExtended>[], FetchError | UnPriceGrantError>> {
+    const { customerId, projectId, now } = params
+
+    // get all grants for a project and customer
+    // get the customer's subscription to find planId
+    const customerSubscription = await this.db.query.customers.findFirst({
+      with: {
+        subscriptions: {
+          with: {
+            phases: {
+              where: (phase, { and, lte, or, isNull, gte }) =>
+                and(lte(phase.startAt, now), or(isNull(phase.endAt), gte(phase.endAt, now))),
+              limit: 1,
+              with: {
+                planVersion: {
+                  with: {
+                    plan: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      where: (customer, { and, eq }) =>
+        and(eq(customer.id, customerId), eq(customer.projectId, projectId)),
+    })
+
+    if (!customerSubscription) {
+      return Err(
+        new UnPriceGrantError({
+          message: "No customer found for project",
+          subjectId: customerId,
+        })
+      )
+    }
+
+    const subscription = customerSubscription?.subscriptions[0] ?? null
+    const currentPhase = subscription?.phases[0] ?? null
+    const planId = currentPhase?.planVersion?.plan?.id ?? null
+    const planVersionId = currentPhase?.planVersion?.id ?? null
+
+    // Build list of subjects to query grants for
+    const subjects: SubjectGrantQuery[] = [
+      { subjectId: customerId, subjectType: "customer" },
+      { subjectId: projectId, subjectType: "project" },
+    ]
+
+    if (planId) {
+      subjects.push({ subjectId: planId, subjectType: "plan" })
+    }
+
+    if (planVersionId) {
+      subjects.push({ subjectId: planVersionId, subjectType: "plan_version" })
+    }
+
+    // Query all active grants for all subjects in the period of the current cycle
+    try {
+      const allGrants = await Promise.all(
+        subjects.map((subject) =>
+          this.db.query.grants.findMany({
+            with: {
+              featurePlanVersion: {
+                with: {
+                  feature: true,
+                },
+              },
+            },
+            where: (grant, { and, eq, gte, lte, or, isNull }) =>
+              and(
+                eq(grant.projectId, projectId),
+                eq(grant.subjectId, subject.subjectId),
+                eq(grant.subjectType, subject.subjectType),
+                eq(grant.deleted, false),
+                // Grant is effective: effectiveAt <= now
+                lte(grant.effectiveAt, now),
+                // Grant hasn't expired: expiresAt is null OR expiresAt >= now
+                or(isNull(grant.expiresAt), gte(grant.expiresAt, now))
+              ),
+            orderBy: (grant, { desc }) => desc(grant.priority),
+          })
+        )
+      )
+
+      return Ok(allGrants.flat())
+    } catch (error) {
+      this.logger.error("Error getting grants for customer", {
+        error: error instanceof Error ? error.message : String(error),
+        customerId,
+        projectId,
+      })
+      return Err(
+        new FetchError({
+          message: `Failed to get grants for customer: ${error instanceof Error ? error.message : String(error)}`,
+          retry: true,
+        })
+      )
+    }
+  }
+
   /**
    * Creates grants with validation to ensure configuration consistency.
    * Grants are append only, so if new grants are created that are already present, we need to delete the old ones
@@ -75,8 +185,8 @@ export class GrantsManager {
    * @throws FetchError if the grants cannot be created
    */
   public async createGrant(params: {
-    grant: typeof grants.$inferInsert
-  }): Promise<Result<typeof grants.$inferSelect, UnPriceGrantError>> {
+    grant: z.infer<typeof grantInsertSchema>
+  }): Promise<Result<z.infer<typeof grantSchema>, UnPriceGrantError>> {
     const { grant: newGrant } = params
 
     // priority map for the grants types
@@ -151,89 +261,23 @@ export class GrantsManager {
   }): Promise<Result<(typeof grants.$inferSelect)[], FetchError | UnPriceGrantError>> {
     const { customerId, projectId, now } = params
 
-    // get all grants for a project and customer
-    // Get customer's subscription to find planId
-    const customerSubscription = await this.db.query.customers.findFirst({
-      with: {
-        subscriptions: {
-          with: {
-            phases: {
-              where: (phase, { and, lte, or, isNull, gte }) =>
-                and(lte(phase.startAt, now), or(isNull(phase.endAt), gte(phase.endAt, now))),
-              limit: 1,
-              with: {
-                planVersion: {
-                  with: {
-                    plan: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      where: (customer, { and, eq }) =>
-        and(eq(customer.id, customerId), eq(customer.projectId, projectId)),
+    const { val: allGrants, err: getGrantsErr } = await this.getGrantsForCustomer({
+      customerId,
+      projectId,
+      now,
     })
 
-    if (!customerSubscription) {
-      return Err(
-        new UnPriceGrantError({
-          message: "No customer found for project",
-          subjectId: customerId,
-        })
-      )
+    if (getGrantsErr) {
+      return Err(getGrantsErr)
     }
 
-    const subscription = customerSubscription?.subscriptions[0] ?? null
-    const currentPhase = subscription?.phases[0] ?? null
-    const planId = currentPhase?.planVersion?.plan?.id ?? null
-    const planVersionId = currentPhase?.planVersion?.id ?? null
-
-    // Build list of subjects to query grants for
-    const subjects: SubjectGrantQuery[] = [
-      { subjectId: customerId, subjectType: "customer" },
-      { subjectId: projectId, subjectType: "project" },
-    ]
-
-    if (planId) {
-      subjects.push({ subjectId: planId, subjectType: "plan" })
-    }
-
-    if (planVersionId) {
-      subjects.push({ subjectId: planVersionId, subjectType: "plan_version" })
-    }
-
-    // Query all active grants for all subjects in the period of the current cycle
-    const allGrants = await Promise.all(
-      subjects.map((subject) =>
-        this.db.query.grants.findMany({
-          with: {
-            featurePlanVersion: {
-              with: {
-                feature: true,
-              },
-            },
-          },
-          where: (grant, { and, eq, gte, or, isNull, not, notInArray }) =>
-            and(
-              eq(grant.projectId, projectId),
-              eq(grant.subjectId, subject.subjectId),
-              eq(grant.subjectType, subject.subjectType),
-              eq(grant.autoRenew, true),
-              // we only renew subscriptions and trials through the subscription renew
-              notInArray(grant.type, ["subscription", "trial"]),
-              not(eq(grant.deleted, true)),
-              // already expired
-              or(isNull(grant.expiresAt), gte(grant.expiresAt, now)) // expiresAt >= now or null
-            ),
-          orderBy: (grant, { desc }) => desc(grant.priority),
-        })
-      )
+    // only renew grants with auto renew true and not trial and subscription
+    const autoRenewGrants = allGrants.filter(
+      (grant) => grant.autoRenew && grant.type !== "trial" && grant.type !== "subscription"
     )
 
     const renewedGrants = []
-    for (const grant of allGrants.flat()) {
+    for (const grant of autoRenewGrants) {
       const cycle = calculateCycleWindow({
         now: now,
         effectiveStartDate: grant.effectiveAt,
@@ -309,100 +353,33 @@ export class GrantsManager {
     featureSlug?: string
   }): Promise<Result<EntitlementState[], FetchError | UnPriceGrantError>> {
     try {
-      // Get customer's subscription to find planId
-      const customerSubscription = await this.db.query.customers.findFirst({
-        with: {
-          subscriptions: {
-            with: {
-              phases: {
-                where: (phase, { and, lte, or, isNull, gte }) =>
-                  and(lte(phase.startAt, now), or(isNull(phase.endAt), gte(phase.endAt, now))),
-                limit: 1,
-                with: {
-                  planVersion: {
-                    with: {
-                      plan: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-        where: (customer, { and, eq }) =>
-          and(eq(customer.id, customerId), eq(customer.projectId, projectId)),
+      const { val: allGrants, err: getGrantsErr } = await this.getGrantsForCustomer({
+        customerId,
+        projectId,
+        now,
       })
 
-      if (!customerSubscription) {
-        return Err(
-          new UnPriceGrantError({
-            message: "No customer found for project",
-            subjectId: customerId,
-          })
-        )
+      if (getGrantsErr) {
+        return Err(getGrantsErr)
       }
 
-      const subscription = customerSubscription?.subscriptions[0] ?? null
-      const currentPhase = subscription?.phases[0] ?? null
-      const planId = currentPhase?.planVersion?.plan?.id ?? null
-      const planVersionId = currentPhase?.planVersion?.id ?? null
+      // Group grants by feature slug
+      const grantsByFeature = new Map<string, typeof allGrants>()
 
-      // Build list of subjects to query grants for
-      const subjects: SubjectGrantQuery[] = [
-        { subjectId: customerId, subjectType: "customer" },
-        { subjectId: projectId, subjectType: "project" },
-      ]
+      for (const grant of allGrants) {
+        const grantFeatureSlug = grant.featurePlanVersion.feature.slug
 
-      if (planId) {
-        subjects.push({ subjectId: planId, subjectType: "plan" })
-      }
-
-      if (planVersionId) {
-        subjects.push({ subjectId: planVersionId, subjectType: "plan_version" })
-      }
-
-      // Query all active grants for all subjects in the period of the current cycle
-      const allGrants = await Promise.all(
-        subjects.map((subject) =>
-          this.db.query.grants.findMany({
-            with: {
-              featurePlanVersion: {
-                with: {
-                  feature: true,
-                },
-              },
-            },
-            where: (grant, { and, eq, lte, gte, or, isNull }) =>
-              and(
-                eq(grant.projectId, projectId),
-                eq(grant.subjectId, subject.subjectId),
-                eq(grant.subjectType, subject.subjectType),
-                eq(grant.deleted, false),
-                lte(grant.effectiveAt, now), // effectiveAt >= now
-                or(isNull(grant.expiresAt), gte(grant.expiresAt, now)) // expiresAt <= now or null
-              ),
-            orderBy: (grant, { desc }) => desc(grant.priority),
-          })
-        )
-      )
-
-      // Flatten and group grants by feature slug
-      const grantsByFeature = new Map<string, (typeof allGrants)[0]>()
-
-      for (const grantList of allGrants) {
-        for (const grant of grantList) {
-          const featureSlug = grant.featurePlanVersion.feature.slug
-
-          // Optimization: skip if we are looking for a specific feature
-          if (featureSlug && featureSlug !== grant.featurePlanVersion.feature.slug) {
-            continue
-          }
-
-          if (!grantsByFeature.has(featureSlug)) {
-            grantsByFeature.set(featureSlug, [])
-          }
-          grantsByFeature.get(featureSlug)!.push(grant)
+        // Optimization: skip if we are looking for a specific feature
+        if (featureSlug && grantFeatureSlug !== featureSlug) {
+          continue
         }
+
+        if (!grantsByFeature.has(grantFeatureSlug)) {
+          grantsByFeature.set(grantFeatureSlug, [])
+        }
+
+        // add the grant to the list of grants for the feature
+        grantsByFeature.get(grantFeatureSlug)!.push(grant)
       }
 
       // Normalize order by priority globally per feature (higher first)
@@ -464,6 +441,114 @@ export class GrantsManager {
   }
 
   /**
+   * Computes the entitlement state from a list of grants without saving to the database.
+   * This logic is shared between the entitlement computation and the billing estimation.
+   */
+  public computeEntitlementState(params: {
+    grants: z.infer<typeof grantSchemaExtended>[]
+  }): Result<
+    {
+      limit: number | null
+      allowOverage: boolean
+      mergingPolicy: EntitlementMergingPolicy
+      activeGrants: z.infer<typeof grantSchemaExtended>[]
+      winningGrant: z.infer<typeof grantSchemaExtended>
+      effectiveAt: number
+      expiresAt: number | null
+      resetConfig: EntitlementState["resetConfig"] | null
+      featureType: FeatureType
+      aggregationMethod: AggregationMethod
+      grantsSnapshot: z.infer<typeof entitlementGrantsSnapshotSchema>[]
+    },
+    UnPriceGrantError
+  > {
+    const { grants } = params
+
+    if (grants.length === 0) {
+      return Err(new UnPriceGrantError({ message: "No grants provided" }))
+    }
+
+    // Sort by priority (higher first) to preserve consumption order and get the best priority grant
+    // This determines the "intent" (feature type) of the entitlement configuration
+    const ordered = [...grants].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
+    const bestPriorityGrant = ordered[0]!
+
+    // Prepare grants snapshot (preserve priority order)
+    const grantsSnapshot = ordered.map((g) => ({
+      id: g.id,
+      type: g.type,
+      name: g.name,
+      effectiveAt: g.effectiveAt,
+      expiresAt: g.expiresAt,
+      limit: g.limit,
+      subjectType: g.subjectType,
+      subjectId: g.subjectId,
+      priority: g.priority,
+      realtime: g.featurePlanVersion.metadata?.realtime ?? false,
+      allowOverage: g.allowOverage,
+      featurePlanVersionId: g.featurePlanVersionId,
+      subscriptionItemId: g.subscriptionItem?.id ?? null,
+      subscriptionPhaseId: g.subscriptionItem?.subscriptionPhaseId ?? null,
+      subscriptionId: g.subscriptionItem?.subscription?.id ?? null,
+    }))
+
+    // Merge grants according to merging policy derived from feature type
+    const merged = this.mergeGrants({
+      grants: grantsSnapshot,
+      featureType: bestPriorityGrant.featurePlanVersion.featureType,
+      usageMode: bestPriorityGrant.featurePlanVersion.config.usageMode,
+    })
+
+    // The effective configuration should come from the "winning" grant(s)
+    // If merged.grants is empty (shouldn't happen if grants.length > 0), fall back to bestPriorityGrant
+    // But since we filter grants in mergeGrants, we need to find the corresponding full grant object
+    // for the winning grant ID to get full configuration (resetConfig etc).
+
+    const winningGrantSnapshot = merged.grants[0] ?? grantsSnapshot[0]!
+    const winningGrant = grants.find((g) => g.id === winningGrantSnapshot.id) ?? bestPriorityGrant
+
+    // Derive overall effective/expires for cycle computation
+    // Compute cycle window from reset config (half-open style via bounds)
+    // Use the winning grant's reset config
+    const resetConfig = winningGrant.featurePlanVersion.resetConfig
+      ? {
+          ...winningGrant.featurePlanVersion.resetConfig,
+          resetAnchor: winningGrant.anchor,
+        }
+      : null
+
+    // use the winning grant's billing config
+    const billingConfig = winningGrant.featurePlanVersion.billingConfig
+      ? {
+          name: winningGrant.featurePlanVersion.billingConfig.name,
+          resetInterval: winningGrant.featurePlanVersion.billingConfig.billingInterval,
+          resetIntervalCount: winningGrant.featurePlanVersion.billingConfig.billingIntervalCount,
+          planType: winningGrant.featurePlanVersion.billingConfig.planType,
+          resetAnchor: winningGrant.anchor,
+        }
+      : null
+
+    // Map snapshots back to original grants for the active grants list
+    const activeGrants = merged.grants
+      .map((snap) => grants.find((g) => g.id === snap.id))
+      .filter((g): g is z.infer<typeof grantSchemaExtended> => !!g)
+
+    return Ok({
+      limit: merged.limit,
+      allowOverage: merged.allowOverage,
+      mergingPolicy: merged.mergingPolicy,
+      activeGrants,
+      winningGrant,
+      effectiveAt: merged.effectiveAt,
+      expiresAt: merged.expiresAt,
+      resetConfig: resetConfig ?? billingConfig ?? null,
+      featureType: bestPriorityGrant.featurePlanVersion.featureType,
+      aggregationMethod: bestPriorityGrant.featurePlanVersion.aggregationMethod,
+      grantsSnapshot: merged.grants,
+    })
+  }
+
+  /**
    * Computes a single entitlement from a list of grants for a feature.
    * This is the core merging logic.
    * @param grants - List of grants to compute the entitlement from
@@ -490,69 +575,26 @@ export class GrantsManager {
     now: number
     usageOverride?: { currentCycleUsage: string; accumulatedUsage: string }
   }): Promise<Result<typeof entitlements.$inferSelect, FetchError | UnPriceGrantError>> {
-    if (grants.length === 0) {
+    const computedStateResult = this.computeEntitlementState({ grants })
+
+    if (computedStateResult.err) {
       return Err(
         new UnPriceGrantError({
-          message: "No grants provided",
+          message: computedStateResult.err.message,
           subjectId: customerId,
         })
       )
     }
 
-    // Sort by priority (higher first) to preserve consumption order and get the best priority grant
-    // This determines the "intent" (feature type) of the entitlement configuration
-    const ordered = [...grants].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
-    const bestPriorityGrant = ordered[0]!
-
-    // Prepare grants snapshot (preserve priority order)
-    const grantsSnapshot = ordered.map((g) => ({
-      id: g.id,
-      type: g.type,
-      effectiveAt: g.effectiveAt,
-      expiresAt: g.expiresAt,
-      limit: g.limit,
-      subjectType: g.subjectType,
-      subjectId: g.subjectId,
-      priority: g.priority,
-      realtime: g.featurePlanVersion.metadata?.realtime ?? false,
-      allowOverage: g.allowOverage,
-      featurePlanVersionId: g.featurePlanVersionId,
-      subscriptionItemId: g.subscriptionItem?.id ?? null,
-      subscriptionPhaseId: g.subscriptionItem?.subscriptionPhaseId ?? null,
-      subscriptionId: g.subscriptionItem?.subscription?.id ?? null,
-    }))
-
-    // Merge grants according to merging policy derived from feature type
-    const merged = this.mergeGrants({
-      grants: grantsSnapshot,
-      featureType: bestPriorityGrant.featurePlanVersion.featureType as FeatureType,
-    })
-
-    // The effective configuration should come from the "winning" grant(s)
-    // If merged.grants is empty (shouldn't happen if grants.length > 0), fall back to bestPriorityGrant
-    // But since we filter grants in mergeGrants, we need to find the corresponding full grant object
-    // for the winning grant ID to get full configuration (resetConfig etc).
-
-    const winningGrantSnapshot = merged.grants[0] ?? grantsSnapshot[0]!
-    const winningGrant = grants.find((g) => g.id === winningGrantSnapshot.id) ?? bestPriorityGrant
+    const computedState = computedStateResult.val
 
     // all feature grants must have the same feature slug
-    const featureSlug = winningGrant.featurePlanVersion.feature.slug
-
-    // Derive overall effective/expires for cycle computation
-    // Compute cycle window from reset config (half-open style via bounds)
-    // Use the winning grant's reset config
-    const resetConfig = winningGrant.featurePlanVersion.resetConfig
-      ? {
-          ...winningGrant.featurePlanVersion.resetConfig,
-          resetAnchor: winningGrant.anchor,
-        }
-      : null
+    const featureSlug = computedState.winningGrant.featurePlanVersion.feature.slug
 
     // Compute version hash + current cycle boundaries
     const version = await hashStringSHA256(
       JSON.stringify({
-        grants: merged.grants,
+        grants: computedState.grantsSnapshot,
       })
     )
 
@@ -566,11 +608,22 @@ export class GrantsManager {
         ),
     })
 
+    const normalizeCycleUsage = currentEntitlement
+      ? this.normalizeCycleUsage({
+          state: {
+            ...currentEntitlement,
+            currentCycleUsage:
+              usageOverride?.currentCycleUsage ?? currentEntitlement.currentCycleUsage,
+            accumulatedUsage:
+              usageOverride?.accumulatedUsage ?? currentEntitlement.accumulatedUsage,
+          },
+          now,
+        })
+      : null
+
     // Determine usage base
-    const baseCurrentUsage =
-      usageOverride?.currentCycleUsage ?? currentEntitlement?.currentCycleUsage ?? "0"
-    const baseAccumulatedUsage =
-      usageOverride?.accumulatedUsage ?? currentEntitlement?.accumulatedUsage ?? "0"
+    const baseCurrentUsage = normalizeCycleUsage?.currentCycleUsage ?? "0"
+    const baseAccumulatedUsage = normalizeCycleUsage?.accumulatedUsage ?? "0"
 
     // Prepare base entitlement data
     const entitlementData = {
@@ -578,18 +631,17 @@ export class GrantsManager {
       projectId,
       customerId,
       featureSlug,
-      featureType: bestPriorityGrant.featurePlanVersion.featureType as FeatureType,
-      limit: merged.limit,
-      allowOverage: merged.allowOverage,
-      aggregationMethod: bestPriorityGrant.featurePlanVersion.aggregationMethod,
-      resetConfig,
-      mergingPolicy: merged.mergingPolicy,
-      grants: merged.grants,
+      featureType: computedState.featureType,
+      limit: computedState.limit,
+      allowOverage: computedState.allowOverage,
+      aggregationMethod: computedState.aggregationMethod,
+      resetConfig: computedState.resetConfig,
+      mergingPolicy: computedState.mergingPolicy,
+      grants: computedState.grantsSnapshot,
       version,
-      effectiveAt: merged.effectiveAt,
-      expiresAt: merged.expiresAt,
-      // revalidate on the next hour after the entitlement is created
-      nextRevalidateAt: Math.floor(Date.now() / 1000) + 60 * 60,
+      effectiveAt: computedState.effectiveAt,
+      expiresAt: computedState.expiresAt,
+      nextRevalidateAt: Date.now() + this.revalidateInterval,
       lastSyncAt: Date.now(),
       computedAt: Date.now(),
       currentCycleUsage: baseCurrentUsage,
@@ -600,21 +652,24 @@ export class GrantsManager {
     const normalizedState = this.normalizeCycleUsage({ state: entitlementData, now })
 
     // New entitlement - no existing entitlement to preserve
+    const finalEntitlementData = {
+      ...entitlementData,
+      currentCycleUsage: normalizedState.currentCycleUsage,
+      accumulatedUsage: normalizedState.accumulatedUsage,
+      nextRevalidateAt: normalizedState.nextRevalidateAt,
+      // update the last sync at and the updated at to now
+      lastSyncAt: Date.now(),
+      updatedAtM: Date.now(),
+      computedAt: Date.now(),
+    }
+
     const newEntitlement = await this.db
       .insert(entitlements)
-      .values(entitlementData)
+      .values(finalEntitlementData)
       .onConflictDoUpdate({
         target: [entitlements.projectId, entitlements.customerId, entitlements.featureSlug],
         set: {
-          ...entitlementData,
-          // update usage
-          currentCycleUsage: normalizedState.currentCycleUsage,
-          accumulatedUsage: normalizedState.accumulatedUsage,
-          nextRevalidateAt: normalizedState.nextRevalidateAt,
-          // update the last sync at and the updated at to now
-          lastSyncAt: Date.now(),
-          updatedAtM: Date.now(),
-          computedAt: Date.now(),
+          ...finalEntitlementData,
         },
       })
       .returning()
@@ -639,6 +694,7 @@ export class GrantsManager {
   private mergeGrants(params: {
     grants: z.infer<typeof entitlementGrantsSnapshotSchema>[]
     featureType?: FeatureType | undefined
+    usageMode?: UsageMode | undefined
     policy?: EntitlementMergingPolicy | undefined
   }): {
     limit: number | null
@@ -648,7 +704,7 @@ export class GrantsManager {
     expiresAt: number | null
     mergingPolicy: EntitlementMergingPolicy
   } {
-    const { grants, featureType, policy: explicitPolicy } = params
+    const { grants, featureType, usageMode, policy: explicitPolicy } = params
 
     if (grants.length === 0) {
       return {
@@ -673,14 +729,14 @@ export class GrantsManager {
         policy = "replace"
       } else {
         switch (featureType) {
-          case "flat":
-            policy = "replace"
-            break
-          case "tier":
-            policy = "max"
-            break
           case "usage":
-            policy = "sum"
+            // for usage, we sum the usage of all the grants
+            // but if the usage mode is tier, we take the max limit
+            if (usageMode === "tier") {
+              policy = "max"
+            } else {
+              policy = "sum"
+            }
             break
           case "package":
             policy = "max"
@@ -912,14 +968,9 @@ export class GrantsManager {
       return state
     }
 
-    // The key insight: We need to track what reset cycle slice we were last in
-    // Since we don't store this separately, we can infer it by checking:
-    // If currentCycleUsage > 0, we were tracking usage for SOME reset cycle
-    // We can calculate what reset cycle the billing cycle started in, and
-    // compare with what reset cycle "now" is in
-
-    // Calculate what reset cycle the billing cycle start falls into
-    const resetCycleAtBillingStart = calculateCycleWindow({
+    // Calculate what reset cycle the last tracked reset cycle start falls into
+    // (effectiveAt may have been updated to track the last reset cycle start)
+    const resetCycleAtLastTracked = calculateCycleWindow({
       now: state.effectiveAt,
       trialEndsAt: null,
       effectiveStartDate: state.effectiveAt,
@@ -933,16 +984,16 @@ export class GrantsManager {
       },
     })
 
-    if (!resetCycleAtBillingStart) {
+    if (!resetCycleAtLastTracked) {
       return state
     }
 
     // Check if we've crossed into a different reset cycle slice
-    // If now is in a different reset cycle than the billing start, we've crossed
-    // (assuming we started tracking at billing start)
+    // Compare the reset cycle we're currently tracking (based on effectiveAt)
+    // with the reset cycle that "now" falls into
     const resetBoundaryCrossed =
-      resetCycleForNow.start !== resetCycleAtBillingStart.start ||
-      resetCycleForNow.end !== resetCycleAtBillingStart.end
+      resetCycleForNow.start !== resetCycleAtLastTracked.start ||
+      resetCycleForNow.end !== resetCycleAtLastTracked.end
 
     if (!resetBoundaryCrossed) {
       return state
@@ -998,7 +1049,7 @@ export class GrantsManager {
       currentCycleUsage: newCurrentUsage,
       accumulatedUsage: newAccumulatedUsage,
       effectiveAt: resetCycleForNow.start,
-      nextRevalidateAt: resetCycleForNow.start + 1000 * 60 * 60,
+      nextRevalidateAt: resetCycleForNow.start + this.revalidateInterval,
     }
   }
 
@@ -1052,7 +1103,8 @@ export class GrantsManager {
 
   /**
    * Consume usage from grants by priority
-   * Returns which grants were consumed for billing attribution
+   * Here we decided to make a trade-off. Instead of calculating the attribution here at consumption time,
+   * we calculated dynamically at billing service time. So we are more flexible when handling edge cases.
    */
   public consume(params: {
     state: EntitlementState
@@ -1079,7 +1131,6 @@ export class GrantsManager {
         allowed: false,
         usage: 0,
         limit: undefined,
-        consumedFrom: [],
         message: err.message,
         deniedReason: "ENTITLEMENT_ERROR",
       }
@@ -1098,19 +1149,19 @@ export class GrantsManager {
         allowed: false,
         usage: amount,
         limit: undefined,
-        consumedFrom: [],
         message: usageErr.message,
         deniedReason: "INCORRECT_USAGE_REPORTING",
       }
     }
 
-    // 3. Recalculate effective limit from active grants (in case grants expired)
+    // 3. Recalculate effective limit from active grants
     const {
       limit: effectiveLimit,
       allowOverage,
       expiresAt,
     } = this.mergeGrants({
       grants: activeGrants,
+      // policy was already calculated use the same
       policy: validatedState.mergingPolicy,
     })
 
@@ -1138,19 +1189,13 @@ export class GrantsManager {
         accumulatedUsage: normalizedState.accumulatedUsage,
         effectiveAt: normalizedState.effectiveAt,
         limit: effectiveLimit,
-        consumedFrom: [],
         message: "Limit exceeded",
         deniedReason: "LIMIT_EXCEEDED",
         notifiedOverLimit: false,
       }
     }
 
-    // 4. Determine which grants would be consumed for billing attribution
-    const consumedFrom = this.attributeConsumption({
-      grants: activeGrants,
-      amount,
-    })
-
+    // 4. Return result without attribution
     return {
       allowed,
       usage: newUsage,
@@ -1158,7 +1203,6 @@ export class GrantsManager {
       effectiveAt: normalizedState.effectiveAt, // normalizedState has the updated effectiveAt from normalizeCycleUsage
       expiresAt: expiresAt,
       limit: effectiveLimit ?? undefined,
-      consumedFrom,
       message: "Allowed",
       deniedReason: undefined,
       notifiedOverLimit: notifiedOverLimit,
@@ -1191,96 +1235,6 @@ export class GrantsManager {
     }
 
     return Ok(amount)
-  }
-
-  /**
-   * Determine which grants would be consumed for billing attribution
-   */
-  private attributeConsumption(params: {
-    grants: z.infer<typeof entitlementGrantsSnapshotSchema>[]
-    amount: number
-  }): Consumption[] {
-    const { grants, amount } = params
-    // Sort by priority
-    const sorted = [...grants].sort((a, b) => b.priority - a.priority)
-
-    // Attribute consumption by priority (for billing records)
-    // This is just for attribution, not for limit checking
-    const attribution: Consumption[] = []
-    let remaining = amount
-
-    for (const grant of sorted) {
-      if (remaining === 0) break
-
-      let toAttribute = 0
-
-      if (remaining > 0) {
-        toAttribute = grant.limit === null ? remaining : Math.min(remaining, grant.limit)
-      } else {
-        toAttribute = grant.limit === null ? remaining : Math.max(remaining, -grant.limit)
-      }
-
-      attribution.push({
-        grantId: grant.id,
-        amount: toAttribute,
-        priority: grant.priority,
-        type: grant.type,
-        featurePlanVersionId: grant.featurePlanVersionId,
-        subscriptionItemId: grant.subscriptionItemId,
-        subscriptionPhaseId: grant.subscriptionPhaseId,
-        subscriptionId: grant.subscriptionId,
-      })
-
-      remaining -= toAttribute
-    }
-
-    // If there is still remaining usage (overage), find a grant that allows overage to attribute it to
-    if (remaining !== 0) {
-      // Find the highest priority grant that allows overage
-      const overageGrant = sorted.find((g) => g.allowOverage)
-
-      if (overageGrant) {
-        // Check if we already have an entry for this grant
-        const existingEntry = attribution.find((a) => a.grantId === overageGrant.id)
-
-        if (existingEntry) {
-          existingEntry.amount += remaining
-        } else {
-          // Add new entry for overage
-          attribution.push({
-            grantId: overageGrant.id,
-            amount: remaining,
-            priority: overageGrant.priority,
-            type: overageGrant.type,
-            featurePlanVersionId: overageGrant.featurePlanVersionId,
-            subscriptionItemId: overageGrant.subscriptionItemId,
-            subscriptionPhaseId: overageGrant.subscriptionPhaseId,
-            subscriptionId: overageGrant.subscriptionId,
-          })
-        }
-      } else {
-        // If there is no overage grant, we need to notify the user we take the first grant and attribute the remaining to it
-        const firstGrant = sorted[0]!
-        const existingEntry = attribution.find((a) => a.grantId === firstGrant.id)
-
-        if (existingEntry) {
-          existingEntry.amount += remaining
-        } else {
-          attribution.push({
-            grantId: firstGrant.id,
-            amount: remaining,
-            priority: firstGrant.priority,
-            type: firstGrant.type,
-            featurePlanVersionId: firstGrant.featurePlanVersionId,
-            subscriptionItemId: firstGrant.subscriptionItemId,
-            subscriptionPhaseId: firstGrant.subscriptionPhaseId,
-            subscriptionId: firstGrant.subscriptionId,
-          })
-        }
-      }
-    }
-
-    return attribution
   }
 
   /**

@@ -4,6 +4,7 @@ import { CloudflareStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
 import type {
+  CurrentUsage,
   EntitlementState,
   ReportUsageRequest,
   ReportUsageResult,
@@ -162,11 +163,11 @@ export class DurableObjectUsagelimiter extends Server {
       config: {
         revalidateInterval:
           env.NODE_ENV === "development"
-            ? 60000 // 1 minute
+            ? 30000 // 30 seconds
             : 300000, // 5 minutes
         syncToDBInterval:
           env.NODE_ENV === "development"
-            ? 60000 // 1 minute
+            ? 30000 // 30 seconds
             : 600000, // 10 minutes
       },
     })
@@ -236,6 +237,14 @@ export class DurableObjectUsagelimiter extends Server {
     return await this.entitlementService.getActiveEntitlements(data)
   }
 
+  public async getCurrentUsage(data: {
+    customerId: string
+    projectId: string
+    now: number
+  }): Promise<Result<CurrentUsage, BaseError>> {
+    return await this.entitlementService.getCurrentUsage(data)
+  }
+
   // when connected through websocket we can broadcast events to the client
   // realtime events are used to debug events in dashboard
   async broadcastEvents(data: {
@@ -299,7 +308,6 @@ export class DurableObjectUsagelimiter extends Server {
       return {
         message: error instanceof Error ? error.message : "unknown error",
         allowed: false,
-        consumedFrom: [],
       }
     } finally {
       this.ctx.waitUntil(Promise.all([this.metrics.flush(), this.logger.flush()]))

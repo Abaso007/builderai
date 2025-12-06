@@ -181,10 +181,28 @@ export function FeatureForm({
 
           <FormField
             control={form.control}
+            name="unit"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Unit</FormLabel>
+                <FormDescription>
+                  Enter the unit of measurement for the feature, please use singular form.
+                </FormDescription>
+                <FormControl>
+                  <Input {...field} placeholder="domain" value={field.value} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
             name="description"
             render={({ field }) => (
               <FormItem>
                 <FormLabel>Description</FormLabel>
+                <FormDescription>Enter a short description of the feature.</FormDescription>
                 <FormControl>
                   <Textarea
                     {...field}
@@ -192,7 +210,6 @@ export function FeatureForm({
                     placeholder="Grants the user the access to custom domains feature"
                   />
                 </FormControl>
-                <FormDescription>Enter a short description of the feature.</FormDescription>
                 <FormMessage />
               </FormItem>
             )}

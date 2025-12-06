@@ -13,7 +13,6 @@ SCHEMA >
     `latency` Float32 `json:$.latency`,
     `requestId` String `json:$.requestId`,
     `projectId` String `json:$.projectId`,
-    `grantId` String `json:$.grantId`,
     `deniedReason` LowCardinality(Nullable(String)) `json:$.deniedReason`,
     `allowed` UInt8 `json:$.allowed`,
     `metadata` Map(String, String) `json:$.metadata`

@@ -8,7 +8,6 @@ SQL >
     SELECT
         projectId,
         customerId,
-        grantId,
         featureSlug,
         countMerge(count) as count_all,
         sumMerge(sum) as sum_all,
@@ -18,7 +17,7 @@ SQL >
     WHERE
         projectId = {{ String(projectId) }} AND
         customerId = {{ String(customerId) }} AND
-        grantId IN {{Array(grantIds, 'String', default='1,2,3')}}
-    GROUP BY projectId, customerId, featureSlug, grantId
+        featureSlug IN {{Array(featureSlugs, 'String')}}
+    GROUP BY projectId, customerId, featureSlug
 
 TYPE endpoint

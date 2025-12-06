@@ -299,14 +299,12 @@ export class Analytics {
       parameters: z.object({
         projectId: z.string().optional(),
         customerId: z.string().optional(),
-        grantId: z.string().optional(),
-        featureSlug: z.string().optional(),
+        featureSlugs: z.array(z.string()).optional(),
         intervalDays: z.number().optional(),
       }),
       data: z.object({
         projectId: z.string(),
         customerId: z.string().optional(),
-        grantId: z.string().optional(),
         featureSlug: z.string(),
         count: z.number(),
         p50_latency: z.number(),
@@ -356,7 +354,7 @@ export class Analytics {
       parameters: z.object({
         projectId: z.string(),
         customerId: z.string().optional(),
-        grantId: z.string().optional(),
+        featureSlugs: z.array(z.string()).optional(),
         intervalDays: z.number().optional(),
         start: z.number().optional(),
         end: z.number().optional(),
@@ -364,7 +362,6 @@ export class Analytics {
       data: z.object({
         projectId: z.string(),
         customerId: z.string().optional(),
-        grantId: z.string().optional(),
         featureSlug: z.string(),
         count: z.number(),
         sum: z.number(),
@@ -386,12 +383,11 @@ export class Analytics {
       parameters: z.object({
         projectId: z.string(),
         customerId: z.string(),
-        grantIds: z.array(z.string()),
+        featureSlugs: z.array(z.string()),
       }),
       data: z.object({
         projectId: z.string(),
         customerId: z.string(),
-        grantId: z.string(),
         featureSlug: z.string(),
         count_all: z.number(),
         sum_all: z.number(),
@@ -410,8 +406,7 @@ export class Analytics {
     return this.readClient.buildPipe({
       pipe: "v1_get_feature_usage_no_duplicates",
       parameters: z.object({
-        grantIds: z.array(z.string()).optional(),
-        subscriptionItemIds: z.array(z.string()).optional(),
+        featureSlugs: z.array(z.string()).optional(),
         customerId: z.string(),
         projectId: z.string(),
         start: z.number().optional(),
@@ -420,8 +415,6 @@ export class Analytics {
       data: z.object({
         projectId: z.string(),
         customerId: z.string(),
-        grantId: z.string().optional(),
-        subscriptionItemId: z.string().optional(),
         featureSlug: z.string(),
         sum_all: z.number().optional(),
         max_all: z.number().optional(),
@@ -466,135 +459,17 @@ export class Analytics {
   }
 
   // TODO: add telemtry for this endpoint to know how many times it's being called and the latency
-  public async getUsageBillingEntitlements({
+  public async getUsageBillingFeatures({
     customerId,
     projectId,
-    entitlements,
-    startAt,
-    endAt,
-    includeAccumulatedUsage,
-  }: {
-    customerId: string
-    projectId: string
-    entitlements: {
-      entitlementId: string
-      aggregationMethod: string
-      featureType: string
-    }[]
-    startAt: number
-    endAt: number
-    includeAccumulatedUsage: boolean
-  }): Promise<
-    Result<
-      { entitlementId: string; usage: number; accumulatedUsage: number }[] | null,
-      FetchError | UnPriceAnalyticsError
-    >
-  > {
-    // filter that only usage, package and tier features are being requested
-    const entitlementsUsage = entitlements.filter((entitlement) =>
-      ["usage", "package", "tier"].includes(entitlement.featureType)
-    )
-
-    const grantIdsArray = entitlementsUsage.map((entitlement) => entitlement.entitlementId)
-
-    if (grantIdsArray.length === 0) {
-      return Ok([])
-    }
-
-    // we use the same endpoint for billing usage as it's the
-    // more accurate one
-    const [totalAccumulatedUsages, totalPeriodUsages] = await Promise.all([
-      includeAccumulatedUsage
-        ? this.getBillingUsage({ customerId, projectId, grantIds: grantIdsArray })
-            .then((usage) => usage.data ?? [])
-            .catch((error) => {
-              this.logger.error("error getting features usage total", {
-                error: JSON.stringify(error),
-                customerId,
-                projectId,
-                grantIds: grantIdsArray,
-                startAt,
-                endAt,
-                includeAccumulatedUsage,
-              })
-              return null
-            })
-        : Promise.resolve([]),
-      this.getBillingUsage({
-        customerId,
-        projectId,
-        grantIds: grantIdsArray,
-        start: startAt,
-        end: endAt,
-      })
-        .then((usage) => usage.data ?? [])
-        .catch((error) => {
-          this.logger.error("error getting features usage period", {
-            error: JSON.stringify(error),
-            customerId,
-            projectId,
-            grantIds: grantIdsArray,
-            startAt,
-            endAt,
-          })
-          return null
-        }),
-    ])
-
-    // if there was an error, return null
-    if (!totalPeriodUsages || !totalAccumulatedUsages) {
-      return Err(new UnPriceAnalyticsError({ message: "Error getting usage billing entitlements" }))
-    }
-
-    const result = []
-
-    // iterate over the entitlements
-    for (const entitlement of entitlements) {
-      let accumulatedUsage = 0
-      let usage = 0
-      const aggregationMethod = entitlement.aggregationMethod
-      const isAccumulated = entitlement.aggregationMethod.endsWith("_all")
-
-      const totalUsage = totalPeriodUsages.find(
-        (usage) => usage.grantId === entitlement.entitlementId
-      )
-      const totalAccumulatedUsage = totalAccumulatedUsages.find(
-        (usage) => usage.grantId === entitlement.entitlementId
-      )
-
-      if (totalUsage) {
-        usage = (totalUsage[aggregationMethod as keyof typeof totalUsage] as number) ?? 0
-      }
-
-      // if the aggregation method is _all, we get the usage for all time
-      if (totalAccumulatedUsage && isAccumulated) {
-        accumulatedUsage =
-          (totalAccumulatedUsage[
-            aggregationMethod as keyof typeof totalAccumulatedUsage
-          ] as number) ?? 0
-      }
-
-      result.push({
-        entitlementId: entitlement.entitlementId,
-        accumulatedUsage,
-        usage,
-      })
-    }
-
-    return Ok(result)
-  }
-
-  public async getUsageBillingSubscriptionItems({
-    customerId,
-    projectId,
-    subscriptionItems,
+    features,
     startAt,
     endAt,
   }: {
     customerId: string
     projectId: string
-    subscriptionItems: {
-      subscriptionItemId: string
+    features: {
+      featureSlug: string
       aggregationMethod: string
       featureType: string
     }[]
@@ -602,43 +477,39 @@ export class Analytics {
     endAt: number
   }): Promise<
     Result<
-      { subscriptionItemId: string; usage: number; accumulatedUsage: number }[],
+      { featureSlug: string; usage: number; accumulatedUsage: number }[],
       FetchError | UnPriceAnalyticsError
     >
   > {
     // filter that only usage, package and tier features are being requested
-    const subscriptionItemsUsage = subscriptionItems.filter((subscriptionItem) =>
-      ["usage", "package", "tier"].includes(subscriptionItem.featureType)
+    const featuresUsage = features.filter((feature) =>
+      ["usage", "package", "tier"].includes(feature.featureType)
     )
 
-    const subscriptionItemIdsArray = subscriptionItemsUsage.map(
-      (subscriptionItem) => subscriptionItem.subscriptionItemId
-    )
+    const featureSlugsArray = featuresUsage.map((feature) => feature.featureSlug)
 
-    if (subscriptionItemIdsArray.length === 0) {
+    if (featureSlugsArray.length === 0) {
       return Ok([])
     }
 
     // we use the same endpoint for billing usage as it's the
     // more accurate one
     const [totalAccumulatedUsages, totalPeriodUsages] = await Promise.all([
-      this.getBillingUsage({ customerId, projectId, subscriptionItemIds: subscriptionItemIdsArray })
+      this.getBillingUsage({ customerId, projectId, featureSlugs: featureSlugsArray })
         .then((usage) => usage.data ?? [])
         .catch((error) => {
           this.logger.error("error getting features usage total", {
             error: JSON.stringify(error),
             customerId,
             projectId,
-            subscriptionItemIds: subscriptionItemIdsArray,
-            startAt,
-            endAt,
+            featureSlugs: featureSlugsArray,
           })
           return null
         }),
       this.getBillingUsage({
         customerId,
         projectId,
-        subscriptionItemIds: subscriptionItemIdsArray,
+        featureSlugs: featureSlugsArray,
         start: startAt,
         end: endAt,
       })
@@ -648,7 +519,7 @@ export class Analytics {
             error: JSON.stringify(error),
             customerId,
             projectId,
-            subscriptionItemIds: subscriptionItemIdsArray,
+            featureSlugs: featureSlugsArray,
             startAt,
             endAt,
           })
@@ -670,17 +541,17 @@ export class Analytics {
 
     const result = []
 
-    // iterate over the entitlements
-    for (const subscriptionItem of subscriptionItems) {
+    // iterate over the features
+    for (const feature of features) {
       let accumulatedUsage = 0
       let usage = 0
-      const aggregationMethod = subscriptionItem.aggregationMethod
+      const aggregationMethod = feature.aggregationMethod
 
       const totalUsage = totalPeriodUsages.find(
-        (usage) => usage.subscriptionItemId === subscriptionItem.subscriptionItemId
+        (usage) => usage.featureSlug === feature.featureSlug
       )
       const totalAccumulatedUsage = totalAccumulatedUsages.find(
-        (usage) => usage.subscriptionItemId === subscriptionItem.subscriptionItemId
+        (usage) => usage.featureSlug === feature.featureSlug
       )
 
       if (totalUsage) {
@@ -695,7 +566,7 @@ export class Analytics {
       }
 
       result.push({
-        subscriptionItemId: subscriptionItem.subscriptionItemId,
+        featureSlug: feature.featureSlug,
         accumulatedUsage,
         usage,
       })

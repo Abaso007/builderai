@@ -29,7 +29,8 @@ export const currencySymbol = (curr: string) =>
   })[curr] ?? curr
 
 export const isSlug = (str?: string) => {
-  return /^[a-z0-9-]+-[a-z0-9-]+$/.test(str ?? "")
+  // slug are always two words separated by a dash
+  return str?.split("-").length === 2
 }
 
 export const slugify = (str: string, forDisplayingInput?: boolean) => {
@@ -58,7 +59,7 @@ export const slugify = (str: string, forDisplayingInput?: boolean) => {
 }
 
 // return the price to stripe money format cents
-export function toStripeMoney(price: Dinero<number>) {
+export function formatAmount(price: Dinero<number>) {
   const { currency } = toSnapshot(price)
 
   // we need to return the amount in cents rounded up to the nearest cent

@@ -291,14 +291,9 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
 
       // insert the usage record into the database
       await this.db.insert(schema.usageRecords).values({
-        grantId: record.grantId,
         customerId: record.customerId,
         featureSlug: record.featureSlug,
         usage: record.usage.toString(),
-        featurePlanVersionId: record.featurePlanVersionId,
-        subscriptionItemId: record.subscriptionItemId,
-        subscriptionPhaseId: record.subscriptionPhaseId,
-        subscriptionId: record.subscriptionId,
         timestamp: record.timestamp,
         createdAt: record.createdAt,
         metadata: record.metadata ? JSON.stringify(record.metadata) : null,
@@ -332,7 +327,6 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
 
       // insert the verification into the database
       await this.db.insert(schema.verifications).values({
-        grantId: record.grantId,
         customerId: record.customerId,
         featureSlug: record.featureSlug,
         projectId: record.projectId,
@@ -380,7 +374,6 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           latency: verification.latency ? Number(verification.latency) : 0,
           createdAt: verification.createdAt,
           requestId: verification.requestId,
-          grantId: verification.grantId,
           customerId: verification.customerId,
           featureSlug: verification.featureSlug,
           projectId: verification.projectId,
@@ -420,7 +413,6 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           usage: usage.usage ? Number(usage.usage) : 0,
           createdAt: usage.createdAt,
           requestId: usage.requestId,
-          grantId: usage.grantId,
         }))
       )
     } catch (error) {

@@ -161,16 +161,6 @@ describe("EntitlementService - Multiple Grants", () => {
 
     expect(result.allowed).toBe(true)
     expect(result.usage).toBe(60)
-    expect(result.consumedFrom).toHaveLength(2)
-
-    const consumedB = result.consumedFrom.find((c) => c.grantId === grantB.id)
-    const consumedA = result.consumedFrom.find((c) => c.grantId === grantA.id)
-
-    expect(consumedB).toBeDefined()
-    expect(consumedB!.amount).toBe(50) // Full limit of B
-
-    expect(consumedA).toBeDefined()
-    expect(consumedA!.amount).toBe(10) // Remaining 10 from A
   })
 
   it("should only consume from active grants based on dates", async () => {
@@ -207,11 +197,6 @@ describe("EntitlementService - Multiple Grants", () => {
     })
 
     expect(result.allowed).toBe(true)
-    // Should only consume from Grant A
-    expect(result.consumedFrom).toHaveLength(1)
-    expect(result.consumedFrom[0]).toBeDefined()
-    expect(result.consumedFrom[0]!.grantId).toBe(grantA.id)
-    expect(result.consumedFrom[0]!.amount).toBe(60)
   })
 
   it("should handle expired grants correctly", async () => {
@@ -248,9 +233,6 @@ describe("EntitlementService - Multiple Grants", () => {
 
     expect(result.allowed).toBe(true)
     // Should only consume from Grant A (active)
-    expect(result.consumedFrom).toHaveLength(1)
-    expect(result.consumedFrom[0]).toBeDefined()
-    expect(result.consumedFrom[0]!.grantId).toBe(grantA.id)
   })
 
   it("should allow overage if at least one active grant allows it", async () => {
@@ -308,17 +290,5 @@ describe("EntitlementService - Multiple Grants", () => {
     // If grant.limit is null (unlimited), it takes all.
     // If both have limits, it consumes up to limit.
     // Any remaining amount is NOT attributed to a specific grant ID if limits are exhausted.
-
-    const consumedFlexible = result.consumedFrom.find((c) => c.grantId === grantFlexible.id)
-    const consumedStrict = result.consumedFrom.find((c) => c.grantId === grantStrict.id)
-
-    expect(consumedFlexible).toBeDefined()
-    expect(consumedFlexible!.amount).toBe(20) // 10 limit + 10 overage
-    expect(consumedStrict).toBeDefined()
-    expect(consumedStrict!.amount).toBe(10)
-
-    const totalAttributed = result.consumedFrom.reduce((acc, c) => acc + c.amount, 0)
-    expect(totalAttributed).toBe(30)
-    // Note: Overage is now attributed to the flexible grant
   })
 })

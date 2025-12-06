@@ -64,6 +64,13 @@
       "when": 1763921301469,
       "tag": "0008_fresh_wind_dancer",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1765055208398,
+      "tag": "0009_fantastic_norrin_radd",
+      "breakpoints": true
     }
   ]
 }

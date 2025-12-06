@@ -1,4 +1,4 @@
-import { createSelectSchema } from "drizzle-zod"
+import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import { z } from "zod"
 import { extendZodWithOpenApi } from "zod-openapi"
 import * as schema from "../schema"
@@ -24,7 +24,14 @@ export const entitlementMetadataSchema = z.record(
   z.union([z.string(), z.number(), z.boolean(), z.null()])
 )
 
-export const grantSchema = createSelectSchema(schema.grants)
+export const grantSchema = createSelectSchema(schema.grants, {
+  metadata: entitlementMetadataSchema,
+})
+
+export const grantInsertSchema = createInsertSchema(schema.grants, {
+  metadata: entitlementMetadataSchema.nullable(),
+})
+
 export const grantSchemaExtended = grantSchema.extend({
   featurePlanVersion: planVersionFeatureSelectBaseSchema.extend({
     feature: featureSelectBaseSchema,
@@ -108,7 +115,6 @@ export const reportUsageResultSchema = z.object({
   usage: z.number().optional(),
   notifiedOverLimit: z.boolean().optional(),
   deniedReason: deniedReasonSchema.optional(),
-  consumedFrom: consumptionSchema.array(),
 })
 export type ReportUsageResult = z.infer<typeof reportUsageResultSchema>
 
@@ -165,3 +171,136 @@ export const entitlementStateSchema = entitlementSchema.pick({
 
 export type EntitlementState = z.infer<typeof entitlementStateSchema>
 export type Grant = z.infer<typeof grantSchema>
+
+// Zod schemas for UsageDisplay
+const billingFrequencySchema = z.enum(["daily", "weekly", "monthly", "yearly"])
+const limitTypeSchema = z.enum(["hard", "soft", "none"])
+const statusTypeSchema = z.enum(["warning", "error", "info"])
+
+const usageBarDisplaySchema = z.object({
+  current: z.number(),
+  included: z.number(),
+  limit: z.number().optional(),
+  limitType: limitTypeSchema,
+  unit: z.string(),
+  freeAmount: z.number(),
+  currentPercent: z.number(),
+  includedPercent: z.number(),
+  freePercent: z.number(),
+  limitPercent: z.number(),
+  isOverIncluded: z.boolean(),
+  isOverLimit: z.boolean(),
+  isNearLimit: z.boolean(),
+  statusMessage: z.string().optional(),
+  statusType: statusTypeSchema.optional(),
+  billableUsage: z.number(),
+  overageAmount: z.number(),
+  overageCost: z.number(),
+})
+
+const tierDisplaySchema = z.object({
+  min: z.number(),
+  max: z.number().nullable(),
+  pricePerUnit: z.number(),
+  label: z.string().optional(),
+  isActive: z.boolean(),
+})
+
+const tieredDisplaySchema = z.object({
+  currentUsage: z.number(),
+  billableUsage: z.number(),
+  unit: z.string(),
+  freeAmount: z.number(),
+  tiers: z.array(tierDisplaySchema),
+  currentTierLabel: z.string().optional(),
+})
+
+const billingDisplaySchema = z.object({
+  hasDifferentBilling: z.boolean(),
+  billingFrequency: billingFrequencySchema.optional(),
+  billingFrequencyLabel: z.string().optional(),
+  resetFrequency: billingFrequencySchema.optional(),
+  resetFrequencyLabel: z.string().optional(),
+})
+
+const flatFeatureDisplaySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  type: z.literal("flat"),
+  typeLabel: z.string(),
+  currency: z.string(),
+  price: z.number(),
+  isIncluded: z.boolean(),
+  enabled: z.boolean(),
+  billing: billingDisplaySchema,
+})
+
+const tieredFeatureDisplaySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  type: z.literal("tiered"),
+  typeLabel: z.string(),
+  currency: z.string(),
+  price: z.number(),
+  isIncluded: z.boolean(),
+  billing: z.object({
+    hasDifferentBilling: z.boolean(),
+  }),
+  tieredDisplay: tieredDisplaySchema,
+})
+
+const usageFeatureDisplaySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  type: z.literal("usage"),
+  typeLabel: z.string(),
+  currency: z.string(),
+  price: z.number(),
+  isIncluded: z.boolean(),
+  billing: billingDisplaySchema,
+  usageBar: usageBarDisplaySchema,
+})
+
+const featureDisplaySchema = z.discriminatedUnion("type", [
+  flatFeatureDisplaySchema,
+  tieredFeatureDisplaySchema,
+  usageFeatureDisplaySchema,
+])
+
+const featureGroupDisplaySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  featureCount: z.number(),
+  features: z.array(featureDisplaySchema),
+  totalPrice: z.number(),
+})
+
+const priceSummaryDisplaySchema = z.object({
+  totalPrice: z.number(),
+  basePrice: z.number(),
+  usageCharges: z.number(),
+  hasUsageCharges: z.boolean(),
+  flatTotal: z.number(),
+  tieredTotal: z.number(),
+  usageTotal: z.number(),
+  freeGrantsSavings: z.number(),
+  hasFreeGrantsSavings: z.boolean(),
+})
+
+export const currentUsageSchema = z.object({
+  planName: z.string(),
+  planDescription: z.string().optional(),
+  basePrice: z.number(),
+  billingPeriod: billingFrequencySchema,
+  billingPeriodLabel: z.string(),
+  currency: z.string(),
+  renewalDate: z.string().optional(),
+  daysRemaining: z.number().optional(),
+  groups: z.array(featureGroupDisplaySchema),
+  priceSummary: priceSummaryDisplaySchema,
+})
+
+export type CurrentUsage = z.infer<typeof currentUsageSchema>

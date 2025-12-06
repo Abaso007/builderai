@@ -1,11 +1,11 @@
 import type {
   EntitlementState,
-  GetCurrentUsage,
   ReportUsageRequest,
   ReportUsageResult,
   VerificationResult,
   VerifyRequest,
 } from "@unprice/db/validators"
+import type { CurrentUsage } from "@unprice/db/validators"
 import type { BaseError, Result } from "@unprice/error"
 import { z } from "zod"
 
@@ -29,7 +29,7 @@ export interface UsageLimiter {
   getActiveEntitlements(
     data: GetEntitlementsRequest
   ): Promise<Result<EntitlementState[], BaseError>>
-  getCurrentUsage(data: GetUsageRequest): Promise<Result<GetCurrentUsage, BaseError>>
+  getCurrentUsage(data: GetUsageRequest): Promise<Result<CurrentUsage, BaseError>>
   prewarmEntitlements(params: { customerId: string; projectId: string; now: number }): Promise<
     Result<void, BaseError>
   >

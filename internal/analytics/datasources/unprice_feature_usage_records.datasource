@@ -13,11 +13,6 @@ SCHEMA >
     `requestId` String `json:$.requestId`,
     `idempotenceKey` String `json:$.idempotenceKey`,
     `projectId` String `json:$.projectId`,
-    `grantId` String `json:$.grantId`,
-    `featurePlanVersionId` String `json:$.featurePlanVersionId`,
-    `subscriptionId` Nullable(String) `json:$.subscriptionId`,
-    `subscriptionItemId` Nullable(String) `json:$.subscriptionItemId`,
-    `subscriptionPhaseId` Nullable(String) `json:$.subscriptionPhaseId`,
     `createdAt` Int64 `json:$.createdAt`,
     `metadata` Map(String, String) `json:$.metadata`,
     `deleted` UInt8 `json:$.deleted` DEFAULT 0

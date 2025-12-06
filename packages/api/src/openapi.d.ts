@@ -1352,348 +1352,121 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        planVersion: {
-                            description: string;
-                            flatPrice: string;
-                            currentTotalPrice: string;
-                            billingConfig: {
-                                name: string;
-                                /** @enum {string} */
-                                billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime";
-                                billingIntervalCount: number;
-                                billingAnchor: number | "dayOfCreation";
-                                /** @enum {string} */
-                                planType: "recurring" | "onetime";
-                            };
-                        };
-                        subscription: {
-                            planSlug: string;
-                            /** @enum {string} */
-                            status: "active" | "trialing" | "canceled" | "expired" | "past_due";
-                            currentCycleEndAt: number;
-                            timezone: string;
-                            currentCycleStartAt: number;
-                            prorationFactor: number;
-                            prorated: boolean;
-                        };
-                        phase: {
-                            trialEndsAt: number | null;
-                            endAt: number | null;
-                            trialUnits: number;
-                            isTrial: boolean;
-                        };
-                        entitlement: {
-                            featureSlug: string;
-                            /** @enum {string} */
-                            featureType: "flat" | "tier" | "package" | "usage";
-                            isCustom: boolean;
-                            limit: number | null;
-                            usage: number;
-                            freeUnits: number;
-                            max: number | null;
-                            units: number | null;
-                            included: number;
-                            featureVersion: {
+                        planName: string;
+                        planDescription?: string;
+                        basePrice: number;
+                        /** @enum {string} */
+                        billingPeriod: "daily" | "weekly" | "monthly" | "yearly";
+                        billingPeriodLabel: string;
+                        currency: string;
+                        renewalDate?: string;
+                        daysRemaining?: number;
+                        groups: {
+                            id: string;
+                            name: string;
+                            featureCount: number;
+                            features: ({
                                 id: string;
-                                projectId: string;
-                                createdAtM: number;
-                                updatedAtM: number;
-                                planVersionId: string;
+                                name: string;
+                                description?: string;
                                 /** @enum {string} */
-                                type: "feature" | "addon";
-                                featureId: string;
+                                type: "flat";
+                                typeLabel: string;
+                                currency: string;
+                                price: number;
+                                isIncluded: boolean;
+                                enabled: boolean;
+                                billing: {
+                                    hasDifferentBilling: boolean;
+                                    /** @enum {string} */
+                                    billingFrequency?: "daily" | "weekly" | "monthly" | "yearly";
+                                    billingFrequencyLabel?: string;
+                                    /** @enum {string} */
+                                    resetFrequency?: "daily" | "weekly" | "monthly" | "yearly";
+                                    resetFrequencyLabel?: string;
+                                };
+                            } | {
+                                id: string;
+                                name: string;
+                                description?: string;
                                 /** @enum {string} */
-                                featureType: "flat" | "tier" | "package" | "usage";
-                                config: {
-                                    tiers?: {
-                                        unitPrice: {
-                                            dinero: {
-                                                /** @description The amount of the dinero object */
-                                                amount: number;
-                                                currency: {
-                                                    /** @description The currency code of the dinero object */
-                                                    code: string;
-                                                    /** @description The base of the dinero object */
-                                                    base: number | number[];
-                                                    /** @description The exponent of the dinero object */
-                                                    exponent: number;
-                                                };
-                                                /** @description The scale of the dinero object */
-                                                scale: number;
-                                            };
-                                            displayAmount: string;
-                                        };
-                                        flatPrice: {
-                                            dinero: {
-                                                /** @description The amount of the dinero object */
-                                                amount: number;
-                                                currency: {
-                                                    /** @description The currency code of the dinero object */
-                                                    code: string;
-                                                    /** @description The base of the dinero object */
-                                                    base: number | number[];
-                                                    /** @description The exponent of the dinero object */
-                                                    exponent: number;
-                                                };
-                                                /** @description The scale of the dinero object */
-                                                scale: number;
-                                            };
-                                            displayAmount: string;
-                                        };
-                                        firstUnit: number;
-                                        lastUnit: number | null;
-                                    }[];
-                                    price: {
-                                        dinero: {
-                                            /** @description The amount of the dinero object */
-                                            amount: number;
-                                            currency: {
-                                                /** @description The currency code of the dinero object */
-                                                code: string;
-                                                /** @description The base of the dinero object */
-                                                base: number | number[];
-                                                /** @description The exponent of the dinero object */
-                                                exponent: number;
-                                            };
-                                            /** @description The scale of the dinero object */
-                                            scale: number;
-                                        };
-                                        displayAmount: string;
-                                    };
-                                    /** @enum {string} */
-                                    usageMode?: "tier" | "package" | "unit";
-                                    /** @enum {string} */
-                                    tierMode?: "volume" | "graduated";
-                                    units?: number;
-                                } | {
-                                    price?: {
-                                        dinero: {
-                                            /** @description The amount of the dinero object */
-                                            amount: number;
-                                            currency: {
-                                                /** @description The currency code of the dinero object */
-                                                code: string;
-                                                /** @description The base of the dinero object */
-                                                base: number | number[];
-                                                /** @description The exponent of the dinero object */
-                                                exponent: number;
-                                            };
-                                            /** @description The scale of the dinero object */
-                                            scale: number;
-                                        };
-                                        displayAmount: string;
-                                    };
-                                    /** @enum {string} */
-                                    tierMode: "volume" | "graduated";
+                                type: "tiered";
+                                typeLabel: string;
+                                currency: string;
+                                price: number;
+                                isIncluded: boolean;
+                                billing: {
+                                    hasDifferentBilling: boolean;
+                                };
+                                tieredDisplay: {
+                                    currentUsage: number;
+                                    billableUsage: number;
+                                    unit: string;
+                                    freeAmount: number;
                                     tiers: {
-                                        unitPrice: {
-                                            dinero: {
-                                                /** @description The amount of the dinero object */
-                                                amount: number;
-                                                currency: {
-                                                    /** @description The currency code of the dinero object */
-                                                    code: string;
-                                                    /** @description The base of the dinero object */
-                                                    base: number | number[];
-                                                    /** @description The exponent of the dinero object */
-                                                    exponent: number;
-                                                };
-                                                /** @description The scale of the dinero object */
-                                                scale: number;
-                                            };
-                                            displayAmount: string;
-                                        };
-                                        flatPrice: {
-                                            dinero: {
-                                                /** @description The amount of the dinero object */
-                                                amount: number;
-                                                currency: {
-                                                    /** @description The currency code of the dinero object */
-                                                    code: string;
-                                                    /** @description The base of the dinero object */
-                                                    base: number | number[];
-                                                    /** @description The exponent of the dinero object */
-                                                    exponent: number;
-                                                };
-                                                /** @description The scale of the dinero object */
-                                                scale: number;
-                                            };
-                                            displayAmount: string;
-                                        };
-                                        firstUnit: number;
-                                        lastUnit: number | null;
+                                        min: number;
+                                        max: number | null;
+                                        pricePerUnit: number;
+                                        label?: string;
+                                        isActive: boolean;
                                     }[];
-                                    /** @enum {string} */
-                                    usageMode?: "tier" | "package" | "unit";
-                                    units?: number;
-                                } | {
-                                    price?: {
-                                        dinero: {
-                                            /** @description The amount of the dinero object */
-                                            amount: number;
-                                            currency: {
-                                                /** @description The currency code of the dinero object */
-                                                code: string;
-                                                /** @description The base of the dinero object */
-                                                base: number | number[];
-                                                /** @description The exponent of the dinero object */
-                                                exponent: number;
-                                            };
-                                            /** @description The scale of the dinero object */
-                                            scale: number;
-                                        };
-                                        displayAmount: string;
-                                    };
-                                    /** @enum {string} */
-                                    usageMode: "tier" | "package" | "unit";
-                                    /** @enum {string} */
-                                    tierMode?: "volume" | "graduated";
-                                    tiers?: {
-                                        unitPrice: {
-                                            dinero: {
-                                                /** @description The amount of the dinero object */
-                                                amount: number;
-                                                currency: {
-                                                    /** @description The currency code of the dinero object */
-                                                    code: string;
-                                                    /** @description The base of the dinero object */
-                                                    base: number | number[];
-                                                    /** @description The exponent of the dinero object */
-                                                    exponent: number;
-                                                };
-                                                /** @description The scale of the dinero object */
-                                                scale: number;
-                                            };
-                                            displayAmount: string;
-                                        };
-                                        flatPrice: {
-                                            dinero: {
-                                                /** @description The amount of the dinero object */
-                                                amount: number;
-                                                currency: {
-                                                    /** @description The currency code of the dinero object */
-                                                    code: string;
-                                                    /** @description The base of the dinero object */
-                                                    base: number | number[];
-                                                    /** @description The exponent of the dinero object */
-                                                    exponent: number;
-                                                };
-                                                /** @description The scale of the dinero object */
-                                                scale: number;
-                                            };
-                                            displayAmount: string;
-                                        };
-                                        firstUnit: number;
-                                        lastUnit: number | null;
-                                    }[];
-                                    units?: number;
-                                } | {
-                                    tiers?: {
-                                        unitPrice: {
-                                            dinero: {
-                                                /** @description The amount of the dinero object */
-                                                amount: number;
-                                                currency: {
-                                                    /** @description The currency code of the dinero object */
-                                                    code: string;
-                                                    /** @description The base of the dinero object */
-                                                    base: number | number[];
-                                                    /** @description The exponent of the dinero object */
-                                                    exponent: number;
-                                                };
-                                                /** @description The scale of the dinero object */
-                                                scale: number;
-                                            };
-                                            displayAmount: string;
-                                        };
-                                        flatPrice: {
-                                            dinero: {
-                                                /** @description The amount of the dinero object */
-                                                amount: number;
-                                                currency: {
-                                                    /** @description The currency code of the dinero object */
-                                                    code: string;
-                                                    /** @description The base of the dinero object */
-                                                    base: number | number[];
-                                                    /** @description The exponent of the dinero object */
-                                                    exponent: number;
-                                                };
-                                                /** @description The scale of the dinero object */
-                                                scale: number;
-                                            };
-                                            displayAmount: string;
-                                        };
-                                        firstUnit: number;
-                                        lastUnit: number | null;
-                                    }[];
-                                    price: {
-                                        dinero: {
-                                            /** @description The amount of the dinero object */
-                                            amount: number;
-                                            currency: {
-                                                /** @description The currency code of the dinero object */
-                                                code: string;
-                                                /** @description The base of the dinero object */
-                                                base: number | number[];
-                                                /** @description The exponent of the dinero object */
-                                                exponent: number;
-                                            };
-                                            /** @description The scale of the dinero object */
-                                            scale: number;
-                                        };
-                                        displayAmount: string;
-                                    };
-                                    /** @enum {string} */
-                                    usageMode?: "tier" | "package" | "unit";
-                                    /** @enum {string} */
-                                    tierMode?: "volume" | "graduated";
-                                    /** @description Units for the package */
-                                    units: number;
+                                    currentTierLabel?: string;
                                 };
-                                billingConfig: {
-                                    name: string;
-                                    /** @enum {string} */
-                                    billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime";
-                                    billingIntervalCount: number;
-                                    billingAnchor: number | "dayOfCreation";
-                                    /** @enum {string} */
-                                    planType: "recurring" | "onetime";
-                                };
-                                resetConfig: {
-                                    name: string;
-                                    /** @enum {string} */
-                                    resetInterval: "month" | "year" | "week" | "day" | "minute" | "onetime";
-                                    resetIntervalCount: number;
-                                    resetAnchor: number | "dayOfCreation";
-                                    /** @enum {string} */
-                                    planType: "recurring" | "onetime";
-                                } | null;
-                                metadata: {
-                                    stripeProductId?: string;
-                                    realtime?: boolean;
-                                } | null;
+                            } | {
+                                id: string;
+                                name: string;
+                                description?: string;
                                 /** @enum {string} */
-                                aggregationMethod: "sum" | "sum_all" | "last_during_period" | "count" | "count_all" | "max" | "max_all";
-                                order: number;
-                                /** @default 1 */
-                                defaultQuantity: number | null;
-                                limit?: number | null;
-                                allowOverage: boolean;
-                                notifyUsageThreshold: number | null;
-                                hidden: boolean;
-                                feature: {
-                                    id: string;
-                                    projectId: string;
-                                    createdAtM: number;
-                                    updatedAtM: number;
-                                    slug: string;
-                                    code: number;
-                                    title: string;
-                                    description: string | null;
+                                type: "usage";
+                                typeLabel: string;
+                                currency: string;
+                                price: number;
+                                isIncluded: boolean;
+                                billing: {
+                                    hasDifferentBilling: boolean;
+                                    /** @enum {string} */
+                                    billingFrequency?: "daily" | "weekly" | "monthly" | "yearly";
+                                    billingFrequencyLabel?: string;
+                                    /** @enum {string} */
+                                    resetFrequency?: "daily" | "weekly" | "monthly" | "yearly";
+                                    resetFrequencyLabel?: string;
                                 };
-                            };
-                            price: string | null;
+                                usageBar: {
+                                    current: number;
+                                    included: number;
+                                    limit?: number;
+                                    /** @enum {string} */
+                                    limitType: "hard" | "soft" | "none";
+                                    unit: string;
+                                    freeAmount: number;
+                                    currentPercent: number;
+                                    includedPercent: number;
+                                    freePercent: number;
+                                    limitPercent: number;
+                                    isOverIncluded: boolean;
+                                    isOverLimit: boolean;
+                                    isNearLimit: boolean;
+                                    statusMessage?: string;
+                                    /** @enum {string} */
+                                    statusType?: "warning" | "error" | "info";
+                                    billableUsage: number;
+                                    overageAmount: number;
+                                    overageCost: number;
+                                };
+                            })[];
+                            totalPrice: number;
                         }[];
+                        priceSummary: {
+                            totalPrice: number;
+                            basePrice: number;
+                            usageCharges: number;
+                            hasUsageCharges: boolean;
+                            flatTotal: number;
+                            tieredTotal: number;
+                            usageTotal: number;
+                            freeGrantsSavings: number;
+                            hasFreeGrantsSavings: boolean;
+                        };
                     };
                 };
             };
@@ -2386,6 +2159,7 @@ export interface operations {
                             projectId: string;
                             slug: string;
                             code: number;
+                            unit: string;
                             title: string;
                             description: string | null;
                         }[];
@@ -2594,6 +2368,7 @@ export interface operations {
                                         };
                                         firstUnit: number;
                                         lastUnit: number | null;
+                                        label?: string;
                                     }[];
                                     price: {
                                         dinero: {
@@ -2674,6 +2449,7 @@ export interface operations {
                                         };
                                         firstUnit: number;
                                         lastUnit: number | null;
+                                        label?: string;
                                     }[];
                                     /** @enum {string} */
                                     usageMode?: "tier" | "package" | "unit";
@@ -2737,6 +2513,7 @@ export interface operations {
                                         };
                                         firstUnit: number;
                                         lastUnit: number | null;
+                                        label?: string;
                                     }[];
                                     units?: number;
                                 } | {
@@ -2777,6 +2554,7 @@ export interface operations {
                                         };
                                         firstUnit: number;
                                         lastUnit: number | null;
+                                        label?: string;
                                     }[];
                                     price: {
                                         dinero: {
@@ -2843,6 +2621,7 @@ export interface operations {
                                     updatedAtM: number;
                                     slug: string;
                                     code: number;
+                                    unit: string;
                                     title: string;
                                     description: string | null;
                                 };
@@ -3086,6 +2865,7 @@ export interface operations {
                                         };
                                         firstUnit: number;
                                         lastUnit: number | null;
+                                        label?: string;
                                     }[];
                                     price: {
                                         dinero: {
@@ -3166,6 +2946,7 @@ export interface operations {
                                         };
                                         firstUnit: number;
                                         lastUnit: number | null;
+                                        label?: string;
                                     }[];
                                     /** @enum {string} */
                                     usageMode?: "tier" | "package" | "unit";
@@ -3229,6 +3010,7 @@ export interface operations {
                                         };
                                         firstUnit: number;
                                         lastUnit: number | null;
+                                        label?: string;
                                     }[];
                                     units?: number;
                                 } | {
@@ -3269,6 +3051,7 @@ export interface operations {
                                         };
                                         firstUnit: number;
                                         lastUnit: number | null;
+                                        label?: string;
                                     }[];
                                     price: {
                                         dinero: {
@@ -3335,6 +3118,7 @@ export interface operations {
                                     updatedAtM: number;
                                     slug: string;
                                     code: number;
+                                    unit: string;
                                     title: string;
                                     description: string | null;
                                 };

@@ -9,12 +9,6 @@ SQL >
         projectId,
         customerId,
         featureSlug,
-        {% if defined(grantIds) %}
-            grantId,
-        {% end %}
-        {% if defined(subscriptionItemIds) %}
-            subscriptionItemId,
-        {% end %}
         {% if defined(start) & defined(end) %}
             count() AS count,
             sum(usage) AS sum,
@@ -29,24 +23,13 @@ SQL >
     WHERE
         projectId = {{ String(projectId) }}
         AND customerId = {{ String(customerId) }}
+        {% if defined(featureSlugs) %}
+            AND featureSlug IN {{ Array(featureSlugs, 'String') }}
+        {% end %}
         {% if defined(start) & defined(end) %}
             AND timestamp BETWEEN {{ Int64(start) }}
             AND {{ Int64(end) }}
         {% end %}
-        {% if defined(grantIds) %}
-            AND grantId IN {{ Array(grantIds, 'String') }}
-        {% end %}
-        {% if defined(subscriptionItemIds) %}
-            AND subscriptionItemId IN {{ Array(subscriptionItemIds, 'String') }}
-        {% end %}
-    {% if defined(grantIds) %}
-        GROUP BY projectId, customerId, featureSlug, grantId
-    {% else %}
-        {% if defined(subscriptionItemIds) %}
-            GROUP BY projectId, customerId, featureSlug, subscriptionItemId
-        {% else %}
-            GROUP BY projectId, customerId, featureSlug
-        {% end %}
-    {% end %}
+    GROUP BY projectId, customerId, featureSlug
 
 TYPE endpoint
