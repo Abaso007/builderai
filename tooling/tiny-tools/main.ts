@@ -49,37 +49,11 @@ async function generateData(customerId: string, async?: boolean) {
     return
   }
 
-  const usageEntitlements = entitlements.filter(
-    (entitlement) => entitlement.featureType === "usage"
-  )!
-
   for (let i = 0; i < 100; i++) {
     // ramdom usage between 1 and 100
     const usage = Math.floor(Math.random() * 100) + 1
     // pick a random feature slug
-    const featureSlug =
-      usageEntitlements[Math.floor(Math.random() * usageEntitlements.length)]?.featureSlug!
-
-    if (featureSlug) {
-      const result = await unprice.customers.reportUsage({
-        customerId,
-        featureSlug,
-        usage,
-        idempotenceKey: randomUUID(),
-      })
-
-      if (result.result?.allowed) {
-        console.info(`Usage ${usage} ${async ? "async" : "sync"} reported for ${featureSlug}`)
-      } else {
-        console.error(
-          `Usage ${usage} ${async ? "async" : "sync"} reported for ${featureSlug} failed`,
-          result.result?.message
-        )
-      }
-    }
-
-    // wait 200ms
-    await new Promise((resolve) => setTimeout(resolve, 200))
+    const featureSlug = entitlements[Math.floor(Math.random() * entitlements.length)]?.featureSlug!
 
     // pick a random feature slug
     const randomFeatureSlug =
@@ -99,6 +73,26 @@ async function generateData(customerId: string, async?: boolean) {
 
       if (result.result?.allowed) {
         console.info(`Verification ${randomFeatureSlug} verified for ${customerId}`)
+
+        // report usage
+        // wait 200ms
+        await new Promise((resolve) => setTimeout(resolve, 200))
+
+        const result = await unprice.customers.reportUsage({
+          customerId,
+          featureSlug,
+          usage,
+          idempotenceKey: randomUUID(),
+        })
+
+        if (result.result?.allowed) {
+          console.info(`Usage ${usage} ${async ? "async" : "sync"} reported for ${featureSlug}`)
+        } else {
+          console.error(
+            `Usage ${usage} ${async ? "async" : "sync"} reported for ${featureSlug} failed`,
+            result.result?.message
+          )
+        }
       } else {
         console.error(
           `Verification for ${randomFeatureSlug} and ${customerId} cannot be used`,
@@ -113,7 +107,7 @@ async function generateData(customerId: string, async?: boolean) {
 
 async function main() {
   // const customerFree = "cus_1MeUjVxFbv8DP9X7f1UW9"
-  const customerPro = "cus_1RaP2D1v2KFXBVWrj6TiM"
+  const customerPro = "cus_1RboK3Uhr2avZT1sZJamk"
   // const customerEnterprise = "cus_1MVdMxZ45uJKDo5z48hYJ"
 
   // PRO plan

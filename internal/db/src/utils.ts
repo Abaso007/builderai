@@ -1,4 +1,14 @@
-import { type Dinero, multiply, toSnapshot, transformScale, up } from "dinero.js"
+import * as currencies from "@dinero.js/currencies"
+import {
+  type Dinero,
+  add,
+  dinero,
+  multiply,
+  toDecimal,
+  toSnapshot,
+  transformScale,
+  up,
+} from "dinero.js"
 
 export * from "./utils/_table"
 export * from "./utils/aesGcm"
@@ -8,7 +18,7 @@ export * from "./utils/id"
 export * from "./utils/pagination"
 export * from "./utils/nformatter"
 
-export type { Dinero } from "dinero.js"
+export { dinero, type Dinero, currencies, add, toDecimal }
 
 import { generateSlug } from "random-word-slugs"
 import type { Currency } from "./validators"

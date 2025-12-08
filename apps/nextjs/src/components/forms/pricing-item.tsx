@@ -82,13 +82,13 @@ export function PricingItem({
   const freeUnitsText =
     freeUnits === Number.POSITIVE_INFINITY
       ? feature.limit
-        ? `Up to ${nFormatter(feature.limit)}`
+        ? `Up to ${nFormatter(feature.limit)} ${feature.feature.unit}`
         : "Unlimited"
       : freeUnits === 0
         ? feature.limit
-          ? `Up to ${nFormatter(feature.limit)}`
+          ? `Up to ${nFormatter(feature.limit)} ${feature.feature.unit}`
           : "Starts at 0"
-        : nFormatter(freeUnits)
+        : `${nFormatter(freeUnits)} ${feature.feature.unit}`
 
   switch (feature.featureType) {
     case "flat": {

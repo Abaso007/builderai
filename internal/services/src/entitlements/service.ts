@@ -2,16 +2,21 @@ import type { Analytics, AnalyticsUsage, AnalyticsVerification } from "@unprice/
 import type { Database } from "@unprice/db"
 import { and, eq } from "@unprice/db"
 import { entitlements } from "@unprice/db/schema"
-import type {
-  CurrentUsage,
-  EntitlementState,
-  ReportUsageRequest,
-  ReportUsageResult,
-  VerificationResult,
-  VerifyRequest,
+import { add, dinero, formatMoney, toDecimal } from "@unprice/db/utils"
+import type { Dinero } from "@unprice/db/utils"
+import {
+  type CurrentUsage,
+  type EntitlementState,
+  type ReportUsageRequest,
+  type ReportUsageResult,
+  type VerificationResult,
+  type VerifyRequest,
+  calculateFlatPricePlan,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
+import { format } from "date-fns"
+import { toZonedTime } from "date-fns-tz"
 import { BillingService } from "../billing"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
@@ -599,6 +604,7 @@ export class EntitlementService {
       }
 
       // set storage
+      // TODO:  we need to check the real usage
       await this.storage.set({ state: val })
 
       return val
@@ -608,6 +614,7 @@ export class EntitlementService {
     if (cached.expiresAt && params.now >= cached.expiresAt) {
       this.logger.info("Current cycle ended, recomputing grants", params)
 
+      // get the real usage from the storage
       const usageOverrides = {
         [params.featureSlug]: {
           currentCycleUsage: cached.currentCycleUsage,
@@ -737,10 +744,23 @@ export class EntitlementService {
           return null
         }
 
-        // set storage
-        await this.storage.set({ state: entitlementFromDB })
+        // Merge: Use DB for definitions (grants, limits, version, etc.) but cached storage for usage (source of truth)
+        // DB has stale usage, but storage has real-time usage
+        const mergedEntitlement: EntitlementState = {
+          ...entitlementFromDB,
+          currentCycleUsage: cached.currentCycleUsage,
+          accumulatedUsage: cached.accumulatedUsage,
+          effectiveAt: cached.effectiveAt, // May have been updated by normalizeCycleUsage
+          expiresAt: cached.expiresAt,
+        }
 
-        return entitlementFromDB
+        // set storage
+        await this.storage.set({ state: mergedEntitlement })
+
+        // sync the entitlement to db in background
+        this.waitUntil(this.syncToDB(mergedEntitlement))
+
+        return cached
       }
 
       // Version matches - just update revalidation time
@@ -777,28 +797,28 @@ export class EntitlementService {
    * Sync usage back to DB (async, non-blocking)
    */
   public async syncToDB(state: EntitlementState): Promise<void> {
+    const now = Date.now()
+
     // sync to db if the last sync was more than the sync to db interval
-    if (Date.now() - state.lastSyncAt < this.syncToDBInterval) {
+    if (now - state.lastSyncAt < this.syncToDBInterval) {
       return
     }
+
+    this.logger.info("Syncing entitlement to DB", {
+      customerId: state.customerId,
+      projectId: state.projectId,
+      featureSlug: state.featureSlug,
+      now,
+      lastSyncAt: state.lastSyncAt,
+      syncToDBInterval: this.syncToDBInterval,
+      usage: state.currentCycleUsage,
+    })
 
     const key = this.makeEntitlementKey({
       customerId: state.customerId,
       projectId: state.projectId,
       featureSlug: state.featureSlug,
     })
-
-    const now = Date.now()
-
-    // Prevent multiple syncs within 1 second to avoid DB flooding (primary check)
-    if (now - state.lastSyncAt < 1000) {
-      return
-    }
-
-    // Check if enough time has passed since last sync (secondary check)
-    if (now - state.lastSyncAt < this.syncToDBInterval) {
-      return
-    }
 
     const updated = await this.db
       .update(entitlements)
@@ -1086,78 +1106,127 @@ export class EntitlementService {
     projectId: string
     now: number
   }): Promise<Result<CurrentUsage, UnPriceEntitlementError | UnPriceEntitlementStorageError>> {
-    // Get customer's subscription to find planVersion
-    const customerSubscription = await this.db.query.customers.findFirst({
-      with: {
-        subscriptions: {
-          with: {
-            phases: {
-              where: (phase, { and, lte, or, isNull, gte }) =>
-                and(lte(phase.startAt, now), or(isNull(phase.endAt), gte(phase.endAt, now))),
-              limit: 1,
-              with: {
-                planVersion: {
-                  with: {
-                    plan: true,
-                    planFeatures: {
-                      with: {
-                        feature: true,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      where: (customer, { and, eq }) =>
-        and(eq(customer.id, customerId), eq(customer.projectId, projectId)),
+    // Get grants and subscription info
+    const grantsResult = await this.grantsManager.getGrantsForCustomer({
+      customerId,
+      projectId,
+      now,
     })
 
-    if (!customerSubscription) {
-      return Err(
-        new UnPriceEntitlementError({
-          message: "Customer not found",
-        })
-      )
+    if (grantsResult.err) {
+      return Err(new UnPriceEntitlementError({ message: grantsResult.err.message }))
     }
 
-    const subscription = customerSubscription.subscriptions[0]
-    if (!subscription) {
-      return Err(
-        new UnPriceEntitlementError({
-          message: "No subscription found for customer",
-        })
-      )
+    const { grants, subscription, planVersion } = grantsResult.val
+
+    if (grants.length === 0 || !subscription || !planVersion) {
+      return Ok(this.buildEmptyUsageResponse(planVersion?.currency ?? "USD"))
     }
 
-    const phase = subscription.phases[0]
-    if (!phase || !phase.planVersion) {
-      return Err(
-        new UnPriceEntitlementError({
-          message: "No active phase or plan version found",
-        })
-      )
+    // Compute entitlement states and get usage estimates in parallel
+    const [entitlementsResult, usageEstimatesResult] = await Promise.all([
+      this.computeEntitlementStates(grants),
+      this.getUsageEstimates(customerId, projectId, now),
+    ])
+
+    if (entitlementsResult.err) {
+      return Err(entitlementsResult.err)
     }
 
-    // Compute grants for customer
-    const { val: entitlements, err: entitlementsErr } =
-      await this.grantsManager.computeGrantsForCustomer({
-        customerId,
-        projectId,
-        now,
-      })
-
-    if (entitlementsErr) {
-      return Err(
-        new UnPriceEntitlementError({
-          message: entitlementsErr.message,
-        })
-      )
+    if (usageEstimatesResult.err) {
+      return Err(usageEstimatesResult.err)
     }
 
-    // Get current usage estimates from billing service
+    // Build feature map and process features
+    const featureMap = new Map(
+      grants.map((g) => [g.featurePlanVersion.feature.slug, g.featurePlanVersion])
+    )
+
+    const features = this.buildFeatures(
+      entitlementsResult.val,
+      usageEstimatesResult.val,
+      featureMap
+    )
+
+    if (features.length === 0) {
+      return Ok(this.buildEmptyUsageResponse(planVersion.currency))
+    }
+
+    // Build and return response
+    return Ok(
+      this.buildUsageResponse(
+        features,
+        subscription,
+        planVersion,
+        subscription.currentCycleEndAt,
+        usageEstimatesResult.val
+      )
+    )
+  }
+
+  private buildEmptyUsageResponse(currency: string): CurrentUsage {
+    return {
+      planName: "No Plan",
+      basePrice: formatMoney("0", currency),
+      billingPeriod: "monthly",
+      billingPeriodLabel: "mo",
+      currency,
+      groups: [],
+      priceSummary: {
+        totalPrice: formatMoney("0", currency),
+        basePrice: formatMoney("0", currency),
+        usageCharges: formatMoney("0", currency),
+        hasUsageCharges: false,
+        flatTotal: formatMoney("0", currency),
+        tieredTotal: formatMoney("0", currency),
+        packageTotal: formatMoney("0", currency),
+        usageTotal: formatMoney("0", currency),
+      },
+    }
+  }
+
+  private async computeEntitlementStates(
+    grants: NonNullable<
+      Awaited<ReturnType<typeof this.grantsManager.getGrantsForCustomer>>["val"]
+    >["grants"]
+  ): Promise<Result<Omit<EntitlementState, "id">[], UnPriceEntitlementError>> {
+    // Group grants by feature slug
+    const grantsByFeature = new Map<string, typeof grants>()
+    for (const grant of grants) {
+      const slug = grant.featurePlanVersion.feature.slug
+      const existing = grantsByFeature.get(slug) ?? []
+      grantsByFeature.set(slug, [...existing, grant])
+    }
+
+    // Compute entitlement states for all features in parallel
+    const entitlementPromises = Array.from(grantsByFeature.values()).map((featureGrants) =>
+      this.grantsManager.computeEntitlementState({ grants: featureGrants })
+    )
+
+    const results = await Promise.all(entitlementPromises)
+
+    // Check for errors and collect entitlements
+    const entitlements: Omit<EntitlementState, "id">[] = []
+    for (const result of results) {
+      if (result.err) {
+        return Err(new UnPriceEntitlementError({ message: result.err.message }))
+      }
+      entitlements.push(result.val)
+    }
+
+    return Ok(entitlements)
+  }
+
+  private async getUsageEstimates(
+    customerId: string,
+    projectId: string,
+    now: number
+  ): Promise<
+    Result<
+      Awaited<ReturnType<BillingService["estimatePriceCurrentUsage"]>>["val"],
+      UnPriceEntitlementError
+    >
+  > {
     const billingService = new BillingService({
       db: this.db,
       logger: this.logger,
@@ -1167,600 +1236,299 @@ export class EntitlementService {
       metrics: this.metrics,
     })
 
-    const { val: currentUsageEstimates, err: currentUsageErr } =
-      await billingService.estimatePriceCurrentUsage({
-        customerId,
-        projectId,
-        now,
+    const result = await billingService.estimatePriceCurrentUsage({
+      customerId,
+      projectId,
+      now,
+    })
+
+    return result.err
+      ? Err(new UnPriceEntitlementError({ message: result.err.message }))
+      : Ok(result.val)
+  }
+
+  private buildFeatures(
+    entitlements: Omit<EntitlementState, "id">[],
+    usageEstimates: Awaited<ReturnType<BillingService["estimatePriceCurrentUsage"]>>["val"],
+    featureMap: Map<
+      string,
+      NonNullable<
+        Awaited<ReturnType<typeof this.grantsManager.getGrantsForCustomer>>["val"]
+      >["grants"][number]["featurePlanVersion"]
+    >
+  ) {
+    const grantIds = new Set(usageEstimates?.map((u) => u.grantId) ?? [])
+
+    return entitlements
+      .map((entitlement) => {
+        const planVersionFeature = featureMap.get(entitlement.featureSlug)
+        if (!planVersionFeature) return null
+
+        // Find matching usage estimates by grant ID
+        const usageGrants = (usageEstimates ?? []).filter((u) =>
+          entitlement.grants.some((g) => g.id === u.grantId && grantIds.has(u.grantId ?? ""))
+        )
+
+        // Aggregate usage data
+        const usage = usageGrants.reduce((acc, u) => acc + u.usage, 0)
+        const included = usageGrants.reduce((acc, u) => acc + u.included, 0)
+        // Sum prices from usageEstimates (already formatted strings, need to parse to sum)
+        const priceNum = usageGrants.reduce(
+          (acc, u) => acc + Number.parseFloat(u.totalPrice?.replace(/[^0-9.-]/g, "") ?? "0"),
+          0
+        )
+
+        return {
+          entitlement,
+          planVersionFeature,
+          usage,
+          included,
+          priceNum, // Keep as number for calculations, will format later
+          limit: entitlement.limit,
+        }
       })
+      .filter((f): f is NonNullable<typeof f> => f !== null)
+  }
 
-    if (currentUsageErr) {
-      return Err(currentUsageErr)
-    }
+  private buildUsageResponse(
+    features: ReturnType<typeof this.buildFeatures>,
+    subscription: NonNullable<
+      NonNullable<
+        Awaited<ReturnType<typeof this.grantsManager.getGrantsForCustomer>>["val"]
+      >["subscription"]
+    >,
+    planVersion: NonNullable<
+      NonNullable<
+        Awaited<ReturnType<typeof this.grantsManager.getGrantsForCustomer>>["val"]
+      >["planVersion"]
+    >,
+    cycleEndAt: number,
+    usageEstimates: Awaited<ReturnType<BillingService["estimatePriceCurrentUsage"]>>["val"]
+  ): CurrentUsage {
+    const billingConfig = planVersion.billingConfig
+    const billingPeriod = billingConfig.name
+    const currency = planVersion.currency
 
-    // Build feature map from planFeatures
-    const featureMap = new Map(phase.planVersion.planFeatures.map((f) => [f.feature.slug, f]))
-
-    const entitlementResults = []
-
-    // Consolidate usage by entitlement
-    for (const entitlement of entitlements) {
-      const currentUsageGrants = currentUsageEstimates.filter((u) =>
-        entitlement.grants.some((g) => g.id === u.grantId)
-      )
-
-      const totalUsage = currentUsageGrants.reduce((acc, u) => acc + u.usage, 0) ?? 0
-      const totalFreeUnits = currentUsageGrants.reduce((acc, u) => acc + u.freeUnits, 0) ?? 0
-      const totalIncluded = currentUsageGrants.reduce((acc, u) => acc + u.included, 0) ?? 0
-      const totalMax = currentUsageGrants.reduce((acc, u) => acc + u.max, 0) ?? 0
-      const totalPrice = currentUsageGrants.reduce(
-        (acc, u) => acc + Number.parseFloat(u.totalPrice ?? "0"),
-        0
-      )
-
-      const planVersionFeature = featureMap.get(entitlement.featureSlug)
-      if (!planVersionFeature) {
-        continue
-      }
-
-      entitlementResults.push({
-        featureSlug: entitlement.featureSlug,
-        featureType: entitlement.featureType,
-        limit: entitlement.limit,
-        usage: totalUsage,
-        freeUnits: totalFreeUnits,
-        included: totalIncluded,
-        max: totalMax,
-        units: entitlement.limit,
-        price: totalPrice > 0 ? totalPrice.toString() : null,
-        featureVersion: {
-          id: planVersionFeature.id,
-          projectId: planVersionFeature.projectId,
-          createdAtM: planVersionFeature.createdAtM,
-          updatedAtM: planVersionFeature.updatedAtM,
-          planVersionId: planVersionFeature.planVersionId,
-          type: planVersionFeature.type,
-          featureId: planVersionFeature.featureId,
-          featureType: planVersionFeature.featureType,
-          config: planVersionFeature.config,
-          billingConfig: planVersionFeature.billingConfig,
-          resetConfig: planVersionFeature.resetConfig,
-          metadata: planVersionFeature.metadata,
-          aggregationMethod: planVersionFeature.aggregationMethod,
-          order: planVersionFeature.order,
-          defaultQuantity: planVersionFeature.defaultQuantity,
-          limit: planVersionFeature.limit,
-          allowOverage: planVersionFeature.allowOverage,
-          notifyUsageThreshold: planVersionFeature.notifyUsageThreshold,
-          hidden: planVersionFeature.hidden,
-          feature: {
-            id: planVersionFeature.feature.id,
-            projectId: planVersionFeature.feature.projectId,
-            createdAtM: planVersionFeature.feature.createdAtM,
-            updatedAtM: planVersionFeature.feature.updatedAtM,
-            slug: planVersionFeature.feature.slug,
-            code: planVersionFeature.feature.code,
-            unit: planVersionFeature.feature.unit,
-            title: planVersionFeature.feature.title,
-            description: planVersionFeature.feature.description,
-          },
-        },
-      })
-    }
-
-    if (!entitlementResults.length) {
-      return Ok({
-        planName: "No Plan",
-        basePrice: 0,
-        billingPeriod: "monthly",
-        billingPeriodLabel: "mo",
-        currency: "USD",
-        groups: [],
-        priceSummary: {
-          totalPrice: 0,
-          basePrice: 0,
-          usageCharges: 0,
-          hasUsageCharges: false,
-          flatTotal: 0,
-          tieredTotal: 0,
-          usageTotal: 0,
-          freeGrantsSavings: 0,
-          hasFreeGrantsSavings: false,
-        },
-      })
-    }
-
-    const usageData = {
+    // Calculate base price
+    const pricePlanResult = calculateFlatPricePlan({
       planVersion: {
-        description: phase.planVersion.description,
-        flatPrice: "0",
-        currentTotalPrice: "0",
-        billingConfig: phase.planVersion.billingConfig,
-        resetConfig: phase.planVersion.planFeatures[0]?.resetConfig ?? {
-          name: "default",
-          resetInterval: phase.planVersion.billingConfig.billingInterval,
-          resetIntervalCount: phase.planVersion.billingConfig.billingIntervalCount,
-          resetAnchor: phase.planVersion.billingConfig.billingAnchor,
-          planType: phase.planVersion.billingConfig.planType,
-        },
-        allowOverage: phase.planVersion.planFeatures[0]?.allowOverage ?? false,
-        notifyUsageThreshold: phase.planVersion.planFeatures[0]?.notifyUsageThreshold ?? 95,
-        type: phase.planVersion.planFeatures[0]?.type ?? "feature",
+        ...planVersion,
+        planFeatures: features.map((f) => f.planVersionFeature),
       },
-      subscription: {
-        planSlug: subscription.planSlug,
-        status: subscription.status,
-        currentCycleEndAt: subscription.currentCycleEndAt,
-        timezone: subscription.timezone,
-        currentCycleStartAt: subscription.currentCycleStartAt,
-        prorationFactor: 0,
-        prorated: false,
-      },
-      phase: {
-        trialEndsAt: phase.trialEndsAt,
-        endAt: phase.endAt,
-        trialUnits: phase.trialUnits,
-        isTrial: phase.trialEndsAt !== null && phase.trialEndsAt > now,
-      },
-      entitlement: entitlementResults,
+    })
+
+    if (pricePlanResult.err) {
+      throw pricePlanResult.err
     }
 
-    if (!usageData.planVersion || !usageData.subscription || !usageData.entitlement) {
-      return Ok({
-        planName: "No Plan",
-        basePrice: 0,
-        billingPeriod: "monthly",
-        billingPeriodLabel: "mo",
-        currency: "USD",
-        groups: [],
-        priceSummary: {
-          totalPrice: 0,
-          basePrice: 0,
-          usageCharges: 0,
-          hasUsageCharges: false,
-          flatTotal: 0,
-          tieredTotal: 0,
-          usageTotal: 0,
-          freeGrantsSavings: 0,
-          hasFreeGrantsSavings: false,
-        },
-      })
-    }
+    // Use displayAmount directly as string (already formatted with currency)
+    const basePrice = pricePlanResult.val.displayAmount
+    const basePriceDinero = pricePlanResult.val.dinero
 
-    // Helper function to format frequency
-    const formatFrequency = (freq: "daily" | "weekly" | "monthly" | "yearly"): string => {
-      const labels: Record<"daily" | "weekly" | "monthly" | "yearly", string> = {
-        daily: "day",
-        weekly: "week",
-        monthly: "mo",
-        yearly: "yr",
+    // Format renewal date
+    const date = toZonedTime(new Date(cycleEndAt), subscription.timezone)
+    const renewalDate =
+      billingConfig.billingInterval === "minute"
+        ? format(date, "MMMM d, yyyy hh:mm a")
+        : format(date, "MMMM d, yyyy")
+
+    const daysRemaining = Math.ceil((cycleEndAt - Date.now()) / (1000 * 60 * 60 * 24))
+
+    // Build feature displays
+    const displayFeatures = features.map((f) =>
+      this.buildFeatureDisplay(f, billingConfig, currency)
+    )
+
+    // Use prices directly from usageEstimates using dinero objects
+    // Group by feature type by matching grants to features
+    const grantToFeatureType = new Map<string, string>()
+    for (const feature of features) {
+      for (const grant of feature.entitlement.grants) {
+        grantToFeatureType.set(grant.id, feature.entitlement.featureType)
       }
-      return labels[freq]
     }
 
-    // Helper to calculate percentages
-    const calculatePercentages = (
-      current: number,
-      included: number,
-      limit: number | null,
-      freeAmount: number
-    ) => {
-      const maxValue = limit ?? included
-      const limitPercent = 100
-      const currentPercent = maxValue > 0 ? Math.min(100, (current / maxValue) * 100) : 0
-      const includedPercent = maxValue > 0 ? Math.min(100, (included / maxValue) * 100) : 0
-      const freePercent = maxValue > 0 ? Math.min(100, (freeAmount / maxValue) * 100) : 0
+    // Initialize dinero totals with zero (using basePrice currency)
+    const zeroDinero = dinero({ amount: 0, currency: basePriceDinero.toJSON().currency })
+    let flatTotalDinero: Dinero<number> = zeroDinero
+    let tieredTotalDinero: Dinero<number> = zeroDinero
+    let usageTotalDinero: Dinero<number> = zeroDinero
+    let packageTotalDinero: Dinero<number> = zeroDinero
 
-      return { currentPercent, includedPercent, freePercent, limitPercent }
-    }
+    // Sum prices from usageEstimates by feature type using dinero
+    for (const estimate of usageEstimates ?? []) {
+      if (!estimate.grantId || !estimate.totalPriceDinero) continue
+      const featureType = grantToFeatureType.get(estimate.grantId)
+      if (!featureType) continue
 
-    // Type for entitlement item
-    type EntitlementItem = NonNullable<typeof usageData>["entitlement"][number]
-
-    // Build usage bar display
-    const buildUsageBarDisplay = (ent: EntitlementItem) => {
-      const feature = ent.featureVersion?.feature
-      const unit = feature?.unit ?? "units"
-      const usage = ent.usage ?? 0
-      const included = ent.included ?? 0
-      const limit = ent.limit
-      const freeUnits = ent.freeUnits ?? 0
-      const price = Number.parseFloat(ent.price ?? "0")
-      const planVersionFeature = ent.featureVersion
-      const allowOverage = planVersionFeature?.allowOverage ?? false
-
-      const limitType: "hard" | "soft" | "none" =
-        limit === null ? "none" : allowOverage ? "soft" : "hard"
-
-      const { currentPercent, includedPercent, freePercent, limitPercent } = calculatePercentages(
-        usage,
-        included,
-        limit,
-        freeUnits
-      )
-
-      const isOverIncluded = usage > included
-      const isOverLimit = limit !== null && usage > limit
-      const notifyThreshold = planVersionFeature?.notifyUsageThreshold ?? 95
-      const isNearLimit = limit !== null && currentPercent >= notifyThreshold
-
-      let statusMessage: string | undefined
-      let statusType: "warning" | "error" | "info" | undefined
-
-      if (isOverLimit && !allowOverage) {
-        statusMessage = "Limit exceeded"
-        statusType = "error"
-      } else if (isOverIncluded) {
-        statusMessage = "Over included limit"
-        statusType = "info"
-      } else if (isNearLimit) {
-        statusMessage = "Near limit"
-        statusType = "warning"
+      if (featureType === "flat") {
+        flatTotalDinero = add(flatTotalDinero, estimate.totalPriceDinero)
+      } else if (featureType === "tier") {
+        tieredTotalDinero = add(tieredTotalDinero, estimate.totalPriceDinero)
+      } else if (featureType === "usage") {
+        usageTotalDinero = add(usageTotalDinero, estimate.totalPriceDinero)
+      } else if (featureType === "package") {
+        packageTotalDinero = add(packageTotalDinero, estimate.totalPriceDinero)
       }
+    }
 
-      const billableUsage = Math.max(0, usage - included - freeUnits)
-      const overageAmount = limit !== null && usage > limit ? usage - limit : 0
-      const overageCost = isOverIncluded ? price : 0
+    // Calculate usageCharges by summing all non-package totals
+    const usageChargesDinero = add(tieredTotalDinero, usageTotalDinero)
+
+    // Calculate total price using dinero
+    const totalPriceDinero = add(basePriceDinero, usageChargesDinero)
+
+    // Format prices from dinero (basePrice is already formatted, so we only format the totals)
+    const flatTotal = toDecimal(flatTotalDinero, ({ value, currency }) =>
+      formatMoney(value.toString(), currency.code)
+    )
+    const tieredTotal = toDecimal(tieredTotalDinero, ({ value, currency }) =>
+      formatMoney(value.toString(), currency.code)
+    )
+    const usageTotal = toDecimal(usageTotalDinero, ({ value, currency }) =>
+      formatMoney(value.toString(), currency.code)
+    )
+    const packageTotal = toDecimal(packageTotalDinero, ({ value, currency }) =>
+      formatMoney(value.toString(), currency.code)
+    )
+    const usageCharges = toDecimal(usageChargesDinero, ({ value, currency }) =>
+      formatMoney(value.toString(), currency.code)
+    )
+    const totalPrice = toDecimal(totalPriceDinero, ({ value, currency }) =>
+      formatMoney(value.toString(), currency.code)
+    )
+
+    return {
+      planName: subscription.planSlug ?? "No Plan",
+      planDescription: planVersion.description ?? undefined,
+      basePrice,
+      billingPeriod,
+      billingPeriodLabel: billingPeriod,
+      currency,
+      renewalDate,
+      daysRemaining: daysRemaining > 0 ? daysRemaining : undefined,
+      groups: [
+        {
+          id: "all-features",
+          name: "Features",
+          featureCount: features.length,
+          features: displayFeatures,
+          totalPrice: usageCharges,
+        },
+      ],
+      priceSummary: {
+        totalPrice,
+        basePrice,
+        usageCharges,
+        hasUsageCharges: usageChargesDinero.toJSON().amount > 0,
+        flatTotal,
+        tieredTotal,
+        packageTotal,
+        usageTotal,
+      },
+    }
+  }
+
+  private buildFeatureDisplay(
+    feature: NonNullable<ReturnType<typeof this.buildFeatures>[number]>,
+    billingConfig: { billingInterval?: string; currency?: string },
+    currency: string
+  ): CurrentUsage["groups"][number]["features"][number] {
+    const { entitlement, planVersionFeature, usage, included, priceNum, limit } = feature
+    const featureType = entitlement.featureType
+    const billingInterval = billingConfig?.billingInterval ?? "month"
+    const hasDifferentBilling = billingInterval !== "month"
+
+    // Format price as string (price comes from usageEstimates)
+    const priceString = formatMoney(priceNum.toString(), currency)
+
+    const baseFeature = {
+      id: entitlement.featureSlug,
+      name: planVersionFeature.feature.title ?? entitlement.featureSlug,
+      description: planVersionFeature.feature.description ?? undefined,
+      currency,
+      price: priceString,
+      isIncluded: feature.priceNum === 0,
+    }
+
+    const billingFrequency = hasDifferentBilling
+      ? (billingInterval as "daily" | "weekly" | "monthly" | "yearly")
+      : undefined
+
+    if (featureType === "flat") {
+      return {
+        ...baseFeature,
+        type: "flat" as const,
+        typeLabel: "Flat",
+        enabled: (limit ?? 0) > 0,
+        billing: {
+          hasDifferentBilling,
+          billingFrequency,
+          billingFrequencyLabel: billingFrequency,
+          resetFrequency: undefined,
+          resetFrequencyLabel: undefined,
+        },
+      }
+    }
+
+    if (featureType === "tier") {
+      const config = planVersionFeature.config as { tiers?: Array<unknown> } | undefined
+      const tiers =
+        (config?.tiers as Array<{
+          firstUnit: number
+          lastUnit: number | null
+          unitPrice: { displayAmount: string }
+          label?: string
+        }>) ?? []
+
+      const formattedTiers = tiers.map((tier, index) => ({
+        min: tier.firstUnit,
+        max: tier.lastUnit,
+        pricePerUnit: Number.parseFloat(tier.unitPrice?.displayAmount ?? "0"),
+        label: tier.label ?? `Tier ${index + 1}`,
+        isActive: usage >= tier.firstUnit && (tier.lastUnit === null || usage <= tier.lastUnit),
+      }))
 
       return {
+        ...baseFeature,
+        type: "tiered" as const,
+        typeLabel: "Tiered",
+        billing: { hasDifferentBilling: false },
+        tieredDisplay: {
+          currentUsage: usage,
+          billableUsage: Math.max(0, usage - included),
+          unit: planVersionFeature.feature.unit ?? "units",
+          freeAmount: included,
+          tiers: formattedTiers,
+          currentTierLabel: formattedTiers.find((t) => t.isActive)?.label,
+        },
+      }
+    }
+
+    // Usage type
+    const limitType: "hard" | "soft" | "none" =
+      limit === null ? "none" : planVersionFeature.allowOverage ? "soft" : "hard"
+
+    return {
+      ...baseFeature,
+      type: "usage" as const,
+      typeLabel: "Usage",
+      billing: {
+        hasDifferentBilling,
+        billingFrequency,
+        billingFrequencyLabel: billingFrequency,
+        resetFrequency: undefined,
+        resetFrequencyLabel: undefined,
+      },
+      usageBar: {
         current: usage,
         included,
         limit: limit ?? undefined,
         limitType,
-        unit,
-        freeAmount: freeUnits,
-        currentPercent,
-        includedPercent,
-        freePercent,
-        limitPercent,
-        isOverIncluded,
-        isOverLimit,
-        isNearLimit,
-        statusMessage,
-        statusType,
-        billableUsage,
-        overageAmount,
-        overageCost,
-      }
-    }
-
-    // Build flat feature display
-    const buildFlatFeatureDisplay = (ent: EntitlementItem, currency: string) => {
-      const feature = ent.featureVersion?.feature
-      const price = Number.parseFloat(ent.price ?? "0")
-      const planVersionFeature = ent.featureVersion
-      const billingConfig = planVersionFeature?.billingConfig as
-        | {
-            billingInterval?: "month" | "year" | "week" | "day" | "minute" | "onetime"
-            [key: string]: unknown
-          }
-        | undefined
-      const resetConfig = planVersionFeature?.resetConfig as
-        | {
-            resetInterval?: string
-            [key: string]: unknown
-          }
-        | undefined
-
-      const billingInterval = billingConfig?.billingInterval ?? "month"
-      const hasDifferentBilling = billingInterval !== "month"
-
-      return {
-        id: ent.featureSlug,
-        name: feature?.title ?? ent.featureSlug,
-        description: feature?.description ? feature.description : undefined,
-        type: "flat" as const,
-        typeLabel: "Flat",
-        currency,
-        price,
-        isIncluded: price === 0,
-        enabled: (ent.units ?? 0) > 0,
-        billing: {
-          hasDifferentBilling,
-          billingFrequency: hasDifferentBilling
-            ? ((billingInterval === "day"
-                ? "daily"
-                : billingInterval === "week"
-                  ? "weekly"
-                  : billingInterval === "year"
-                    ? "yearly"
-                    : "monthly") as "daily" | "weekly" | "monthly" | "yearly")
-            : undefined,
-          billingFrequencyLabel: hasDifferentBilling
-            ? formatFrequency(
-                billingInterval === "day"
-                  ? "daily"
-                  : billingInterval === "week"
-                    ? "weekly"
-                    : billingInterval === "year"
-                      ? "yearly"
-                      : "monthly"
-              )
-            : undefined,
-          resetFrequency: resetConfig?.resetInterval
-            ? ((resetConfig?.resetInterval === "day"
-                ? "daily"
-                : resetConfig?.resetInterval === "week"
-                  ? "weekly"
-                  : resetConfig?.resetInterval === "year"
-                    ? "yearly"
-                    : "monthly") as "daily" | "weekly" | "monthly" | "yearly")
-            : undefined,
-          resetFrequencyLabel: resetConfig?.resetInterval
-            ? formatFrequency(
-                resetConfig?.resetInterval === "day"
-                  ? "daily"
-                  : resetConfig?.resetInterval === "week"
-                    ? "weekly"
-                    : resetConfig?.resetInterval === "year"
-                      ? "yearly"
-                      : "monthly"
-              )
-            : undefined,
-        },
-      }
-    }
-
-    // Build tiered feature display
-    const buildTieredFeatureDisplay = (ent: EntitlementItem, currency: string) => {
-      const feature = ent.featureVersion?.feature
-      const unit = feature?.unit ?? "units"
-      const usage = ent.usage ?? 0
-      const freeUnits = ent.freeUnits ?? 0
-      const price = Number.parseFloat(ent.price ?? "0")
-      const planVersionFeature = ent.featureVersion
-      const config = planVersionFeature?.config
-
-      const tiers =
-        config && typeof config === "object" && "tiers" in config && Array.isArray(config.tiers)
-          ? (config.tiers as unknown as Array<{
-              firstUnit: number
-              lastUnit: number | null
-              unitPrice: { displayAmount: string; dinero?: unknown }
-              flatPrice: { displayAmount: string; dinero?: unknown }
-              label?: string
-            }>)
-          : []
-
-      const formattedTiers = tiers.map((tier, index) => {
-        const isActive =
-          usage >= tier.firstUnit && (tier.lastUnit === null || usage <= tier.lastUnit)
-        const pricePerUnit = Number.parseFloat(tier.unitPrice?.displayAmount ?? "0")
-        return {
-          min: tier.firstUnit,
-          max: tier.lastUnit,
-          pricePerUnit,
-          label: tier.label ?? `Tier ${index + 1}`,
-          isActive,
-        }
-      })
-
-      const activeTier = formattedTiers.find((t) => t.isActive)
-      const currentTierLabel = activeTier?.label
-
-      const billableUsage = Math.max(0, usage - freeUnits)
-
-      return {
-        id: ent.featureSlug,
-        name: feature?.title ?? ent.featureSlug,
-        description: feature?.description ? feature.description : undefined,
-        type: "tiered" as const,
-        typeLabel: "Tiered",
-        currency,
-        price,
-        isIncluded: price === 0,
-        billing: {
-          hasDifferentBilling: false,
-        },
-        tieredDisplay: {
-          currentUsage: usage,
-          billableUsage,
-          unit,
-          freeAmount: freeUnits,
-          tiers: formattedTiers.map((tier) => ({
-            min: tier.min,
-            max: tier.max,
-            pricePerUnit: tier.pricePerUnit,
-            label: tier.label,
-            isActive: tier.isActive,
-          })),
-          currentTierLabel,
-        },
-      }
-    }
-
-    // Build usage feature display
-    const buildUsageFeatureDisplay = (ent: EntitlementItem, currency: string) => {
-      const feature = ent.featureVersion?.feature
-      const planVersionFeature = ent.featureVersion
-      const billingConfig = planVersionFeature?.billingConfig as
-        | {
-            billingInterval?: "month" | "year" | "week" | "day" | "minute" | "onetime"
-            [key: string]: unknown
-          }
-        | undefined
-      const resetConfig = planVersionFeature?.resetConfig as
-        | {
-            resetInterval?: string
-            [key: string]: unknown
-          }
-        | undefined
-
-      const billingInterval = billingConfig?.billingInterval ?? "month"
-      const hasDifferentBilling = billingInterval !== "month"
-
-      const price = Number.parseFloat(ent.price ?? "0")
-
-      return {
-        id: ent.featureSlug,
-        name: feature?.title ?? ent.featureSlug,
-        description: feature?.description ? feature.description : undefined,
-        type: "usage" as const,
-        typeLabel: "Usage",
-        currency,
-        price,
-        isIncluded: price === 0,
-        billing: {
-          hasDifferentBilling,
-          billingFrequency: hasDifferentBilling
-            ? ((billingInterval === "day"
-                ? "daily"
-                : billingInterval === "week"
-                  ? "weekly"
-                  : billingInterval === "year"
-                    ? "yearly"
-                    : "monthly") as "daily" | "weekly" | "monthly" | "yearly")
-            : undefined,
-          billingFrequencyLabel: hasDifferentBilling
-            ? formatFrequency(
-                billingInterval === "day"
-                  ? "daily"
-                  : billingInterval === "week"
-                    ? "weekly"
-                    : billingInterval === "year"
-                      ? "yearly"
-                      : "monthly"
-              )
-            : undefined,
-          resetFrequency: resetConfig?.resetInterval
-            ? ((resetConfig?.resetInterval === "day"
-                ? "daily"
-                : resetConfig?.resetInterval === "week"
-                  ? "weekly"
-                  : resetConfig?.resetInterval === "year"
-                    ? "yearly"
-                    : "monthly") as "daily" | "weekly" | "monthly" | "yearly")
-            : undefined,
-          resetFrequencyLabel: resetConfig?.resetInterval
-            ? formatFrequency(
-                resetConfig?.resetInterval === "day"
-                  ? "daily"
-                  : resetConfig?.resetInterval === "week"
-                    ? "weekly"
-                    : resetConfig?.resetInterval === "year"
-                      ? "yearly"
-                      : "monthly"
-              )
-            : undefined,
-        },
-        usageBar: buildUsageBarDisplay(ent),
-      }
-    }
-
-    // Build feature display based on type
-    const buildFeatureDisplay = (ent: EntitlementItem, currency: string) => {
-      const featureType = ent.featureType
-
-      switch (featureType) {
-        case "flat":
-          return buildFlatFeatureDisplay(ent, currency)
-        case "tier":
-          return buildTieredFeatureDisplay(ent, currency)
-        case "usage":
-          return buildUsageFeatureDisplay(ent, currency)
-        default:
-          return buildUsageFeatureDisplay(ent, currency)
-      }
-    }
-
-    // Build price summary
-    const buildPriceSummary = (
-      features: ReturnType<typeof buildFeatureDisplay>[],
-      basePrice: number
-    ) => {
-      let flatTotal = 0
-      let tieredTotal = 0
-      let usageTotal = 0
-
-      for (const feature of features) {
-        switch (feature.type) {
-          case "flat":
-            flatTotal += feature.price
-            break
-          case "tiered":
-            tieredTotal += feature.price
-            break
-          case "usage":
-            usageTotal += feature.price
-            break
-        }
-      }
-
-      const usageCharges = flatTotal + tieredTotal + usageTotal
-      const totalPrice = basePrice + usageCharges
-
-      return {
-        totalPrice,
-        basePrice,
-        usageCharges,
-        hasUsageCharges: usageCharges > 0,
-        flatTotal,
-        tieredTotal,
-        usageTotal,
-        freeGrantsSavings: 0,
-        hasFreeGrantsSavings: false,
-      }
-    }
-
-    // Extract plan info
-    const planName = usageData.subscription.planSlug ?? "No Plan"
-    const planDescription = usageData.planVersion.description
-    const basePrice = Number.parseFloat(usageData.planVersion.flatPrice ?? "0")
-    const billingConfig = usageData.planVersion.billingConfig as {
-      billingInterval?: "month" | "year" | "week" | "day" | "minute" | "onetime"
-      currency?: string
-    }
-    const billingInterval = billingConfig?.billingInterval ?? "month"
-    const billingPeriod = (
-      billingInterval === "day"
-        ? "daily"
-        : billingInterval === "week"
-          ? "weekly"
-          : billingInterval === "year"
-            ? "yearly"
-            : "monthly"
-    ) as "daily" | "weekly" | "monthly" | "yearly"
-    const currency = (billingConfig as { currency?: string } | undefined)?.currency ?? "USD"
-
-    // Calculate renewal date and days remaining
-    const renewalDate = new Date(usageData.subscription.currentCycleEndAt)
-    const daysRemaining = Math.ceil(
-      (usageData.subscription.currentCycleEndAt - Date.now()) / (1000 * 60 * 60 * 24)
-    )
-
-    // Transform entitlements to features
-    const features = usageData.entitlement
-      .filter((e): e is NonNullable<typeof e> => e !== undefined && e !== null)
-      .map((e) => buildFeatureDisplay(e, currency))
-
-    // Group features
-    const groups = [
-      {
-        id: "all-features",
-        name: "Features",
-        featureCount: features.length,
-        features,
-        totalPrice: features.reduce((sum, f) => sum + f.price, 0),
+        unit: planVersionFeature.feature.unit ?? "units",
+        notifyThreshold: planVersionFeature.notifyUsageThreshold ?? 95,
+        allowOverage: planVersionFeature.allowOverage,
       },
-    ]
-
-    const priceSummary = buildPriceSummary(features, basePrice)
-
-    return Ok({
-      planName,
-      planDescription: planDescription ?? undefined,
-      basePrice,
-      billingPeriod,
-      billingPeriodLabel: formatFrequency(billingPeriod),
-      currency,
-      renewalDate: renewalDate.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      }),
-      daysRemaining: daysRemaining > 0 ? daysRemaining : undefined,
-      groups,
-      priceSummary,
-    })
+    }
   }
 }

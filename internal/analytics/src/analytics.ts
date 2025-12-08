@@ -535,7 +535,7 @@ export class Analytics {
     }
 
     // if there are no usages, return an empty array
-    if (totalPeriodUsages.length === 0 || totalAccumulatedUsages.length === 0) {
+    if (totalPeriodUsages.length === 0 && totalAccumulatedUsages.length === 0) {
       return Ok([])
     }
 

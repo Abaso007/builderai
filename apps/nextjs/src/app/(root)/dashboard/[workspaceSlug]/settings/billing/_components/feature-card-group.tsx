@@ -1,7 +1,4 @@
 "use client"
-
-import { formatMoney } from "@unprice/db/utils"
-import { Badge } from "@unprice/ui/badge"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import type { unprice } from "~/lib/unprice"
 import { FeatureItem } from "./feature-item"
@@ -13,21 +10,21 @@ interface FeatureGroupCardProps {
   group: FeatureGroupDisplay
   isExpanded: boolean
   onToggle: () => void
-  currency?: string
+  planBillingPeriod?: "daily" | "weekly" | "monthly" | "yearly"
 }
 
 export function FeatureGroupCard({
   group,
   isExpanded,
   onToggle,
-  currency = "USD",
+  planBillingPeriod,
 }: FeatureGroupCardProps) {
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card">
       <button
         onClick={onToggle}
         type="button"
-        className="flex w-full items-center justify-between p-4 text-left transition-colors hover:bg-secondary/50"
+        className="flex w-full items-center justify-between p-3 text-left transition-colors hover:bg-muted/50"
       >
         <div className="flex items-center gap-3">
           {isExpanded ? (
@@ -36,21 +33,17 @@ export function FeatureGroupCard({
             <ChevronRight className="h-4 w-4 text-muted-foreground" />
           )}
           <span className="font-medium text-foreground">{group.name}</span>
-          <Badge className="ml-2">
-            {group.featureCount} feature{group.featureCount !== 1 ? "s" : ""}
-          </Badge>
-        </div>
-        {group.totalPrice > 0 && (
-          <span className="font-medium text-background-textContrast text-sm">
-            {formatMoney(group.totalPrice.toString(), currency)}
+          <span className="text-muted-foreground text-sm">
+            {group.featureCount} {group.featureCount === 1 ? "feature" : "features"}
           </span>
-        )}
+        </div>
+        <span className="font-semibold text-foreground">{group.totalPrice}</span>
       </button>
 
       {isExpanded && (
-        <div className="divide-y divide-border border-border border-t">
+        <div className="divide-y divide-border border-t">
           {group.features.map((feature) => (
-            <FeatureItem key={feature.id} feature={feature} />
+            <FeatureItem key={feature.id} feature={feature} planBillingPeriod={planBillingPeriod} />
           ))}
         </div>
       )}

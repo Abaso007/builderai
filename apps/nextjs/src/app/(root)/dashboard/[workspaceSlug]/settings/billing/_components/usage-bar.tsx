@@ -1,6 +1,7 @@
 "use client"
 
 import { nFormatter } from "@unprice/db/utils"
+import { Progress } from "@unprice/ui/progress"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@unprice/ui/tooltip"
 import { AlertTriangle, Ban, TrendingUp } from "lucide-react"
 import type { unprice } from "~/lib/unprice"
@@ -22,146 +23,154 @@ function formatNumber(num: number | null | undefined, unit = ""): string {
 }
 
 export function UsageBar({ data }: UsageBarProps) {
-  const {
-    current,
-    included,
-    limit,
-    freeAmount,
-    limitType,
-    unit,
-    currentPercent,
-    includedPercent,
-    freePercent,
-    limitPercent,
-    isOverLimit,
-    isOverIncluded,
-    isNearLimit,
-    statusMessage,
-    statusType,
-  } = data
+  const { current, included, limit, limitType, unit } = data
+  // These fields may not exist in the type yet, but will be available at runtime
+  const notifyThreshold = (data as { notifyThreshold?: number }).notifyThreshold ?? 95
+  const allowOverage = (data as { allowOverage?: boolean }).allowOverage ?? false
 
   const currentFormatted = formatNumber(current, unit)
   const limitFormatted = limit !== undefined ? formatNumber(limit, unit) : null
   const includedFormatted = formatNumber(included, unit)
-  const freeAmountFormatted = formatNumber(freeAmount, unit)
 
   const hasHardLimit = limitType === "hard"
   const hasSoftLimit = limitType === "soft"
   const hasNoLimit = limitType === "none"
 
-  // Calculate barColor based on usage state
-  const barColor: "primary" | "amber" | "destructive" | "overage" =
+  // Calculate max value for percentage: limit > included > current*1.2 > 1
+  const maxValue =
+    limit !== null && limit !== undefined
+      ? limit
+      : included > 0
+        ? included
+        : current > 0
+          ? Math.max(current * 1.2, current + 1)
+          : 1
+
+  const currentPercent = Math.min(100, (current / maxValue) * 100)
+  const includedPercent = Math.min(100, (included / maxValue) * 100)
+
+  // Calculate derived states
+  const isOverIncluded = current > included
+  const isOverLimit = limit !== null && limit !== undefined && current > limit
+  const isNearLimit = limit !== null && limit !== undefined && currentPercent >= notifyThreshold
+
+  // Determine status message
+  let statusMessage: string | undefined
+  let statusType: "warning" | "error" | "info" | undefined
+  if (isOverLimit && !allowOverage) {
+    statusMessage = "Limit exceeded"
+    statusType = "error"
+  } else if (isOverIncluded) {
+    statusMessage = "Over included limit"
+    statusType = "info"
+  } else if (isNearLimit) {
+    statusMessage = "Near limit"
+    statusType = "warning"
+  }
+
+  // Clamp to 0-100 for Progress component (it can't show >100% natively)
+  const progressValue =
+    Number.isFinite(currentPercent) && currentPercent >= 0 ? Math.min(100, currentPercent) : 0
+
+  // Use includedPercent for display
+  const displayIncludedPercent = includedPercent
+
+  // Determine progress variant based on state
+  const progressVariant: "default" | "primary" | "destructive" | "secondary" =
     isOverLimit && hasHardLimit
       ? "destructive"
       : isOverIncluded
-        ? "overage"
+        ? "secondary"
         : isNearLimit
-          ? "amber"
+          ? "secondary"
           : "primary"
-
-  const barColorClass = {
-    primary: "bg-info-borderHover",
-    amber: "bg-primary-borderHover",
-    destructive: "bg-warning-borderHover",
-    overage: "bg-danger-borderHover",
-  }[barColor]
 
   return (
     <div className="space-y-2">
+      {/* Usage Stats - Simplified */}
       <div className="flex items-baseline justify-between">
         <div className="flex items-baseline gap-2">
-          <span className="font-semibold text-2xl text-foreground">{currentFormatted}</span>
+          <span className="font-semibold text-foreground text-xl">{currentFormatted}</span>
           <span className="text-muted-foreground text-sm">
-            {limitFormatted ? `of ${limitFormatted} ${unit}` : unit}
+            {limitFormatted
+              ? `of ${limitFormatted}`
+              : included > 0
+                ? `of ${includedFormatted}`
+                : ""}{" "}
           </span>
-          {limitFormatted && (
-            <TooltipProvider>
-              <Tooltip delayDuration={200}>
-                <TooltipTrigger asChild>
-                  <span
-                    className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs ${
-                      hasHardLimit
-                        ? "bg-destructive/10 text-destructive"
-                        : hasSoftLimit
-                          ? "text-warning"
-                          : "text-success"
-                    }`}
-                  >
-                    {hasHardLimit && <Ban className="h-3 w-3" />}
-                    {hasSoftLimit && <AlertTriangle className="h-3 w-3" />}
-                    {hasNoLimit && <TrendingUp className="h-3 w-3" />}
-                    {hasHardLimit ? "Hard limit" : hasSoftLimit ? "Soft limit" : "Overuse OK"}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="top" className="max-w-48 text-xs">
-                  {hasHardLimit && "Usage will be blocked when limit is reached"}
-                  {hasSoftLimit && "You'll receive a warning but can continue using"}
-                  {hasNoLimit && "No limit - overage will be billed per unit"}
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
         </div>
-        <div className="text-right">
-          {data.included > 0 && (
-            <span className="text-muted-foreground text-xs">
-              {includedFormatted} included
-              {freeAmount > 0 && (
-                <span className="text-success"> ({freeAmountFormatted} free)</span>
-              )}
-            </span>
-          )}
-        </div>
+        {limitFormatted && (
+          <TooltipProvider>
+            <Tooltip delayDuration={200}>
+              <TooltipTrigger asChild>
+                <span
+                  className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs ${
+                    hasHardLimit
+                      ? "text-destructive"
+                      : hasSoftLimit
+                        ? "text-warning"
+                        : "text-success"
+                  }`}
+                >
+                  {hasHardLimit && <Ban className="h-3 w-3" />}
+                  {hasSoftLimit && <AlertTriangle className="h-3 w-3" />}
+                  {hasNoLimit && <TrendingUp className="h-3 w-3" />}
+                  {hasHardLimit ? "Hard limit" : hasSoftLimit ? "Soft limit" : "Unlimited"}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-48 text-xs">
+                {hasHardLimit && "Usage will be blocked when limit is reached"}
+                {hasSoftLimit && "You'll receive a warning but can continue using"}
+                {hasNoLimit && "No limit - overage will be billed per unit"}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
       </div>
 
-      <div className="relative h-2 w-full overflow-hidden rounded-full bg-background-bgHover">
-        {freeAmount > 0 && (
+      {/* Progress Bar with overlays */}
+      <div className="relative">
+        <Progress value={progressValue} variant={progressVariant} className="h-2" />
+
+        {/* Included amount indicator (subtle line) */}
+        {included > 0 && displayIncludedPercent < 100 && (
           <div
-            className="absolute top-0 h-full rounded-l-full bg-info-borderHover"
-            style={{ width: `${freePercent}%` }}
+            className="absolute top-0 h-full w-0.5 bg-muted-foreground/30"
+            style={{ left: `${displayIncludedPercent}%` }}
+            aria-hidden="true"
           />
         )}
-        {data.included > 0 && includedPercent < 100 && (
+
+        {/* Overage indicator (only when over limit and soft limit) */}
+        {isOverLimit && !hasHardLimit && limit && currentPercent > 100 && (
           <div
-            className="absolute top-0 h-full w-px bg-muted-foreground"
-            style={{ left: `${includedPercent}%` }}
-          />
-        )}
-        {limitFormatted && limitPercent < 100 && (
-          <div
-            className={`absolute top-0 h-full w-0.5 ${hasHardLimit ? "bg-destructive" : "bg-warning"}`}
-            style={{ left: `${limitPercent}%` }}
-          />
-        )}
-        <div
-          className={`h-full rounded-full transition-all ${barColorClass}`}
-          style={{ width: `${Math.min(currentPercent, 100)}%` }}
-        />
-        {isOverLimit && !hasHardLimit && data.limit && (
-          <div
-            className="absolute top-0 h-full animate-pulse rounded-r-full bg-danger-borderHover"
+            className="absolute top-0 h-full rounded-r-full bg-danger-borderHover/50"
             style={{
-              left: `${limitPercent}%`,
-              width: `${Math.min(((data.current - data.limit) / (data.limit || 1)) * 100, 100 - limitPercent)}%`,
+              left: "100%",
+              width: `${Math.min(((current - limit) / (limit || 1)) * 100, 20)}%`,
             }}
           />
         )}
       </div>
 
-      {statusMessage && (
+      {/* Status Message - Only show when there's an issue */}
+      {statusMessage && (statusType === "error" || statusType === "warning") && (
         <p
-          className={`flex items-center gap-1 text-xs ${
-            statusType === "error"
-              ? "text-danger-borderHover"
-              : statusType === "warning"
-                ? "text-warning-borderHover"
-                : "text-danger-borderHover"
+          className={`flex items-center gap-1.5 text-xs ${
+            statusType === "error" ? "text-destructive" : "text-warning"
           }`}
         >
-          {statusType === "error" && <Ban className="h-3 w-3" />}
-          {statusType === "warning" && <AlertTriangle className="h-3 w-3" />}
+          {statusType === "error" && <Ban className="h-3.5 w-3.5" />}
+          {statusType === "warning" && <AlertTriangle className="h-3.5 w-3.5" />}
           {statusMessage}
         </p>
+      )}
+
+      {/* Additional Info - Only show if there's included units */}
+      {included > 0 && (
+        <div className="text-xs">
+          <span>{includedFormatted} included</span>
+        </div>
       )}
     </div>
   )

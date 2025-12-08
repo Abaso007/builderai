@@ -1,7 +1,6 @@
 "use client"
 
 import { APP_DOMAIN } from "@unprice/config"
-import { formatMoney } from "@unprice/db/utils"
 import { Badge } from "@unprice/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import { ChevronDown, ChevronUp } from "lucide-react"
@@ -73,7 +72,7 @@ export function UsageDashboard({ config, customerId, workspaceSlug }: UsageDashb
                 <div className="text-right">
                   <p className="text-muted-foreground text-sm">Base price</p>
                   <p className="font-semibold text-foreground text-xl">
-                    {formatMoney(config.basePrice.toString(), config.currency)}
+                    {config.basePrice}
                     <span className="font-normal text-muted-foreground text-sm">
                       /{config.billingPeriodLabel}
                     </span>
@@ -102,7 +101,7 @@ export function UsageDashboard({ config, customerId, workspaceSlug }: UsageDashb
               />
             </div>
           </div>
-          <PriceSummary data={config.priceSummary} currency={config.currency} />
+          <PriceSummary data={config.priceSummary} />
         </div>
 
         {/* Feature Groups */}
@@ -132,6 +131,7 @@ export function UsageDashboard({ config, customerId, workspaceSlug }: UsageDashb
               isExpanded={expandedGroups.has(group.id)}
               onToggle={() => toggleGroup(group.id)}
               currency={config.currency}
+              planBillingPeriod={config.billingPeriod}
             />
           ))}
 
