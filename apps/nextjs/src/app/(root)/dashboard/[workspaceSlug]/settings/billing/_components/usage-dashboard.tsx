@@ -58,11 +58,7 @@ export function UsageDashboard({ config, customerId, workspaceSlug }: UsageDashb
                   <div className="flex items-center gap-2">
                     <h2 className="font-medium text-foreground text-lg">{config.planName}</h2>
                     <Badge className="ml-2" variant="primary">
-                      {config.billingPeriod === "yearly"
-                        ? "Annual"
-                        : config.billingPeriod === "weekly"
-                          ? "Weekly"
-                          : "Monthly"}
+                      {config.billingPeriodLabel}
                     </Badge>
                   </div>
                   {config.planDescription && (
@@ -72,7 +68,7 @@ export function UsageDashboard({ config, customerId, workspaceSlug }: UsageDashb
                 <div className="text-right">
                   <p className="text-muted-foreground text-sm">Base price</p>
                   <p className="font-semibold text-foreground text-xl">
-                    {config.basePrice}
+                    {config.priceSummary.flatTotal}
                     <span className="font-normal text-muted-foreground text-sm">
                       /{config.billingPeriodLabel}
                     </span>
@@ -130,8 +126,7 @@ export function UsageDashboard({ config, customerId, workspaceSlug }: UsageDashb
               group={group}
               isExpanded={expandedGroups.has(group.id)}
               onToggle={() => toggleGroup(group.id)}
-              currency={config.currency}
-              planBillingPeriod={config.billingPeriod}
+              planBillingPeriodLabel={config.billingPeriodLabel}
             />
           ))}
 

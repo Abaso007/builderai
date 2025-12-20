@@ -17,13 +17,18 @@ export function PriceSummary({ data }: PriceSummaryProps) {
 
       <div className="mt-6 space-y-2.5 border-border border-t pt-4">
         <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">Base plan</span>
-          <span className="font-medium text-foreground">{data.basePrice}</span>
+          <span className="text-muted-foreground">Fixed price</span>
+          <span className="font-medium text-foreground">{data.flatTotal}</span>
         </div>
 
         <div className="flex justify-between text-sm">
           <span className="text-muted-foreground">Tiered usage</span>
           <span className="font-medium text-foreground">{data.tieredTotal}</span>
+        </div>
+
+        <div className="flex justify-between text-sm">
+          <span className="text-muted-foreground">Package usage</span>
+          <span className="font-medium text-foreground">{data.packageTotal}</span>
         </div>
 
         <div className="flex justify-between text-sm">

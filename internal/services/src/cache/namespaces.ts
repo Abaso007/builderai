@@ -15,7 +15,7 @@ import type {
   CurrentUsage,
   Customer,
   CustomerPaymentMethod,
-  EntitlementState,
+  Entitlement,
   Feature,
   PlanVersionApi,
   Project,
@@ -41,7 +41,7 @@ export type CacheNamespaces = {
   apiKeyByHash: ApiKeyExtended | null
   customerSubscription: SubscriptionCache | null
   customer: CustomerCache | null
-  customerEntitlement: EntitlementState | null
+  customerEntitlement: Entitlement | null
   customerPaymentMethods: CustomerPaymentMethod[] | null
   projectFeatures: ProjectFeatureCache | null
   idempotentRequestUsageByHash: ReportUsageResult | null

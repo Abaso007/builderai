@@ -2,6 +2,7 @@ import baseX from "base-x"
 
 const b58 = baseX("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz")
 
+// this simulates uuid v7 and generated ids sortable by timestamp and url safe base58 encoded
 export const prefixes = {
   workspace: "ws",
   ingestion: "ing",

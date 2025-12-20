@@ -47,9 +47,6 @@ describe("EntitlementService - verify", () => {
         allowOverage: false,
         featurePlanVersionId: "fpv_1",
         realtime: false,
-        subscriptionId: "sub_1",
-        subscriptionItemId: "si_1",
-        subscriptionPhaseId: "sp_1",
       },
     ],
     version: "v1",
@@ -293,9 +290,6 @@ describe("EntitlementService - reportUsage", () => {
         allowOverage: false,
         featurePlanVersionId: "fpv_1",
         realtime: false,
-        subscriptionId: "sub_1",
-        subscriptionItemId: "si_1",
-        subscriptionPhaseId: "sp_1",
       },
     ],
     version: "v1",
@@ -443,7 +437,6 @@ describe("EntitlementService - reportUsage", () => {
     // Modify state to trigger sync (lastSyncAt old enough)
     const oldSyncState = {
       ...mockEntitlementState,
-      lastSyncAt: now - 60000 - 1000, // default syncToDBInterval is 60000
       metadata: null,
       createdAtM: now,
       updatedAtM: now,

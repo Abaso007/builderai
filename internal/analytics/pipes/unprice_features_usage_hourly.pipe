@@ -1,18 +1,25 @@
 NODE features_usage_hourly_mv_node
 SQL >
     SELECT
-        toStartOfHour(fromUnixTimestamp64Milli(timestamp, 'UTC')) as date,
+        toStartOfHour(fromUnixTimestamp64Milli(timestamp, 'UTC')) AS date,
         projectId,
         customerId,
         featureSlug,
         countState() AS count,
         sumState(usage) AS sum,
         maxState(usage) AS max,
-        argMaxState(usage, timestamp) AS last_during_period
+        argMaxState(usage, timestamp) AS last_during_period,
+        argMaxState(id, timestamp) AS last_id
     FROM unprice_feature_usage_records
     WHERE deleted = 0
-    GROUP BY date, projectId, customerId, featureSlug
-    ORDER BY date DESC
+    GROUP BY
+        date,
+        projectId,
+        customerId,
+        featureSlug
 
 TYPE MATERIALIZED
 DATASOURCE unprice_feature_usage_hourly_mv
+ENGINE "AggregatingMergeTree"
+ENGINE_PARTITION_KEY "toYYYYMM(date)"
+ENGINE_SORTING_KEY "projectId, customerId, featureSlug, date"

@@ -209,3 +209,24 @@ export const FEATURE_TYPES = Object.keys(FEATURE_TYPES_MAPS) as unknown as reado
   FeatureType,
   ...FeatureType[],
 ]
+
+export type Scope = "period" | "lifetime"
+export type Behavior = "sum" | "max" | "last"
+
+interface MethodConfig {
+  behavior: Behavior // How do we update the number? (Add, Max, Replace)
+  scope: Scope // When does it reset? (Cycle end vs Never)
+}
+
+export const AGGREGATION_CONFIG: Record<AggregationMethod, MethodConfig> = {
+  // Period Scoped (Resets on Cycle)
+  sum: { behavior: "sum", scope: "period" },
+  count: { behavior: "sum", scope: "period" }, // count is just sum(+1)
+  max: { behavior: "max", scope: "period" },
+  last_during_period: { behavior: "last", scope: "period" },
+
+  // Lifetime Scoped (Never Resets)
+  sum_all: { behavior: "sum", scope: "lifetime" },
+  count_all: { behavior: "sum", scope: "lifetime" },
+  max_all: { behavior: "max", scope: "lifetime" },
+}

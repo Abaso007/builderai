@@ -37,4 +37,4 @@ SCHEMA >
 
 ENGINE MergeTree
 ENGINE_PARTITION_KEY toYYYYMM(timestamp)
-ENGINE_SORTING_KEY timestamp, page_id
+ENGINE_SORTING_KEY page_id, timestamp

@@ -76,6 +76,7 @@ export const featureVerificationSchemaV1 = z.object({
 })
 
 export const featureUsageSchemaV1 = z.object({
+  id: z.string(),
   idempotenceKey: z.string(),
   featureSlug: z.string(),
   customerId: z.string(),
@@ -303,7 +304,7 @@ export type PageBrowserVisits = Awaited<ReturnType<Analytics["getBrowserVisits"]
 export type PageOverview = Awaited<ReturnType<Analytics["getPagesOverview"]>>["data"]
 export type FeatureHeatmap = Awaited<ReturnType<Analytics["getFeatureHeatmap"]>>["data"]
 export type FeaturesOverview = Awaited<ReturnType<Analytics["getFeaturesOverview"]>>["data"]
-export type FeaturesUsageTotal = Awaited<ReturnType<Analytics["getFeaturesUsageTotal"]>>["data"]
+export type FeaturesUsage = Awaited<ReturnType<Analytics["getFeaturesUsage"]>>["data"]
 export type PlansConversion = Awaited<ReturnType<Analytics["getPlansConversion"]>>["data"]
 export type Usage = Awaited<ReturnType<Analytics["getFeaturesUsagePeriod"]>>["data"]
 export type Verifications = Awaited<ReturnType<Analytics["getFeaturesVerifications"]>>["data"]

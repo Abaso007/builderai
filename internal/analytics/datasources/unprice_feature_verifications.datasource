@@ -19,4 +19,4 @@ SCHEMA >
 
 ENGINE MergeTree
 ENGINE_PARTITION_KEY toYYYYMM(fromUnixTimestamp64Milli(timestamp, 'UTC'))
-ENGINE_SORTING_KEY (timestamp, projectId, customerId, featureSlug)
+ENGINE_SORTING_KEY projectId, customerId, featureSlug, timestamp

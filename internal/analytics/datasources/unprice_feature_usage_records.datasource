@@ -6,6 +6,7 @@ DESCRIPTION >
 TAGS "usage"
 
 SCHEMA >
+    `id` String `json:$.id`,
     `timestamp` Int64 `json:$.timestamp`,
     `featureSlug` LowCardinality(String) `json:$.featureSlug`,
     `customerId` String `json:$.customerId`,

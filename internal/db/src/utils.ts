@@ -3,6 +3,7 @@ import {
   type Dinero,
   add,
   dinero,
+  isZero,
   multiply,
   toDecimal,
   toSnapshot,
@@ -18,7 +19,7 @@ export * from "./utils/id"
 export * from "./utils/pagination"
 export * from "./utils/nformatter"
 
-export { dinero, type Dinero, currencies, add, toDecimal }
+export { dinero, type Dinero, currencies, add, toDecimal, isZero }
 
 import { generateSlug } from "random-word-slugs"
 import type { Currency } from "./validators"
@@ -69,7 +70,7 @@ export const slugify = (str: string, forDisplayingInput?: boolean) => {
 }
 
 // return the price to stripe money format cents
-export function formatAmount(price: Dinero<number>) {
+export function formatAmountDinero(price: Dinero<number>) {
   const { currency } = toSnapshot(price)
 
   // we need to return the amount in cents rounded up to the nearest cent

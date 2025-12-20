@@ -24,7 +24,7 @@ describe("EntitlementService - Multiple Grants", () => {
 
   const grantA = {
     id: "grant_A",
-    type: "subscription",
+    type: "subscription" as const,
     priority: 10,
     limit: 100,
     effectiveAt: now - 10000,
@@ -34,14 +34,11 @@ describe("EntitlementService - Multiple Grants", () => {
     subjectType: "customer",
     subjectId: customerId,
     realtime: false,
-    subscriptionId: "sub_A",
-    subscriptionItemId: "item_A",
-    subscriptionPhaseId: "phase_A",
   }
 
   const grantB = {
     id: "grant_B",
-    type: "addon",
+    type: "addon" as const,
     priority: 20,
     limit: 50,
     effectiveAt: now - 10000,
@@ -51,9 +48,6 @@ describe("EntitlementService - Multiple Grants", () => {
     subjectType: "customer",
     subjectId: customerId,
     realtime: false,
-    subscriptionId: "sub_B",
-    subscriptionItemId: "item_B",
-    subscriptionPhaseId: "phase_B",
   }
 
   const mockEntitlementState: EntitlementState = {

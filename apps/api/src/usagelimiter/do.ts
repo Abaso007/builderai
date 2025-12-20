@@ -5,7 +5,8 @@ import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
 import type {
   CurrentUsage,
-  EntitlementState,
+  Entitlement,
+  MeterState,
   ReportUsageRequest,
   ReportUsageResult,
   VerificationResult,
@@ -141,6 +142,12 @@ export class DurableObjectUsagelimiter extends Server {
       storage: this.ctx.storage,
       state: this.ctx,
       logger: this.logger,
+      analytics: new Analytics({
+        emit: env.EMIT_ANALYTICS.toString() === "true",
+        tinybirdToken: env.TINYBIRD_TOKEN,
+        tinybirdUrl: env.TINYBIRD_URL,
+        logger: this.logger,
+      }),
     })
 
     // initialize the storage provider
@@ -165,10 +172,6 @@ export class DurableObjectUsagelimiter extends Server {
           env.NODE_ENV === "development"
             ? 30000 // 30 seconds
             : 300000, // 5 minutes
-        syncToDBInterval:
-          env.NODE_ENV === "development"
-            ? 30000 // 30 seconds
-            : 600000, // 10 minutes
       },
     })
 
@@ -220,20 +223,11 @@ export class DurableObjectUsagelimiter extends Server {
     })
   }
 
-  async prewarm({
-    customerId,
-    projectId,
-    now,
-  }: { customerId: string; projectId: string; now: number }) {
-    // prewarm the entitlement service
-    await this.entitlementService.prewarm({ customerId, projectId, now })
-  }
-
   public async getActiveEntitlements(data: {
     customerId: string
     projectId: string
     now: number
-  }): Promise<Result<EntitlementState[], BaseError>> {
+  }): Promise<Result<(Entitlement & MeterState)[], BaseError>> {
     return await this.entitlementService.getActiveEntitlements(data)
   }
 
@@ -354,9 +348,7 @@ export class DurableObjectUsagelimiter extends Server {
   // when the alarm is triggered
   async onAlarm(): Promise<void> {
     // flush the usage records
-    await this.entitlementService.flushUsageRecords()
-    // flush the verifications (usage verifications)
-    await this.entitlementService.flushVerifications()
+    await this.entitlementService.flush()
     // flush the metrics and logs
     this.ctx.waitUntil(Promise.all([this.metrics.flush(), this.logger.flush()]))
   }

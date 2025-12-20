@@ -783,6 +783,9 @@ importers:
       p-limit:
         specifier: ^7.1.1
         version: 7.1.1
+      ulid:
+        specifier: ^3.0.2
+        version: 3.0.2
       xstate:
         specifier: ^5.21.0
         version: 5.21.0
@@ -20418,6 +20421,11 @@ packages:
 
   /ulid@2.4.0:
     resolution: {integrity: sha512-fIRiVTJNcSRmXKPZtGzFQv9WRrZ3M9eoptl/teFJvjOzmpU+/K/JH6HZ8deBfb5vMEpicJcLn7JmvdknlMq7Zg==}
+    hasBin: true
+    dev: false
+
+  /ulid@3.0.2:
+    resolution: {integrity: sha512-yu26mwteFYzBAot7KVMqFGCVpsF6g8wXfJzQUHvu1no3+rRRSFcSV2nKeYvNPLD2J4b08jYBDhHUjeH0ygIl9w==}
     hasBin: true
     dev: false
 

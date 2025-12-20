@@ -761,16 +761,6 @@ export interface operations {
                         notifiedOverLimit?: boolean;
                         /** @enum {string} */
                         deniedReason?: "ERROR_SYNCING_ENTITLEMENTS_LAST_USAGE" | "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE" | "ENTITLEMENT_OUTSIDE_OF_CURRENT_BILLING_WINDOW" | "ERROR_RESETTING_DO" | "RATE_LIMITED" | "ENTITLEMENT_NOT_FOUND" | "LIMIT_EXCEEDED" | "ENTITLEMENT_EXPIRED" | "ENTITLEMENT_NOT_ACTIVE" | "DO_NOT_INITIALIZED" | "INCORRECT_USAGE_REPORTING" | "ERROR_INSERTING_USAGE_DO" | "ERROR_INSERTING_VERIFICATION_DO" | "PROJECT_DISABLED" | "CUSTOMER_DISABLED" | "SUBSCRIPTION_DISABLED" | "FETCH_ERROR" | "SUBSCRIPTION_ERROR" | "ENTITLEMENT_ERROR" | "SUBSCRIPTION_EXPIRED" | "NO_DEFAULT_PLAN_FOUND" | "SUBSCRIPTION_NOT_ACTIVE" | "PHASE_NOT_CREATED" | "FEATURE_NOT_FOUND_IN_SUBSCRIPTION" | "CUSTOMER_NOT_FOUND" | "CUSTOMER_ENTITLEMENTS_NOT_FOUND" | "FEATURE_TYPE_NOT_SUPPORTED" | "PROJECT_DISABLED" | "CUSTOMER_DISABLED" | "PLAN_VERSION_NOT_PUBLISHED" | "PLAN_VERSION_NOT_ACTIVE" | "PAYMENT_PROVIDER_CONFIG_NOT_FOUND" | "ENTITLEMENT_EXPIRED" | "ENTITLEMENT_NOT_ACTIVE" | "CUSTOMER_SESSION_NOT_CREATED" | "CUSTOMER_SESSION_NOT_FOUND" | "PLAN_VERSION_NOT_FOUND" | "PAYMENT_PROVIDER_ERROR" | "SUBSCRIPTION_NOT_CREATED" | "CUSTOMER_NOT_CREATED" | "SUBSCRIPTION_NOT_CANCELED" | "CUSTOMER_PHASE_NOT_FOUND" | "CURRENCY_MISMATCH" | "BILLING_INTERVAL_MISMATCH" | "ENTITLEMENT_NOT_FOUND" | "SUBSCRIPTION_NOT_FOUND" | "INVALID_ENTITLEMENT_TYPE" | "NO_ACTIVE_PHASE_FOUND";
-                        consumedFrom: {
-                            grantId: string;
-                            amount: number;
-                            priority: number;
-                            type: string;
-                            featurePlanVersionId: string;
-                            subscriptionItemId: string | null;
-                            subscriptionPhaseId: string | null;
-                            subscriptionId: string | null;
-                        }[];
                     };
                 };
             };
@@ -876,7 +866,8 @@ export interface operations {
                         mergingPolicy: "sum" | "max" | "min" | "replace";
                         grants: {
                             id: string;
-                            type: string;
+                            /** @enum {string} */
+                            type: "subscription" | "manual" | "promotion" | "trial" | "addon";
                             subjectType: string;
                             subjectId: string;
                             priority: number;
@@ -886,9 +877,6 @@ export interface operations {
                             realtime: boolean;
                             allowOverage: boolean;
                             featurePlanVersionId: string;
-                            subscriptionItemId: string | null;
-                            subscriptionPhaseId: string | null;
-                            subscriptionId: string | null;
                         }[];
                         version: string;
                         computedAt: number;
@@ -1354,9 +1342,7 @@ export interface operations {
                     "application/json": {
                         planName: string;
                         planDescription?: string;
-                        basePrice: number;
-                        /** @enum {string} */
-                        billingPeriod: "daily" | "weekly" | "monthly" | "yearly";
+                        billingPeriod: string;
                         billingPeriodLabel: string;
                         currency: string;
                         renewalDate?: string;
@@ -1373,17 +1359,11 @@ export interface operations {
                                 type: "flat";
                                 typeLabel: string;
                                 currency: string;
-                                price: number;
-                                isIncluded: boolean;
+                                price: string;
                                 enabled: boolean;
                                 billing: {
-                                    hasDifferentBilling: boolean;
-                                    /** @enum {string} */
-                                    billingFrequency?: "daily" | "weekly" | "monthly" | "yearly";
-                                    billingFrequencyLabel?: string;
-                                    /** @enum {string} */
-                                    resetFrequency?: "daily" | "weekly" | "monthly" | "yearly";
-                                    resetFrequencyLabel?: string;
+                                    billingFrequencyLabel: string;
+                                    resetFrequencyLabel: string;
                                 };
                             } | {
                                 id: string;
@@ -1393,10 +1373,10 @@ export interface operations {
                                 type: "tiered";
                                 typeLabel: string;
                                 currency: string;
-                                price: number;
-                                isIncluded: boolean;
+                                price: string;
                                 billing: {
-                                    hasDifferentBilling: boolean;
+                                    billingFrequencyLabel: string;
+                                    resetFrequencyLabel: string;
                                 };
                                 tieredDisplay: {
                                     currentUsage: number;
@@ -1420,16 +1400,10 @@ export interface operations {
                                 type: "usage";
                                 typeLabel: string;
                                 currency: string;
-                                price: number;
-                                isIncluded: boolean;
+                                price: string;
                                 billing: {
-                                    hasDifferentBilling: boolean;
-                                    /** @enum {string} */
-                                    billingFrequency?: "daily" | "weekly" | "monthly" | "yearly";
-                                    billingFrequencyLabel?: string;
-                                    /** @enum {string} */
-                                    resetFrequency?: "daily" | "weekly" | "monthly" | "yearly";
-                                    resetFrequencyLabel?: string;
+                                    billingFrequencyLabel: string;
+                                    resetFrequencyLabel: string;
                                 };
                                 usageBar: {
                                     current: number;
@@ -1438,34 +1412,30 @@ export interface operations {
                                     /** @enum {string} */
                                     limitType: "hard" | "soft" | "none";
                                     unit: string;
-                                    freeAmount: number;
-                                    currentPercent: number;
-                                    includedPercent: number;
-                                    freePercent: number;
-                                    limitPercent: number;
-                                    isOverIncluded: boolean;
-                                    isOverLimit: boolean;
-                                    isNearLimit: boolean;
-                                    statusMessage?: string;
-                                    /** @enum {string} */
-                                    statusType?: "warning" | "error" | "info";
-                                    billableUsage: number;
-                                    overageAmount: number;
-                                    overageCost: number;
+                                    notifyThreshold?: number;
+                                    allowOverage: boolean;
+                                };
+                            } | {
+                                id: string;
+                                name: string;
+                                description?: string;
+                                /** @enum {string} */
+                                type: "package";
+                                typeLabel: string;
+                                currency: string;
+                                price: string;
+                                billing: {
+                                    billingFrequencyLabel: string;
+                                    resetFrequencyLabel: string;
                                 };
                             })[];
-                            totalPrice: number;
                         }[];
                         priceSummary: {
-                            totalPrice: number;
-                            basePrice: number;
-                            usageCharges: number;
-                            hasUsageCharges: boolean;
-                            flatTotal: number;
-                            tieredTotal: number;
-                            usageTotal: number;
-                            freeGrantsSavings: number;
-                            hasFreeGrantsSavings: boolean;
+                            totalPrice: string;
+                            flatTotal: string;
+                            tieredTotal: string;
+                            packageTotal: string;
+                            usageTotal: string;
                         };
                     };
                 };
@@ -3244,7 +3214,6 @@ export interface operations {
                         usage: {
                             projectId: string;
                             customerId?: string;
-                            grantId?: string;
                             featureSlug: string;
                             count: number;
                             sum: number;
@@ -3369,7 +3338,6 @@ export interface operations {
                         verifications: {
                             projectId: string;
                             customerId?: string;
-                            grantId?: string;
                             featureSlug: string;
                             count: number;
                             p50_latency: number;

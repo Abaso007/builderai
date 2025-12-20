@@ -21,10 +21,10 @@ function formatNumber(num: number | null | undefined, unit = ""): string {
 
 interface FeatureItemProps {
   feature: FeatureDisplay
-  planBillingPeriod?: "daily" | "weekly" | "monthly" | "yearly"
+  planBillingPeriodLabel?: string
 }
 
-export function FeatureItem({ feature, planBillingPeriod }: FeatureItemProps) {
+export function FeatureItem({ feature, planBillingPeriodLabel }: FeatureItemProps) {
   const getIcon = () => {
     switch (feature.type) {
       case "flat":
@@ -37,10 +37,7 @@ export function FeatureItem({ feature, planBillingPeriod }: FeatureItemProps) {
   }
 
   // Only show billing frequency if it's different from plan
-  const showBillingFrequency =
-    feature.billing.hasDifferentBilling &&
-    (feature.type === "flat" || feature.type === "usage") &&
-    feature.billing.billingFrequency !== planBillingPeriod
+  const showBillingFrequency = feature.billing.billingFrequencyLabel !== planBillingPeriodLabel
 
   return (
     <div className="p-4">
@@ -58,19 +55,15 @@ export function FeatureItem({ feature, planBillingPeriod }: FeatureItemProps) {
                 <TooltipProvider>
                   <Tooltip delayDuration={200}>
                     <TooltipTrigger asChild>
-                      <span className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground text-xs">
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-info text-xs">
                         <Clock className="h-3 w-3" />
                         {feature.billing.billingFrequencyLabel}
                       </span>
                     </TooltipTrigger>
                     <TooltipContent side="top" className="text-xs">
                       <div className="space-y-1">
-                        {feature.billing.billingFrequency && (
-                          <div>Billed: {feature.billing.billingFrequency}</div>
-                        )}
-                        {feature.billing.resetFrequency && (
-                          <div>Resets: {feature.billing.resetFrequency}</div>
-                        )}
+                        <div>Billed: {feature.billing.billingFrequencyLabel}</div>
+                        <div>Resets: {feature.billing.resetFrequencyLabel}</div>
                       </div>
                     </TooltipContent>
                   </Tooltip>
@@ -84,17 +77,10 @@ export function FeatureItem({ feature, planBillingPeriod }: FeatureItemProps) {
         </div>
 
         <div className="shrink-0 text-right">
-          {!feature.isIncluded ? (
-            <div className="text-right">
-              <div className="font-semibold text-foreground text-sm">{feature.price}</div>
-              <div className="text-muted-foreground text-xs">{feature.typeLabel}</div>
-            </div>
-          ) : (
-            <div className="text-right">
-              <div className="font-medium text-sm">Included</div>
-              <div className="text-muted-foreground text-xs">{feature.typeLabel}</div>
-            </div>
-          )}
+          <div className="text-right">
+            <div className="font-semibold text-foreground text-sm">{feature.price}</div>
+            <div className="text-muted-foreground text-xs">{feature.typeLabel}</div>
+          </div>
         </div>
       </div>
 

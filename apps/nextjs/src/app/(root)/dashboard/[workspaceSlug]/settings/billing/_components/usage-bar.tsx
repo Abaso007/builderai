@@ -47,7 +47,6 @@ export function UsageBar({ data }: UsageBarProps) {
           : 1
 
   const currentPercent = Math.min(100, (current / maxValue) * 100)
-  const includedPercent = Math.min(100, (included / maxValue) * 100)
 
   // Calculate derived states
   const isOverIncluded = current > included
@@ -71,9 +70,6 @@ export function UsageBar({ data }: UsageBarProps) {
   // Clamp to 0-100 for Progress component (it can't show >100% natively)
   const progressValue =
     Number.isFinite(currentPercent) && currentPercent >= 0 ? Math.min(100, currentPercent) : 0
-
-  // Use includedPercent for display
-  const displayIncludedPercent = includedPercent
 
   // Determine progress variant based on state
   const progressVariant: "default" | "primary" | "destructive" | "secondary" =
@@ -128,30 +124,7 @@ export function UsageBar({ data }: UsageBarProps) {
         )}
       </div>
 
-      {/* Progress Bar with overlays */}
-      <div className="relative">
-        <Progress value={progressValue} variant={progressVariant} className="h-2" />
-
-        {/* Included amount indicator (subtle line) */}
-        {included > 0 && displayIncludedPercent < 100 && (
-          <div
-            className="absolute top-0 h-full w-0.5 bg-muted-foreground/30"
-            style={{ left: `${displayIncludedPercent}%` }}
-            aria-hidden="true"
-          />
-        )}
-
-        {/* Overage indicator (only when over limit and soft limit) */}
-        {isOverLimit && !hasHardLimit && limit && currentPercent > 100 && (
-          <div
-            className="absolute top-0 h-full rounded-r-full bg-danger-borderHover/50"
-            style={{
-              left: "100%",
-              width: `${Math.min(((current - limit) / (limit || 1)) * 100, 20)}%`,
-            }}
-          />
-        )}
-      </div>
+      <Progress value={progressValue} variant={progressVariant} className="h-2" />
 
       {/* Status Message - Only show when there's an issue */}
       {statusMessage && (statusType === "error" || statusType === "warning") && (
@@ -168,7 +141,7 @@ export function UsageBar({ data }: UsageBarProps) {
 
       {/* Additional Info - Only show if there's included units */}
       {included > 0 && (
-        <div className="text-xs">
+        <div className="text-muted-foreground text-xs">
           <span>{includedFormatted} included</span>
         </div>
       )}

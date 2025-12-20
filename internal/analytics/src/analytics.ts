@@ -377,22 +377,26 @@ export class Analytics {
   }
 
   // analytics usage
-  public get getFeaturesUsageTotal() {
+  public get getFeaturesUsage() {
     return this.readClient.buildPipe({
-      pipe: "v1_get_feature_usage_total",
+      pipe: "v1_get_feature_usage_cursor",
       parameters: z.object({
         projectId: z.string(),
         customerId: z.string(),
-        featureSlugs: z.array(z.string()),
+        featureSlug: z.string(),
+        afterRecordId: z.string(),
+        beforeRecordId: z.string().optional(),
+        billingPeriodStart: z.number().optional(),
       }),
       data: z.object({
+        featureSlug: z.string(),
         projectId: z.string(),
         customerId: z.string(),
-        featureSlug: z.string(),
-        count_all: z.number(),
-        sum_all: z.number(),
-        max_all: z.number(),
-        last_during_period: z.number(),
+        deltaCount: z.number(),
+        deltaSum: z.number(),
+        deltaMax: z.number(),
+        lastValue: z.number(),
+        lastRecordId: z.string(),
       }),
       opts: {
         cache: "no-store",
@@ -573,5 +577,131 @@ export class Analytics {
     }
 
     return Ok(result)
+  }
+
+  /* cursor based usage for reconciliation */
+  public async getFeaturesUsageCursor({
+    customerId,
+    projectId,
+    feature,
+    afterRecordId,
+    beforeRecordId,
+    startAt,
+  }: {
+    customerId: string
+    projectId: string
+    feature: {
+      featureSlug: string
+      aggregationMethod:
+        | "sum"
+        | "count"
+        | "max"
+        | "last"
+        | "sum_all"
+        | "max_all"
+        | "count_all"
+        | "last_during_period"
+      featureType: "usage" | "package" | "tier" | "flat"
+    }
+    afterRecordId: string
+    beforeRecordId: string
+    startAt: number
+  }): Promise<
+    Result<
+      {
+        featureSlug: string
+        usage: number
+        lastRecordId: string
+      },
+      FetchError | UnPriceAnalyticsError
+    >
+  > {
+    const AGGREGATION_CONFIG: Record<
+      "sum" | "max" | "count" | "sum_all" | "max_all" | "count_all" | "last_during_period",
+      { behavior: "sum" | "max" | "last"; scope: "period" | "lifetime" }
+    > = {
+      // Period Scoped (Resets on Cycle)
+      sum: { behavior: "sum", scope: "period" },
+      count: { behavior: "sum", scope: "period" }, // count is just sum(+1)
+      max: { behavior: "max", scope: "period" },
+      last_during_period: { behavior: "last", scope: "period" },
+
+      // Lifetime Scoped (Never Resets)
+      sum_all: { behavior: "sum", scope: "lifetime" },
+      count_all: { behavior: "sum", scope: "lifetime" },
+      max_all: { behavior: "max", scope: "lifetime" },
+    }
+
+    // filter that only usage, package and tier features are being requested
+    if (!["usage", "package", "tier"].includes(feature.featureType)) {
+      return Ok({
+        featureSlug: feature.featureSlug,
+        usage: 0,
+        lastRecordId: "",
+      })
+    }
+
+    const config = AGGREGATION_CONFIG[feature.aggregationMethod as keyof typeof AGGREGATION_CONFIG]
+
+    if (!config) {
+      return Err(new UnPriceAnalyticsError({ message: "Invalid aggregation method" }))
+    }
+
+    let usage = 0
+
+    // we use the same endpoint for billing usage as it's the
+    // more accurate one
+    // TODO: need to improve this for long range dates
+    // and idea could be tiered mv for the different periods
+    const result = await this.getFeaturesUsage({
+      customerId,
+      projectId,
+      featureSlug: feature.featureSlug,
+      afterRecordId,
+      beforeRecordId,
+      billingPeriodStart: startAt,
+    })
+      .then((usage) => usage.data ?? [])
+      .catch((error) => {
+        this.logger.error("error getting reconciliation delta", {
+          error: JSON.stringify(error),
+          customerId,
+          projectId,
+          featureSlug: feature.featureSlug,
+          afterRecordId,
+          beforeRecordId,
+          startAt,
+        })
+        return null
+      })
+
+    const delta = result?.[0]
+
+    // if there are no usages, return an empty array
+    if (!delta) {
+      return Ok({
+        featureSlug: feature.featureSlug,
+        usage: 0,
+        lastRecordId: "",
+      })
+    }
+
+    if (config.behavior === "sum") {
+      if (feature.aggregationMethod === "count") {
+        usage = delta.deltaCount
+      } else {
+        usage = delta.deltaSum
+      }
+    } else if (config.behavior === "max") {
+      usage = delta.deltaMax
+    } else if (config.behavior === "last") {
+      usage = delta.lastValue
+    }
+
+    return Ok({
+      featureSlug: feature.featureSlug,
+      usage,
+      lastRecordId: delta.lastRecordId,
+    })
   }
 }

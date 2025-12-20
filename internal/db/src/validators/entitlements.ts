@@ -4,7 +4,12 @@ import { extendZodWithOpenApi } from "zod-openapi"
 import * as schema from "../schema"
 import { featureSelectBaseSchema } from "./features"
 import { planVersionFeatureSelectBaseSchema } from "./planVersionFeatures"
-import { deniedReasonSchema, entitlementMergingPolicySchema, resetConfigSchema } from "./shared"
+import {
+  deniedReasonSchema,
+  entitlementMergingPolicySchema,
+  grantTypeSchema,
+  resetConfigSchema,
+} from "./shared"
 import { aggregationMethodSchema, typeFeatureSchema } from "./shared"
 import {
   subscriptionItemsSelectSchema,
@@ -56,12 +61,6 @@ export const reportUsageSchema = z.object({
   sync: z.boolean().optional(),
   requestId: z.string(),
   metadata: z.record(z.string(), z.any()).nullable(),
-  fromCache: z
-    .boolean()
-    .optional()
-    .describe(
-      "if true will check the entitlement from cache. This will reduce latency for the request but won't have 100% accuracy. If false, the entitlement will be validated synchronously 100% accurate but will have a higher latency"
-    ),
 })
 
 export const verifySchema = z.object({
@@ -120,9 +119,7 @@ export type ReportUsageResult = z.infer<typeof reportUsageResultSchema>
 
 export const entitlementGrantsSnapshotSchema = z.object({
   id: z.string(),
-  type: z.string(),
-  subjectType: z.string(),
-  subjectId: z.string(),
+  type: grantTypeSchema,
   priority: z.number(),
   effectiveAt: z.number(),
   expiresAt: z.number().nullable(),
@@ -130,10 +127,6 @@ export const entitlementGrantsSnapshotSchema = z.object({
   realtime: z.boolean(),
   allowOverage: z.boolean(),
   featurePlanVersionId: z.string(),
-  // let us keep track in analytics
-  subscriptionItemId: z.string().nullable(),
-  subscriptionPhaseId: z.string().nullable(),
-  subscriptionId: z.string().nullable(),
 })
 
 export const entitlementSchema = createSelectSchema(schema.entitlements, {
@@ -147,33 +140,29 @@ export const entitlementSchema = createSelectSchema(schema.entitlements, {
   mergingPolicy: entitlementMergingPolicySchema,
 })
 
-export const entitlementStateSchema = entitlementSchema.pick({
-  id: true,
-  customerId: true,
-  projectId: true,
-  featureSlug: true,
-  featureType: true,
-  mergingPolicy: true,
-  grants: true,
-  version: true,
-  computedAt: true,
-  currentCycleUsage: true,
-  accumulatedUsage: true,
-  aggregationMethod: true,
-  effectiveAt: true,
-  expiresAt: true,
-  limit: true,
-  resetConfig: true,
-  allowOverage: true,
-  nextRevalidateAt: true,
-  lastSyncAt: true,
+export const meterStateSchema = z.object({
+  lastReconciledId: z
+    .string()
+    .describe(
+      "the last record id that was reconciled, uuidv7 id to mark the cursor position in the analytics"
+    ),
+  snapshotUsage: z
+    .string()
+    .describe(
+      "snapshot of the usage in storage at the last reconciliation, we compare this with analytics to detect drift"
+    ),
+  lastUpdated: z.number().describe("Timestamp when the meter was last updated"),
+  usage: z.string().describe("Usage in the current specific cycle"),
+  lastCycleStart: z
+    .number()
+    .optional()
+    .describe("The start timestamp of the last cycle boundary that was processed"),
 })
 
-export type EntitlementState = z.infer<typeof entitlementStateSchema>
+export type MeterState = z.infer<typeof meterStateSchema>
 export type Grant = z.infer<typeof grantSchema>
 
 // Zod schemas for UsageDisplay
-const billingFrequencySchema = z.enum(["daily", "weekly", "monthly", "yearly"])
 const limitTypeSchema = z.enum(["hard", "soft", "none"])
 
 const usageBarDisplaySchema = z.object({
@@ -204,11 +193,8 @@ const tieredDisplaySchema = z.object({
 })
 
 const billingDisplaySchema = z.object({
-  hasDifferentBilling: z.boolean(),
-  billingFrequency: billingFrequencySchema.optional(),
-  billingFrequencyLabel: z.string().optional(),
-  resetFrequency: billingFrequencySchema.optional(),
-  resetFrequencyLabel: z.string().optional(),
+  billingFrequencyLabel: z.string(),
+  resetFrequencyLabel: z.string(),
 })
 
 const flatFeatureDisplaySchema = z.object({
@@ -219,7 +205,6 @@ const flatFeatureDisplaySchema = z.object({
   typeLabel: z.string(),
   currency: z.string(),
   price: z.string(),
-  isIncluded: z.boolean(),
   enabled: z.boolean(),
   billing: billingDisplaySchema,
 })
@@ -232,10 +217,7 @@ const tieredFeatureDisplaySchema = z.object({
   typeLabel: z.string(),
   currency: z.string(),
   price: z.string(),
-  isIncluded: z.boolean(),
-  billing: z.object({
-    hasDifferentBilling: z.boolean(),
-  }),
+  billing: billingDisplaySchema,
   tieredDisplay: tieredDisplaySchema,
 })
 
@@ -247,15 +229,26 @@ const usageFeatureDisplaySchema = z.object({
   typeLabel: z.string(),
   currency: z.string(),
   price: z.string(),
-  isIncluded: z.boolean(),
   billing: billingDisplaySchema,
   usageBar: usageBarDisplaySchema,
+})
+
+const packageFeatureDisplaySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  type: z.literal("package"),
+  typeLabel: z.string(),
+  currency: z.string(),
+  price: z.string(),
+  billing: billingDisplaySchema,
 })
 
 const featureDisplaySchema = z.discriminatedUnion("type", [
   flatFeatureDisplaySchema,
   tieredFeatureDisplaySchema,
   usageFeatureDisplaySchema,
+  packageFeatureDisplaySchema,
 ])
 
 const featureGroupDisplaySchema = z.object({
@@ -263,14 +256,10 @@ const featureGroupDisplaySchema = z.object({
   name: z.string(),
   featureCount: z.number(),
   features: z.array(featureDisplaySchema),
-  totalPrice: z.string(),
 })
 
 const priceSummaryDisplaySchema = z.object({
   totalPrice: z.string(),
-  basePrice: z.string(),
-  usageCharges: z.string(),
-  hasUsageCharges: z.boolean(),
   flatTotal: z.string(),
   tieredTotal: z.string(),
   packageTotal: z.string(),
@@ -280,7 +269,6 @@ const priceSummaryDisplaySchema = z.object({
 export const currentUsageSchema = z.object({
   planName: z.string(),
   planDescription: z.string().optional(),
-  basePrice: z.string(),
   billingPeriod: z.string(),
   billingPeriodLabel: z.string(),
   currency: z.string(),
@@ -291,3 +279,4 @@ export const currentUsageSchema = z.object({
 })
 
 export type CurrentUsage = z.infer<typeof currentUsageSchema>
+export type Entitlement = z.infer<typeof entitlementSchema>

@@ -8,14 +8,15 @@ import {
   invoices,
 } from "@unprice/db/schema"
 import {
-  type Dinero,
   currencies,
   dinero,
-  formatAmount,
+  formatAmountDinero,
+  formatMoney,
   hashStringSHA256,
   newId,
 } from "@unprice/db/utils"
 import {
+  type CalculatedPrice,
   type CollectionMethod,
   type Currency,
   type Customer,
@@ -57,10 +58,7 @@ interface ComputeInvoiceItemsResult {
 
 interface ComputeCurrentUsageResult {
   grantId: string | null
-  totalPrice: string
-  unitPrice: string
-  subtotalPrice: string
-  totalPriceDinero: Dinero<number>
+  price: CalculatedPrice
   prorate: number
   cycleStartAt: number
   cycleEndAt: number
@@ -68,9 +66,6 @@ interface ComputeCurrentUsageResult {
   included: number
   limit: number
   isTrial: boolean
-  totalPriceCents?: number
-  unitPriceCents?: number
-  subtotalPriceCents?: number
 }
 
 export class BillingService {
@@ -1067,6 +1062,8 @@ export class BillingService {
           // Compute entitlement state to get aggregation method
           const computedStateResult = await this.grantsManager.computeEntitlementState({
             grants: featureGrants,
+            customerId: invoice.customerId,
+            projectId: invoice.projectId,
           })
 
           if (computedStateResult.err) {
@@ -1195,9 +1192,9 @@ export class BillingService {
             }
 
             if (targetItem) {
-              const unitAmountCents = res.unitPriceCents ?? 0
-              const totalAmountCents = res.totalPriceCents ?? 0
-              const subtotalAmountCents = res.subtotalPriceCents ?? 0
+              const unitAmountCents = formatAmountDinero(res.price.unitPrice.dinero).amount
+              const totalAmountCents = formatAmountDinero(res.price.totalPrice.dinero).amount
+              const subtotalAmountCents = formatAmountDinero(res.price.subtotalPrice.dinero).amount
 
               let description = targetItem.description ?? ""
               let descriptionDetail = ""
@@ -1265,9 +1262,9 @@ export class BillingService {
             return Err(new UnPriceBillingError({ message: priceCalculationErr.message }))
           }
 
-          const formattedTotalAmount = formatAmount(priceCalculation.totalPrice.dinero)
-          const formattedUnitAmount = formatAmount(priceCalculation.unitPrice.dinero)
-          const formattedSubtotalAmount = formatAmount(priceCalculation.subtotalPrice.dinero)
+          const formattedTotalAmount = formatAmountDinero(priceCalculation.totalPrice.dinero)
+          const formattedUnitAmount = formatAmountDinero(priceCalculation.unitPrice.dinero)
+          const formattedSubtotalAmount = formatAmountDinero(priceCalculation.subtotalPrice.dinero)
 
           unitAmount = formattedUnitAmount.amount
           subtotalAmount = formattedSubtotalAmount.amount
@@ -2217,6 +2214,15 @@ export class BillingService {
     const grantServiceStart = Math.max(billingStartAt, grant.effectiveAt)
     const grantServiceEnd = Math.min(billingEndAt, grant.expiresAt ?? Number.POSITIVE_INFINITY)
 
+    // if grant is trial, proration factor should be 0
+    if (grant.type === "trial") {
+      return {
+        prorationFactor: 0,
+        referenceCycleStart: grantServiceStart,
+        referenceCycleEnd: grantServiceEnd,
+      }
+    }
+
     if (resetConfig) {
       const proration = calculateProration({
         serviceStart: grantServiceStart,
@@ -2280,23 +2286,14 @@ export class BillingService {
     resetConfig: Omit<EntitlementState, "id">["resetConfig"]
     remainingUsage: number
     featureSlug: string
-  }): Result<ComputeCurrentUsageResult | null, UnPriceBillingError> {
+  }): Result<ComputeCurrentUsageResult, UnPriceBillingError> {
     // Calculate grant service window
     const grantServiceStart = Math.max(billingStartAt, grant.effectiveAt)
     const grantServiceEnd = Math.min(billingEndAt, grant.expiresAt ?? Number.POSITIVE_INFINITY)
 
     // Validate grant service window
     if (grantServiceStart >= grantServiceEnd) {
-      this.logger.warn("Grant service window is invalid, skipping grant", {
-        grantId: grant.id,
-        grantServiceStart,
-        grantServiceEnd,
-        billingStartAt,
-        billingEndAt,
-        grantEffectiveAt: grant.effectiveAt,
-        grantExpiresAt: grant.expiresAt,
-      })
-      return Ok(null)
+      return Err(new UnPriceBillingError({ message: "Invalid grant service window" }))
     }
 
     // Calculate quantity
@@ -2330,11 +2327,6 @@ export class BillingService {
       resetConfig,
     })
 
-    // If trial, proration factor should be 0
-    if (grant.type === "trial") {
-      proration.prorationFactor = 0
-    }
-
     // Calculate price
     const { val: priceCalculation, err: priceCalculationErr } = calculatePricePerFeature({
       config: grant.featurePlanVersion.config,
@@ -2356,10 +2348,7 @@ export class BillingService {
 
     return Ok({
       grantId: grant.id,
-      totalPrice: priceCalculation.totalPrice.displayAmount,
-      unitPrice: priceCalculation.unitPrice.displayAmount,
-      subtotalPrice: priceCalculation.subtotalPrice.displayAmount,
-      totalPriceDinero: priceCalculation.totalPrice.dinero,
+      price: priceCalculation,
       prorate: proration.prorationFactor,
       cycleStartAt: grant.effectiveAt,
       cycleEndAt: grant.expiresAt ?? Number.POSITIVE_INFINITY,
@@ -2367,9 +2356,6 @@ export class BillingService {
       included: freeUnits,
       limit: grantLimit,
       isTrial: grant.type === "trial",
-      totalPriceCents: priceCalculation.totalPrice.dinero.toJSON().amount,
-      unitPriceCents: priceCalculation.unitPrice.dinero.toJSON().amount,
-      subtotalPriceCents: priceCalculation.subtotalPrice.dinero.toJSON().amount,
     })
   }
 
@@ -2453,6 +2439,8 @@ export class BillingService {
     // Compute entitlement state
     const computedStateResult = await this.grantsManager.computeEntitlementState({
       grants,
+      customerId,
+      projectId,
     })
 
     if (computedStateResult.err) {
@@ -2502,8 +2490,9 @@ export class BillingService {
     let remainingUsage = totalUsageAmount
     const result: ComputeCurrentUsageResult[] = []
 
-    // Waterfall attribution: process grants in order, attributing usage to each
-    for (const grant of grants) {
+    // Waterfall attribution per priority from highest to lowest
+    const sortedGrants = [...grants].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
+    for (const grant of sortedGrants) {
       // For usage features, break early if all usage is attributed
       if (isUsageFeature && remainingUsage <= 0) {
         break
@@ -2545,19 +2534,30 @@ export class BillingService {
 
     // Unattributed Overage (Only for usage features)
     // This represents usage that exceeds all grant limits
+    // this shouldn't happen, but just in case
     if (isUsageFeature && remainingUsage > 0) {
-      // Get currency from planVersion (passed in context) or use USD as default
-      // We need to get it from the feature metadata or use a default
-      const currencyCode = "USD" // Default, should ideally come from planVersion
+      // grants have the currency code in the feature plan version
+      const currencyCode =
+        grants[0]?.featurePlanVersion.config?.price?.dinero?.currency.code ?? "USD"
       const currencyDinero = currencies[currencyCode as keyof typeof currencies]
       const zeroDinero = dinero({ amount: 0, currency: currencyDinero })
 
       result.push({
         grantId: null,
-        totalPrice: "0.00", // Overage is typically not charged, but tracked for visibility
-        unitPrice: "0.00",
-        subtotalPrice: "0.00",
-        totalPriceDinero: zeroDinero,
+        price: {
+          unitPrice: {
+            dinero: zeroDinero,
+            displayAmount: `${formatMoney("0", currencyCode)}`,
+          },
+          subtotalPrice: {
+            dinero: zeroDinero,
+            displayAmount: `${formatMoney("0", currencyCode)}`,
+          },
+          totalPrice: {
+            dinero: zeroDinero,
+            displayAmount: `${formatMoney("0", currencyCode)}`,
+          },
+        },
         prorate: 1,
         cycleStartAt: billingStartAt,
         cycleEndAt: billingEndAt,
@@ -2636,6 +2636,8 @@ export class BillingService {
       // Compute entitlement state to determine feature type and billing window
       const computedStateResult = await this.grantsManager.computeEntitlementState({
         grants: featureGrants,
+        customerId,
+        projectId,
       })
 
       if (computedStateResult.err) {

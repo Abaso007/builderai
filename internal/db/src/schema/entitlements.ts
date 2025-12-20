@@ -6,7 +6,6 @@ import {
   index,
   integer,
   json,
-  numeric,
   primaryKey,
   unique,
   varchar,
@@ -74,10 +73,6 @@ export const entitlements = pgTableProject(
     // expires at is the date when the entitlement will expire
     expiresAt: bigint("expires_at", { mode: "number" }),
 
-    // Usage tracking (mutable)
-    currentCycleUsage: numeric("current_cycle_usage").notNull().default("0"),
-    accumulatedUsage: numeric("accumulated_usage").notNull().default("0"),
-
     // Cache invalidation ----------------------------
     computedAt: bigint("computed_at", { mode: "number" })
       .notNull()
@@ -86,8 +81,6 @@ export const entitlements = pgTableProject(
     // next revalidate at is the date when the entitlement will be revalidated
     // often times is the same as the cycle end at
     nextRevalidateAt: bigint("next_revalidate_at", { mode: "number" }).notNull(),
-    // last sync at is the date when the entitlement was last synced with the database
-    lastSyncAt: bigint("last_sync_at", { mode: "number" }).notNull(),
 
     // Version is string because it's a hash of the grants
     // every time the grants are recomputed, the version is updated

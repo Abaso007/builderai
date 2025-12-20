@@ -1,5 +1,5 @@
 import type { AnalyticsUsage, AnalyticsVerification } from "@unprice/analytics"
-import type { EntitlementState } from "@unprice/db/validators"
+import type { Entitlement, MeterState } from "@unprice/db/validators"
 import type { Result } from "@unprice/error"
 import type { UnPriceEntitlementStorageError } from "./errors"
 
@@ -21,12 +21,12 @@ export interface UnPriceEntitlementStorage {
     customerId: string
     projectId: string
     featureSlug: string
-  }): Promise<Result<EntitlementState | null, UnPriceEntitlementStorageError>>
+  }): Promise<Result<(Entitlement & MeterState) | null, UnPriceEntitlementStorageError>>
 
   /**
    * Get all entitlement states
    */
-  getAll(): Promise<Result<EntitlementState[], UnPriceEntitlementStorageError>>
+  getAll(): Promise<Result<(Entitlement & MeterState)[], UnPriceEntitlementStorageError>>
 
   /**
    * Delete all entitlement states
@@ -36,7 +36,9 @@ export interface UnPriceEntitlementStorage {
   /**
    * Set an entitlement state
    */
-  set(params: { state: EntitlementState }): Promise<Result<void, UnPriceEntitlementStorageError>>
+  set(params: { state: Entitlement & MeterState }): Promise<
+    Result<void, UnPriceEntitlementStorageError>
+  >
 
   /**
    * Delete an entitlement state
@@ -61,22 +63,31 @@ export interface UnPriceEntitlementStorage {
   ): Promise<Result<void, UnPriceEntitlementStorageError>>
 
   /**
-   * Delete all verifications
+   * Flush usage records and verifications
+   * fire and forget
    */
-  deleteAllVerifications(): Promise<Result<void, UnPriceEntitlementStorageError>>
+  flush(): Promise<
+    Result<
+      {
+        usage: {
+          count: number
+          lastId: string | null
+        }
+        verification: {
+          count: number
+          lastId: string | null
+        }
+      },
+      UnPriceEntitlementStorageError
+    >
+  >
 
   /**
-   * Delete all usage records
+   * Make entitlement key
    */
-  deleteAllUsageRecords(): Promise<Result<void, UnPriceEntitlementStorageError>>
-
-  /**
-   * Get all verifications
-   */
-  getAllVerifications(): Promise<Result<AnalyticsVerification[], UnPriceEntitlementStorageError>>
-
-  /**
-   * Get all usage records
-   */
-  getAllUsageRecords(): Promise<Result<AnalyticsUsage[], UnPriceEntitlementStorageError>>
+  makeKey(params: {
+    customerId: string
+    projectId: string
+    featureSlug: string
+  }): string
 }

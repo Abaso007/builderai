@@ -13,14 +13,6 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
   private initialized = false
   private logger: Logger
 
-  private makeKey(params: {
-    customerId: string
-    projectId: string
-    featureSlug: string
-  }): string {
-    return `${params.projectId}:${params.customerId}:${params.featureSlug}`
-  }
-
   constructor({
     logger,
   }: {
@@ -244,5 +236,13 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
         })
       )
     }
+  }
+
+  public makeKey(params: {
+    customerId: string
+    projectId: string
+    featureSlug: string
+  }): string {
+    return `${params.projectId}:${params.customerId}:${params.featureSlug}`
   }
 }

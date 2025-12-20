@@ -4,6 +4,7 @@ import { addByInterval, getAnchor, setUtc, setUtcDay, startOfUtcDay, startOfUtcH
 export interface CycleWindow {
   start: number
   end: number
+  periodsPassed: number
   isTrial?: boolean
 }
 
@@ -44,7 +45,7 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
     const start = effectiveStartDate
     const end = Math.min(trialEndsAt, effectiveEndDate ?? Number.POSITIVE_INFINITY)
     // trial is not billable
-    return { start, end, isTrial: true }
+    return { start, end, periodsPassed: 0, isTrial: true }
   }
 
   // --- 2. Handle Onetime Plan Cycle (No changes needed) ---
@@ -54,9 +55,9 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
     // For onetime without effectiveEndDate, tests expect infinite window with
     // billableSeconds computed as elapsed since start and proration 0.
     if (!effectiveEndDate) {
-      return { start, end }
+      return { start, end, periodsPassed: 0, isTrial: false }
     }
-    return { start, end }
+    return { start, end, periodsPassed: 0, isTrial: false }
   }
 
   // --- 3. Recurring Plan Validation and Setup (No changes needed) ---
@@ -126,7 +127,7 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
         effectiveEndDate ?? Number.POSITIVE_INFINITY
       )
       // Use elapsed semantics from the billable start inside the aligned window
-      return { start: fullStart, end }
+      return { start: fullStart, end, periodsPassed: 0 }
     }
 
     // Default behavior (non-minute or count=1): stub from paid start to first anchor
@@ -135,21 +136,23 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
       firstPaidCycleStart.getTime(),
       effectiveEndDate ?? Number.POSITIVE_INFINITY
     )
-    return { start, end }
+    return { start, end, periodsPassed: 0 }
   }
 
   // If we are past the first anchor, find the correct cycle.
+  let periodsPassed = 0
   let nextCycleStart = addByInterval(currentCycleStart, interval, intervalCount)
   while (now >= nextCycleStart.getTime()) {
     currentCycleStart = nextCycleStart
     nextCycleStart = addByInterval(currentCycleStart, interval, intervalCount)
+    periodsPassed++
   }
 
   // --- 6. Construct, Cap, and Return the Final Window ---
   const start = currentCycleStart.getTime()
   const end = Math.min(nextCycleStart.getTime(), effectiveEndDate ?? Number.POSITIVE_INFINITY)
 
-  return { start, end }
+  return { start, end, periodsPassed }
 }
 
 // =================================================================================

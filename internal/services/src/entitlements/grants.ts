@@ -1,14 +1,16 @@
 import { type Database, and, eq, inArray } from "@unprice/db"
 import { entitlements, grants } from "@unprice/db/schema"
-import { type UsageMode, hashStringSHA256, newId } from "@unprice/db/utils"
+import { AGGREGATION_CONFIG, type UsageMode, hashStringSHA256, newId } from "@unprice/db/utils"
 import {
   type FeatureType,
   calculateCycleWindow,
   type entitlementGrantsSnapshotSchema,
 } from "@unprice/db/validators"
 import type {
+  AggregationMethod,
+  Entitlement,
   EntitlementMergingPolicy,
-  EntitlementState,
+  MeterState,
   ReportUsageResult,
   VerificationResult,
   grantInsertSchema,
@@ -22,6 +24,7 @@ import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import type z from "zod"
 import { UnPriceGrantError } from "./errors"
+import { UsageMeter } from "./usage-meter"
 
 interface SubjectGrantQuery {
   subjectId: string
@@ -388,15 +391,13 @@ export class GrantsManager {
     customerId,
     projectId,
     now,
-    usageOverrides,
     featureSlug,
   }: {
     customerId: string
     projectId: string
     now: number
-    usageOverrides?: Record<string, { currentCycleUsage: string; accumulatedUsage: string }>
     featureSlug?: string
-  }): Promise<Result<EntitlementState[], FetchError | UnPriceGrantError>> {
+  }): Promise<Result<(typeof entitlements.$inferSelect)[], FetchError | UnPriceGrantError>> {
     try {
       const { val: result, err: getGrantsErr } = await this.getGrantsForCustomer({
         customerId,
@@ -446,8 +447,6 @@ export class GrantsManager {
           grants: featureGrants,
           customerId,
           projectId,
-          now,
-          usageOverride: usageOverrides?.[featureSlugItem],
         })
 
         if (entitlementResult.err) {
@@ -464,7 +463,7 @@ export class GrantsManager {
         computedEntitlements.push(entitlementResult.val)
       }
 
-      return Ok(computedEntitlements as EntitlementState[])
+      return Ok(computedEntitlements)
     } catch (error) {
       this.logger.error("Error computing entitlements for customer", {
         error: error instanceof Error ? error.message : String(error),
@@ -486,9 +485,11 @@ export class GrantsManager {
    * This logic is shared between the entitlement computation and the billing estimation.
    */
   public async computeEntitlementState(params: {
+    projectId: string
+    customerId: string
     grants: z.infer<typeof grantSchemaExtended>[]
-  }): Promise<Result<Omit<EntitlementState, "id">, UnPriceGrantError>> {
-    const { grants } = params
+  }): Promise<Result<Omit<Entitlement, "id">, UnPriceGrantError>> {
+    const { grants, customerId, projectId } = params
 
     if (grants.length === 0) {
       return Err(new UnPriceGrantError({ message: "No grants provided" }))
@@ -517,8 +518,6 @@ export class GrantsManager {
       effectiveAt: g.effectiveAt,
       expiresAt: g.expiresAt,
       limit: g.limit,
-      subjectType: g.subjectType,
-      subjectId: g.subjectId,
       priority: g.priority,
       realtime: g.featurePlanVersion.metadata?.realtime ?? false,
       allowOverage: g.allowOverage,
@@ -564,6 +563,8 @@ export class GrantsManager {
         }
       : null
 
+    const localResetConfig = resetConfig ?? billingConfig ?? null
+
     // Compute version hash + current cycle boundaries
     const version = await hashStringSHA256(
       JSON.stringify({
@@ -571,25 +572,33 @@ export class GrantsManager {
       })
     )
 
+    const config = AGGREGATION_CONFIG[bestPriorityGrant.featurePlanVersion.aggregationMethod]
+
+    // period scoped entitlements use the merged effective at and expires at
+    // lifetime scoped entitlements use the winning grant's effective at and expires at
+    const effectiveAt = config.scope === "period" ? merged.effectiveAt : winningGrant.effectiveAt
+    const expiresAt = config.scope === "period" ? merged.expiresAt : winningGrant.expiresAt
+    const defaultResetConfig = config.scope === "period" ? localResetConfig : null
+
     return Ok({
       limit: merged.limit,
       allowOverage: merged.allowOverage,
       mergingPolicy: merged.mergingPolicy,
-      effectiveAt: merged.effectiveAt,
-      expiresAt: merged.expiresAt,
-      resetConfig: resetConfig ?? billingConfig ?? null,
+      effectiveAt: effectiveAt,
+      expiresAt: expiresAt,
+      resetConfig: defaultResetConfig,
       featureType: bestPriorityGrant.featurePlanVersion.featureType,
       aggregationMethod: bestPriorityGrant.featurePlanVersion.aggregationMethod,
       grants: merged.grants,
       featureSlug,
-      customerId: winningGrant.subjectId,
-      projectId: winningGrant.projectId,
+      customerId,
+      projectId,
       version,
       nextRevalidateAt: Date.now() + this.revalidateInterval,
-      lastSyncAt: Date.now(),
       computedAt: Date.now(),
-      currentCycleUsage: "0",
-      accumulatedUsage: "0",
+      createdAtM: Date.now(),
+      updatedAtM: Date.now(),
+      metadata: {},
     })
   }
 
@@ -611,16 +620,16 @@ export class GrantsManager {
     grants,
     customerId,
     projectId,
-    now,
-    usageOverride,
   }: {
     grants: z.infer<typeof grantSchemaExtended>[]
     customerId: string
     projectId: string
-    now: number
-    usageOverride?: { currentCycleUsage: string; accumulatedUsage: string }
   }): Promise<Result<typeof entitlements.$inferSelect, FetchError | UnPriceGrantError>> {
-    const computedStateResult = await this.computeEntitlementState({ grants })
+    const computedStateResult = await this.computeEntitlementState({
+      grants,
+      customerId,
+      projectId,
+    })
 
     if (computedStateResult.err) {
       return Err(
@@ -643,23 +652,6 @@ export class GrantsManager {
         ),
     })
 
-    const normalizeCycleUsage = currentEntitlement
-      ? this.normalizeCycleUsage({
-          state: {
-            ...currentEntitlement,
-            currentCycleUsage:
-              usageOverride?.currentCycleUsage ?? currentEntitlement.currentCycleUsage,
-            accumulatedUsage:
-              usageOverride?.accumulatedUsage ?? currentEntitlement.accumulatedUsage,
-          },
-          now,
-        })
-      : null
-
-    // Determine usage base
-    const baseCurrentUsage = normalizeCycleUsage?.currentCycleUsage ?? "0"
-    const baseAccumulatedUsage = normalizeCycleUsage?.accumulatedUsage ?? "0"
-
     // Prepare base entitlement data
     const entitlementData = {
       id: currentEntitlement?.id ?? newId("entitlement"),
@@ -677,34 +669,17 @@ export class GrantsManager {
       effectiveAt: computedState.effectiveAt,
       expiresAt: computedState.expiresAt,
       nextRevalidateAt: Date.now() + this.revalidateInterval,
-      lastSyncAt: Date.now(),
       computedAt: Date.now(),
-      currentCycleUsage: baseCurrentUsage,
-      accumulatedUsage: baseAccumulatedUsage,
-    }
-
-    // normalize the cycle usage to handle reset cycles
-    const normalizedState = this.normalizeCycleUsage({ state: entitlementData, now })
-
-    // New entitlement - no existing entitlement to preserve
-    const finalEntitlementData = {
-      ...entitlementData,
-      currentCycleUsage: normalizedState.currentCycleUsage,
-      accumulatedUsage: normalizedState.accumulatedUsage,
-      nextRevalidateAt: normalizedState.nextRevalidateAt,
-      // update the last sync at and the updated at to now
-      lastSyncAt: Date.now(),
       updatedAtM: Date.now(),
-      computedAt: Date.now(),
     }
 
     const newEntitlement = await this.db
       .insert(entitlements)
-      .values(finalEntitlementData)
+      .values(entitlementData)
       .onConflictDoUpdate({
         target: [entitlements.projectId, entitlements.customerId, entitlements.featureSlug],
         set: {
-          ...finalEntitlementData,
+          ...entitlementData,
         },
       })
       .returning()
@@ -888,281 +863,76 @@ export class GrantsManager {
    * @param params.crossBoundary - Whether we're crossing a reset boundary (resets current cycle and updates accumulated)
    * @returns The usage per feature
    */
-  public calculateUsage({
+  public resetUsage({
     aggregationMethod,
     usage,
-    accumulatedUsage,
-    currentCycleUsage,
-    crossBoundary = false,
   }: {
-    aggregationMethod: string
-    usage: number
-    accumulatedUsage: number
-    currentCycleUsage: number
-    crossBoundary?: boolean
+    aggregationMethod: AggregationMethod
+    usage: string
   }): {
-    usage: number
-    accumulatedUsage: number
+    usage: string
   } {
+    const config = AGGREGATION_CONFIG[aggregationMethod]
+
     // Handle cross-boundary reset: move current cycle usage to accumulated and reset current cycle
-    if (crossBoundary) {
-      switch (aggregationMethod) {
-        case "sum":
-        case "count":
-          // Move current usage to accumulated
-          return {
-            usage: 0,
-            accumulatedUsage: accumulatedUsage + currentCycleUsage,
-          }
-
-        case "max":
-          // For max, we snapshot the max reached in the cycle
-          return {
-            usage: 0,
-            accumulatedUsage: Math.max(accumulatedUsage, currentCycleUsage),
-          }
-
-        case "last_during_period":
-          // accumulated used will be the last usage during the period
-          return {
-            usage: 0,
-            accumulatedUsage: currentCycleUsage,
-          }
-
-        case "sum_all":
-        case "count_all":
-          // For sum_all and count_all, add current cycle usage to accumulated
-          return {
-            usage: 0,
-            accumulatedUsage: accumulatedUsage + currentCycleUsage,
-          }
-
-        case "max_all":
-          // For max_all, take the max of accumulated and current cycle usage
-          return {
-            usage: 0,
-            accumulatedUsage: Math.max(accumulatedUsage, currentCycleUsage),
-          }
-
-        default:
-          // Default reset behavior (sum-like)
-          return {
-            usage: 0,
-            accumulatedUsage: accumulatedUsage + currentCycleUsage,
-          }
+    if (config.scope === "period") {
+      if (config.behavior === "sum") {
+        // Odometer Logic: Snap Anchor to Current Counter
+        // Usage becomes 0 because Global - Anchor = 0
+        usage = "0"
       }
+
+      // Gauge Logic (Max/Last): Hard reset
+      usage = "0"
     }
 
-    // Normal usage calculation (not crossing boundary)
-    switch (aggregationMethod) {
-      case "sum": {
-        const newUsage = currentCycleUsage + usage
-        return {
-          usage: newUsage,
-          accumulatedUsage: accumulatedUsage,
-        }
-      }
-      case "max": {
-        const newUsage = Math.max(currentCycleUsage, usage)
-        return {
-          usage: newUsage,
-          accumulatedUsage: accumulatedUsage,
-        }
-      }
-
-      case "last_during_period": {
-        const newUsage = usage
-        return {
-          usage: newUsage,
-          accumulatedUsage: accumulatedUsage,
-        }
-      }
-      case "count": {
-        const newUsage = currentCycleUsage + 1
-        return {
-          usage: newUsage,
-          accumulatedUsage: accumulatedUsage,
-        }
-      }
-      case "count_all": {
-        const newUsage = accumulatedUsage + 1
-        const newAccumulatedUsage = accumulatedUsage
-        return {
-          usage: newUsage,
-          accumulatedUsage: newAccumulatedUsage,
-        }
-      }
-      case "max_all": {
-        const newUsage = Math.max(accumulatedUsage, usage)
-        const newAccumulatedUsage = accumulatedUsage
-        return {
-          usage: newUsage,
-          accumulatedUsage: newAccumulatedUsage,
-        }
-      }
-      case "sum_all": {
-        const newUsage = accumulatedUsage + usage
-        const newAccumulatedUsage = accumulatedUsage
-        return {
-          usage: newUsage,
-          accumulatedUsage: newAccumulatedUsage,
-        }
-      }
-      default:
-        return {
-          usage: currentCycleUsage,
-          accumulatedUsage: accumulatedUsage,
-        }
-    }
+    return { usage }
   }
 
   /**
-   * Gets the effective usage value to check against the limit based on aggregation method.
-   * For _all methods (sum_all, count_all, max_all), limits are checked against the total lifetime usage:
-   *   - accumulatedUsage (past cycles) + currentCycleUsage (current cycle)
-   *   - For max_all: Math.max(accumulatedUsage, currentCycleUsage)
-   * For regular methods (sum, count, max, last_during_period), limits are checked against currentCycleUsage only.
-   * @param params - The parameters for getting effective usage
-   * @param params.aggregationMethod - The aggregation method
-   * @param params.currentCycleUsage - The current cycle usage
-   * @param params.accumulatedUsage - The accumulated usage (from past cycles)
-   * @returns The effective usage value to check against the limit
+   * Updates the global counter based on the aggregation method
+   * @param params - The parameters for the calculation
+   * @param params.aggregationMethod - The aggregation method to use
+   * @param params.amount - The amount to calculate the usage from
+   * @param params.usage - The usage to calculate the usage from
+   * @returns The usage after the calculation
    */
-  private getEffectiveUsageForLimit({
+  public calculateUsage({
     aggregationMethod,
-    currentCycleUsage,
-    accumulatedUsage,
+    amount,
+    newUsage,
   }: {
-    aggregationMethod: string
-    currentCycleUsage: number
-    accumulatedUsage: number
-  }): number {
-    // For _all methods, limits are checked against total lifetime usage
-    // which includes both past cycles (accumulatedUsage) and current cycle (currentCycleUsage)
-    if (aggregationMethod === "sum_all" || aggregationMethod === "count_all") {
-      // Total lifetime usage = accumulated (past cycles) + current cycle
-      return accumulatedUsage + currentCycleUsage
+    aggregationMethod: AggregationMethod
+    amount: number
+    newUsage: string
+  }): {
+    newUsage: string
+  } {
+    const config = AGGREGATION_CONFIG[aggregationMethod]
+
+    if (config.behavior === "sum") {
+      newUsage = (Number(newUsage) + amount).toString()
+    } else if (config.behavior === "max") {
+      newUsage = Math.max(Number(newUsage), amount).toString()
+    } else if (config.behavior === "last") {
+      newUsage = amount.toString()
     }
 
-    if (aggregationMethod === "max_all") {
-      // Total lifetime max = max of accumulated (past cycles) and current cycle max
-      return Math.max(accumulatedUsage, currentCycleUsage)
-    }
-
-    // For regular methods, limits are checked against current cycle usage only
-    return currentCycleUsage
-  }
-
-  /**
-   * Normalizes entitlement state by checking if reset boundary has been crossed.
-   * This is a safety net - the database update should handle it, but this
-   * ensures correctness even if recomputation hasn't happened yet.
-   * @param params - The parameters for the normalization
-   * @param params.state - The entitlement state to normalize
-   * @param params.now - The current time
-   * @returns The normalized entitlement state
-   */
-  private normalizeCycleUsage(params: {
-    state: EntitlementState
-    now: number
-  }): EntitlementState {
-    const { state, now } = params
-
-    if (!state.resetConfig) {
-      return state
-    }
-
-    // Calculate which reset cycle slice "now" falls into
-    // This uses the existing calculateCycleWindow which already handles
-    // all the anchor/interval logic correctly
-    const resetCycleForNow = calculateCycleWindow({
-      now: now,
-      trialEndsAt: null,
-      effectiveStartDate: state.effectiveAt,
-      effectiveEndDate: state.expiresAt,
-      config: {
-        name: state.resetConfig.name,
-        interval: state.resetConfig.resetInterval,
-        intervalCount: state.resetConfig.resetIntervalCount,
-        anchor: state.resetConfig.resetAnchor,
-        planType: state.resetConfig.planType,
-      },
-    })
-
-    if (!resetCycleForNow) {
-      return state
-    }
-
-    // Calculate what reset cycle the last tracked reset cycle start falls into
-    // (effectiveAt may have been updated to track the last reset cycle start)
-    const resetCycleAtLastTracked = calculateCycleWindow({
-      now: state.effectiveAt,
-      trialEndsAt: null,
-      effectiveStartDate: state.effectiveAt,
-      effectiveEndDate: state.expiresAt,
-      config: {
-        name: state.resetConfig.name,
-        interval: state.resetConfig.resetInterval,
-        intervalCount: state.resetConfig.resetIntervalCount,
-        anchor: state.resetConfig.resetAnchor,
-        planType: state.resetConfig.planType,
-      },
-    })
-
-    if (!resetCycleAtLastTracked) {
-      return state
-    }
-
-    // Check if we've crossed into a different reset cycle slice
-    // Compare the reset cycle we're currently tracking (based on effectiveAt)
-    // with the reset cycle that "now" falls into
-    const resetBoundaryCrossed =
-      resetCycleForNow.start !== resetCycleAtLastTracked.start ||
-      resetCycleForNow.end !== resetCycleAtLastTracked.end
-
-    if (!resetBoundaryCrossed) {
-      return state
-    }
-
-    // Reset Logic based on aggregation method
-    const currentUsageNum = Number(state.currentCycleUsage)
-    const accumulatedUsageNum = Number(state.accumulatedUsage)
-
-    const usageResult = this.calculateUsage({
-      aggregationMethod: state.aggregationMethod,
-      usage: 0,
-      accumulatedUsage: accumulatedUsageNum,
-      currentCycleUsage: currentUsageNum,
-      crossBoundary: true,
-    })
-
-    const newCurrentUsage = usageResult.usage.toString()
-    const newAccumulatedUsage = usageResult.accumulatedUsage.toString()
-
-    // Reset boundary crossed - but we can't update currentCycleStartAt/currentCycleEndAt
-    // because those represent billing cycles, not reset cycles!
-    // This is the fundamental problem - you need separate fields for reset cycle boundaries
-    return {
-      ...state,
-      currentCycleUsage: newCurrentUsage,
-      accumulatedUsage: newAccumulatedUsage,
-      effectiveAt: resetCycleForNow.start,
-      expiresAt: resetCycleForNow.end === Number.POSITIVE_INFINITY ? null : resetCycleForNow.end,
-      nextRevalidateAt: resetCycleForNow.start + this.revalidateInterval,
-    }
+    return { newUsage }
   }
 
   /**
    * Check if usage is allowed and give the information of the grants that were used to calculate the result
    */
-  public verify(params: { state: EntitlementState; now: number }): VerificationResult {
+  public verify(params: {
+    state: Entitlement & MeterState
+    now: number
+  }): VerificationResult {
     const { state, now } = params
 
-    // Normalize cycle usage (safety net)
-    const normalizedState = this.normalizeCycleUsage({ state, now })
-
+    // 1. Validate entitlement state
     const { err, val: validatedState } = this.validateEntitlementState({
-      state: normalizedState,
+      state: state,
       now,
     })
 
@@ -1175,7 +945,7 @@ export class GrantsManager {
       }
     }
 
-    // Flat features always allowed
+    // 2. Flat features always allowed
     if (validatedState.featureType === "flat") {
       return {
         allowed: true,
@@ -1185,23 +955,21 @@ export class GrantsManager {
       }
     }
 
-    // Check limit using effective usage based on aggregation method
-    const effectiveUsage = this.getEffectiveUsageForLimit({
-      aggregationMethod: validatedState.aggregationMethod,
-      currentCycleUsage: Number(validatedState.currentCycleUsage),
-      accumulatedUsage: Number(validatedState.accumulatedUsage),
-    })
-
+    // 3. Check limit using effective usage based on aggregation method
     const hasLimit = validatedState.limit !== null
     const withinLimit =
-      !hasLimit || effectiveUsage < (validatedState.limit ?? Number.POSITIVE_INFINITY)
+      !hasLimit || Number(validatedState.usage) < (validatedState.limit ?? Number.POSITIVE_INFINITY)
 
+    // 4. Return result
     return {
       allowed: withinLimit,
       message: withinLimit ? "Allowed" : "Limit exceeded",
       deniedReason: withinLimit ? undefined : "LIMIT_EXCEEDED",
-      usage: effectiveUsage,
+      usage: Number(validatedState.usage),
       limit: validatedState.limit ?? undefined,
+      remaining: validatedState.limit
+        ? validatedState.limit - Number(validatedState.usage)
+        : undefined,
     }
   }
 
@@ -1211,45 +979,24 @@ export class GrantsManager {
    * we calculated dynamically at billing service time. So we are more flexible when handling edge cases.
    */
   public consume(params: {
-    state: EntitlementState
+    state: Entitlement & MeterState
     amount: number
     now: number
   }): ReportUsageResult & {
-    effectiveAt?: number | null
-    expiresAt?: number | null
-    accumulatedUsage?: string
+    state: Entitlement & MeterState
   } {
     const { state, amount, now } = params
 
-    // Normalize cycle usage (safety net)
-    const normalizedState = this.normalizeCycleUsage({ state, now })
-
-    // 1. Get active grants at this timestamp
-    const { err, val: validatedState } = this.validateEntitlementState({
-      state: normalizedState,
-      now,
-    })
-
-    if (err) {
-      return {
-        allowed: false,
-        usage: 0,
-        limit: undefined,
-        message: err.message,
-        deniedReason: "ENTITLEMENT_ERROR",
-      }
-    }
-
-    const activeGrants = validatedState.grants
-
-    // 2. Validate usage
+    // 1. Validate usage
     const { err: usageErr, val: validatedUsage } = this.validateUsage({
-      state: normalizedState,
+      featureType: state.featureType,
+      aggregationMethod: state.aggregationMethod,
       amount: amount,
     })
 
     if (usageErr) {
       return {
+        state: state,
         allowed: false,
         usage: amount,
         limit: undefined,
@@ -1258,91 +1005,111 @@ export class GrantsManager {
       }
     }
 
-    // 3. Recalculate effective limit from active grants
-    const {
-      limit: effectiveLimit,
-      allowOverage,
-      expiresAt,
-    } = this.mergeGrants({
-      grants: activeGrants,
-      // policy was already calculated use the same
-      policy: validatedState.mergingPolicy,
+    // 2. Get active grants at this timestamp
+    const { err, val: validatedState } = this.validateEntitlementState({
+      state: state,
+      now,
     })
 
-    // 3. Calculate the new usage
-    const usage = this.calculateUsage({
-      aggregationMethod: validatedState.aggregationMethod,
-      usage: validatedUsage,
-      accumulatedUsage: Number(normalizedState.accumulatedUsage),
-      currentCycleUsage: Number(normalizedState.currentCycleUsage),
-    })
-
-    const newUsage = usage.usage
-    // For limit checking, use effective usage based on aggregation method
-    // calculateUsage already returns the correct usage (accumulated for _all methods)
-    const withinLimit = effectiveLimit === null || newUsage <= effectiveLimit
-    // threshold of 90% to send a notification
-    // TODO: use the notifyUsageThreshold from the plan version feature
-    const threshold = effectiveLimit ? Math.floor(effectiveLimit * 0.9) : null
-    const notifiedOverLimit = threshold !== null && newUsage > threshold
-
-    const allowed = withinLimit || allowOverage
-
-    if (!allowed) {
-      // Return current effective usage (before the attempted consumption)
-      const currentEffectiveUsage = this.getEffectiveUsageForLimit({
-        aggregationMethod: validatedState.aggregationMethod,
-        currentCycleUsage: Number(normalizedState.currentCycleUsage),
-        accumulatedUsage: Number(normalizedState.accumulatedUsage),
-      })
-
+    if (err) {
       return {
+        state: state,
         allowed: false,
-        usage: currentEffectiveUsage,
-        accumulatedUsage: normalizedState.accumulatedUsage,
-        effectiveAt: normalizedState.effectiveAt,
-        limit: effectiveLimit,
-        message: "Limit exceeded",
-        deniedReason: "LIMIT_EXCEEDED",
-        notifiedOverLimit: false,
+        usage: 0,
+        limit: undefined,
+        message: err.message,
+        deniedReason: "ENTITLEMENT_ERROR",
       }
     }
 
-    // 4. Return result without attribution
+    // 3. merge the grants to get the effective limits
+    // this is neccesary because some grants can be expired and we need to get the effective limits
+    const mergedState = this.mergeGrants({
+      grants: validatedState.grants,
+      featureType: validatedState.featureType,
+      policy: validatedState.mergingPolicy,
+    })
+
+    // 4. Calculate the new usage
+    const { newUsage } = this.calculateUsage({
+      aggregationMethod: state.aggregationMethod,
+      amount: validatedUsage,
+      newUsage: state.usage,
+    })
+
+    // 5. Check if the usage is within the limit using UsageMeter
+    const effectiveLimit = mergedState.limit
+    // Restore UsageMeter from persisted state if available
+    const usageMeter = new UsageMeter(
+      {
+        capacity: effectiveLimit ?? Number.POSITIVE_INFINITY,
+        resetConfig: state.resetConfig,
+        startDate: state.effectiveAt,
+        threshold: 0.9, // when close to the limit, send a notification
+        endDate: state.expiresAt,
+      },
+      {
+        lastUpdated: state.lastUpdated,
+        usage: state.usage,
+        lastCycleStart: state.lastCycleStart,
+      }
+    )
+
+    const consumeResult = usageMeter.consume(Number(newUsage))
+    const allowed = consumeResult.allowed || mergedState.allowOverage
+
+    // Persist the UsageMeter state
+    const newState = {
+      ...state,
+      ...usageMeter.toPersist(),
+    }
+
+    if (!allowed) {
+      return {
+        state: newState,
+        allowed: false,
+        usage: Number(newUsage),
+        limit: effectiveLimit ?? undefined,
+        message: "Limit exceeded",
+        deniedReason: "LIMIT_EXCEEDED",
+        notifiedOverLimit: consumeResult.overThreshold,
+      }
+    }
+
+    // 6. Return result without attribution
     return {
-      allowed,
-      usage: newUsage,
-      accumulatedUsage: usage.accumulatedUsage.toString(),
-      effectiveAt: normalizedState.effectiveAt, // normalizedState has the updated effectiveAt from normalizeCycleUsage
-      expiresAt: expiresAt,
+      allowed: allowed,
+      usage: Number(newUsage),
       limit: effectiveLimit ?? undefined,
       message: "Allowed",
+      notifiedOverLimit: consumeResult.overThreshold,
       deniedReason: undefined,
-      notifiedOverLimit: notifiedOverLimit,
+      state: state,
     }
   }
 
-  private validateUsage(params: { state: EntitlementState; amount: number }): Result<
-    number,
-    UnPriceGrantError
-  > {
-    const { state, amount } = params
+  private validateUsage(params: {
+    featureType: FeatureType
+    aggregationMethod: AggregationMethod
+    amount: number
+  }): Result<number, UnPriceGrantError> {
+    const { featureType, aggregationMethod, amount } = params
 
-    if (amount < 0 && !["sum", "sum_all"].includes(state.aggregationMethod)) {
+    // check flat features
+    if (featureType === "flat") {
       return Err(
         new UnPriceGrantError({
-          message: `Usage cannot be negative when the feature type is not sum or sum_all, got ${state.aggregationMethod}. This will disturb aggregations.`,
-          subjectId: state.customerId,
+          message: "Flat feature cannot be used to consume usage",
         })
       )
     }
 
-    // check flat features
-    if (state.featureType === "flat") {
+    // for negative usage that is not sum, sum_all
+    // count and count_all are not affected by negative usage they are monotonic increasing
+    if (amount < 0 && !["sum", "sum_all"].includes(aggregationMethod)) {
       return Err(
         new UnPriceGrantError({
-          message: "Flat feature cannot be used to consume usage",
-          subjectId: state.customerId,
+          message: `Usage cannot be negative when the feature type is not sum, got ${aggregationMethod}. This will disturb aggregations.`,
         })
       )
     }
@@ -1381,10 +1148,10 @@ export class GrantsManager {
   /**
    * Validates entitlement access at a specific timestamp
    */
-  private validateEntitlementState(params: { state: EntitlementState; now: number }): Result<
-    EntitlementState,
-    UnPriceGrantError
-  > {
+  private validateEntitlementState(params: {
+    state: Entitlement & MeterState
+    now: number
+  }): Result<Entitlement & MeterState, UnPriceGrantError> {
     const { state, now } = params
 
     // Then check if any grant is active at this timestamp
