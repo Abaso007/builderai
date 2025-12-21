@@ -68,6 +68,7 @@ export const unpriceProjectErrorSchema = z.enum([
 export const unpricePlanErrorSchema = z.enum(["PLAN_VERSION_NOT_FOUND"])
 
 export const deniedReasonSchema = z.enum([
+  "INVALID_USAGE",
   "ERROR_SYNCING_ENTITLEMENTS_LAST_USAGE",
   "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE",
   "ENTITLEMENT_OUTSIDE_OF_CURRENT_BILLING_WINDOW",

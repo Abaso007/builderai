@@ -159,9 +159,6 @@ export const meterStateSchema = z.object({
     .describe("The start timestamp of the last cycle boundary that was processed"),
 })
 
-export type MeterState = z.infer<typeof meterStateSchema>
-export type Grant = z.infer<typeof grantSchema>
-
 // Zod schemas for UsageDisplay
 const limitTypeSchema = z.enum(["hard", "soft", "none"])
 
@@ -280,3 +277,8 @@ export const currentUsageSchema = z.object({
 
 export type CurrentUsage = z.infer<typeof currentUsageSchema>
 export type Entitlement = z.infer<typeof entitlementSchema>
+export type MeterState = z.infer<typeof meterStateSchema>
+export type EntitlementState = Entitlement & {
+  meter?: MeterState // flat features don't have a meter
+}
+export type Grant = z.infer<typeof grantSchema>

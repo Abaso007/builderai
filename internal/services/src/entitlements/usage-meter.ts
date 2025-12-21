@@ -1,7 +1,12 @@
 // ---------------------------------------------------------
 // 1. CONFIGURATION & STATE
 
-import { type ResetConfig, calculateCycleWindow } from "@unprice/db/validators"
+import { AGGREGATION_CONFIG } from "@unprice/db/utils"
+import {
+  type AggregationMethod,
+  type ResetConfig,
+  calculateCycleWindow,
+} from "@unprice/db/validators"
 import type { DenyReason } from "../customers"
 
 // ---------------------------------------------------------
@@ -11,6 +16,11 @@ export interface MeterConfig {
    * -1 or Infinity for Unlimited.
    */
   capacity: number
+
+  /**
+   * The aggregation method for the meter.
+   */
+  aggregationMethod: AggregationMethod
 
   /**
    * The Anchor Timestamp.
@@ -111,17 +121,77 @@ export class UsageMeter {
   }
 
   /**
-   * Main entry point to consume quota.
+   * verify
    */
-  // TODO: add verify, add usage method and
-  consume(cost = 1): {
+  verify(now: number): {
     allowed: boolean
     remaining: number
     retryAfterMs: number
     overThreshold: boolean
     deniedReason?: DenyReason
   } {
-    const now = Date.now()
+    // 0. Check Expiration (End Date)
+    if (this.config.endDate && now > this.config.endDate) {
+      return {
+        allowed: false,
+        remaining: 0,
+        retryAfterMs: -1,
+        overThreshold: false,
+        deniedReason: "ENTITLEMENT_EXPIRED",
+      } // -1 indicates "Expired/Never"
+    }
+
+    if (this.isUnlimited()) {
+      return {
+        allowed: true,
+        remaining: Number.POSITIVE_INFINITY,
+        retryAfterMs: 0,
+        overThreshold: false,
+      }
+    }
+
+    // verify capacity
+    if (this.tokens < 0) {
+      return {
+        allowed: false,
+        remaining: 0,
+        retryAfterMs: 0,
+        overThreshold: false,
+        deniedReason: "LIMIT_EXCEEDED",
+      }
+    }
+
+    return {
+      allowed: true,
+      remaining: this.tokens,
+      retryAfterMs: 0,
+      overThreshold: this.isOverThreshold(),
+    }
+  }
+
+  /**
+   * Main entry point to consume quota.
+   */
+  // TODO: add verify, add usage method and
+  consume(
+    cost: number,
+    now: number
+  ): {
+    allowed: boolean
+    remaining: number
+    retryAfterMs: number
+    overThreshold: boolean
+    deniedReason?: DenyReason
+  } {
+    if (!this.isValidUsage(cost)) {
+      return {
+        allowed: false,
+        remaining: this.tokens,
+        retryAfterMs: 0,
+        overThreshold: false,
+        deniedReason: "INVALID_USAGE",
+      }
+    }
 
     // 0. Check Expiration (End Date)
     if (this.config.endDate && now > this.config.endDate) {
@@ -156,8 +226,13 @@ export class UsageMeter {
     // 2. Check Balance
     const currentTokens = this.tokens
     if (currentTokens >= cost) {
+      const newUsage = this.calculateUsage({
+        amount: cost,
+        newUsage: this.usage,
+      })
+
       // Update usage as string to avoid precision issues
-      this.usage = (this.usageNumber + cost).toString()
+      this.usage = newUsage.newUsage
       this.lastUpdated = now
 
       const overThreshold = this.isOverThreshold()
@@ -179,6 +254,46 @@ export class UsageMeter {
       overThreshold,
       deniedReason: "LIMIT_EXCEEDED",
     }
+  }
+
+  private isValidUsage(cost: number) {
+    // for negative usage that is not sum, sum_all
+    // count and count_all are not affected by negative usage they are monotonic increasing
+    if (cost < 0 && !["sum", "sum_all"].includes(this.config.aggregationMethod)) {
+      return false
+    }
+
+    return true
+  }
+
+  /**
+   * Updates the global counter based on the aggregation method
+   * @param params - The parameters for the calculation
+   * @param params.aggregationMethod - The aggregation method to use
+   * @param params.amount - The amount to calculate the usage from
+   * @param params.usage - The usage to calculate the usage from
+   * @returns The usage after the calculation
+   */
+  private calculateUsage({
+    amount,
+    newUsage,
+  }: {
+    amount: number
+    newUsage: string
+  }): {
+    newUsage: string
+  } {
+    const config = AGGREGATION_CONFIG[this.config.aggregationMethod]
+
+    if (config.behavior === "sum") {
+      newUsage = (Number(newUsage) + amount).toString()
+    } else if (config.behavior === "max") {
+      newUsage = Math.max(Number(newUsage), amount).toString()
+    } else if (config.behavior === "last") {
+      newUsage = amount.toString()
+    }
+
+    return { newUsage }
   }
 
   /**
@@ -254,9 +369,6 @@ export class UsageMeter {
     if (resetBoundaryCrossed) {
       this.performReset()
 
-      // Reset usage counter because it is a NEW period
-      this.usage = "0"
-
       // Update the last cycle start to the current cycle start
       this.lastCycleStart = resetCycleForNow.start
     } else if (!this.lastCycleStart) {
@@ -269,16 +381,18 @@ export class UsageMeter {
   }
 
   private performReset(): void {
-    // const ceiling = this.config.capacity * (this.config.maxBurstPercentage ?? 1.0)
-    // const resetAmount = this.config.capacity
+    const config = AGGREGATION_CONFIG[this.config.aggregationMethod]
 
-    // TODO: implement this
-    if (this.config) {
-      // Accumulate: Add capacity for EVERY period passed
-      // const totalToAdd = resetAmount * periodsPassed
-    } else {
-      // Hard Reset: Just set to capacity.
-      // History is erased.
+    // Handle cross-boundary reset: move current cycle usage to accumulated and reset current cycle
+    if (config.scope === "period") {
+      if (config.behavior === "sum") {
+        // Odometer Logic: Snap Anchor to Current Counter
+        // Usage becomes 0 because Global - Anchor = 0
+        this.usage = "0"
+      }
+
+      // Gauge Logic (Max/Last): Hard reset
+      this.usage = "0"
     }
   }
 

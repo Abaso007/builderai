@@ -1,5 +1,5 @@
 import type { AnalyticsUsage, AnalyticsVerification } from "@unprice/analytics"
-import type { Entitlement, MeterState } from "@unprice/db/validators"
+import type { EntitlementState } from "@unprice/db/validators"
 import type { Result } from "@unprice/error"
 import type { UnPriceEntitlementStorageError } from "./errors"
 
@@ -21,12 +21,12 @@ export interface UnPriceEntitlementStorage {
     customerId: string
     projectId: string
     featureSlug: string
-  }): Promise<Result<(Entitlement & MeterState) | null, UnPriceEntitlementStorageError>>
+  }): Promise<Result<EntitlementState | null, UnPriceEntitlementStorageError>>
 
   /**
    * Get all entitlement states
    */
-  getAll(): Promise<Result<(Entitlement & MeterState)[], UnPriceEntitlementStorageError>>
+  getAll(): Promise<Result<EntitlementState[], UnPriceEntitlementStorageError>>
 
   /**
    * Delete all entitlement states
@@ -36,9 +36,7 @@ export interface UnPriceEntitlementStorage {
   /**
    * Set an entitlement state
    */
-  set(params: { state: Entitlement & MeterState }): Promise<
-    Result<void, UnPriceEntitlementStorageError>
-  >
+  set(params: { state: EntitlementState }): Promise<Result<void, UnPriceEntitlementStorageError>>
 
   /**
    * Delete an entitlement state

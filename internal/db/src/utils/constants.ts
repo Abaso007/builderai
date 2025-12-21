@@ -53,6 +53,10 @@ export const USAGE_MODES_MAP = {
 } as const
 
 export const AGGREGATION_METHODS_MAP = {
+  none: {
+    label: "None",
+    description: "No usage aggregation method",
+  },
   sum: {
     label: "Sum",
     description: "Adds up all events values within the current cycle period",
@@ -211,7 +215,7 @@ export const FEATURE_TYPES = Object.keys(FEATURE_TYPES_MAPS) as unknown as reado
 ]
 
 export type Scope = "period" | "lifetime"
-export type Behavior = "sum" | "max" | "last"
+export type Behavior = "sum" | "max" | "last" | "none"
 
 interface MethodConfig {
   behavior: Behavior // How do we update the number? (Add, Max, Replace)
@@ -219,6 +223,7 @@ interface MethodConfig {
 }
 
 export const AGGREGATION_CONFIG: Record<AggregationMethod, MethodConfig> = {
+  none: { behavior: "none", scope: "period" },
   // Period Scoped (Resets on Cycle)
   sum: { behavior: "sum", scope: "period" },
   count: { behavior: "sum", scope: "period" }, // count is just sum(+1)

@@ -82,7 +82,9 @@ export const update = protectedProjectProcedure
         }),
         ...(limit !== undefined && { limit: limit === 0 ? null : limit }),
         ...(hidden !== undefined && { hidden }),
-        ...(aggregationMethod && { aggregationMethod }),
+        ...(aggregationMethod !== undefined && {
+          aggregationMethod: featureType === "flat" ? "none" : aggregationMethod,
+        }),
         ...(billingConfigUpdate && {
           billingConfig: {
             ...billingConfigUpdate,

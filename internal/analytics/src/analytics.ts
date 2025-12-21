@@ -593,6 +593,7 @@ export class Analytics {
     feature: {
       featureSlug: string
       aggregationMethod:
+        | "none"
         | "sum"
         | "count"
         | "max"
@@ -617,10 +618,11 @@ export class Analytics {
     >
   > {
     const AGGREGATION_CONFIG: Record<
-      "sum" | "max" | "count" | "sum_all" | "max_all" | "count_all" | "last_during_period",
-      { behavior: "sum" | "max" | "last"; scope: "period" | "lifetime" }
+      "none" | "sum" | "max" | "count" | "sum_all" | "max_all" | "count_all" | "last_during_period",
+      { behavior: "none" | "sum" | "max" | "last"; scope: "period" | "lifetime" }
     > = {
       // Period Scoped (Resets on Cycle)
+      none: { behavior: "none", scope: "period" },
       sum: { behavior: "sum", scope: "period" },
       count: { behavior: "sum", scope: "period" }, // count is just sum(+1)
       max: { behavior: "max", scope: "period" },

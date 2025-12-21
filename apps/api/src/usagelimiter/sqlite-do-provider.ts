@@ -1,6 +1,4 @@
 import type { Analytics, AnalyticsUsage, AnalyticsVerification } from "@unprice/analytics"
-import type { Entitlement } from "@unprice/db/validators"
-import type { MeterState } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import {
@@ -29,7 +27,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   private state: DurableObjectState
   private analytics: Analytics
   private logger: Logger
-  private memoizedStates: Map<string, Entitlement & MeterState> = new Map()
+  private memoizedStates: Map<string, EntitlementState> = new Map()
   // if the storage provider is initialized
   private initialized = false
 
@@ -137,12 +135,12 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   /**
    * Get all entitlement states from DO
    */
-  async getAll(): Promise<Result<(Entitlement & MeterState)[], UnPriceEntitlementStorageError>> {
+  async getAll(): Promise<Result<EntitlementState[], UnPriceEntitlementStorageError>> {
     try {
       this.isInitialized()
 
       // get the states from the storage
-      const states = await this.storage.list<Entitlement & MeterState>()
+      const states = await this.storage.list<EntitlementState>()
 
       // clear the memoized states
       this.memoizedStates.clear()
@@ -180,7 +178,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     customerId: string
     projectId: string
     featureSlug: string
-  }): Promise<Result<(Entitlement & MeterState) | null, UnPriceEntitlementStorageError>> {
+  }): Promise<Result<EntitlementState | null, UnPriceEntitlementStorageError>> {
     try {
       this.isInitialized()
 
@@ -195,7 +193,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       }
 
       // get the state from the storage
-      const value = await this.storage.get<Entitlement & MeterState>(key)
+      const value = await this.storage.get<EntitlementState>(key)
 
       // memoize the state
       if (value) {
@@ -219,7 +217,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   /**
    * Set entitlement state in DO
    */
-  async set(params: { state: Entitlement & MeterState }): Promise<
+  async set(params: { state: EntitlementState }): Promise<
     Result<void, UnPriceEntitlementStorageError>
   > {
     try {

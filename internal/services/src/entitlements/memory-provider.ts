@@ -245,4 +245,34 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
   }): string {
     return `${params.projectId}:${params.customerId}:${params.featureSlug}`
   }
+
+  async flush(): Promise<
+    Result<
+      {
+        usage: { count: number; lastId: string | null }
+        verification: { count: number; lastId: string | null }
+      },
+      UnPriceEntitlementStorageError
+    >
+  > {
+    try {
+      this.isInitialized()
+      return Ok({
+        usage: {
+          count: this.usageRecords.length,
+          lastId: this.usageRecords[this.usageRecords.length - 1]?.id ?? null,
+        },
+        verification: {
+          count: this.verifications.length,
+          lastId: this.verifications[this.verifications.length - 1]?.requestId ?? null,
+        },
+      })
+    } catch (error) {
+      return Err(
+        new UnPriceEntitlementStorageError({
+          message: `Flush failed: ${error instanceof Error ? error.message : "unknown"}`,
+        })
+      )
+    }
+  }
 }

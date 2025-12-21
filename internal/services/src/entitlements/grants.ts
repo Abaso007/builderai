@@ -7,10 +7,9 @@ import {
   type entitlementGrantsSnapshotSchema,
 } from "@unprice/db/validators"
 import type {
-  AggregationMethod,
   Entitlement,
   EntitlementMergingPolicy,
-  MeterState,
+  EntitlementState,
   ReportUsageResult,
   VerificationResult,
   grantInsertSchema,
@@ -854,78 +853,10 @@ export class GrantsManager {
   }
 
   /**
-   * Calculates the usage per feature based on the aggregation method
-   * @param params - The parameters for the calculation
-   * @param params.aggregationMethod - The aggregation method to use
-   * @param params.usage - The usage to calculate
-   * @param params.accumulatedUsage - The accumulated usage
-   * @param params.currentCycleUsage - The current cycle usage
-   * @param params.crossBoundary - Whether we're crossing a reset boundary (resets current cycle and updates accumulated)
-   * @returns The usage per feature
-   */
-  public resetUsage({
-    aggregationMethod,
-    usage,
-  }: {
-    aggregationMethod: AggregationMethod
-    usage: string
-  }): {
-    usage: string
-  } {
-    const config = AGGREGATION_CONFIG[aggregationMethod]
-
-    // Handle cross-boundary reset: move current cycle usage to accumulated and reset current cycle
-    if (config.scope === "period") {
-      if (config.behavior === "sum") {
-        // Odometer Logic: Snap Anchor to Current Counter
-        // Usage becomes 0 because Global - Anchor = 0
-        usage = "0"
-      }
-
-      // Gauge Logic (Max/Last): Hard reset
-      usage = "0"
-    }
-
-    return { usage }
-  }
-
-  /**
-   * Updates the global counter based on the aggregation method
-   * @param params - The parameters for the calculation
-   * @param params.aggregationMethod - The aggregation method to use
-   * @param params.amount - The amount to calculate the usage from
-   * @param params.usage - The usage to calculate the usage from
-   * @returns The usage after the calculation
-   */
-  public calculateUsage({
-    aggregationMethod,
-    amount,
-    newUsage,
-  }: {
-    aggregationMethod: AggregationMethod
-    amount: number
-    newUsage: string
-  }): {
-    newUsage: string
-  } {
-    const config = AGGREGATION_CONFIG[aggregationMethod]
-
-    if (config.behavior === "sum") {
-      newUsage = (Number(newUsage) + amount).toString()
-    } else if (config.behavior === "max") {
-      newUsage = Math.max(Number(newUsage), amount).toString()
-    } else if (config.behavior === "last") {
-      newUsage = amount.toString()
-    }
-
-    return { newUsage }
-  }
-
-  /**
    * Check if usage is allowed and give the information of the grants that were used to calculate the result
    */
   public verify(params: {
-    state: Entitlement & MeterState
+    state: EntitlementState
     now: number
   }): VerificationResult {
     const { state, now } = params
@@ -945,8 +876,10 @@ export class GrantsManager {
       }
     }
 
+    const meter = validatedState.meter
+
     // 2. Flat features always allowed
-    if (validatedState.featureType === "flat") {
+    if (!meter) {
       return {
         allowed: true,
         message: "Flat feature",
@@ -956,20 +889,30 @@ export class GrantsManager {
     }
 
     // 3. Check limit using effective usage based on aggregation method
-    const hasLimit = validatedState.limit !== null
-    const withinLimit =
-      !hasLimit || Number(validatedState.usage) < (validatedState.limit ?? Number.POSITIVE_INFINITY)
+    // Restore UsageMeter from persisted state if available
+    const usageMeter = new UsageMeter(
+      {
+        capacity: validatedState.limit ?? Number.POSITIVE_INFINITY,
+        aggregationMethod: state.aggregationMethod,
+        resetConfig: state.resetConfig,
+        startDate: state.effectiveAt,
+        threshold: 0.9, // when close to the limit, send a notification
+        endDate: state.expiresAt,
+      },
+      meter
+    )
+
+    const verifyResult = usageMeter.verify(now)
+    const meterResult = usageMeter.toPersist()
 
     // 4. Return result
     return {
-      allowed: withinLimit,
-      message: withinLimit ? "Allowed" : "Limit exceeded",
-      deniedReason: withinLimit ? undefined : "LIMIT_EXCEEDED",
-      usage: Number(validatedState.usage),
+      allowed: verifyResult.allowed,
+      message: verifyResult.allowed ? "Allowed" : "Limit exceeded",
+      deniedReason: verifyResult.allowed ? undefined : "LIMIT_EXCEEDED",
+      usage: Number(meterResult.usage),
       limit: validatedState.limit ?? undefined,
-      remaining: validatedState.limit
-        ? validatedState.limit - Number(validatedState.usage)
-        : undefined,
+      remaining: verifyResult.remaining,
     }
   }
 
@@ -979,33 +922,15 @@ export class GrantsManager {
    * we calculated dynamically at billing service time. So we are more flexible when handling edge cases.
    */
   public consume(params: {
-    state: Entitlement & MeterState
+    state: EntitlementState
     amount: number
     now: number
   }): ReportUsageResult & {
-    state: Entitlement & MeterState
+    state: EntitlementState
   } {
     const { state, amount, now } = params
 
-    // 1. Validate usage
-    const { err: usageErr, val: validatedUsage } = this.validateUsage({
-      featureType: state.featureType,
-      aggregationMethod: state.aggregationMethod,
-      amount: amount,
-    })
-
-    if (usageErr) {
-      return {
-        state: state,
-        allowed: false,
-        usage: amount,
-        limit: undefined,
-        message: usageErr.message,
-        deniedReason: "INCORRECT_USAGE_REPORTING",
-      }
-    }
-
-    // 2. Get active grants at this timestamp
+    // 1. Get active grants at this timestamp
     const { err, val: validatedState } = this.validateEntitlementState({
       state: state,
       now,
@@ -1022,6 +947,18 @@ export class GrantsManager {
       }
     }
 
+    const meter = validatedState.meter
+
+    if (!meter) {
+      return {
+        state: state,
+        allowed: false,
+        usage: 0,
+        limit: undefined,
+        message: "Feature does not have a meter",
+      }
+    }
+
     // 3. merge the grants to get the effective limits
     // this is neccesary because some grants can be expired and we need to get the effective limits
     const mergedState = this.mergeGrants({
@@ -1030,46 +967,35 @@ export class GrantsManager {
       policy: validatedState.mergingPolicy,
     })
 
-    // 4. Calculate the new usage
-    const { newUsage } = this.calculateUsage({
-      aggregationMethod: state.aggregationMethod,
-      amount: validatedUsage,
-      newUsage: state.usage,
-    })
-
-    // 5. Check if the usage is within the limit using UsageMeter
-    const effectiveLimit = mergedState.limit
     // Restore UsageMeter from persisted state if available
     const usageMeter = new UsageMeter(
       {
-        capacity: effectiveLimit ?? Number.POSITIVE_INFINITY,
+        capacity: mergedState.limit ?? Number.POSITIVE_INFINITY,
+        aggregationMethod: state.aggregationMethod,
         resetConfig: state.resetConfig,
         startDate: state.effectiveAt,
         threshold: 0.9, // when close to the limit, send a notification
         endDate: state.expiresAt,
       },
-      {
-        lastUpdated: state.lastUpdated,
-        usage: state.usage,
-        lastCycleStart: state.lastCycleStart,
-      }
+      meter
     )
 
-    const consumeResult = usageMeter.consume(Number(newUsage))
+    const consumeResult = usageMeter.consume(amount, now)
     const allowed = consumeResult.allowed || mergedState.allowOverage
+    const meterResult = usageMeter.toPersist()
 
     // Persist the UsageMeter state
     const newState = {
       ...state,
-      ...usageMeter.toPersist(),
+      ...meterResult,
     }
 
     if (!allowed) {
       return {
         state: newState,
         allowed: false,
-        usage: Number(newUsage),
-        limit: effectiveLimit ?? undefined,
+        usage: Number(meterResult.usage),
+        limit: mergedState.limit ?? undefined,
         message: "Limit exceeded",
         deniedReason: "LIMIT_EXCEEDED",
         notifiedOverLimit: consumeResult.overThreshold,
@@ -1079,42 +1005,13 @@ export class GrantsManager {
     // 6. Return result without attribution
     return {
       allowed: allowed,
-      usage: Number(newUsage),
-      limit: effectiveLimit ?? undefined,
+      usage: Number(meterResult.usage),
+      limit: mergedState.limit ?? undefined,
       message: "Allowed",
       notifiedOverLimit: consumeResult.overThreshold,
       deniedReason: undefined,
       state: state,
     }
-  }
-
-  private validateUsage(params: {
-    featureType: FeatureType
-    aggregationMethod: AggregationMethod
-    amount: number
-  }): Result<number, UnPriceGrantError> {
-    const { featureType, aggregationMethod, amount } = params
-
-    // check flat features
-    if (featureType === "flat") {
-      return Err(
-        new UnPriceGrantError({
-          message: "Flat feature cannot be used to consume usage",
-        })
-      )
-    }
-
-    // for negative usage that is not sum, sum_all
-    // count and count_all are not affected by negative usage they are monotonic increasing
-    if (amount < 0 && !["sum", "sum_all"].includes(aggregationMethod)) {
-      return Err(
-        new UnPriceGrantError({
-          message: `Usage cannot be negative when the feature type is not sum, got ${aggregationMethod}. This will disturb aggregations.`,
-        })
-      )
-    }
-
-    return Ok(amount)
   }
 
   /**
@@ -1149,9 +1046,9 @@ export class GrantsManager {
    * Validates entitlement access at a specific timestamp
    */
   private validateEntitlementState(params: {
-    state: Entitlement & MeterState
+    state: EntitlementState
     now: number
-  }): Result<Entitlement & MeterState, UnPriceGrantError> {
+  }): Result<EntitlementState, UnPriceGrantError> {
     const { state, now } = params
 
     // Then check if any grant is active at this timestamp

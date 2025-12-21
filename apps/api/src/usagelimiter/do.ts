@@ -5,8 +5,6 @@ import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
 import type {
   CurrentUsage,
-  Entitlement,
-  MeterState,
   ReportUsageRequest,
   ReportUsageResult,
   VerificationResult,
@@ -227,7 +225,7 @@ export class DurableObjectUsagelimiter extends Server {
     customerId: string
     projectId: string
     now: number
-  }): Promise<Result<(Entitlement & MeterState)[], BaseError>> {
+  }): Promise<Result<EntitlementState[], BaseError>> {
     return await this.entitlementService.getActiveEntitlements(data)
   }
 
