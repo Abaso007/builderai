@@ -1,4 +1,5 @@
 import type { Analytics, AnalyticsUsage, AnalyticsVerification } from "@unprice/analytics"
+import type { EntitlementState } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import {
@@ -278,6 +279,34 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       return Err(
         new UnPriceEntitlementStorageError({
           message: `Delete failed: ${error instanceof Error ? error.message : "unknown"}`,
+        })
+      )
+    }
+  }
+
+  /**
+   * Check if idempotence key exists (fast local query)
+   */
+  async hasIdempotenceKey(
+    idempotenceKey: string
+  ): Promise<Result<boolean, UnPriceEntitlementStorageError>> {
+    try {
+      this.isInitialized()
+
+      const result = await this.db
+        .select({ id: schema.usageRecords.id })
+        .from(schema.usageRecords)
+        .where(eq(schema.usageRecords.idempotenceKey, idempotenceKey))
+        .limit(1)
+
+      return Ok(result.length > 0)
+    } catch (error) {
+      this.logger.error(`SQLite DO ${this.state.id.toString()} hasIdempotenceKey failed`, {
+        error: error instanceof Error ? error.message : "unknown",
+      })
+      return Err(
+        new UnPriceEntitlementStorageError({
+          message: `Has idempotence key failed: ${error instanceof Error ? error.message : "unknown"}`,
         })
       )
     }

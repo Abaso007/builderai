@@ -4,6 +4,8 @@
 import { AGGREGATION_CONFIG } from "@unprice/db/utils"
 import {
   type AggregationMethod,
+  type FeatureType,
+  type MeterState,
   type ResetConfig,
   calculateCycleWindow,
 } from "@unprice/db/validators"
@@ -11,6 +13,11 @@ import type { DenyReason } from "../customers"
 
 // ---------------------------------------------------------
 export interface MeterConfig {
+  /**
+   * The feature type.
+   */
+  featureType: FeatureType
+
   /**
    * The Maximum limit per period (e.g. 100 messages).
    * -1 or Infinity for Unlimited.
@@ -60,12 +67,14 @@ export interface MeterConfig {
    * Default: undefined (no threshold).
    */
   threshold?: number
-}
 
-export interface MeterState {
-  lastUpdated: number
-  usage: string // Usage in the current specific cycle (string to avoid JS precision issues)
-  lastCycleStart?: number // The start timestamp of the last cycle we processed (for boundary detection)
+  /**
+   * Whether to allow usage beyond the capacity limit.
+   * When true, usage can exceed the limit (soft limit).
+   * When false, usage is blocked when limit is reached (hard limit).
+   * Default: false.
+   */
+  allowOverage?: boolean
 }
 
 // ---------------------------------------------------------
@@ -75,25 +84,18 @@ export class UsageMeter {
   private lastUpdated: number
   private usage: string // Store as string to avoid JS precision issues
   private lastCycleStart?: number // Track the last cycle boundary we processed
+  private lastReconciledId: string // Track the last reconciled id
+  private snapshotUsage: string // Track the snapshot usage
 
   private readonly config: MeterConfig
 
-  constructor(config: MeterConfig, initialState?: MeterState) {
+  constructor(config: MeterConfig, initialState: MeterState) {
     this.config = config
-
-    if (this.isUnlimited()) {
-      this.lastUpdated = Date.now()
-      this.usage = "0"
-      this.lastCycleStart = initialState?.lastCycleStart
-    } else if (initialState) {
-      this.lastUpdated = initialState.lastUpdated
-      this.usage = initialState.usage
-      this.lastCycleStart = initialState.lastCycleStart
-    } else {
-      this.lastUpdated = Date.now() // or config.startDate
-      this.usage = "0"
-      this.lastCycleStart = undefined // Will be set on first sync
-    }
+    this.lastUpdated = initialState.lastUpdated
+    this.usage = initialState.usage
+    this.lastCycleStart = initialState.lastCycleStart
+    this.lastReconciledId = initialState.lastReconciledId
+    this.snapshotUsage = initialState.snapshotUsage
   }
 
   /**
@@ -110,14 +112,20 @@ export class UsageMeter {
     if (this.isUnlimited()) {
       return Number.POSITIVE_INFINITY
     }
+
     const tokens = this.config.capacity - this.usageNumber
     const ceiling = this.config.capacity * (this.config.maxBurstPercentage ?? 1.0)
     // Cap at ceiling (for burst scenarios)
     return Math.min(ceiling, Math.max(0, tokens))
   }
 
-  isUnlimited(): boolean {
-    return this.config.capacity === -1 || this.config.capacity === Number.POSITIVE_INFINITY
+  private isUnlimited(): boolean {
+    // flat features are always unlimited
+    return (
+      this.config.capacity === -1 ||
+      this.config.capacity === Number.POSITIVE_INFINITY ||
+      this.config.featureType === "flat"
+    )
   }
 
   /**
@@ -129,18 +137,24 @@ export class UsageMeter {
     retryAfterMs: number
     overThreshold: boolean
     deniedReason?: DenyReason
+    message?: string
   } {
-    // 0. Check Expiration (End Date)
-    if (this.config.endDate && now > this.config.endDate) {
+    // 1. Sync the meter to check if there is a new cycle boundary
+    this.sync(now)
+
+    // 2. Check if the entitlement is expired
+    if (this.isExpired(now)) {
       return {
         allowed: false,
         remaining: 0,
         retryAfterMs: -1,
         overThreshold: false,
         deniedReason: "ENTITLEMENT_EXPIRED",
-      } // -1 indicates "Expired/Never"
+        message: "Entitlement expired",
+      }
     }
 
+    // 3. Check if the feature is unlimited
     if (this.isUnlimited()) {
       return {
         allowed: true,
@@ -150,20 +164,25 @@ export class UsageMeter {
       }
     }
 
-    // verify capacity
-    if (this.tokens < 0) {
+    // 4. Verify capacity
+    const allowOverage = this.config.allowOverage ?? false
+    const currentTokens = this.tokens
+
+    if (currentTokens < 0 && !allowOverage) {
       return {
         allowed: false,
         remaining: 0,
         retryAfterMs: 0,
         overThreshold: false,
         deniedReason: "LIMIT_EXCEEDED",
+        message: "Limit exceeded",
       }
     }
 
+    // 5. Return the verification result
     return {
       allowed: true,
-      remaining: this.tokens,
+      remaining: currentTokens,
       retryAfterMs: 0,
       overThreshold: this.isOverThreshold(),
     }
@@ -172,7 +191,6 @@ export class UsageMeter {
   /**
    * Main entry point to consume quota.
    */
-  // TODO: add verify, add usage method and
   consume(
     cost: number,
     now: number
@@ -182,7 +200,12 @@ export class UsageMeter {
     retryAfterMs: number
     overThreshold: boolean
     deniedReason?: DenyReason
+    message?: string
   } {
+    // 1. Sync Logic (Check if we jumped to a new mathematical period)
+    this.sync(now)
+
+    // 2. Check if the usage is valid
     if (!this.isValidUsage(cost)) {
       return {
         allowed: false,
@@ -190,20 +213,23 @@ export class UsageMeter {
         retryAfterMs: 0,
         overThreshold: false,
         deniedReason: "INVALID_USAGE",
+        message: `Invalid usage for feature type: ${this.config.featureType} and aggregation method: ${this.config.aggregationMethod}`,
       }
     }
 
-    // 0. Check Expiration (End Date)
-    if (this.config.endDate && now > this.config.endDate) {
+    // 3. Check if the entitlement is expired
+    if (this.isExpired(now)) {
       return {
         allowed: false,
         remaining: 0,
         retryAfterMs: -1,
         overThreshold: false,
         deniedReason: "ENTITLEMENT_EXPIRED",
-      } // -1 indicates "Expired/Never"
+        message: "Entitlement expired",
+      }
     }
 
+    // 4. Check if the feature is unlimited
     if (this.isUnlimited()) {
       return {
         allowed: true,
@@ -213,39 +239,24 @@ export class UsageMeter {
       }
     }
 
-    // Handle Refunds (Negative Cost)
-    if (cost < 0) {
-      const { tokens } = this.refund(cost)
-      const overThreshold = this.isOverThreshold()
-      return { allowed: true, remaining: tokens, retryAfterMs: 0, overThreshold }
-    }
-
-    // 1. Sync Logic (Check if we jumped to a new mathematical period)
-    this.sync(now)
-
-    // 2. Check Balance
+    // 6. Check Balance
     const currentTokens = this.tokens
-    if (currentTokens >= cost) {
-      const newUsage = this.calculateUsage({
-        amount: cost,
-        newUsage: this.usage,
-      })
+    const allowOverage = this.config.allowOverage ?? false
 
-      // Update usage as string to avoid precision issues
-      this.usage = newUsage.newUsage
-      this.lastUpdated = now
-
-      const overThreshold = this.isOverThreshold()
+    // 7. handle consumption
+    if (currentTokens >= cost || allowOverage) {
+      // update the usage
+      this.updateUsage(cost, now)
 
       return {
         allowed: true,
         remaining: this.tokens, // Recalculate after usage update
         retryAfterMs: 0,
-        overThreshold,
+        overThreshold: this.isOverThreshold(),
       }
     }
 
-    // 3. Denied
+    // 8. Denied (hard limit)
     const overThreshold = this.isOverThreshold()
     return {
       allowed: false,
@@ -253,10 +264,16 @@ export class UsageMeter {
       retryAfterMs: this.getTimeUntilNextPeriod(now),
       overThreshold,
       deniedReason: "LIMIT_EXCEEDED",
+      message: "Limit exceeded",
     }
   }
 
   private isValidUsage(cost: number) {
+    // check if flat feature
+    if (this.config.featureType === "flat") {
+      return false
+    }
+
     // for negative usage that is not sum, sum_all
     // count and count_all are not affected by negative usage they are monotonic increasing
     if (cost < 0 && !["sum", "sum_all"].includes(this.config.aggregationMethod)) {
@@ -264,6 +281,19 @@ export class UsageMeter {
     }
 
     return true
+  }
+
+  private isExpired(now: number): boolean {
+    // 0. Check Expiration (End Date)
+    if (this.config.endDate && now > this.config.endDate) {
+      return true
+    }
+
+    if (this.config.startDate > now) {
+      return true
+    }
+
+    return false
   }
 
   /**
@@ -274,33 +304,26 @@ export class UsageMeter {
    * @param params.usage - The usage to calculate the usage from
    * @returns The usage after the calculation
    */
-  private calculateUsage({
-    amount,
-    newUsage,
-  }: {
-    amount: number
-    newUsage: string
-  }): {
-    newUsage: string
-  } {
+  private updateUsage(amount: number, now: number) {
     const config = AGGREGATION_CONFIG[this.config.aggregationMethod]
 
+    // Update usage as string to avoid precision issues
     if (config.behavior === "sum") {
-      newUsage = (Number(newUsage) + amount).toString()
+      this.usage = (Number(this.usage) + amount).toString()
     } else if (config.behavior === "max") {
-      newUsage = Math.max(Number(newUsage), amount).toString()
+      this.usage = Math.max(Number(this.usage), amount).toString()
     } else if (config.behavior === "last") {
-      newUsage = amount.toString()
+      this.usage = amount.toString()
     }
 
-    return { newUsage }
+    this.lastUpdated = now
   }
 
   /**
    * Returns usages stats without modifying state (readonly-ish).
    * Useful for showing "You have used X of Y today" in UI.
    */
-  getUsage(now = Date.now()) {
+  public getUsage(now = Date.now()) {
     // We must project what the state WOULD be at 'now' to give accurate info
     // without actually mutating the bucket if we don't want to.
     // However, lazily syncing is usually fine.
@@ -341,7 +364,7 @@ export class UsageMeter {
     const resetCycleForNow = calculateCycleWindow({
       now: now,
       trialEndsAt: null,
-      effectiveStartDate: this.config.startDate, // This is the subscription anchor (immutable)
+      effectiveStartDate: this.config.startDate,
       effectiveEndDate: this.config.endDate,
       config: {
         name: this.config.resetConfig.name,
@@ -385,13 +408,7 @@ export class UsageMeter {
 
     // Handle cross-boundary reset: move current cycle usage to accumulated and reset current cycle
     if (config.scope === "period") {
-      if (config.behavior === "sum") {
-        // Odometer Logic: Snap Anchor to Current Counter
-        // Usage becomes 0 because Global - Anchor = 0
-        this.usage = "0"
-      }
-
-      // Gauge Logic (Max/Last): Hard reset
+      // scope period means there is a cadence for the reset
       this.usage = "0"
     }
   }
@@ -422,21 +439,6 @@ export class UsageMeter {
     return resetCycleForNow.end - now
   }
 
-  /**
-   * Refunds tokens (e.g. failed job).
-   * Decrements usage counters to keep accounting accurate.
-   */
-  refund(amount: number): { tokens: number } {
-    if (this.isUnlimited() || amount <= 0) return { tokens: this.tokens }
-
-    this.sync(Date.now())
-
-    // Refund reduces usage (which increases available tokens)
-    this.usage = Math.max(0, this.usageNumber - amount).toString()
-
-    return { tokens: this.tokens }
-  }
-
   // -------------------------------------------------------
   // PERSISTENCE
   // -------------------------------------------------------
@@ -447,6 +449,8 @@ export class UsageMeter {
       lastUpdated: this.lastUpdated,
       usage: this.usage,
       lastCycleStart: this.lastCycleStart,
+      lastReconciledId: this.lastReconciledId,
+      snapshotUsage: this.snapshotUsage,
     }
   }
 }

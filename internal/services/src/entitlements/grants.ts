@@ -9,9 +9,6 @@ import {
 import type {
   Entitlement,
   EntitlementMergingPolicy,
-  EntitlementState,
-  ReportUsageResult,
-  VerificationResult,
   grantInsertSchema,
   grantSchema,
   grantSchemaExtended,
@@ -23,7 +20,6 @@ import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import type z from "zod"
 import { UnPriceGrantError } from "./errors"
-import { UsageMeter } from "./usage-meter"
 
 interface SubjectGrantQuery {
   subjectId: string
@@ -700,7 +696,7 @@ export class GrantsManager {
    * Merges grants according to the specified feature type and its implicit merging policy.
    * Returns the calculated limit, overage setting, the winning grants, and the effective date range.
    */
-  private mergeGrants(params: {
+  public mergeGrants(params: {
     grants: z.infer<typeof entitlementGrantsSnapshotSchema>[]
     featureType?: FeatureType | undefined
     usageMode?: UsageMode | undefined
@@ -850,222 +846,5 @@ export class GrantsManager {
         }
       }
     }
-  }
-
-  /**
-   * Check if usage is allowed and give the information of the grants that were used to calculate the result
-   */
-  public verify(params: {
-    state: EntitlementState
-    now: number
-  }): VerificationResult {
-    const { state, now } = params
-
-    // 1. Validate entitlement state
-    const { err, val: validatedState } = this.validateEntitlementState({
-      state: state,
-      now,
-    })
-
-    if (err) {
-      return {
-        allowed: false,
-        message: err.message,
-        deniedReason: "ENTITLEMENT_ERROR",
-        usage: 0,
-      }
-    }
-
-    const meter = validatedState.meter
-
-    // 2. Flat features always allowed
-    if (!meter) {
-      return {
-        allowed: true,
-        message: "Flat feature",
-        usage: 1,
-        limit: 1,
-      }
-    }
-
-    // 3. Check limit using effective usage based on aggregation method
-    // Restore UsageMeter from persisted state if available
-    const usageMeter = new UsageMeter(
-      {
-        capacity: validatedState.limit ?? Number.POSITIVE_INFINITY,
-        aggregationMethod: state.aggregationMethod,
-        resetConfig: state.resetConfig,
-        startDate: state.effectiveAt,
-        threshold: 0.9, // when close to the limit, send a notification
-        endDate: state.expiresAt,
-      },
-      meter
-    )
-
-    const verifyResult = usageMeter.verify(now)
-    const meterResult = usageMeter.toPersist()
-
-    // 4. Return result
-    return {
-      allowed: verifyResult.allowed,
-      message: verifyResult.allowed ? "Allowed" : "Limit exceeded",
-      deniedReason: verifyResult.allowed ? undefined : "LIMIT_EXCEEDED",
-      usage: Number(meterResult.usage),
-      limit: validatedState.limit ?? undefined,
-      remaining: verifyResult.remaining,
-    }
-  }
-
-  /**
-   * Consume usage from grants by priority
-   * Here we decided to make a trade-off. Instead of calculating the attribution here at consumption time,
-   * we calculated dynamically at billing service time. So we are more flexible when handling edge cases.
-   */
-  public consume(params: {
-    state: EntitlementState
-    amount: number
-    now: number
-  }): ReportUsageResult & {
-    state: EntitlementState
-  } {
-    const { state, amount, now } = params
-
-    // 1. Get active grants at this timestamp
-    const { err, val: validatedState } = this.validateEntitlementState({
-      state: state,
-      now,
-    })
-
-    if (err) {
-      return {
-        state: state,
-        allowed: false,
-        usage: 0,
-        limit: undefined,
-        message: err.message,
-        deniedReason: "ENTITLEMENT_ERROR",
-      }
-    }
-
-    const meter = validatedState.meter
-
-    if (!meter) {
-      return {
-        state: state,
-        allowed: false,
-        usage: 0,
-        limit: undefined,
-        message: "Feature does not have a meter",
-      }
-    }
-
-    // 3. merge the grants to get the effective limits
-    // this is neccesary because some grants can be expired and we need to get the effective limits
-    const mergedState = this.mergeGrants({
-      grants: validatedState.grants,
-      featureType: validatedState.featureType,
-      policy: validatedState.mergingPolicy,
-    })
-
-    // Restore UsageMeter from persisted state if available
-    const usageMeter = new UsageMeter(
-      {
-        capacity: mergedState.limit ?? Number.POSITIVE_INFINITY,
-        aggregationMethod: state.aggregationMethod,
-        resetConfig: state.resetConfig,
-        startDate: state.effectiveAt,
-        threshold: 0.9, // when close to the limit, send a notification
-        endDate: state.expiresAt,
-      },
-      meter
-    )
-
-    const consumeResult = usageMeter.consume(amount, now)
-    const allowed = consumeResult.allowed || mergedState.allowOverage
-    const meterResult = usageMeter.toPersist()
-
-    // Persist the UsageMeter state
-    const newState = {
-      ...state,
-      ...meterResult,
-    }
-
-    if (!allowed) {
-      return {
-        state: newState,
-        allowed: false,
-        usage: Number(meterResult.usage),
-        limit: mergedState.limit ?? undefined,
-        message: "Limit exceeded",
-        deniedReason: "LIMIT_EXCEEDED",
-        notifiedOverLimit: consumeResult.overThreshold,
-      }
-    }
-
-    // 6. Return result without attribution
-    return {
-      allowed: allowed,
-      usage: Number(meterResult.usage),
-      limit: mergedState.limit ?? undefined,
-      message: "Allowed",
-      notifiedOverLimit: consumeResult.overThreshold,
-      deniedReason: undefined,
-      state: state,
-    }
-  }
-
-  /**
-   * Checks if a timestamp falls within any active grant period
-   */
-  private isGrantActiveAtTimestamp(params: {
-    grant: z.infer<typeof entitlementGrantsSnapshotSchema>
-    now: number
-  }): boolean {
-    const { grant, now } = params
-    const grantStart = grant.effectiveAt
-    const grantEnd = grant.expiresAt ?? Number.POSITIVE_INFINITY
-    return now >= grantStart && now < grantEnd
-  }
-
-  /**
-   * Gets the active grant(s) at a specific timestamp
-   */
-  private getActiveGrantsAtTimestamp(params: {
-    grants: z.infer<typeof entitlementGrantsSnapshotSchema>[]
-    now: number
-  }): z.infer<typeof entitlementGrantsSnapshotSchema>[] {
-    const { grants, now } = params
-
-    // sort by priority
-    return grants
-      .filter((grant) => this.isGrantActiveAtTimestamp({ grant, now }))
-      .sort((a, b) => b.priority - a.priority)
-  }
-
-  /**
-   * Validates entitlement access at a specific timestamp
-   */
-  private validateEntitlementState(params: {
-    state: EntitlementState
-    now: number
-  }): Result<EntitlementState, UnPriceGrantError> {
-    const { state, now } = params
-
-    // Then check if any grant is active at this timestamp
-    const activeGrants = this.getActiveGrantsAtTimestamp({ grants: state.grants, now })
-
-    if (activeGrants.length === 0) {
-      return Err(
-        new UnPriceGrantError({
-          message: `No active grant found for customer ${state.customerId} and project ${state.projectId} and feature ${state.featureSlug}`,
-          subjectId: state.customerId,
-        })
-      )
-    }
-
-    return Ok({
-      ...state,
-      grants: activeGrants,
-    })
   }
 }

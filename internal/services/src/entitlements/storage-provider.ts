@@ -48,6 +48,14 @@ export interface UnPriceEntitlementStorage {
   }): Promise<Result<void, UnPriceEntitlementStorageError>>
 
   /**
+   * Check if an idempotence key already exists
+   * Used to prevent double counting before consuming usage
+   */
+  hasIdempotenceKey(
+    idempotenceKey: string
+  ): Promise<Result<boolean, UnPriceEntitlementStorageError>>
+
+  /**
    * Insert usage record for batch sending
    * Useful for DO with alarms or Redis with pipelines
    */

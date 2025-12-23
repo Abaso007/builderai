@@ -166,6 +166,22 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
     }
   }
 
+  async hasIdempotenceKey(
+    idempotenceKey: string
+  ): Promise<Result<boolean, UnPriceEntitlementStorageError>> {
+    try {
+      this.isInitialized()
+      const exists = this.usageRecords.some((r) => r.idempotenceKey === idempotenceKey)
+      return Ok(exists)
+    } catch (error) {
+      return Err(
+        new UnPriceEntitlementStorageError({
+          message: `Has idempotence key failed: ${error instanceof Error ? error.message : "unknown"}`,
+        })
+      )
+    }
+  }
+
   async insertUsageRecord(
     record: AnalyticsUsage
   ): Promise<Result<void, UnPriceEntitlementStorageError>> {

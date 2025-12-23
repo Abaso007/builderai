@@ -275,10 +275,14 @@ export const currentUsageSchema = z.object({
   priceSummary: priceSummaryDisplaySchema,
 })
 
+export const entitlementStateSchema = entitlementSchema.extend({
+  meter: meterStateSchema,
+})
+
 export type CurrentUsage = z.infer<typeof currentUsageSchema>
 export type Entitlement = z.infer<typeof entitlementSchema>
 export type MeterState = z.infer<typeof meterStateSchema>
 export type EntitlementState = Entitlement & {
-  meter?: MeterState // flat features don't have a meter
+  meter: MeterState
 }
 export type Grant = z.infer<typeof grantSchema>
