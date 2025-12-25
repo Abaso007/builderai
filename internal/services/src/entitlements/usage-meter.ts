@@ -146,7 +146,7 @@ export class UsageMeter {
     if (this.isExpired(now)) {
       return {
         allowed: false,
-        remaining: 0,
+        remaining: this.tokens,
         retryAfterMs: -1,
         overThreshold: false,
         deniedReason: "ENTITLEMENT_EXPIRED",
@@ -158,9 +158,10 @@ export class UsageMeter {
     if (this.isUnlimited()) {
       return {
         allowed: true,
-        remaining: Number.POSITIVE_INFINITY,
+        remaining: this.tokens,
         retryAfterMs: 0,
         overThreshold: false,
+        message: "Unlimited feature",
       }
     }
 
@@ -171,7 +172,7 @@ export class UsageMeter {
     if (currentTokens < 0 && !allowOverage) {
       return {
         allowed: false,
-        remaining: 0,
+        remaining: this.tokens,
         retryAfterMs: 0,
         overThreshold: false,
         deniedReason: "LIMIT_EXCEEDED",
@@ -206,14 +207,16 @@ export class UsageMeter {
     this.sync(now)
 
     // 2. Check if the usage is valid
-    if (!this.isValidUsage(cost)) {
+    const { isValid, message } = this.isValidUsage(cost)
+
+    if (!isValid) {
       return {
         allowed: false,
         remaining: this.tokens,
         retryAfterMs: 0,
         overThreshold: false,
         deniedReason: "INVALID_USAGE",
-        message: `Invalid usage for feature type: ${this.config.featureType} and aggregation method: ${this.config.aggregationMethod}`,
+        message,
       }
     }
 
@@ -229,24 +232,18 @@ export class UsageMeter {
       }
     }
 
-    // 4. Check if the feature is unlimited
-    if (this.isUnlimited()) {
-      return {
-        allowed: true,
-        remaining: Number.POSITIVE_INFINITY,
-        retryAfterMs: 0,
-        overThreshold: false,
-      }
-    }
-
-    // 6. Check Balance
+    // 4. Check Balance
     const currentTokens = this.tokens
     const allowOverage = this.config.allowOverage ?? false
 
-    // 7. handle consumption
+    // 5. handle consumption
     if (currentTokens >= cost || allowOverage) {
       // update the usage
-      this.updateUsage(cost, now)
+      const newUsage = this.applyUsage(cost)
+
+      // update the state
+      this.usage = newUsage
+      this.lastUpdated = now
 
       return {
         allowed: true,
@@ -256,7 +253,7 @@ export class UsageMeter {
       }
     }
 
-    // 8. Denied (hard limit)
+    // 6. Denied (hard limit)
     const overThreshold = this.isOverThreshold()
     return {
       allowed: false,
@@ -271,16 +268,33 @@ export class UsageMeter {
   private isValidUsage(cost: number) {
     // check if flat feature
     if (this.config.featureType === "flat") {
-      return false
+      return {
+        isValid: true,
+      }
     }
 
     // for negative usage that is not sum, sum_all
     // count and count_all are not affected by negative usage they are monotonic increasing
     if (cost < 0 && !["sum", "sum_all"].includes(this.config.aggregationMethod)) {
-      return false
+      return {
+        isValid: false,
+        message: "Negative usage is not allowed for this aggregation method",
+      }
     }
 
-    return true
+    // and the current usage - the cost is not negative
+    const newUsage = this.applyUsage(cost)
+
+    if (Number(newUsage) < 0) {
+      return {
+        isValid: false,
+        message: "Total usage would be negative",
+      }
+    }
+
+    return {
+      isValid: true,
+    }
   }
 
   private isExpired(now: number): boolean {
@@ -297,26 +311,25 @@ export class UsageMeter {
   }
 
   /**
-   * Updates the global counter based on the aggregation method
-   * @param params - The parameters for the calculation
-   * @param params.aggregationMethod - The aggregation method to use
-   * @param params.amount - The amount to calculate the usage from
-   * @param params.usage - The usage to calculate the usage from
+   * Applies the usage to the meter based on the aggregation method
+   * @param amount - The amount to calculate the usage from
    * @returns The usage after the calculation
    */
-  private updateUsage(amount: number, now: number) {
+  private applyUsage(amount: number) {
     const config = AGGREGATION_CONFIG[this.config.aggregationMethod]
+
+    let newUsage = this.usage
 
     // Update usage as string to avoid precision issues
     if (config.behavior === "sum") {
-      this.usage = (Number(this.usage) + amount).toString()
+      newUsage = (Number(this.usage) + amount).toString()
     } else if (config.behavior === "max") {
-      this.usage = Math.max(Number(this.usage), amount).toString()
+      newUsage = Math.max(Number(this.usage), amount).toString()
     } else if (config.behavior === "last") {
-      this.usage = amount.toString()
+      newUsage = amount.toString()
     }
 
-    this.lastUpdated = now
+    return newUsage
   }
 
   /**

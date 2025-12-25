@@ -104,9 +104,9 @@ export class UsageLimiterService implements UsageLimiter {
     })
   }
 
-  private getDurableObjectCustomerId(customerId: string): string {
+  private getDurableObjectCustomerId(customerId: string, projectId: string): string {
     // later on we can shard this by customer and feature slug if needed
-    return `${customerId}`
+    return `${projectId}:${customerId}`
   }
 
   public async verify(
@@ -118,14 +118,16 @@ export class UsageLimiterService implements UsageLimiter {
     // if we hit the same isolate we can return the cached result
     // only for request that are denied.
     // we don't use the normal swr cache here because it doesn't make sense to call
-    // the cache layer, the idea is to speed up the next request
+    // the cache layer, the idea is to speed up the next request and memory is our friend.
     if (cached && env.VERCEL_ENV === "production") {
       const result = JSON.parse(cached) as VerificationResult
 
       return Ok({ ...result, cacheHit: true })
     }
 
-    const durableObject = this.getStub(this.getDurableObjectCustomerId(data.customerId))
+    const durableObject = this.getStub(
+      this.getDurableObjectCustomerId(data.customerId, data.projectId)
+    )
 
     // TODO: implement this if the request is async, we can validate entitlement from cache
 
@@ -157,7 +159,9 @@ export class UsageLimiterService implements UsageLimiter {
       return Ok({ ...sent, cacheHit: true })
     }
 
-    const durableObject = this.getStub(this.getDurableObjectCustomerId(data.customerId))
+    const durableObject = this.getStub(
+      this.getDurableObjectCustomerId(data.customerId, data.projectId)
+    )
     const result = await durableObject.reportUsage({
       ...data,
       idempotenceKey: idempotentKey,
@@ -173,13 +177,16 @@ export class UsageLimiterService implements UsageLimiter {
     return Ok(result)
   }
 
-  public async prewarmEntitlements(params: {
+  public async resetEntitlements(params: {
     customerId: string
     projectId: string
-    now: number
   }): Promise<Result<void, BaseError>> {
-    const durableObject = this.getStub(this.getDurableObjectCustomerId(params.customerId))
-    await durableObject.prewarm(params)
+    const durableObject = this.getStub(
+      this.getDurableObjectCustomerId(params.customerId, params.projectId)
+    )
+
+    // reset the entitlements for the customer
+    await durableObject.resetEntitlements()
 
     return Ok(undefined)
   }
@@ -187,8 +194,11 @@ export class UsageLimiterService implements UsageLimiter {
   public async getActiveEntitlements(
     data: GetEntitlementsRequest
   ): Promise<Result<EntitlementState[], BaseError>> {
-    const durableObject = this.getStub(this.getDurableObjectCustomerId(data.customerId))
+    const durableObject = this.getStub(
+      this.getDurableObjectCustomerId(data.customerId, data.projectId)
+    )
 
+    // TODO: we can cache this to avoid calling the DO again
     const { val: entitlements, err } = await durableObject.getActiveEntitlements(data)
 
     if (err) {
@@ -201,7 +211,9 @@ export class UsageLimiterService implements UsageLimiter {
   public async getCurrentUsage(
     data: GetUsageRequest
   ): Promise<Result<CurrentUsage, FetchError | BaseError>> {
-    const durableObject = this.getStub(this.getDurableObjectCustomerId(data.customerId))
+    const durableObject = this.getStub(
+      this.getDurableObjectCustomerId(data.customerId, data.projectId)
+    )
     const { val: usageDisplay, err } = await durableObject.getCurrentUsage(data)
 
     if (err) {

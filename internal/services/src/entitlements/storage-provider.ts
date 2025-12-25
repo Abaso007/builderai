@@ -89,6 +89,11 @@ export interface UnPriceEntitlementStorage {
   >
 
   /**
+   * Reset the storage provider
+   */
+  reset(): Promise<Result<void, UnPriceEntitlementStorageError>>
+
+  /**
    * Make entitlement key
    */
   makeKey(params: {

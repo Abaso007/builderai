@@ -224,7 +224,6 @@ export class EntitlementService {
         message: stateErr.message,
         deniedReason: "ENTITLEMENT_ERROR",
         usage: 0,
-        limit: undefined,
       }
     }
 
@@ -234,7 +233,6 @@ export class EntitlementService {
         message: "No entitlement found for the given customer, project and feature",
         deniedReason: "ENTITLEMENT_NOT_FOUND",
         usage: 0,
-        limit: undefined,
       }
     }
 
@@ -328,6 +326,7 @@ export class EntitlementService {
 
     return {
       allowed: consumeResult.allowed,
+      remaining: consumeResult.remaining,
       message: consumeResult.message,
       deniedReason: consumeResult.deniedReason,
       usage: Number(meterResult.usage),
@@ -344,7 +343,6 @@ export class EntitlementService {
     return Ok(undefined)
   }
 
-  // TODO: improve this
   public async getActiveEntitlements(params: {
     customerId: string
     projectId: string
@@ -360,53 +358,54 @@ export class EntitlementService {
     }
 
     // filter entitlements by customerId and projectId
-    const filteredEntitlements = entitlements.val.filter(
+    const validatedEntitlements = entitlements.val.filter(
+      (entitlement) => entitlement.customerId === customerId && entitlement.projectId === projectId
+    )
+
+    // validate effective at and expires at
+    const activeEntitlements = validatedEntitlements.filter(
       (entitlement) =>
-        entitlement.customerId === customerId &&
-        entitlement.projectId === projectId &&
-        entitlement.expiresAt &&
-        entitlement.expiresAt > now &&
-        entitlement.effectiveAt <= now
+        entitlement.effectiveAt <= now &&
+        (entitlement.expiresAt === null || entitlement.expiresAt > now)
     )
 
-    // filter by now date
-    const filteredEntitlementsByNow = filteredEntitlements.filter(
-      (entitlement) => entitlement.expiresAt && entitlement.expiresAt > now
-    )
-
-    return Ok(filteredEntitlementsByNow)
+    return Ok(activeEntitlements)
   }
 
   /**
    * RECONCILE: We need to reconcile the usage in storage with the source of truth in analytics.
    * This is extremly important to avoid double counting usage and other race conditions.
    * To do that we use a cursor to mark the position in the analytics and we compare the usage in storage with the usage in analytics.
-   * in case of drift we add to the global counter to avoid rewrites, the global counter is a moving target as we add usage as it comes in.
+   * in case of drift we add to the global counter to avoid rewrites, the global counter is a moving target as we add usage as per request.
    *
    * Timeline:
    *
    * | ◄──────────────── DO's globalCounter includes ALL of this ─────────────────────►  │
-   * ├─ effectiveAt ─────────────────────────────────────────────────────────────────── now
-   * ├───────────| start new cycle window ───────────────────────────────────────────── now
+   * |                                                                                   │
+   * ├─ effectiveAt (open ended) ────────────────────────────────────────────────────── now
+   * |                                                                                   │
+   * ├───────────| start new cycle window ──────────── end cycle window ─|───────────── now
    * |                                                                                   │
    * [ ... Verified in TB ... ]   [ ... In Flight / Settling ... ]   [ ... In Buffer ... ]
+   * |                                                                                   │
+   * |────────Analytics ──────|── Analytics not ready yet  ──────────|────── Storage ────|
    *             ▲            ▲
    *             │            │
    *    lastReconciledId   beforeRecordId (watermark)
    *             | -tb query- │
    */
-  private async reconcileFeatureUsage(params: { state: EntitlementState }) {
-    const { state } = params
+  private async reconcileFeatureUsage(params: { state: EntitlementState; now: number }) {
+    const { state, now } = params
     // 5 minutes ago is more than enough for tb to settle the usage
-    const watermark = subMinutes(new Date(), 5).getTime()
+    const watermark = subMinutes(new Date(now), 5).getTime()
 
     // Immutable snapshot for avoiding race conditions
     const snapshot: Readonly<EntitlementState> = { ...state }
     const config = AGGREGATION_CONFIG[snapshot.aggregationMethod]
     const meter = snapshot.meter
 
-    // if the feature is a flat feature we don't have a meter
-    if (!meter) {
+    // if the feature is a flat feature we don't need to reconcile
+    if (snapshot.featureType === "flat") {
       this.logger.info("skipping reconcile for flat feature", {
         featureSlug: snapshot.featureSlug,
         customerId: snapshot.customerId,
@@ -415,7 +414,7 @@ export class EntitlementService {
       return // fire-and-forget
     }
 
-    // dirf only makes sense for sum behavior
+    // drift only makes sense for sum behavior
     if (config.behavior !== "sum") {
       this.logger.info("skipping reconcile for non-sum behavior", {
         behavior: config.behavior,
@@ -491,7 +490,7 @@ export class EntitlementService {
     // in the current cycle window
     if (lastReconciledId >= beforeRecordId) {
       this.logger.info(
-        "skipping reconcile, the last reconciled id is greater than the before record id",
+        "skipping reconcile, reconciliation already happened in the past 5 minutes",
         {
           lastReconciledId,
           beforeRecordId,
@@ -505,19 +504,23 @@ export class EntitlementService {
 
     // if the cycle hasn't been started at least in the past 5 minutes we can't reconcile
     if (watermark < effectiveAt) {
-      this.logger.info("skipping reconcile, the watermark is before the effective at", {
-        watermark,
-        effectiveAt,
-        featureSlug: snapshot.featureSlug,
-        customerId: snapshot.customerId,
-        projectId: snapshot.projectId,
-      })
+      this.logger.info(
+        "skipping reconcile, not enough time has passed since the last reconciliation",
+        {
+          watermark,
+          effectiveAt,
+          featureSlug: snapshot.featureSlug,
+          customerId: snapshot.customerId,
+          projectId: snapshot.projectId,
+        }
+      )
       return // fire-and-forget
     }
 
-    // if the last reconciled id is empty we can't reconcile
+    // if the last reconciled id is empty we can't reconcile.
+    // this means something went wrong in the initialization of the meter or the entiltment was used for the first time.
     if (lastReconciledId === "") {
-      this.logger.info("skipping reconcile, the last reconciled id is empty", {
+      this.logger.warn("skipping reconcile, the last reconciled id is empty", {
         lastReconciledId,
         featureSlug: snapshot.featureSlug,
         customerId: snapshot.customerId,
@@ -526,7 +529,7 @@ export class EntitlementService {
       return // fire-and-forget
     }
 
-    // at the same time get the usage from analytics and current usage in storage
+    // get the usage from analytics and current usage in storage at the same time
     // this give us the exact usage at the watermark and save it in the entitlement state for the next reconciliation
     const [analyticsResult, entitlementResult] = await Promise.all([
       this.analytics.getFeaturesUsageCursor({
@@ -539,7 +542,7 @@ export class EntitlementService {
         },
         afterRecordId: lastReconciledId,
         beforeRecordId: beforeRecordId,
-        startAt: currentCycleWindow?.start ?? state.effectiveAt,
+        startAt: effectiveAt,
       }),
       this.storage.get({
         customerId: snapshot.customerId,
@@ -665,7 +668,8 @@ export class EntitlementService {
         })
       : null
 
-    const beforeRecordId = ulid(watermark) // ulid is more reliable than timestamp
+    // ulid is more reliable than timestamp because at high throughputs it can be not unique
+    const beforeRecordId = ulid(watermark)
     // after record Id on initilization should be the begining of the cycle
     const afterRecordId = watermarkCycleWindow
       ? ulid(watermarkCycleWindow.start)
@@ -701,8 +705,6 @@ export class EntitlementService {
         })
       )
     }
-
-    console.log("analyticsResult", analyticsResult)
 
     const usage = analyticsResult.usage ?? 0 // Total from effectiveAt to watermark
     const lastRecordId = analyticsResult.lastRecordId ?? beforeRecordId
@@ -805,24 +807,18 @@ export class EntitlementService {
         }
 
         // trust the analytics data and sync the entitlement usage
-        const updatedEntitlement = await this.initializeUsageMeter({
+        const meterState = await this.initializeUsageMeter({
           entitlement: entitlement,
           watermark: params.now,
         })
 
-        if (updatedEntitlement.err) {
-          throw new UnPriceEntitlementError({ message: updatedEntitlement.err.message })
+        if (meterState.err) {
+          throw new UnPriceEntitlementError({ message: meterState.err.message })
         }
 
         const entitlementState: EntitlementState = {
           ...entitlement,
-          meter: {
-            usage: updatedEntitlement.val.usage,
-            snapshotUsage: updatedEntitlement.val.snapshotUsage,
-            lastReconciledId: updatedEntitlement.val.lastReconciledId,
-            lastUpdated: updatedEntitlement.val.lastUpdated,
-            lastCycleStart: updatedEntitlement.val.lastCycleStart,
-          },
+          meter: meterState.val,
         }
 
         // set storage
@@ -847,8 +843,10 @@ export class EntitlementService {
     }
 
     // Cache hit - no cycle boundary crossed, check if we need to revalidate
-    if (params.now >= cached.nextRevalidateAt) {
+    if (params.now >= cached.nextRevalidateAt || !cached.meter) {
       this.logger.info("Revalidation time, checking version", params)
+
+      let entitlementState: EntitlementState | undefined = undefined
 
       try {
         // get the entitlement from the cache
@@ -890,14 +888,20 @@ export class EntitlementService {
             throw new UnPriceEntitlementError({ message: err.message })
           }
 
+          // update revalidation time
+          entitlementFromDB.nextRevalidateAt = params.now + this.revalidateInterval
+
           // set storage -> this will have the latest usage
           await this.storage.set({ state: entitlementFromDB })
 
           // fire a reconcile feature usage in background
-          this.waitUntil(this.reconcileFeatureUsage({ state: entitlementFromDB }))
+          this.waitUntil(this.reconcileFeatureUsage({ state: entitlementFromDB, now: params.now }))
 
           return Ok(entitlementFromDB)
         }
+
+        // update the entitlement state with the latest meter state
+        entitlementState = entitlement
       } catch (error) {
         const err = error as UnPriceEntitlementError
         this.logger.error(err.message, {
@@ -915,23 +919,24 @@ export class EntitlementService {
       }
 
       // Version matches - just update revalidation time and return the entitlement
-      cached.nextRevalidateAt = params.now + this.revalidateInterval
+      entitlementState.nextRevalidateAt = params.now + this.revalidateInterval
       // set the entitlement to the storage
-      await this.storage.set({ state: cached })
+      await this.storage.set({ state: entitlementState })
 
       // Update cache and fire a reconcile feature usage in background
-      this.waitUntil(
-        Promise.all([
-          this.cache.customerEntitlement.set(this.storage.makeKey(params), cached),
-          this.reconcileFeatureUsage({ state: cached }),
-        ])
-      )
+      this.waitUntil(this.reconcileFeatureUsage({ state: entitlementState, now: params.now }))
+
+      return Ok(entitlementState)
     }
 
-    // TODO: there is an error here when first initilizing the entitlement
-    console.log("cached", cached)
-
     return Ok(cached)
+  }
+
+  public async resetEntitlements(): Promise<
+    Result<void, UnPriceEntitlementError | UnPriceEntitlementStorageError>
+  > {
+    // reset the storage provider
+    return await this.storage.reset()
   }
 
   /**
@@ -1070,18 +1075,20 @@ export class EntitlementService {
 
     // initialize the entitlement usage
     // neve saved on cache as it changes on every usage
-    const { val: entitlementState, err: entitlementStateErr } = await this.initializeUsageMeter({
+    const { val: meterState, err: meterStateErr } = await this.initializeUsageMeter({
       entitlement: val,
       watermark: opts?.now ?? Date.now(),
     })
 
-    if (entitlementStateErr) {
-      return Err(new UnPriceEntitlementError({ message: entitlementStateErr.message }))
+    console.log("meterState", meterState)
+
+    if (meterStateErr) {
+      return Err(new UnPriceEntitlementError({ message: meterStateErr.message }))
     }
 
     return Ok({
       ...val,
-      meter: entitlementState,
+      meter: meterState,
     })
   }
 
@@ -1179,7 +1186,7 @@ export class EntitlementService {
     if (entitlementsResult.err) {
       return Err(entitlementsResult.err)
     }
-
+    x
     if (usageEstimatesResult.err) {
       return Err(usageEstimatesResult.err)
     }

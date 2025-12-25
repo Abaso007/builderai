@@ -10,10 +10,9 @@ import { type BaseError, Ok, type Result } from "@unprice/error"
 import type { GetEntitlementsRequest, GetUsageRequest, UsageLimiter } from "./interface"
 
 export class NoopUsageLimiter implements UsageLimiter {
-  public async prewarmEntitlements(_params: {
+  public async resetEntitlements(_params: {
     customerId: string
     projectId: string
-    now: number
   }): Promise<Result<void, BaseError>> {
     return Ok(undefined)
   }

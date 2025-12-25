@@ -13,10 +13,10 @@ import type { App } from "~/hono/app"
 const tags = ["customer"]
 
 export const route = createRoute({
-  path: "/v1/customer/prewarm-entitlements",
-  operationId: "customer.prewarmEntitlements",
-  summary: "prewarm entitlements",
-  description: "Prewarm entitlements for a customer",
+  path: "/v1/customer/reset-entitlements",
+  operationId: "customer.resetEntitlements",
+  summary: "reset entitlements",
+  description: "Reset entitlements for a customer",
   method: "post",
   tags,
   request: {
@@ -39,20 +39,20 @@ export const route = createRoute({
       z.object({
         success: z.boolean(),
       }),
-      "The result of the prewarm entitlements"
+      "The result of the reset entitlements"
     ),
     ...openApiErrorResponses,
   },
 })
 
-export type PrewarmEntitlementsRequest = z.infer<
+export type ResetEntitlementsRequest = z.infer<
   (typeof route.request.body)["content"]["application/json"]["schema"]
 >
-export type PrewarmEntitlementsResponse = z.infer<
+export type ResetEntitlementsResponse = z.infer<
   (typeof route.responses)[200]["content"]["application/json"]["schema"]
 >
 
-export const registerPrewarmEntitlementsV1 = (app: App) =>
+export const registerResetEntitlementsV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customerId, projectId } = c.req.valid("json")
     const { usagelimiter } = c.get("services")
@@ -62,26 +62,25 @@ export const registerPrewarmEntitlementsV1 = (app: App) =>
 
     const finalProjectId = key.project.workspace.isMain ? projectId : key.projectId
 
-    // only main keys can prewarm entitlements for other projects other than their own
+    // only main keys can reset entitlements for other projects other than their own
     if (key.project.workspace.isMain && projectId !== finalProjectId) {
       throw new UnpriceApiError({
         code: "FORBIDDEN",
-        message: "You are not allowed to prewarm entitlements for other projects.",
+        message: "You are not allowed to reset entitlements for other projects.",
       })
     }
 
     // start a timer
-    startTime(c, "prewarmEntitlements")
+    startTime(c, "resetEntitlements")
 
     // delete the customer from the DO
-    const { err } = await usagelimiter.prewarmEntitlements({
+    const { err } = await usagelimiter.resetEntitlements({
       customerId,
       projectId: finalProjectId,
-      now: Date.now(),
     })
 
     // end the timer
-    endTime(c, "prewarmEntitlements")
+    endTime(c, "resetEntitlements")
 
     if (err) {
       throw err

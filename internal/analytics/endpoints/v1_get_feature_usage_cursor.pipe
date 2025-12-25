@@ -25,9 +25,9 @@ SQL >
         argMax(usage, id) AS lastValue,
 
         -- New cursor position
-        max(id) AS lastRecordId,
+        argMax(id, timestamp) AS lastRecordId
 
-    FROM unprice_feature_usage_records AS outer
+    FROM unprice_feature_usage_records
     WHERE
         deleted = 0
         AND projectId = {{ String(projectId) }}

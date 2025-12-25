@@ -6,7 +6,7 @@ import {
   type UnPriceEntitlementStorage,
   UnPriceEntitlementStorageError,
 } from "@unprice/services/entitlements"
-import { and, asc, desc, eq, sql } from "drizzle-orm"
+import { count, desc, eq, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import { schema } from "~/db/types"
@@ -76,7 +76,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         // clear the memoized states
         this.memoizedStates.clear()
 
-        this.logger.error(`SQLite DO ${this.state.id.toString()} initialize failed`, {
+        this.logger.error(`Storage provider ${this.state.id.toString()} initialize failed`, {
           error: error instanceof Error ? error.message : "unknown",
         })
 
@@ -94,7 +94,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       await migrate(this.db, migrations)
     } catch (error) {
       // Log the error
-      this.logger.error(`SQLite DO ${this.state.id.toString()} migrate failed`, {
+      this.logger.error(`Storage provider ${this.state.id.toString()} migrate failed`, {
         error: error instanceof Error ? error.message : "unknown",
       })
     }
@@ -161,7 +161,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       // return the states
       return Ok(Array.from(this.memoizedStates.values()))
     } catch (error) {
-      this.logger.error(`SQLite DO ${this.state.id.toString()} getAll failed`, {
+      this.logger.error(`Storage provider ${this.state.id.toString()} getAll failed`, {
         error: error instanceof Error ? error.message : "unknown",
       })
       return Err(
@@ -204,7 +204,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       // return the state
       return Ok(value ?? null)
     } catch (error) {
-      this.logger.error(`SQLite DO ${this.state.id.toString()} get failed`, {
+      this.logger.error(`Storage provider ${this.state.id.toString()} get failed`, {
         error: error instanceof Error ? error.message : "unknown",
       })
       return Err(
@@ -239,7 +239,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       // return ok
       return Ok(undefined)
     } catch (error) {
-      this.logger.error(`SQLite DO ${this.state.id.toString()} set failed`, {
+      this.logger.error(`Storage provider ${this.state.id.toString()} set failed`, {
         error: error instanceof Error ? error.message : "unknown",
       })
       return Err(
@@ -273,7 +273,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       // return ok
       return Ok(undefined)
     } catch (error) {
-      this.logger.error(`SQLite DO ${this.state.id.toString()} delete failed`, {
+      this.logger.error(`Storage provider ${this.state.id.toString()} delete failed`, {
         error: error instanceof Error ? error.message : "unknown",
       })
       return Err(
@@ -301,7 +301,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
 
       return Ok(result.length > 0)
     } catch (error) {
-      this.logger.error(`SQLite DO ${this.state.id.toString()} hasIdempotenceKey failed`, {
+      this.logger.error(`Storage provider ${this.state.id.toString()} hasIdempotenceKey failed`, {
         error: error instanceof Error ? error.message : "unknown",
       })
       return Err(
@@ -341,7 +341,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
 
       return Ok(undefined)
     } catch (error) {
-      this.logger.error(`SQLite DO ${this.state.id.toString()} insert usage record failed`, {
+      this.logger.error(`Storage provider ${this.state.id.toString()} insert usage record failed`, {
         error: error instanceof Error ? error.message : "unknown",
       })
       return Err(
@@ -377,7 +377,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
 
       return Ok(undefined)
     } catch (error) {
-      this.logger.error(`SQLite DO ${this.state.id.toString()} insert verification failed`, {
+      this.logger.error(`Storage provider ${this.state.id.toString()} insert verification failed`, {
         error: error instanceof Error ? error.message : "unknown",
       })
       return Err(
@@ -389,64 +389,72 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   }
 
   /**
-   * Get the last usage flushed id from SQLite
-   * Get the min ID still in buffer, everything before that has been flushed
+   * Reset the storage provider
    */
-  public async getLastUsageFlushedId(
-    featureSlug: string
-  ): Promise<Result<string | null, UnPriceEntitlementStorageError>> {
-    // Query the min ID still in buffer for this feature
-    const records = await this.db
-      .select({
-        id: schema.usageRecords.id,
+  public async reset(): Promise<Result<void, UnPriceEntitlementStorageError>> {
+    try {
+      // try to flush
+      await this.flush()
+
+      // check if everything was flushed
+      const events = await this.db
+        .select({
+          count: count(),
+        })
+        .from(schema.usageRecords)
+        .then((e) => e[0])
+
+      const verification_events = await this.db
+        .select({
+          count: count(),
+        })
+        .from(schema.verifications)
+        .then((e) => e[0])
+
+      // if there are any events, do not delete
+      if ((events?.count ?? 0) !== 0 || (verification_events?.count ?? 0) !== 0) {
+        return Err(
+          new UnPriceEntitlementStorageError({
+            message: `Storage provider has ${events?.count} events and ${verification_events?.count} verification events, can't delete.`,
+          })
+        )
+      }
+    } catch (error) {
+      this.logger.error("error resetting storage provider", {
+        error: error instanceof Error ? error.message : "unknown error",
       })
-      .from(schema.usageRecords)
-      .where(
-        and(eq(schema.usageRecords.featureSlug, featureSlug), eq(schema.usageRecords.deleted, 0))
+
+      return Err(
+        new UnPriceEntitlementStorageError({
+          message: `Reset failed: ${error instanceof Error ? error.message : "unknown"}`,
+        })
       )
-      .orderBy(asc(schema.usageRecords.id)) // ULID sort = oldest first
-      .limit(1)
-
-    if (records.length === 0) {
-      return Ok(null)
     }
 
-    return Ok(records[0]!.id)
-  }
+    // we are setting the state so better do it inside a block concurrency
+    return await this.state.blockConcurrencyWhile(async () => {
+      try {
+        // clear the memoized states
+        this.memoizedStates.clear()
+        // delete all the states from the storage
+        await this.storage.deleteAll()
+        // set initialized to false
+        this.initialized = false
+        // initialize the storage provider again in case there are concurrent requests
+        await this.initialize()
 
-  /**
-   * Get unflushed usage from SQLite buffer
-   *
-   * Returns aggregated values for records still in the buffer
-   * (not yet flushed to Tinybird).
-   */
-  public async getUnflushedUsage(
-    featureSlug: string
-  ): Promise<
-    Result<
-      { sum: number; max: number; last: number | null; count: number },
-      UnPriceEntitlementStorageError
-    >
-  > {
-    // Query all unflushed records for this feature
-    const records = await this.db
-      .select({
-        usage: schema.usageRecords.usage,
-        id: schema.usageRecords.id,
-      })
-      .from(schema.usageRecords)
-      .where(eq(schema.usageRecords.featureSlug, featureSlug))
-      .orderBy(schema.usageRecords.id) // ULID sort = chronological sort
+        return Ok(undefined)
+      } catch (error) {
+        this.logger.error("error resetting storage provider", {
+          error: error instanceof Error ? error.message : "unknown error",
+        })
 
-    if (records.length === 0) {
-      return Ok({ sum: 0, max: 0, last: null, count: 0 })
-    }
-
-    return Ok({
-      sum: records.reduce((acc, r) => acc + (r.usage ? Number(r.usage) : 0), 0),
-      max: Math.max(...records.map((r) => (r.usage ? Number(r.usage) : 0))),
-      last: records[records.length - 1]!.usage ? Number(records[records.length - 1]!.usage) : null, // Last by ULID = most recent
-      count: records.length,
+        return Err(
+          new UnPriceEntitlementStorageError({
+            message: `Reset failed: ${error instanceof Error ? error.message : "unknown"}`,
+          })
+        )
+      }
     })
   }
 
@@ -473,7 +481,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       // transform the verifications to the format expected by the analytics
       const transformedEvents = verificationEvents.map((verification) => ({
         ...verification,
-        metadata: verification.metadata ? JSON.parse(verification.metadata) : null,
+        metadata: verification.metadata ? null : null,
         latency: verification.latency ? Number(verification.latency) : 0,
         deniedReason: verification.deniedReason ?? undefined,
       }))
@@ -481,11 +489,14 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       await this.analytics
         .ingestFeaturesVerification(transformedEvents)
         .catch((e) => {
-          this.logger.error(`Failed in ingestFeaturesVerification from do ${e.message}`, {
-            error: JSON.stringify(e),
-            customerId: transformedEvents[0]?.customerId,
-            projectId: transformedEvents[0]?.projectId,
-          })
+          this.logger.error(
+            `Failed in ingestFeaturesVerification from storage provider ${this.state.id.toString()} ${e.message}`,
+            {
+              error: JSON.stringify(e),
+              customerId: transformedEvents[0]?.customerId,
+              projectId: transformedEvents[0]?.projectId,
+            }
+          )
         })
         .then(async (data) => {
           const rows = data?.successful_rows ?? 0
@@ -508,7 +519,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
             const deleted = deletedResult.length
 
             this.logger.debug(
-              `deleted ${deleted} verifications from do ${this.state.id.toString()} (range: ${firstId}-${lastId})`,
+              `deleted ${deleted} verifications from storage provider ${this.state.id.toString()} (range: ${firstId}-${lastId})`,
               {
                 rows: total,
                 deleted,
@@ -516,7 +527,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
               }
             )
           } else {
-            this.logger.debug(
+            this.logger.warn(
               "the total of verifications sent to tinybird are not the same as the total of verifications in the db",
               {
                 total,
@@ -529,7 +540,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         })
     } catch (error) {
       this.logger.error(
-        `Failed to send verifications to Tinybird from do ${this.state.id.toString()} ${error instanceof Error ? error.message : "unknown error"}`,
+        `Failed to send verifications to Tinybird from storage provider ${this.state.id.toString()} ${error instanceof Error ? error.message : "unknown error"}`,
         {
           error: error instanceof Error ? JSON.stringify(error) : "unknown error",
           customerId: verificationEvents[0]?.customerId,
@@ -567,7 +578,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       if (!uniqueEvents.has(event.idempotenceKey)) {
         uniqueEvents.set(event.idempotenceKey, {
           ...event,
-          metadata: event.metadata ? JSON.parse(event.metadata) : {},
+          metadata: event.metadata ? JSON.parse(event.metadata) : null,
         })
       }
     }
@@ -580,7 +591,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           .ingestFeaturesUsage(deduplicatedEvents)
           .catch((e) => {
             this.logger.error(
-              `Failed to send ${deduplicatedEvents.length} events to Tinybird from do ${this.state.id.toString()}:`,
+              `Failed to send ${deduplicatedEvents.length} events to Tinybird from storage provider ${this.state.id.toString()}:`,
               {
                 error: e.message,
                 customerId: deduplicatedEvents[0]?.customerId,
@@ -604,20 +615,20 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
               // Delete by range - much more efficient, only 2 SQL variables
               const deletedResult = await this.db
                 .delete(schema.usageRecords)
-                .where(sql`id >= ${firstId} AND id <= ${lastId}`)
+                .where(sql`id >= ${lastId} AND id <= ${firstId}`)
                 .returning({ id: schema.usageRecords.id })
 
               const deleted = deletedResult.length
 
               this.logger.debug(
-                `deleted ${deleted} usage records from do ${this.state.id.toString()} (range: ${firstId}-${lastId})`,
+                `deleted ${deleted} usage records from storage provider ${this.state.id.toString()} (range: ${firstId}-${lastId})`,
                 {
                   count: events.length,
                   deleted,
                 }
               )
             } else {
-              this.logger.debug(
+              this.logger.warn(
                 "the total of usage records sent to tinybird are not the same as the total of usage records in the db",
                 {
                   total,
@@ -630,7 +641,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           })
       } catch (error) {
         this.logger.error(
-          `Failed to send events to Tinybird from do ${this.state.id.toString()}:`,
+          `Failed to send events to Tinybird from storage provider ${this.state.id.toString()}:`,
           {
             error: error instanceof Error ? error.message : "unknown error",
             customerId: deduplicatedEvents[0]?.customerId,
@@ -671,7 +682,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         verification,
       })
     } catch (error) {
-      this.logger.error(`SQLite DO ${this.state.id.toString()} flush failed`, {
+      this.logger.error(`Storage provider ${this.state.id.toString()} flush failed`, {
         error: error instanceof Error ? error.message : "unknown",
       })
       return Err(

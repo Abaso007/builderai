@@ -665,7 +665,7 @@ export class Analytics {
     })
       .then((usage) => usage.data ?? [])
       .catch((error) => {
-        this.logger.error("error getting reconciliation delta", {
+        this.logger.error("Error getting features usage cursor", {
           error: JSON.stringify(error),
           customerId,
           projectId,
@@ -676,6 +676,10 @@ export class Analytics {
         })
         return null
       })
+
+    if (result === null) {
+      return Err(new UnPriceAnalyticsError({ message: "Error getting features usage cursor" }))
+    }
 
     const delta = result?.[0]
 

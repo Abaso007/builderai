@@ -6,10 +6,11 @@ SCHEMA >
     `projectId` String,
     `customerId` String,
     `featureSlug` LowCardinality(String),
-    `max` AggregateFunction(max, Int32),
+    `max` AggregateFunction(max, Decimal64(4)),
     `count` AggregateFunction(count),
-    `sum` AggregateFunction(sum, Int32),
-    `last_during_period` AggregateFunction(argMax, Int32, Int64)
+    `sum` AggregateFunction(sum, Decimal64(4)),
+    `last_during_period` AggregateFunction(argMax, Decimal64(4), Int64),
+    `last_id` AggregateFunction(argMax, String, Int64)
 
 ENGINE AggregatingMergeTree
 ENGINE_PARTITION_KEY toYYYYMM(date)

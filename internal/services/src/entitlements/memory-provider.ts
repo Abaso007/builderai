@@ -291,4 +291,20 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
       )
     }
   }
+
+  async reset(): Promise<Result<void, UnPriceEntitlementStorageError>> {
+    try {
+      this.isInitialized()
+      this.states.clear()
+      this.usageRecords = []
+      this.verifications = []
+      return Ok(undefined)
+    } catch (error) {
+      return Err(
+        new UnPriceEntitlementStorageError({
+          message: `Reset failed: ${error instanceof Error ? error.message : "unknown"}`,
+        })
+      )
+    }
+  }
 }

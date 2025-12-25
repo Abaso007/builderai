@@ -113,6 +113,7 @@ export const reportUsageResultSchema = z.object({
   limit: z.number().optional(),
   usage: z.number().optional(),
   notifiedOverLimit: z.boolean().optional(),
+  remaining: z.number().optional(),
   deniedReason: deniedReasonSchema.optional(),
 })
 export type ReportUsageResult = z.infer<typeof reportUsageResultSchema>

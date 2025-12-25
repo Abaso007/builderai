@@ -9,6 +9,7 @@ import m0006 from './0006_tricky_squirrel_girl.sql';
 import m0007 from './0007_strange_jocasta.sql';
 import m0008 from './0008_fresh_wind_dancer.sql';
 import m0009 from './0009_fantastic_norrin_radd.sql';
+import m0010 from './0010_mysterious_inhumans.sql';
 
   export default {
     journal,
@@ -22,7 +23,8 @@ m0005,
 m0006,
 m0007,
 m0008,
-m0009
+m0009,
+m0010
     }
   }
   

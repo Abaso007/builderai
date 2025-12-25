@@ -5,6 +5,7 @@ import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
 import type {
   CurrentUsage,
+  EntitlementState,
   ReportUsageRequest,
   ReportUsageResult,
   VerificationResult,
@@ -237,6 +238,9 @@ export class DurableObjectUsagelimiter extends Server {
     return await this.entitlementService.getCurrentUsage(data)
   }
 
+  public async resetEntitlements(): Promise<Result<void, BaseError>> {
+    return await this.entitlementService.resetEntitlements()
+  }
   // when connected through websocket we can broadcast events to the client
   // realtime events are used to debug events in dashboard
   async broadcastEvents(data: {

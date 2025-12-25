@@ -95,7 +95,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
           requestId,
           environment: c.env.NODE_ENV,
           service: "api",
-          logLevel: c.env.VERCEL_ENV === "production" ? "error" : "warn",
+          logLevel: c.env.VERCEL_ENV === "production" ? "error" : "info",
           defaultFields: {
             isolateId,
             isolateCreatedAt,

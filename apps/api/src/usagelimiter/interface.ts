@@ -30,7 +30,7 @@ export interface UsageLimiter {
     data: GetEntitlementsRequest
   ): Promise<Result<EntitlementState[], BaseError>>
   getCurrentUsage(data: GetUsageRequest): Promise<Result<CurrentUsage, BaseError>>
-  prewarmEntitlements(params: { customerId: string; projectId: string; now: number }): Promise<
+  resetEntitlements(params: { customerId: string; projectId: string }): Promise<
     Result<void, BaseError>
   >
 }

@@ -79,18 +79,12 @@ export const featureUsageSchemaV1 = z.object({
   id: z.string(),
   idempotenceKey: z.string(),
   featureSlug: z.string(),
-  customerId: z.string(),
-  timestamp: z
-    .number()
-    .default(Date.now())
-    .describe("timestamp of when this usage record should be billed"),
-  projectId: z.string(),
-  usage: stringToUInt32,
-  createdAt: z
-    .number()
-    .default(Date.now())
-    .describe("timestamp of when this usage record was created"),
   requestId: z.string(),
+  projectId: z.string(),
+  customerId: z.string(),
+  timestamp: z.number().describe("timestamp of when this usage record should be billed"),
+  usage: stringToUInt32,
+  createdAt: z.number().describe("timestamp of when this usage record was created"),
   deleted: z.number().int().min(0).max(1).default(0),
   metadata: metadataSchema,
 })
