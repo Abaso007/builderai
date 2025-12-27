@@ -3,7 +3,7 @@ import type { Analytics } from "@unprice/analytics"
 import type { Stats } from "@unprice/analytics/utils"
 import type { Database } from "@unprice/db"
 import type {
-  EntitlementState,
+  MinimalEntitlement,
   ReportUsageRequest,
   ReportUsageResult,
   VerificationResult,
@@ -15,6 +15,10 @@ import type { Logger } from "@unprice/logging"
 import type { Cache } from "@unprice/services/cache"
 import type { CustomerService } from "@unprice/services/customers"
 import type { UnPriceCustomerError } from "@unprice/services/customers"
+import {
+  EntitlementService,
+  MemoryEntitlementStorageProvider,
+} from "@unprice/services/entitlements"
 import type { Metrics } from "@unprice/services/metrics"
 import type { DurableObjectProject } from "~/project/do"
 import type { DurableObjectUsagelimiter } from "./do"
@@ -193,16 +197,30 @@ export class UsageLimiterService implements UsageLimiter {
 
   public async getActiveEntitlements(
     data: GetEntitlementsRequest
-  ): Promise<Result<EntitlementState[], BaseError>> {
-    const durableObject = this.getStub(
-      this.getDurableObjectCustomerId(data.customerId, data.projectId)
-    )
+  ): Promise<Result<MinimalEntitlement[], BaseError>> {
+    // we don't need storage for this so we don't need to call the DO
+    // instead we use the entitlement service
+    const entitlementService = new EntitlementService({
+      db: this.db,
+      storage: new MemoryEntitlementStorageProvider({ logger: this.logger }), // we don't need storage but we need to pass it to the service
+      logger: this.logger,
+      analytics: this.analytics,
+      waitUntil: this.waitUntil,
+      cache: this.cache,
+      metrics: this.metrics,
+    })
 
-    // TODO: we can cache this to avoid calling the DO again
-    const { val: entitlements, err } = await durableObject.getActiveEntitlements(data)
+    const { val: entitlements, err } = await entitlementService.getActiveEntitlements({
+      customerId: data.customerId,
+      projectId: data.projectId,
+      opts: {
+        now: data.now,
+        skipCache: false,
+      },
+    })
 
     if (err) {
-      throw err
+      return Err(err)
     }
 
     return Ok(entitlements)

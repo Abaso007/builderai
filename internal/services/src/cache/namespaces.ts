@@ -17,6 +17,7 @@ import type {
   CustomerPaymentMethod,
   Entitlement,
   Feature,
+  MinimalEntitlement,
   PlanVersionApi,
   Project,
   ReportUsageResult,
@@ -42,6 +43,7 @@ export type CacheNamespaces = {
   customerSubscription: SubscriptionCache | null
   customer: CustomerCache | null
   customerEntitlement: Entitlement | null
+  customerEntitlements: MinimalEntitlement[] | null
   customerPaymentMethods: CustomerPaymentMethod[] | null
   projectFeatures: ProjectFeatureCache | null
   idempotentRequestUsageByHash: ReportUsageResult | null

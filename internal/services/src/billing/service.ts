@@ -16,11 +16,14 @@ import {
   newId,
 } from "@unprice/db/utils"
 import {
+  type AggregationMethod,
   type CalculatedPrice,
   type CollectionMethod,
   type Currency,
   type Customer,
+  type Entitlement,
   type EntitlementState,
+  type FeatureType,
   type InvoiceItemExtended,
   type InvoiceStatus,
   type PaymentProvider,
@@ -1042,8 +1045,8 @@ export class BillingService {
         // Batch fetch usage data for all usage features in this cycle
         const usageFeaturesToFetch: Array<{
           featureSlug: string
-          aggregationMethod: string
-          featureType: string
+          aggregationMethod: AggregationMethod
+          featureType: FeatureType
         }> = []
 
         const featureMetadata = new Map<
@@ -1051,7 +1054,7 @@ export class BillingService {
           {
             grants: typeof allGrants.grants
             items: InvoiceItemExtended[]
-            entitlementState: Omit<EntitlementState, "id">
+            entitlement: Omit<Entitlement, "id">
           }
         >()
 
@@ -1074,27 +1077,25 @@ export class BillingService {
             continue
           }
 
-          const entitlementState = computedStateResult.val
+          const entitlement = computedStateResult.val
 
           featureMetadata.set(featureSlug, {
             grants: featureGrants,
             items: featureItems,
-            entitlementState,
+            entitlement,
           })
 
-          if (entitlementState.featureType === "usage") {
+          if (entitlement.featureType === "usage") {
             usageFeaturesToFetch.push({
               featureSlug,
-              aggregationMethod: entitlementState.aggregationMethod,
-              featureType: entitlementState.featureType,
+              aggregationMethod: entitlement.aggregationMethod,
+              featureType: entitlement.featureType,
             })
           }
         }
 
         // Batch fetch usage data for all usage features in this cycle
-        let batchUsageData:
-          | { featureSlug: string; usage: number; accumulatedUsage: number }[]
-          | undefined
+        let batchUsageData: { featureSlug: string; usage: number }[] | undefined
 
         if (usageFeaturesToFetch.length > 0) {
           const { err: usageErr, val: fetchedUsageData } =
@@ -2008,17 +2009,17 @@ export class BillingService {
    * Handles both 'now' and explicit startAt/endAt scenarios.
    */
   private calculateBillingWindow({
-    entitlementState,
+    entitlement,
     now,
     startAt,
     endAt,
   }: {
-    entitlementState: Omit<EntitlementState, "id">
+    entitlement: Omit<Entitlement, "id">
     now?: number
     startAt?: number
     endAt?: number
   }): Result<{ billingStartAt: number; billingEndAt: number }, UnPriceBillingError> {
-    const resetConfig = entitlementState.resetConfig
+    const resetConfig = entitlement.resetConfig
 
     // If explicit dates provided, use them
     if (startAt !== undefined && endAt !== undefined) {
@@ -2037,8 +2038,8 @@ export class BillingService {
       if (resetConfig) {
         const cycleWindow = calculateCycleWindow({
           now,
-          effectiveStartDate: entitlementState.effectiveAt,
-          effectiveEndDate: entitlementState.expiresAt,
+          effectiveStartDate: entitlement.effectiveAt,
+          effectiveEndDate: entitlement.expiresAt,
           config: {
             name: resetConfig.name,
             interval: resetConfig.resetInterval,
@@ -2058,8 +2059,9 @@ export class BillingService {
       }
 
       // Fallback: use grant effective dates
-      const billingStartAt = entitlementState.effectiveAt
-      const billingEndAt = entitlementState.expiresAt ?? Number.POSITIVE_INFINITY
+      const billingStartAt = entitlement.effectiveAt
+      // max int64 that represent the max date
+      const billingEndAt = entitlement.expiresAt ?? new Date("9999-12-31").getTime()
 
       if (billingStartAt >= billingEndAt) {
         return Err(
@@ -2084,14 +2086,13 @@ export class BillingService {
    * This method handles fetching usage data (if not provided) and computing total usage amounts.
    * Can be reused across calculateFeaturePrice and estimatePriceCurrentUsage.
    *
-   * @returns Object containing usage information including currentCycleUsage, accumulatedUsage,
-   *          totalUsageAmount, and isUsageFeature flag
+   * @returns Object containing usage information including usage, and isUsageFeature flag
    */
   private async calculateUsageOfFeatures({
     projectId,
     customerId,
     featureSlug,
-    entitlementState,
+    entitlement,
     billingStartAt,
     billingEndAt,
     usageData: providedUsageData,
@@ -2099,16 +2100,14 @@ export class BillingService {
     projectId: string
     customerId: string
     featureSlug: string
-    entitlementState: Omit<EntitlementState, "id">
+    entitlement: Omit<Entitlement, "id">
     billingStartAt: number
     billingEndAt: number
-    usageData?: { featureSlug: string; usage: number; accumulatedUsage: number }[]
+    usageData?: { featureSlug: string; usage: number }[]
   }): Promise<
     Result<
       {
-        currentCycleUsage: number
-        accumulatedUsage: number
-        totalUsageAmount: number
+        usage: number
         isUsageFeature: boolean
       },
       UnPriceBillingError
@@ -2123,22 +2122,20 @@ export class BillingService {
       )
     }
 
-    const featureType = entitlementState.featureType
-    const aggregationMethod = entitlementState.aggregationMethod
+    const featureType = entitlement.featureType
+    const aggregationMethod = entitlement.aggregationMethod
     const isUsageFeature = featureType !== "flat"
 
     // For non-usage features, return early with zero usage
     if (!isUsageFeature) {
       return Ok({
-        currentCycleUsage: 0,
-        accumulatedUsage: 0,
-        totalUsageAmount: 0,
+        usage: 0,
         isUsageFeature: false,
       })
     }
 
     // Use provided usage data if available, otherwise fetch it
-    let usageData: { featureSlug: string; usage: number; accumulatedUsage: number }[]
+    let usageData: { featureSlug: string; usage: number }[]
     if (providedUsageData && providedUsageData.length > 0) {
       usageData = providedUsageData
     } else {
@@ -2177,20 +2174,9 @@ export class BillingService {
     // Extract usage values for the specific feature
     const featureUsage = usageData.find((u) => u.featureSlug === featureSlug)
     const currentCycleUsage = featureUsage?.usage ?? 0
-    const accumulatedUsage = featureUsage?.accumulatedUsage ?? 0
-
-    // Calculate total usage amount using grants manager
-    const { usage: totalUsageAmount } = this.grantsManager.calculateUsage({
-      aggregationMethod,
-      usage: 0,
-      accumulatedUsage,
-      currentCycleUsage,
-    })
 
     return Ok({
-      currentCycleUsage,
-      accumulatedUsage,
-      totalUsageAmount,
+      usage: currentCycleUsage,
       isUsageFeature: true,
     })
   }
@@ -2373,7 +2359,7 @@ export class BillingService {
           grants?: z.infer<typeof grantSchemaExtended>[]
           startAt?: never
           endAt?: never
-          usageData?: { featureSlug: string; usage: number; accumulatedUsage: number }[]
+          usageData?: { featureSlug: string; usage: number }[]
         }
       | {
           projectId: string
@@ -2383,7 +2369,7 @@ export class BillingService {
           endAt: number
           grants?: z.infer<typeof grantSchemaExtended>[]
           now?: never
-          usageData?: { featureSlug: string; usage: number; accumulatedUsage: number }[]
+          usageData?: { featureSlug: string; usage: number }[]
         }
   ): Promise<Result<ComputeCurrentUsageResult[], UnPriceBillingError>> {
     const {
@@ -2453,11 +2439,11 @@ export class BillingService {
       return Err(new UnPriceBillingError({ message: computedStateResult.err.message }))
     }
 
-    const entitlementState = computedStateResult.val
+    const entitlement = computedStateResult.val
 
     // Calculate billing window using extracted method
     const billingWindowResult = this.calculateBillingWindow({
-      entitlementState,
+      entitlement,
       now,
       startAt,
       endAt,
@@ -2474,7 +2460,7 @@ export class BillingService {
       projectId,
       customerId,
       featureSlug,
-      entitlementState,
+      entitlement,
       billingStartAt,
       billingEndAt,
       usageData: providedUsageData,
@@ -2484,10 +2470,10 @@ export class BillingService {
       return Err(usageResult.err)
     }
 
-    const { totalUsageAmount, isUsageFeature } = usageResult.val
+    const { usage, isUsageFeature } = usageResult.val
 
     // Track remaining usage for waterfall attribution
-    let remainingUsage = totalUsageAmount
+    let remainingUsage = usage
     const result: ComputeCurrentUsageResult[] = []
 
     // Waterfall attribution per priority from highest to lowest
@@ -2503,7 +2489,7 @@ export class BillingService {
         grant,
         billingStartAt,
         billingEndAt,
-        resetConfig: entitlementState.resetConfig,
+        resetConfig: entitlement.resetConfig,
         remainingUsage,
         featureSlug,
       })
@@ -2616,8 +2602,8 @@ export class BillingService {
     // Pre-compute entitlement states and billing windows for all features to batch fetch usage data
     const usageFeaturesToFetch: Array<{
       featureSlug: string
-      aggregationMethod: string
-      featureType: string
+      aggregationMethod: AggregationMethod
+      featureType: FeatureType
       billingStartAt: number
       billingEndAt: number
     }> = []
@@ -2626,7 +2612,7 @@ export class BillingService {
       string,
       {
         grants: typeof grantsResult.grants
-        entitlementState: Omit<EntitlementState, "id">
+        entitlement: Omit<Entitlement, "id">
         billingStartAt: number
         billingEndAt: number
       }
@@ -2648,11 +2634,11 @@ export class BillingService {
         continue
       }
 
-      const entitlementState = computedStateResult.val
+      const entitlement = computedStateResult.val
 
       // Calculate billing window using extracted method
       const billingWindowResult = this.calculateBillingWindow({
-        entitlementState,
+        entitlement,
         now,
       })
 
@@ -2668,17 +2654,17 @@ export class BillingService {
 
       featureMetadata.set(featureSlug, {
         grants: featureGrants,
-        entitlementState,
+        entitlement,
         billingStartAt,
         billingEndAt,
       })
 
       // Collect usage features for batch fetching
-      if (entitlementState.featureType !== "flat") {
+      if (entitlement.featureType !== "flat") {
         usageFeaturesToFetch.push({
           featureSlug,
-          aggregationMethod: entitlementState.aggregationMethod,
-          featureType: entitlementState.featureType,
+          aggregationMethod: entitlement.aggregationMethod,
+          featureType: entitlement.featureType,
           billingStartAt,
           billingEndAt,
         })
@@ -2687,10 +2673,7 @@ export class BillingService {
 
     // Batch fetch usage data for all usage features
     // Group by billing window to make optimal queries
-    const usageDataByWindow = new Map<
-      string,
-      { featureSlug: string; usage: number; accumulatedUsage: number }[]
-    >()
+    const usageDataByWindow = new Map<string, { featureSlug: string; usage: number }[]>()
 
     if (usageFeaturesToFetch.length > 0) {
       // Group features by billing window to minimize queries
@@ -2736,11 +2719,9 @@ export class BillingService {
     // Process each feature - pass grants and usage data to avoid duplicate fetching
     for (const [featureSlug, metadata] of featureMetadata.entries()) {
       // Get usage data for this feature's billing window if it's a usage feature
-      let usageDataForFeature:
-        | { featureSlug: string; usage: number; accumulatedUsage: number }[]
-        | undefined
+      let usageDataForFeature: { featureSlug: string; usage: number }[] | undefined
 
-      if (metadata.entitlementState.featureType === "usage") {
+      if (metadata.entitlement.featureType === "usage") {
         const windowKey = `${metadata.billingStartAt}-${metadata.billingEndAt}`
         usageDataForFeature = usageDataByWindow.get(windowKey)
       }

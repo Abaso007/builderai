@@ -50,6 +50,13 @@
       "when": 1764457531377,
       "tag": "0006_bent_johnny_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1766779411154,
+      "tag": "0007_chemical_starhawk",
+      "breakpoints": true
     }
   ]
 }

@@ -5,7 +5,6 @@ import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
 import type {
   CurrentUsage,
-  EntitlementState,
   ReportUsageRequest,
   ReportUsageResult,
   VerificationResult,
@@ -220,14 +219,6 @@ export class DurableObjectUsagelimiter extends Server {
     await this.ctx.storage.put("config", {
       ...config,
     })
-  }
-
-  public async getActiveEntitlements(data: {
-    customerId: string
-    projectId: string
-    now: number
-  }): Promise<Result<EntitlementState[], BaseError>> {
-    return await this.entitlementService.getActiveEntitlements(data)
   }
 
   public async getCurrentUsage(data: {

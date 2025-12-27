@@ -50,8 +50,8 @@ async function generateData(customerId: string, async?: boolean) {
   }
 
   for (let i = 0; i < 100; i++) {
-    // ramdom usage between 1 and 100
-    const usage = Math.floor(Math.random() * 100) + 1
+    // ramdom usage between -10 and 100 (negative usage is allowed)
+    const usage = Math.floor(Math.random() * 200) - 10
     // pick a random feature slug
     const featureSlug = entitlements[Math.floor(Math.random() * entitlements.length)]?.featureSlug!
 

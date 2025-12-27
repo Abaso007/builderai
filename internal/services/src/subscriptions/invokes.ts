@@ -192,12 +192,6 @@ export async function renewSubscription(opts: {
     //   projectId: subscription.projectId,
     // })
 
-    // // prewarm the entitlements cache and the DO
-    // await unprice.customers.prewarmEntitlements({
-    //   customerId: subscription.customerId,
-    //   projectId: subscription.projectId,
-    // })
-
     // update subscription for ui purposes
     const subscriptionUpdated = await db
       .update(subscriptions)

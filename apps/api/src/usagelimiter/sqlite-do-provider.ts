@@ -481,7 +481,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       // transform the verifications to the format expected by the analytics
       const transformedEvents = verificationEvents.map((verification) => ({
         ...verification,
-        metadata: verification.metadata ? null : null,
+        metadata: JSON.parse(verification.metadata ?? "{}"),
         latency: verification.latency ? Number(verification.latency) : 0,
         deniedReason: verification.deniedReason ?? undefined,
       }))
@@ -504,7 +504,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           const total = rows + quarantined
 
           if (quarantined > 0) {
-            this.logger.warn("quarantined verifications", {
+            this.logger.debug("quarantined verifications", {
               quarantined,
             })
           }

@@ -15,6 +15,7 @@ import {
   type Entitlement,
   type EntitlementState,
   type MeterState,
+  type MinimalEntitlement,
   type ReportUsageRequest,
   type ReportUsageResult,
   type VerificationResult,
@@ -343,33 +344,101 @@ export class EntitlementService {
     return Ok(undefined)
   }
 
-  public async getActiveEntitlements(params: {
+  /* we cannot trust in the storage since it could be not initilize yet.
+   */
+  /**
+   * Get active entitlements for a customer
+   * @param customerId - Customer id
+   * @param projectId - Project id
+   * @param now - Current time
+   * @param opts - Options
+   * @returns Active entitlements
+   */
+  public async getActiveEntitlements({
+    customerId,
+    projectId,
+    opts,
+  }: {
     customerId: string
     projectId: string
-    now: number
-  }): Promise<
-    Result<EntitlementState[], UnPriceEntitlementError | UnPriceEntitlementStorageError>
-  > {
-    const { customerId, projectId, now } = params
-    const entitlements = await this.storage.getAll()
+    opts?: {
+      skipCache?: boolean // skip cache to force revalidation
+      now?: number
+    }
+  }): Promise<Result<MinimalEntitlement[], FetchError | UnPriceEntitlementError>> {
+    const cacheKey = `${projectId}:${customerId}`
 
-    if (entitlements.err) {
-      return Err(new UnPriceEntitlementError({ message: entitlements.err.message }))
+    if (opts?.skipCache) {
+      this.logger.debug("skipping cache for getActiveEntitlements and loading from DB", {
+        customerId,
+        projectId,
+      })
     }
 
-    // filter entitlements by customerId and projectId
-    const validatedEntitlements = entitlements.val.filter(
-      (entitlement) => entitlement.customerId === customerId && entitlement.projectId === projectId
-    )
+    // first try to get the entitlement from cache, if not found try to get it from DO,
+    const { val, err } = opts?.skipCache
+      ? await wrapResult(
+          this.getActiveEntitlementsFromDB({
+            customerId,
+            projectId,
+          }),
+          (err) =>
+            new FetchError({
+              message: `unable to query entitlements from db in getActiveEntitlementsFromDB - ${err.message}`,
+              retry: false,
+              context: {
+                error: err.message,
+                url: "",
+                customerId: customerId,
+                projectId: projectId,
+                method: "getActiveEntitlementsFromDB",
+              },
+            })
+        )
+      : await retry(
+          3,
+          async () =>
+            this.cache.customerEntitlements.swr(cacheKey, () =>
+              this.getActiveEntitlementsFromDB({
+                customerId,
+                projectId,
+              })
+            ),
+          (attempt, err) => {
+            this.logger.warn("Failed to fetch entitlements data from cache, retrying...", {
+              customerId: customerId,
+              projectId: projectId,
+              method: "getActiveEntitlementsFromDB",
+              attempt,
+              error: err.message,
+            })
+          }
+        )
 
-    // validate effective at and expires at
-    const activeEntitlements = validatedEntitlements.filter(
-      (entitlement) =>
-        entitlement.effectiveAt <= now &&
-        (entitlement.expiresAt === null || entitlement.expiresAt > now)
-    )
+    if (err) {
+      return Err(
+        new FetchError({
+          message: err.message,
+          retry: true,
+          cause: err,
+        })
+      )
+    }
 
-    return Ok(activeEntitlements)
+    // set the cache
+    if (!opts?.skipCache) {
+      this.waitUntil(this.cache.customerEntitlements.set(cacheKey, val ?? null))
+    }
+
+    if (!val || val.length === 0) {
+      return Err(
+        new UnPriceEntitlementError({
+          message: "entitlements not found",
+        })
+      )
+    }
+
+    return Ok(val)
   }
 
   /**
@@ -971,6 +1040,36 @@ export class EntitlementService {
   }
 
   /**
+   * Load full entitlement from DB
+   * @param customerId - Customer id
+   * @param projectId - Project id
+   * @param featureSlug - Feature slug
+   * @param now - Current time
+   * @returns Entitlement state
+   */
+  private async getActiveEntitlementsFromDB({
+    customerId,
+    projectId,
+  }: {
+    customerId: string
+    projectId: string
+  }): Promise<MinimalEntitlement[] | null> {
+    const entitlements = await this.db.query.entitlements.findMany({
+      columns: {
+        id: true,
+        featureSlug: true,
+        effectiveAt: true,
+        expiresAt: true,
+      },
+      where: (e, { and, eq }) => and(eq(e.customerId, customerId), eq(e.projectId, projectId)),
+    })
+
+    if (!entitlements) return null
+
+    return entitlements
+  }
+
+  /**
    * Get active entitlements for a customer
    * @param customerId - Customer id
    * @param projectId - Project id
@@ -1080,8 +1179,6 @@ export class EntitlementService {
       watermark: opts?.now ?? Date.now(),
     })
 
-    console.log("meterState", meterState)
-
     if (meterStateErr) {
       return Err(new UnPriceEntitlementError({ message: meterStateErr.message }))
     }
@@ -1186,7 +1283,7 @@ export class EntitlementService {
     if (entitlementsResult.err) {
       return Err(entitlementsResult.err)
     }
-    x
+
     if (usageEstimatesResult.err) {
       return Err(usageEstimatesResult.err)
     }

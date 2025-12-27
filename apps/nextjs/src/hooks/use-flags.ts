@@ -42,12 +42,3 @@ export function useIsMain(): boolean {
 
   return isMain
 }
-
-export function useEntitlements(): {
-  [x: string]: boolean
-}[] {
-  const [data] = useAtom(flagsAtom)
-  const { entitlements } = data
-
-  return entitlements
-}

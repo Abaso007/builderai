@@ -445,9 +445,8 @@ export class GrantsManager {
         })
 
         if (entitlementResult.err) {
-          this.logger.error("Failed to compute entitlement for feature", {
+          this.logger.error(entitlementResult.err.message, {
             featureSlug: featureSlugItem,
-            error: entitlementResult.err.message,
             customerId,
             projectId,
           })
@@ -673,17 +672,22 @@ export class GrantsManager {
       .values(entitlementData)
       .onConflictDoUpdate({
         target: [entitlements.projectId, entitlements.customerId, entitlements.featureSlug],
-        set: {
-          ...entitlementData,
-        },
+        set: entitlementData,
       })
       .returning()
-      .then((rows) => rows[0])
+      .catch((error) => {
+        this.logger.error(`Error computeEntitlementFromGrants: ${error.message}`, {
+          error: JSON.stringify(error),
+          entitlementId: entitlementData.id,
+        })
+        return null
+      })
+      .then((rows) => rows?.[0] ?? null)
 
     if (!newEntitlement) {
       return Err(
         new UnPriceGrantError({
-          message: `Failed to create entitlement for feature ${computedState.featureSlug}`,
+          message: `Failed to compute entitlement from grants for feature slug: ${computedState.featureSlug}`,
           subjectId: customerId,
         })
       )

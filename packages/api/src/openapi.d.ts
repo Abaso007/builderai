@@ -32,8 +32,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * get entitlements
-         * @description Get entitlements for a customer
+         * get minimal entitlements
+         * @description Get minimal entitlements for a customer
          */
         get: operations["customer.getEntitlements"];
         put?: never;
@@ -164,7 +164,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/customer/prewarm-entitlements": {
+    "/v1/customer/reset-entitlements": {
         parameters: {
             query?: never;
             header?: never;
@@ -174,10 +174,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * prewarm entitlements
-         * @description Prewarm entitlements for a customer
+         * reset entitlements
+         * @description Reset entitlements for a customer
          */
-        post: operations["customer.prewarmEntitlements"];
+        post: operations["customer.resetEntitlements"];
         delete?: never;
         options?: never;
         head?: never;
@@ -759,8 +759,9 @@ export interface operations {
                         limit?: number;
                         usage?: number;
                         notifiedOverLimit?: boolean;
+                        remaining?: number;
                         /** @enum {string} */
-                        deniedReason?: "ERROR_SYNCING_ENTITLEMENTS_LAST_USAGE" | "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE" | "ENTITLEMENT_OUTSIDE_OF_CURRENT_BILLING_WINDOW" | "ERROR_RESETTING_DO" | "RATE_LIMITED" | "ENTITLEMENT_NOT_FOUND" | "LIMIT_EXCEEDED" | "ENTITLEMENT_EXPIRED" | "ENTITLEMENT_NOT_ACTIVE" | "DO_NOT_INITIALIZED" | "INCORRECT_USAGE_REPORTING" | "ERROR_INSERTING_USAGE_DO" | "ERROR_INSERTING_VERIFICATION_DO" | "PROJECT_DISABLED" | "CUSTOMER_DISABLED" | "SUBSCRIPTION_DISABLED" | "FETCH_ERROR" | "SUBSCRIPTION_ERROR" | "ENTITLEMENT_ERROR" | "SUBSCRIPTION_EXPIRED" | "NO_DEFAULT_PLAN_FOUND" | "SUBSCRIPTION_NOT_ACTIVE" | "PHASE_NOT_CREATED" | "FEATURE_NOT_FOUND_IN_SUBSCRIPTION" | "CUSTOMER_NOT_FOUND" | "CUSTOMER_ENTITLEMENTS_NOT_FOUND" | "FEATURE_TYPE_NOT_SUPPORTED" | "PROJECT_DISABLED" | "CUSTOMER_DISABLED" | "PLAN_VERSION_NOT_PUBLISHED" | "PLAN_VERSION_NOT_ACTIVE" | "PAYMENT_PROVIDER_CONFIG_NOT_FOUND" | "ENTITLEMENT_EXPIRED" | "ENTITLEMENT_NOT_ACTIVE" | "CUSTOMER_SESSION_NOT_CREATED" | "CUSTOMER_SESSION_NOT_FOUND" | "PLAN_VERSION_NOT_FOUND" | "PAYMENT_PROVIDER_ERROR" | "SUBSCRIPTION_NOT_CREATED" | "CUSTOMER_NOT_CREATED" | "SUBSCRIPTION_NOT_CANCELED" | "CUSTOMER_PHASE_NOT_FOUND" | "CURRENCY_MISMATCH" | "BILLING_INTERVAL_MISMATCH" | "ENTITLEMENT_NOT_FOUND" | "SUBSCRIPTION_NOT_FOUND" | "INVALID_ENTITLEMENT_TYPE" | "NO_ACTIVE_PHASE_FOUND";
+                        deniedReason?: "INVALID_USAGE" | "ERROR_SYNCING_ENTITLEMENTS_LAST_USAGE" | "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE" | "ENTITLEMENT_OUTSIDE_OF_CURRENT_BILLING_WINDOW" | "ERROR_RESETTING_DO" | "RATE_LIMITED" | "ENTITLEMENT_NOT_FOUND" | "LIMIT_EXCEEDED" | "ENTITLEMENT_EXPIRED" | "ENTITLEMENT_NOT_ACTIVE" | "DO_NOT_INITIALIZED" | "INCORRECT_USAGE_REPORTING" | "ERROR_INSERTING_USAGE_DO" | "ERROR_INSERTING_VERIFICATION_DO" | "PROJECT_DISABLED" | "CUSTOMER_DISABLED" | "SUBSCRIPTION_DISABLED" | "FETCH_ERROR" | "SUBSCRIPTION_ERROR" | "ENTITLEMENT_ERROR" | "SUBSCRIPTION_EXPIRED" | "NO_DEFAULT_PLAN_FOUND" | "SUBSCRIPTION_NOT_ACTIVE" | "PHASE_NOT_CREATED" | "FEATURE_NOT_FOUND_IN_SUBSCRIPTION" | "CUSTOMER_NOT_FOUND" | "CUSTOMER_ENTITLEMENTS_NOT_FOUND" | "FEATURE_TYPE_NOT_SUPPORTED" | "PROJECT_DISABLED" | "CUSTOMER_DISABLED" | "PLAN_VERSION_NOT_PUBLISHED" | "PLAN_VERSION_NOT_ACTIVE" | "PAYMENT_PROVIDER_CONFIG_NOT_FOUND" | "ENTITLEMENT_EXPIRED" | "ENTITLEMENT_NOT_ACTIVE" | "CUSTOMER_SESSION_NOT_CREATED" | "CUSTOMER_SESSION_NOT_FOUND" | "PLAN_VERSION_NOT_FOUND" | "PAYMENT_PROVIDER_ERROR" | "SUBSCRIPTION_NOT_CREATED" | "CUSTOMER_NOT_CREATED" | "SUBSCRIPTION_NOT_CANCELED" | "CUSTOMER_PHASE_NOT_FOUND" | "CURRENCY_MISMATCH" | "BILLING_INTERVAL_MISMATCH" | "ENTITLEMENT_NOT_FOUND" | "SUBSCRIPTION_NOT_FOUND" | "INVALID_ENTITLEMENT_TYPE" | "NO_ACTIVE_PHASE_FOUND";
                     };
                 };
             };
@@ -849,7 +850,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The result of the get entitlements */
+            /** @description The result of the get minimal entitlements */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -857,48 +858,9 @@ export interface operations {
                 content: {
                     "application/json": {
                         id: string;
-                        customerId: string;
-                        projectId: string;
                         featureSlug: string;
-                        /** @enum {string} */
-                        featureType: "flat" | "tier" | "package" | "usage";
-                        /** @enum {string} */
-                        mergingPolicy: "sum" | "max" | "min" | "replace";
-                        grants: {
-                            id: string;
-                            /** @enum {string} */
-                            type: "subscription" | "manual" | "promotion" | "trial" | "addon";
-                            subjectType: string;
-                            subjectId: string;
-                            priority: number;
-                            effectiveAt: number;
-                            expiresAt: number | null;
-                            limit: number | null;
-                            realtime: boolean;
-                            allowOverage: boolean;
-                            featurePlanVersionId: string;
-                        }[];
-                        version: string;
-                        computedAt: number;
-                        currentCycleUsage: string;
-                        accumulatedUsage: string;
-                        /** @enum {string} */
-                        aggregationMethod: "sum" | "sum_all" | "last_during_period" | "count" | "count_all" | "max" | "max_all";
                         effectiveAt: number;
                         expiresAt: number | null;
-                        limit: number | null;
-                        resetConfig: {
-                            name: string;
-                            /** @enum {string} */
-                            resetInterval: "month" | "year" | "week" | "day" | "minute" | "onetime";
-                            resetIntervalCount: number;
-                            resetAnchor: number;
-                            /** @enum {string} */
-                            planType: "recurring" | "onetime";
-                        } | null;
-                        allowOverage: boolean;
-                        nextRevalidateAt: number;
-                        lastSyncAt: number;
                     }[];
                 };
             };
@@ -1027,7 +989,7 @@ export interface operations {
                         allowed: boolean;
                         message?: string;
                         /** @enum {string} */
-                        deniedReason?: "ERROR_SYNCING_ENTITLEMENTS_LAST_USAGE" | "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE" | "ENTITLEMENT_OUTSIDE_OF_CURRENT_BILLING_WINDOW" | "ERROR_RESETTING_DO" | "RATE_LIMITED" | "ENTITLEMENT_NOT_FOUND" | "LIMIT_EXCEEDED" | "ENTITLEMENT_EXPIRED" | "ENTITLEMENT_NOT_ACTIVE" | "DO_NOT_INITIALIZED" | "INCORRECT_USAGE_REPORTING" | "ERROR_INSERTING_USAGE_DO" | "ERROR_INSERTING_VERIFICATION_DO" | "PROJECT_DISABLED" | "CUSTOMER_DISABLED" | "SUBSCRIPTION_DISABLED" | "FETCH_ERROR" | "SUBSCRIPTION_ERROR" | "ENTITLEMENT_ERROR" | "SUBSCRIPTION_EXPIRED" | "NO_DEFAULT_PLAN_FOUND" | "SUBSCRIPTION_NOT_ACTIVE" | "PHASE_NOT_CREATED" | "FEATURE_NOT_FOUND_IN_SUBSCRIPTION" | "CUSTOMER_NOT_FOUND" | "CUSTOMER_ENTITLEMENTS_NOT_FOUND" | "FEATURE_TYPE_NOT_SUPPORTED" | "PROJECT_DISABLED" | "CUSTOMER_DISABLED" | "PLAN_VERSION_NOT_PUBLISHED" | "PLAN_VERSION_NOT_ACTIVE" | "PAYMENT_PROVIDER_CONFIG_NOT_FOUND" | "ENTITLEMENT_EXPIRED" | "ENTITLEMENT_NOT_ACTIVE" | "CUSTOMER_SESSION_NOT_CREATED" | "CUSTOMER_SESSION_NOT_FOUND" | "PLAN_VERSION_NOT_FOUND" | "PAYMENT_PROVIDER_ERROR" | "SUBSCRIPTION_NOT_CREATED" | "CUSTOMER_NOT_CREATED" | "SUBSCRIPTION_NOT_CANCELED" | "CUSTOMER_PHASE_NOT_FOUND" | "CURRENCY_MISMATCH" | "BILLING_INTERVAL_MISMATCH" | "ENTITLEMENT_NOT_FOUND" | "SUBSCRIPTION_NOT_FOUND" | "INVALID_ENTITLEMENT_TYPE" | "NO_ACTIVE_PHASE_FOUND";
+                        deniedReason?: "INVALID_USAGE" | "ERROR_SYNCING_ENTITLEMENTS_LAST_USAGE" | "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE" | "ENTITLEMENT_OUTSIDE_OF_CURRENT_BILLING_WINDOW" | "ERROR_RESETTING_DO" | "RATE_LIMITED" | "ENTITLEMENT_NOT_FOUND" | "LIMIT_EXCEEDED" | "ENTITLEMENT_EXPIRED" | "ENTITLEMENT_NOT_ACTIVE" | "DO_NOT_INITIALIZED" | "INCORRECT_USAGE_REPORTING" | "ERROR_INSERTING_USAGE_DO" | "ERROR_INSERTING_VERIFICATION_DO" | "PROJECT_DISABLED" | "CUSTOMER_DISABLED" | "SUBSCRIPTION_DISABLED" | "FETCH_ERROR" | "SUBSCRIPTION_ERROR" | "ENTITLEMENT_ERROR" | "SUBSCRIPTION_EXPIRED" | "NO_DEFAULT_PLAN_FOUND" | "SUBSCRIPTION_NOT_ACTIVE" | "PHASE_NOT_CREATED" | "FEATURE_NOT_FOUND_IN_SUBSCRIPTION" | "CUSTOMER_NOT_FOUND" | "CUSTOMER_ENTITLEMENTS_NOT_FOUND" | "FEATURE_TYPE_NOT_SUPPORTED" | "PROJECT_DISABLED" | "CUSTOMER_DISABLED" | "PLAN_VERSION_NOT_PUBLISHED" | "PLAN_VERSION_NOT_ACTIVE" | "PAYMENT_PROVIDER_CONFIG_NOT_FOUND" | "ENTITLEMENT_EXPIRED" | "ENTITLEMENT_NOT_ACTIVE" | "CUSTOMER_SESSION_NOT_CREATED" | "CUSTOMER_SESSION_NOT_FOUND" | "PLAN_VERSION_NOT_FOUND" | "PAYMENT_PROVIDER_ERROR" | "SUBSCRIPTION_NOT_CREATED" | "CUSTOMER_NOT_CREATED" | "SUBSCRIPTION_NOT_CANCELED" | "CUSTOMER_PHASE_NOT_FOUND" | "CURRENCY_MISMATCH" | "BILLING_INTERVAL_MISMATCH" | "ENTITLEMENT_NOT_FOUND" | "SUBSCRIPTION_NOT_FOUND" | "INVALID_ENTITLEMENT_TYPE" | "NO_ACTIVE_PHASE_FOUND";
                         cacheHit?: boolean;
                         remaining?: number;
                         limit?: number;
@@ -1998,7 +1960,7 @@ export interface operations {
             };
         };
     };
-    "customer.prewarmEntitlements": {
+    "customer.resetEntitlements": {
         parameters: {
             query?: never;
             header?: never;
@@ -2023,7 +1985,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The result of the prewarm entitlements */
+            /** @description The result of the reset entitlements */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -2573,7 +2535,7 @@ export interface operations {
                                     realtime?: boolean;
                                 } | null;
                                 /** @enum {string} */
-                                aggregationMethod: "sum" | "sum_all" | "last_during_period" | "count" | "count_all" | "max" | "max_all";
+                                aggregationMethod: "none" | "sum" | "sum_all" | "last_during_period" | "count" | "count_all" | "max" | "max_all";
                                 order: number;
                                 /** @default 1 */
                                 defaultQuantity: number | null;
@@ -3070,7 +3032,7 @@ export interface operations {
                                     realtime?: boolean;
                                 } | null;
                                 /** @enum {string} */
-                                aggregationMethod: "sum" | "sum_all" | "last_during_period" | "count" | "count_all" | "max" | "max_all";
+                                aggregationMethod: "none" | "sum" | "sum_all" | "last_during_period" | "count" | "count_all" | "max" | "max_all";
                                 order: number;
                                 /** @default 1 */
                                 defaultQuantity: number | null;

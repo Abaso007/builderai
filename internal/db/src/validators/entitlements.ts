@@ -280,6 +280,14 @@ export const entitlementStateSchema = entitlementSchema.extend({
   meter: meterStateSchema,
 })
 
+export const minimalEntitlementSchema = entitlementSchema.pick({
+  id: true,
+  featureSlug: true,
+  effectiveAt: true,
+  expiresAt: true,
+})
+
+export type MinimalEntitlement = z.infer<typeof minimalEntitlementSchema>
 export type CurrentUsage = z.infer<typeof currentUsageSchema>
 export type Entitlement = z.infer<typeof entitlementSchema>
 export type MeterState = z.infer<typeof meterStateSchema>

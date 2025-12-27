@@ -1,5 +1,5 @@
 import { createRoute } from "@hono/zod-openapi"
-import { entitlementStateSchema } from "@unprice/db/validators"
+import { minimalEntitlementSchema } from "@unprice/db/validators"
 import { endTime, startTime } from "hono/timing"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent } from "stoker/openapi/helpers"
@@ -14,8 +14,8 @@ const tags = ["customer"]
 export const route = createRoute({
   path: "/v1/customer/{customerId}/getEntitlements",
   operationId: "customer.getEntitlements",
-  summary: "get entitlements",
-  description: "Get entitlements for a customer",
+  summary: "get minimal entitlements",
+  description: "Get minimal entitlements for a customer",
   method: "get",
   tags,
   request: {
@@ -28,8 +28,8 @@ export const route = createRoute({
   },
   responses: {
     [HttpStatusCodes.OK]: jsonContent(
-      entitlementStateSchema.array(),
-      "The result of the get entitlements"
+      minimalEntitlementSchema.array(),
+      "The result of the get minimal entitlements"
     ),
     ...openApiErrorResponses,
   },

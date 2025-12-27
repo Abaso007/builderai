@@ -1,5 +1,5 @@
 import type {
-  EntitlementState,
+  MinimalEntitlement,
   ReportUsageRequest,
   ReportUsageResult,
   VerificationResult,
@@ -21,6 +21,7 @@ export const getUsageRequestSchema = z.object({
   projectId: z.string(),
   now: z.number(),
 })
+
 export type GetUsageRequest = z.infer<typeof getUsageRequestSchema>
 
 export interface UsageLimiter {
@@ -28,7 +29,7 @@ export interface UsageLimiter {
   reportUsage(data: ReportUsageRequest): Promise<Result<ReportUsageResult, BaseError>>
   getActiveEntitlements(
     data: GetEntitlementsRequest
-  ): Promise<Result<EntitlementState[], BaseError>>
+  ): Promise<Result<MinimalEntitlement[], BaseError>>
   getCurrentUsage(data: GetUsageRequest): Promise<Result<CurrentUsage, BaseError>>
   resetEntitlements(params: { customerId: string; projectId: string }): Promise<
     Result<void, BaseError>

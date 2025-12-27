@@ -474,17 +474,39 @@ export class Analytics {
     projectId: string
     features: {
       featureSlug: string
-      aggregationMethod: string
-      featureType: string
+      aggregationMethod:
+        | "none"
+        | "sum"
+        | "count"
+        | "max"
+        | "last"
+        | "sum_all"
+        | "max_all"
+        | "count_all"
+        | "last_during_period"
+      featureType: "usage" | "package" | "tier" | "flat"
     }[]
     startAt: number
     endAt: number
   }): Promise<
-    Result<
-      { featureSlug: string; usage: number; accumulatedUsage: number }[],
-      FetchError | UnPriceAnalyticsError
-    >
+    Result<{ featureSlug: string; usage: number }[], FetchError | UnPriceAnalyticsError>
   > {
+    const AGGREGATION_CONFIG: Record<
+      "none" | "sum" | "max" | "count" | "sum_all" | "max_all" | "count_all" | "last_during_period",
+      { behavior: "none" | "sum" | "max" | "last"; scope: "period" | "lifetime" }
+    > = {
+      // Period Scoped (Resets on Cycle)
+      none: { behavior: "none", scope: "period" },
+      sum: { behavior: "sum", scope: "period" },
+      count: { behavior: "sum", scope: "period" }, // count is just sum(+1)
+      max: { behavior: "max", scope: "period" },
+      last_during_period: { behavior: "last", scope: "period" },
+
+      // Lifetime Scoped (Never Resets)
+      sum_all: { behavior: "sum", scope: "lifetime" },
+      count_all: { behavior: "sum", scope: "lifetime" },
+      max_all: { behavior: "max", scope: "lifetime" },
+    }
     // filter that only usage, package and tier features are being requested
     const featuresUsage = features.filter((feature) =>
       ["usage", "package", "tier"].includes(feature.featureType)
@@ -498,81 +520,87 @@ export class Analytics {
 
     // we use the same endpoint for billing usage as it's the
     // more accurate one
-    const [totalAccumulatedUsages, totalPeriodUsages] = await Promise.all([
-      this.getBillingUsage({ customerId, projectId, featureSlugs: featureSlugsArray })
-        .then((usage) => usage.data ?? [])
-        .catch((error) => {
-          this.logger.error("error getting features usage total", {
-            error: JSON.stringify(error),
-            customerId,
-            projectId,
-            featureSlugs: featureSlugsArray,
-          })
-          return null
-        }),
-      this.getBillingUsage({
-        customerId,
-        projectId,
-        featureSlugs: featureSlugsArray,
-        start: startAt,
-        end: endAt,
+    const totalPeriodUsages = await this.getBillingUsage({
+      customerId,
+      projectId,
+      featureSlugs: featureSlugsArray,
+      start: startAt,
+      end: endAt,
+    })
+      .then((usage) => usage.data ?? [])
+      .catch((error) => {
+        console.error(error)
+        this.logger.error(`Error getBillingUsage:${error.message}`, {
+          customerId,
+          projectId,
+          featureSlugs: featureSlugsArray,
+          startAt,
+          endAt,
+        })
+        return null
       })
-        .then((usage) => usage.data ?? [])
-        .catch((error) => {
-          this.logger.error("error getting features usage period", {
-            error: JSON.stringify(error),
-            customerId,
-            projectId,
-            featureSlugs: featureSlugsArray,
-            startAt,
-            endAt,
-          })
-          return null
-        }),
-    ])
 
     // if there was an error, return null
-    if (!totalPeriodUsages || !totalAccumulatedUsages) {
+    if (totalPeriodUsages === null) {
       return Err(
         new UnPriceAnalyticsError({ message: "Error getting usage billing subscription items" })
       )
     }
 
     // if there are no usages, return an empty array
-    if (totalPeriodUsages.length === 0 && totalAccumulatedUsages.length === 0) {
+    if (totalPeriodUsages.length === 0) {
       return Ok([])
     }
 
     const result = []
 
     // iterate over the features
-    for (const feature of features) {
-      let accumulatedUsage = 0
-      let usage = 0
-      const aggregationMethod = feature.aggregationMethod
-
-      const totalUsage = totalPeriodUsages.find(
-        (usage) => usage.featureSlug === feature.featureSlug
-      )
-      const totalAccumulatedUsage = totalAccumulatedUsages.find(
+    for (const feature of featuresUsage) {
+      const totalPeriodUsage = totalPeriodUsages.find(
         (usage) => usage.featureSlug === feature.featureSlug
       )
 
-      if (totalUsage) {
-        usage = (totalUsage[aggregationMethod as keyof typeof totalUsage] as number) ?? 0
+      if (!totalPeriodUsage) {
+        this.logger.error("No usage found for feature", {
+          featureSlug: feature.featureSlug,
+          customerId,
+          projectId,
+        })
+        continue
       }
 
-      if (totalAccumulatedUsage) {
-        accumulatedUsage =
-          (totalAccumulatedUsage[
-            aggregationMethod as keyof typeof totalAccumulatedUsage
-          ] as number) ?? 0
+      // get the aggregation config for the feature
+      const config =
+        AGGREGATION_CONFIG[feature.aggregationMethod as keyof typeof AGGREGATION_CONFIG]
+
+      if (!config) {
+        this.logger.error("Invalid aggregation method", {
+          aggregationMethod: feature.aggregationMethod,
+          featureSlug: feature.featureSlug,
+          customerId,
+          projectId,
+        })
+
+        continue
+      }
+
+      let usage = 0
+
+      if (config.behavior === "sum") {
+        if (feature.aggregationMethod === "count") {
+          usage = totalPeriodUsage.count ?? 0
+        } else {
+          usage = totalPeriodUsage.sum ?? 0
+        }
+      } else if (config.behavior === "max") {
+        usage = totalPeriodUsage.max ?? 0
+      } else if (config.behavior === "last") {
+        usage = totalPeriodUsage.last_during_period ?? 0
       }
 
       result.push({
         featureSlug: feature.featureSlug,
-        accumulatedUsage,
-        usage,
+        usage: usage,
       })
     }
 

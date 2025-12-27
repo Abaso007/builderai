@@ -6,7 +6,6 @@ import { Fragment, Suspense } from "react"
 import Flags from "~/components/layout/flags"
 import Header from "~/components/layout/header"
 import { Logo } from "~/components/layout/logo"
-import { entitlementFlag } from "~/lib/flags"
 import { unprice } from "~/lib/unprice"
 import { HydrateClient, prefetch, trpc } from "~/trpc/server"
 import { ProjectSwitcher } from "../../_components/project-switcher"
@@ -63,15 +62,13 @@ export default async function Page(props: {
 
       // prefetch entitlements only for non-main workspaces
       if (!atw.isMain) {
-        const { result: featuresResult } = await unprice.projects.getFeatures()
+        const { result: featuresEntitlements } = await unprice.customers.getEntitlements(customerId)
 
-        const features = featuresResult?.features ?? []
+        const features = featuresEntitlements ?? []
 
-        customerEntitlements = await Promise.all(
-          features.map(async (feature) => ({
-            [feature.slug]: await entitlementFlag(feature.slug),
-          }))
-        )
+        customerEntitlements = features.map((feature) => ({
+          [feature.featureSlug]: true,
+        }))
       }
     }
   }
