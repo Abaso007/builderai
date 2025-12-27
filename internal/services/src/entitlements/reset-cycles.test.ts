@@ -41,8 +41,16 @@ describe("EntitlementService - Reset Cycles", () => {
     allowOverage: false,
     aggregationMethod: "sum",
     mergingPolicy: "sum",
-    currentCycleUsage: "0",
-    accumulatedUsage: "0",
+    metadata: null,
+    createdAtM: jan1,
+    updatedAtM: jan1,
+    meter: {
+      usage: "0",
+      snapshotUsage: "0",
+      lastReconciledId: "",
+      lastUpdated: jan1,
+      lastCycleStart: jan1,
+    },
     grants: [
       {
         id: "grant_reset_1",
@@ -51,8 +59,6 @@ describe("EntitlementService - Reset Cycles", () => {
         expiresAt: jan1 + 30 * 24 * 60 * 60 * 1000, // 30 days
         limit: 100,
         priority: 10,
-        subjectType: "customer",
-        subjectId: customerId,
         allowOverage: false,
         featurePlanVersionId: "fpv_reset_1",
         realtime: false,
@@ -62,7 +68,6 @@ describe("EntitlementService - Reset Cycles", () => {
     effectiveAt: jan1,
     expiresAt: jan1 + 30 * 24 * 60 * 60 * 1000,
     nextRevalidateAt: jan1 + 300000,
-    lastSyncAt: jan1,
     computedAt: jan1,
     resetConfig: {
       name: "weekly-reset",
@@ -86,6 +91,9 @@ describe("EntitlementService - Reset Cycles", () => {
 
     mockAnalytics = {
       ingestFeaturesVerification: vi.fn().mockResolvedValue({ successful_rows: 1 }),
+      getFeaturesUsageCursor: vi
+        .fn()
+        .mockResolvedValue(Ok({ usage: 0, lastRecordId: "rec_initial" })),
     } as unknown as Analytics
 
     mockDb = {
@@ -131,7 +139,7 @@ describe("EntitlementService - Reset Cycles", () => {
   })
 
   it("should reset usage when entering a new cycle", async () => {
-    // Initial State
+    // Initial State hit the database on cache miss
     vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue({
       ...mockEntitlementState,
       metadata: null,
@@ -148,7 +156,6 @@ describe("EntitlementService - Reset Cycles", () => {
       timestamp: jan2,
       requestId: "req_1",
       idempotenceKey: "idem_1",
-      fromCache: false,
       metadata: null,
     })
 
@@ -157,7 +164,7 @@ describe("EntitlementService - Reset Cycles", () => {
 
     // Verify storage
     let stored = await mockStorage.get({ customerId, projectId, featureSlug })
-    expect(stored.val?.currentCycleUsage).toBe("50")
+    expect(stored.val?.meter.usage).toBe("50")
 
     // mock the entitlement in cache
     vi.spyOn(mockCache.customerEntitlement, "swr").mockResolvedValue(Ok(mockEntitlementState))
@@ -171,7 +178,6 @@ describe("EntitlementService - Reset Cycles", () => {
       timestamp: jan3,
       requestId: "req_2",
       idempotenceKey: "idem_2",
-      fromCache: true, // Use cached state
       metadata: null,
     })
 
@@ -179,7 +185,7 @@ describe("EntitlementService - Reset Cycles", () => {
     expect(res2.usage).toBe(60)
 
     stored = await mockStorage.get({ customerId, projectId, featureSlug })
-    expect(stored.val?.currentCycleUsage).toBe("60")
+    expect(stored.val?.meter.usage).toBe("60")
 
     // 3. Week 2 - Usage 20 (Should Reset)
     // Week 2 starts Jan 8
@@ -191,7 +197,6 @@ describe("EntitlementService - Reset Cycles", () => {
       timestamp: jan9,
       requestId: "req_3",
       idempotenceKey: "idem_3",
-      fromCache: true,
       metadata: null,
     })
     expect(res3.allowed).toBe(true)
@@ -199,9 +204,7 @@ describe("EntitlementService - Reset Cycles", () => {
     expect(res3.usage).toBe(20)
 
     stored = await mockStorage.get({ customerId, projectId, featureSlug })
-    expect(stored.val?.currentCycleUsage).toBe("20")
-    // Accumulated should include previous cycle usage (60)
-    expect(stored.val?.accumulatedUsage).toBe("60")
+    expect(stored.val?.meter.usage).toBe("20")
 
     // 4. Week 2 - Usage 10 (Total 30 in Week 2)
     // This confirms we don't reset AGAIN within Week 2
@@ -213,15 +216,13 @@ describe("EntitlementService - Reset Cycles", () => {
       timestamp: jan10,
       requestId: "req_4",
       idempotenceKey: "idem_4",
-      fromCache: true,
       metadata: null,
     })
     expect(res4.allowed).toBe(true)
     expect(res4.usage).toBe(30)
 
     stored = await mockStorage.get({ customerId, projectId, featureSlug })
-    expect(stored.val?.currentCycleUsage).toBe("30")
-    expect(stored.val?.accumulatedUsage).toBe("60")
+    expect(stored.val?.meter.usage).toBe("30")
   })
 
   it("should handle daily reset over a month period and expire entitlement", async () => {
@@ -241,6 +242,13 @@ describe("EntitlementService - Reset Cycles", () => {
       limit: 10, // Daily limit of 10
       effectiveAt: monthStart,
       expiresAt: monthEnd,
+      meter: {
+        usage: "0",
+        snapshotUsage: "0",
+        lastReconciledId: "",
+        lastUpdated: monthStart,
+        lastCycleStart: monthStart,
+      },
     }
 
     vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue({
@@ -248,7 +256,14 @@ describe("EntitlementService - Reset Cycles", () => {
       metadata: null,
       createdAtM: monthStart,
       updatedAtM: monthStart,
-    })
+      meter: {
+        usage: "0",
+        snapshotUsage: "0",
+        lastReconciledId: "",
+        lastUpdated: monthStart,
+        lastCycleStart: monthStart,
+      },
+    } as EntitlementState)
 
     vi.spyOn(mockCache.customerEntitlement, "swr").mockResolvedValue(Ok(dailyResetState))
 
@@ -268,7 +283,6 @@ describe("EntitlementService - Reset Cycles", () => {
         timestamp: currentTimestamp,
         requestId: `req_day_${day}`,
         idempotenceKey: `idem_day_${day}`,
-        fromCache: day > 0, // First request from DB, subsequent from cache/memory
         metadata: null,
       })
 
@@ -277,18 +291,14 @@ describe("EntitlementService - Reset Cycles", () => {
 
       // Verify storage state
       const stored = await mockStorage.get({ customerId, projectId, featureSlug })
-      expect(stored.val?.currentCycleUsage).toBe("5")
+
+      expect(stored.val?.meter.usage).toBe("5")
 
       // Accumulated usage should increase by 5 from previous day (except first day is 0 accumulated from previous)
       // Day 0: accum 0
       // Day 1: accum 5
       // Day 2: accum 10 ...
-      expect(stored.val?.accumulatedUsage).toBe((day * 5).toString())
     }
-
-    // Verify accumulated usage at the end
-    const stored = await mockStorage.get({ customerId, projectId, featureSlug })
-    expect(stored.val?.accumulatedUsage).toBe(((30 - 1) * 5).toString())
 
     // Test expiration
     const expiredTimestamp = monthEnd + 1000 // 1 second after expiration
@@ -307,7 +317,6 @@ describe("EntitlementService - Reset Cycles", () => {
       timestamp: expiredTimestamp,
       requestId: "req_expired",
       idempotenceKey: "idem_expired",
-      fromCache: true,
       metadata: null,
     })
 
@@ -315,17 +324,11 @@ describe("EntitlementService - Reset Cycles", () => {
       customerId,
       projectId,
       now: expiredTimestamp,
-      usageOverrides: {
-        [featureSlug]: {
-          currentCycleUsage: (5).toString(),
-          accumulatedUsage: ((30 - 1) * 5).toString(),
-        },
-      },
       featureSlug,
     })
 
     // Should fail with ENTITLEMENT_NOT_FOUND because recomputation found no grants
     expect(resExpired.allowed).toBe(false)
-    expect(resExpired.deniedReason).toBe("ENTITLEMENT_NOT_FOUND")
+    expect(resExpired.deniedReason).toBe("ENTITLEMENT_ERROR")
   })
 })

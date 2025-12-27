@@ -32,8 +32,6 @@ describe("EntitlementService - Idempotency & Flush", () => {
     allowOverage: false,
     aggregationMethod: "sum",
     mergingPolicy: "sum",
-    currentCycleUsage: "0",
-    accumulatedUsage: "0",
     grants: [
       {
         id: "grant_idem_1",
@@ -42,8 +40,6 @@ describe("EntitlementService - Idempotency & Flush", () => {
         expiresAt: now + 10000,
         limit: 100,
         priority: 10,
-        subjectType: "customer",
-        subjectId: customerId,
         allowOverage: false,
         featurePlanVersionId: "fpv_1",
         realtime: false,
@@ -53,9 +49,18 @@ describe("EntitlementService - Idempotency & Flush", () => {
     effectiveAt: now - 10000,
     expiresAt: now + 10000,
     nextRevalidateAt: now + 300000,
-    lastSyncAt: now,
     computedAt: now,
     resetConfig: null,
+    metadata: null,
+    createdAtM: now,
+    updatedAtM: now,
+    meter: {
+      usage: "0",
+      lastReconciledId: "",
+      snapshotUsage: "0",
+      lastUpdated: now,
+      lastCycleStart: now - 10000,
+    },
   }
 
   beforeEach(async () => {
@@ -137,7 +142,6 @@ describe("EntitlementService - Idempotency & Flush", () => {
       timestamp: now,
       requestId: "req_1",
       idempotenceKey,
-      fromCache: false,
       metadata: null,
     })
     expect(res1.allowed).toBe(true)
@@ -153,7 +157,6 @@ describe("EntitlementService - Idempotency & Flush", () => {
       timestamp: now,
       requestId: "req_2",
       idempotenceKey, // SAME key
-      fromCache: true,
       metadata: null,
     })
 
@@ -164,7 +167,7 @@ describe("EntitlementService - Idempotency & Flush", () => {
     expect(res2.usage).toBe(10) // 5 + 5
 
     // Now let's flush and verify analytics only receives ONE event
-    await service.flushUsageRecords()
+    await service.flush()
 
     expect(mockAnalytics.ingestFeaturesUsage).toHaveBeenCalledTimes(1)
     // The argument to ingestFeaturesUsage should be an array with 1 element (deduplicated)
@@ -202,7 +205,7 @@ describe("EntitlementService - Idempotency & Flush", () => {
     expect(pending.val).toHaveLength(5)
 
     // Flush
-    await service.flushVerifications()
+    await service.flush()
 
     // Analytics should be called with 5 items
     expect(mockAnalytics.ingestFeaturesVerification).toHaveBeenCalledTimes(1)
@@ -234,13 +237,12 @@ describe("EntitlementService - Idempotency & Flush", () => {
         timestamp: now + i,
         requestId: `req_usage_flush_${i}`,
         idempotenceKey: `idem_flush_${i}`, // Distinct keys
-        fromCache: i > 0,
         metadata: null,
       })
     }
 
     // Flush
-    await service.flushUsageRecords()
+    await service.flush()
 
     // Analytics called with 3 items
     expect(mockAnalytics.ingestFeaturesUsage).toHaveBeenCalledTimes(1)

@@ -700,8 +700,9 @@ export class EntitlementService {
   private async initializeUsageMeter(params: {
     entitlement: Entitlement
     watermark: number
+    forceRefresh?: boolean
   }): Promise<Result<MeterState, FetchError | UnPriceEntitlementError>> {
-    const { entitlement, watermark } = params
+    const { entitlement, watermark, forceRefresh } = params
 
     // this should happen as the initial state is stored in the storage
     // so if there is a storage definition we use that on initialization
@@ -715,8 +716,8 @@ export class EntitlementService {
       return Err(new UnPriceEntitlementError({ message: entitlementStateErr.message }))
     }
 
-    // if the entitlement is already initialized, return it
-    if (entitlementState?.meter) {
+    // if the entitlement is already initialized and we don't want to force refresh, return it
+    if (!forceRefresh && entitlementState?.meter) {
       return Ok(entitlementState.meter)
     }
 
@@ -826,7 +827,7 @@ export class EntitlementService {
       const { val, err } = await this.getActiveEntitlement({
         ...params,
         opts: {
-          skipCache: params.skipCache,
+          skipCache: true,
           now: params.now,
         },
       })
@@ -839,7 +840,9 @@ export class EntitlementService {
           featureSlug: params.featureSlug,
         })
 
-        throw new UnPriceEntitlementError({ message: err.message })
+        throw new UnPriceEntitlementError({
+          message: `unable to get entitlement from cache - ${err.message}`,
+        })
       }
 
       // set storage
@@ -879,6 +882,7 @@ export class EntitlementService {
         const meterState = await this.initializeUsageMeter({
           entitlement: entitlement,
           watermark: params.now,
+          forceRefresh: true, // upon entitlement expiration we force refresh the usage meter
         })
 
         if (meterState.err) {
@@ -928,7 +932,9 @@ export class EntitlementService {
         })
 
         if (err) {
-          throw new UnPriceEntitlementError({ message: err.message })
+          throw new UnPriceEntitlementError({
+            message: `unable to get entitlement from cache - ${err.message}`,
+          })
         }
 
         // no entitlement found, entitlement deleted from storage
@@ -954,7 +960,9 @@ export class EntitlementService {
           })
 
           if (err) {
-            throw new UnPriceEntitlementError({ message: err.message })
+            throw new UnPriceEntitlementError({
+              message: `unable to reload entitlement from DB - ${err.message}`,
+            })
           }
 
           // update revalidation time
@@ -1180,7 +1188,11 @@ export class EntitlementService {
     })
 
     if (meterStateErr) {
-      return Err(new UnPriceEntitlementError({ message: meterStateErr.message }))
+      return Err(
+        new UnPriceEntitlementError({
+          message: `unable to initialize usage meter - ${meterStateErr.message}`,
+        })
+      )
     }
 
     return Ok({
