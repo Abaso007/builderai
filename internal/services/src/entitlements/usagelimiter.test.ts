@@ -1,6 +1,7 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { EntitlementState } from "@unprice/db/validators"
+import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache/service"
@@ -32,8 +33,13 @@ describe("EntitlementService - verify", () => {
     allowOverage: false,
     aggregationMethod: "sum",
     mergingPolicy: "sum",
-    currentCycleUsage: "10",
-    accumulatedUsage: "50",
+    meter: {
+      usage: "10",
+      snapshotUsage: "10",
+      lastReconciledId: "rec_initial",
+      lastUpdated: now,
+      lastCycleStart: now - 10000,
+    },
     grants: [
       {
         id: "grant_1",
@@ -42,8 +48,6 @@ describe("EntitlementService - verify", () => {
         expiresAt: now + 10000,
         limit: 100,
         priority: 10,
-        subjectType: "customer",
-        subjectId: customerId,
         allowOverage: false,
         featurePlanVersionId: "fpv_1",
         realtime: false,
@@ -53,9 +57,11 @@ describe("EntitlementService - verify", () => {
     effectiveAt: now - 10000,
     expiresAt: now + 10000,
     nextRevalidateAt: now + 300000,
-    lastSyncAt: now,
     computedAt: now,
     resetConfig: null,
+    metadata: null,
+    createdAtM: now,
+    updatedAtM: now,
   }
 
   beforeEach(async () => {
@@ -73,6 +79,16 @@ describe("EntitlementService - verify", () => {
     // Mock Analytics
     mockAnalytics = {
       ingestFeaturesVerification: vi.fn().mockResolvedValue({ successful_rows: 1 }),
+      getFeaturesUsageCursor: vi.fn().mockImplementation((params) => {
+        let usage = 0
+        if (params.customerId === "cust_123" || params.customerId === "cust_usage_123") {
+          usage = 10
+        }
+        if (params.customerId === "cust_overlimit") {
+          usage = 101
+        }
+        return Promise.resolve(Ok({ usage, lastRecordId: "rec_initial" }))
+      }),
     } as unknown as Analytics
 
     // Mock Database
@@ -100,7 +116,10 @@ describe("EntitlementService - verify", () => {
     mockMetrics = {} as unknown as Metrics
 
     // Initialize Memory Storage
-    mockStorage = new MemoryEntitlementStorageProvider({ logger: mockLogger })
+    mockStorage = new MemoryEntitlementStorageProvider({
+      logger: mockLogger,
+      analytics: mockAnalytics,
+    })
     await mockStorage.initialize()
 
     // Initialize Service
@@ -130,7 +149,6 @@ describe("EntitlementService - verify", () => {
       featureSlug,
       timestamp: now,
       requestId: "req_1",
-      fromCache: false,
       metadata: null,
       performanceStart: performance.now(),
     })
@@ -175,7 +193,6 @@ describe("EntitlementService - verify", () => {
       featureSlug,
       timestamp: now,
       requestId: "req_2",
-      fromCache: true, // Should use cache/storage
       metadata: null,
       performanceStart: performance.now(),
     })
@@ -189,8 +206,11 @@ describe("EntitlementService - verify", () => {
   it("should deny access when usage exceeds limit", async () => {
     const exceededState = {
       ...mockEntitlementState,
-      currentCycleUsage: "100", // usage == limit
-      limit: 100,
+      customerId: "cust_overlimit",
+      meter: {
+        ...mockEntitlementState.meter,
+        usage: "101", // usage > limit
+      },
       metadata: null,
       createdAtM: now,
       updatedAtM: now,
@@ -200,12 +220,11 @@ describe("EntitlementService - verify", () => {
     vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue(exceededState)
 
     const result = await service.verify({
-      customerId,
+      customerId: "cust_overlimit",
       projectId,
       featureSlug,
       timestamp: now,
       requestId: "req_3",
-      fromCache: false,
       metadata: null,
       performanceStart: performance.now(),
     })
@@ -232,7 +251,6 @@ describe("EntitlementService - verify", () => {
       featureSlug: "non-existent",
       timestamp: now,
       requestId: "req_4",
-      fromCache: false,
       metadata: null,
       performanceStart: performance.now(),
     })
@@ -275,8 +293,13 @@ describe("EntitlementService - reportUsage", () => {
     allowOverage: false,
     aggregationMethod: "sum",
     mergingPolicy: "sum",
-    currentCycleUsage: "10",
-    accumulatedUsage: "50",
+    meter: {
+      usage: "10",
+      snapshotUsage: "10",
+      lastReconciledId: "rec_initial",
+      lastUpdated: now,
+      lastCycleStart: now - 10000,
+    },
     grants: [
       {
         id: "grant_usage_1",
@@ -285,8 +308,6 @@ describe("EntitlementService - reportUsage", () => {
         expiresAt: now + 10000,
         limit: 100,
         priority: 10,
-        subjectType: "customer",
-        subjectId: customerId,
         allowOverage: false,
         featurePlanVersionId: "fpv_1",
         realtime: false,
@@ -296,9 +317,11 @@ describe("EntitlementService - reportUsage", () => {
     effectiveAt: now - 10000,
     expiresAt: now + 10000,
     nextRevalidateAt: now + 300000,
-    lastSyncAt: now,
     computedAt: now,
     resetConfig: null,
+    metadata: null,
+    createdAtM: now,
+    updatedAtM: now,
   }
 
   beforeEach(async () => {
@@ -314,6 +337,16 @@ describe("EntitlementService - reportUsage", () => {
 
     mockAnalytics = {
       ingestFeaturesVerification: vi.fn().mockResolvedValue({ successful_rows: 1 }),
+      getFeaturesUsageCursor: vi.fn().mockImplementation((params) => {
+        let usage = 0
+        if (params.customerId === "cust_123" || params.customerId === "cust_usage_123") {
+          usage = 10
+        }
+        if (params.customerId === "cust_overlimit") {
+          usage = 101
+        }
+        return Promise.resolve(Ok({ usage, lastRecordId: "rec_initial" }))
+      }),
     } as unknown as Analytics
 
     mockDb = {
@@ -344,7 +377,10 @@ describe("EntitlementService - reportUsage", () => {
 
     mockMetrics = {} as unknown as Metrics
 
-    mockStorage = new MemoryEntitlementStorageProvider({ logger: mockLogger })
+    mockStorage = new MemoryEntitlementStorageProvider({
+      logger: mockLogger,
+      analytics: mockAnalytics,
+    })
     await mockStorage.initialize()
 
     service = new EntitlementService({
@@ -376,7 +412,6 @@ describe("EntitlementService - reportUsage", () => {
       timestamp: now,
       requestId: "req_usage_1",
       idempotenceKey: "idem_1",
-      fromCache: false,
       metadata: null,
     })
 
@@ -386,7 +421,7 @@ describe("EntitlementService - reportUsage", () => {
 
     // Check storage update
     const stored = await mockStorage.get({ customerId, projectId, featureSlug })
-    expect(stored.val?.currentCycleUsage).toBe("15")
+    expect(stored.val?.meter.usage).toBe("15")
 
     // Check usage record
     const usageRecords = await mockStorage.getAllUsageRecords()
@@ -417,7 +452,6 @@ describe("EntitlementService - reportUsage", () => {
       timestamp: now,
       requestId: "req_usage_2",
       idempotenceKey: "idem_2",
-      fromCache: false,
       metadata: null,
     })
 
@@ -426,39 +460,11 @@ describe("EntitlementService - reportUsage", () => {
 
     // Storage should NOT be updated with new usage
     const stored = await mockStorage.get({ customerId, projectId, featureSlug })
-    expect(stored.val?.currentCycleUsage).toBe("10")
+    expect(stored.val?.meter.usage).toBe("10")
 
     // No usage record should be inserted for denied usage
     const usageRecords = await mockStorage.getAllUsageRecords()
     expect(usageRecords.val).toHaveLength(0)
-  })
-
-  it("should sync to DB when sync interval passed", async () => {
-    // Modify state to trigger sync (lastSyncAt old enough)
-    const oldSyncState = {
-      ...mockEntitlementState,
-      metadata: null,
-      createdAtM: now,
-      updatedAtM: now,
-    }
-
-    vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue(oldSyncState)
-
-    await service.reportUsage({
-      customerId,
-      projectId,
-      featureSlug,
-      usage: 5,
-      timestamp: now,
-      requestId: "req_usage_3",
-      idempotenceKey: "idem_3",
-      fromCache: false,
-      metadata: null,
-    })
-
-    // Check if DB update was called
-    expect(mockDb.update).toHaveBeenCalled()
-    expect(mockDb.query.entitlements.findFirst).toHaveBeenCalledTimes(1)
   })
 
   it("should handle random usage amounts correctly", async () => {
@@ -486,7 +492,6 @@ describe("EntitlementService - reportUsage", () => {
         timestamp: now,
         requestId: `req_rand_${i}`,
         idempotenceKey: `idem_rand_${i}`,
-        fromCache: true, // Use memory storage where we are updating state
         metadata: null,
       })
 

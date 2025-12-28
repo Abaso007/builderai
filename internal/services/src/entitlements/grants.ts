@@ -105,17 +105,17 @@ export class GrantsManager {
         subscriptions: {
           with: {
             phases: {
-              where: (phase, { and, lte, or, isNull, gte }) => {
+              where: (phase, { and, lte, or, isNull, gt }) => {
                 // filter by startAt and endAt if provided otherwise filter by now
                 if (startAt !== undefined) {
                   // Find phases that overlap with the [startAt, endAt] range
                   return and(
                     lte(phase.startAt, endAt),
-                    or(isNull(phase.endAt), gte(phase.endAt, startAt))
+                    or(isNull(phase.endAt), gt(phase.endAt, startAt))
                   )
                 }
                 // Otherwise use now to find the active phase
-                return and(lte(phase.startAt, now), or(isNull(phase.endAt), gte(phase.endAt, now)))
+                return and(lte(phase.startAt, now), or(isNull(phase.endAt), gt(phase.endAt, now)))
               },
               limit: 1,
               with: {
@@ -173,19 +173,19 @@ export class GrantsManager {
                 },
               },
             },
-            where: (grant, { and, eq, gte, lte, or, isNull }) => {
-              const effectiveDate = startAt !== undefined ? endAt : now
-              const expiryDate = startAt !== undefined ? startAt : now
+            where: (grant, { and, eq, gt, lte, or, isNull }) => {
+              const maxEffectiveAt = startAt !== undefined ? endAt : now
+              const minExpiresAt = startAt !== undefined ? startAt : now
 
               return and(
                 eq(grant.projectId, projectId),
                 eq(grant.subjectId, subject.subjectId),
                 eq(grant.subjectType, subject.subjectType),
                 eq(grant.deleted, false),
-                // Grant is effective: effectiveAt <= effectiveDate (endAt if range provided, otherwise now)
-                lte(grant.effectiveAt, effectiveDate),
-                // Grant hasn't expired: expiresAt is null OR expiresAt >= expiryDate (startAt if range provided, otherwise now)
-                or(isNull(grant.expiresAt), gte(grant.expiresAt, expiryDate))
+                // Grant is effective: effectiveAt <= maxEffectiveAt (endAt if range provided, otherwise now)
+                lte(grant.effectiveAt, maxEffectiveAt),
+                // Grant hasn't expired: expiresAt is null OR expiresAt >= minExpiresAt (startAt if range provided, otherwise now)
+                or(isNull(grant.expiresAt), gt(grant.expiresAt, minExpiresAt))
               )
             },
             orderBy: (grant, { desc }) => desc(grant.priority),
@@ -747,6 +747,7 @@ export class GrantsManager {
               policy = "sum"
             }
             break
+          case "tier":
           case "package":
             policy = "max"
             break

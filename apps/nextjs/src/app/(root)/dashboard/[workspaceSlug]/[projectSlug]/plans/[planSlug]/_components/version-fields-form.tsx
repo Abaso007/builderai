@@ -9,7 +9,6 @@ import {
   FormMessage,
 } from "@unprice/ui/form"
 import { Input } from "@unprice/ui/input"
-import { Switch } from "@unprice/ui/switch"
 import type { FieldPath, FieldValues, UseFormReturn } from "react-hook-form"
 
 import { CURRENCIES, PAYMENT_PROVIDERS } from "@unprice/db/utils"
@@ -25,41 +24,6 @@ interface FormValues extends FieldValues {
   paymentProvider: PaymentProvider
   description: string
   trialUnits?: number
-}
-
-export function PaymentMethodRequiredFormField<TFieldValues extends FormValues>({
-  form,
-  isDisabled,
-}: {
-  form: UseFormReturn<TFieldValues>
-  isDisabled?: boolean
-}) {
-  return (
-    <FormField
-      control={form.control}
-      name={"paymentMethodRequired" as FieldPath<TFieldValues>}
-      render={({ field }) => (
-        <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
-          <div className="space-y-0.5">
-            <FormLabel className="text-base">Payment method required</FormLabel>
-            <FormDescription>
-              Requiring a payment method will force customers to enter their payment method at the
-              subscription checkout. This is automatically validated for paid plans.
-            </FormDescription>
-          </div>
-          <FormControl>
-            <Switch
-              checked={field.value ?? false}
-              onCheckedChange={(value) => {
-                field.onChange(value === true)
-              }}
-              disabled={isDisabled}
-            />
-          </FormControl>
-        </FormItem>
-      )}
-    />
-  )
 }
 
 export function TitleFormField<TFieldValues extends FormValues>({

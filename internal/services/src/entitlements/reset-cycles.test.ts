@@ -124,7 +124,10 @@ describe("EntitlementService - Reset Cycles", () => {
 
     mockMetrics = {} as unknown as Metrics
 
-    mockStorage = new MemoryEntitlementStorageProvider({ logger: mockLogger })
+    mockStorage = new MemoryEntitlementStorageProvider({
+      logger: mockLogger,
+      analytics: mockAnalytics,
+    })
     await mockStorage.initialize()
 
     service = new EntitlementService({
@@ -329,6 +332,6 @@ describe("EntitlementService - Reset Cycles", () => {
 
     // Should fail with ENTITLEMENT_NOT_FOUND because recomputation found no grants
     expect(resExpired.allowed).toBe(false)
-    expect(resExpired.deniedReason).toBe("ENTITLEMENT_ERROR")
+    expect(resExpired.deniedReason).toBe("ENTITLEMENT_NOT_FOUND")
   })
 })

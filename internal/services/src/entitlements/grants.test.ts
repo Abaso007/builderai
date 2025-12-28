@@ -32,6 +32,9 @@ describe("GrantsManager", () => {
       },
       featureType: "usage",
       aggregationMethod: "sum",
+      config: {
+        usageMode: "sum",
+      },
       billingConfig: {
         name: "billing",
         billingInterval: "month",
@@ -330,18 +333,98 @@ describe("GrantsManager", () => {
       expect(entitlement!.allowOverage).toBe(true)
     })
 
-    it("should require ALL grants to allow overage for min policy (hypothetical)", async () => {
-      // Min policy logic exists in code, though feature type mapping might not strictly use it yet
-      // Simulating by mocking the merge logic or forcing a case if possible.
-      // But verify function uses standard mergeGrants.
-      // Let's just unit test `mergeGrants` logic indirectly via computeEntitlementFromGrants if possible?
-      // Actually, we can't easily inject 'min' policy via feature type unless we change code or rely on 'package' maybe?
-      // Code says: package -> max.
-      // Let's skip strict min policy test if no feature type maps to it by default,
-      // OR assume we might add one.
-      // Wait, the switch case doesn't have 'min'.
-      // So 'min' is only reachable if we manually call mergeGrants with 'min', which computeEntitlementFromGrants doesn't do.
-      // So we skip testing 'min' integration here.
+    it("should require ALL grants to allow overage for min policy", async () => {
+      // Test mergeGrants directly for min policy since no feature type currently maps to it
+      const grants = [
+        {
+          id: "g1",
+          type: "subscription",
+          name: "g1",
+          effectiveAt: now,
+          expiresAt: now + 1000,
+          limit: 100,
+          priority: 10,
+          realtime: false,
+          allowOverage: true,
+          featurePlanVersionId: "fpv1",
+          subscriptionItemId: null,
+          subscriptionPhaseId: null,
+          subscriptionId: null,
+        },
+        {
+          id: "g2",
+          type: "subscription",
+          name: "g2",
+          effectiveAt: now,
+          expiresAt: now + 1000,
+          limit: 50,
+          priority: 20,
+          realtime: false,
+          allowOverage: false,
+          featurePlanVersionId: "fpv1",
+          subscriptionItemId: null,
+          subscriptionPhaseId: null,
+          subscriptionId: null,
+        },
+      ]
+
+      const merged = grantsManager.mergeGrants({
+        // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        grants: grants as any,
+        policy: "min",
+      })
+
+      expect(merged.limit).toBe(50)
+      expect(merged.allowOverage).toBe(false) // every(true, false) is false
+      expect(merged.grants[0]!.id).toBe("g2")
+    })
+
+    it("should union date ranges for sum policy", async () => {
+      const usageFeature = { ...baseGrant.featurePlanVersion, featureType: "usage" }
+      const grants = [
+        {
+          ...baseGrant,
+          id: "g1",
+          effectiveAt: 1000,
+          expiresAt: 5000,
+          limit: 100,
+          featurePlanVersion: usageFeature,
+        },
+        {
+          ...baseGrant,
+          id: "g2",
+          effectiveAt: 2000,
+          expiresAt: 6000,
+          limit: 50,
+          featurePlanVersion: usageFeature,
+        },
+      ]
+
+      setupMocks(grants)
+
+      const result = await grantsManager.computeGrantsForCustomer({
+        customerId,
+        projectId,
+        now,
+      })
+
+      expect(result.err).toBeUndefined()
+      const entitlement = result.val![0]
+      expect(entitlement!.effectiveAt).toBe(1000)
+      expect(entitlement!.expiresAt).toBe(6000)
+    })
+
+    it("should return empty list when no grants are found", async () => {
+      setupMocks([])
+
+      const result = await grantsManager.computeGrantsForCustomer({
+        customerId,
+        projectId,
+        now,
+      })
+
+      expect(result.err).toBeUndefined()
+      expect(result.val).toEqual([])
     })
 
     it("should fail if mixed feature types for same slug (should not happen ideally but uses highest priority)", async () => {
@@ -383,6 +466,59 @@ describe("GrantsManager", () => {
       expect(entitlement!.featureType).toBe("tier")
       expect(entitlement!.mergingPolicy).toBe("max")
       expect(entitlement!.limit).toBe(500)
+    })
+  })
+
+  describe("renewGrantsForCustomer", () => {
+    it("should renew auto-renewing grants that are not trial or subscription", async () => {
+      const grantToRenew = {
+        ...baseGrant,
+        id: "g_addon",
+        type: "addon",
+        autoRenew: true,
+        effectiveAt: now - 30 * 24 * 60 * 60 * 1000, // 30 days ago
+        expiresAt: now + 1000, // Grant is still active
+      }
+
+      setupMocks([grantToRenew])
+
+      // Mock createGrant (insert)
+      vi.spyOn(mockDb, "insert").mockReturnValue({
+        values: vi.fn().mockReturnValue({
+          onConflictDoNothing: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([{ ...grantToRenew, id: "g_addon_renewed" }]),
+          }),
+        }),
+        // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+      } as any)
+
+      const result = await grantsManager.renewGrantsForCustomer({
+        customerId,
+        projectId,
+        now,
+      })
+
+      expect(result.err).toBeUndefined()
+      expect(result.val).toHaveLength(1)
+      expect(result.val?.[0]?.id).toBe("g_addon_renewed")
+    })
+
+    it("should not renew trial or subscription grants", async () => {
+      const grants = [
+        { ...baseGrant, id: "g_sub", type: "subscription", autoRenew: true },
+        { ...baseGrant, id: "g_trial", type: "trial", autoRenew: true },
+      ]
+
+      setupMocks(grants)
+
+      const result = await grantsManager.renewGrantsForCustomer({
+        customerId,
+        projectId,
+        now,
+      })
+
+      expect(result.err).toBeUndefined()
+      expect(result.val).toHaveLength(0)
     })
   })
 })

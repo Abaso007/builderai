@@ -425,17 +425,11 @@ export class EntitlementService {
       )
     }
 
-    // set the cache
-    if (!opts?.skipCache) {
-      this.waitUntil(this.cache.customerEntitlements.set(cacheKey, val ?? null))
-    }
+    // set the cache with the fresh value from DB
+    this.waitUntil(this.cache.customerEntitlements.set(cacheKey, val ?? null))
 
-    if (!val || val.length === 0) {
-      return Err(
-        new UnPriceEntitlementError({
-          message: "entitlements not found",
-        })
-      )
+    if (!val) {
+      return Ok([])
     }
 
     return Ok(val)
@@ -833,16 +827,15 @@ export class EntitlementService {
       })
 
       if (err) {
-        // remove the entitlement from storage
-        await this.storage.delete({
-          customerId: params.customerId,
-          projectId: params.projectId,
-          featureSlug: params.featureSlug,
-        })
+        return Err(
+          new UnPriceEntitlementError({
+            message: `unable to get entitlement from cache - ${err.message}`,
+          })
+        )
+      }
 
-        throw new UnPriceEntitlementError({
-          message: `unable to get entitlement from cache - ${err.message}`,
-        })
+      if (!val) {
+        return Ok(null)
       }
 
       // set storage
@@ -873,9 +866,14 @@ export class EntitlementService {
         const entitlement = result.val.find((e) => e.featureSlug === params.featureSlug)
 
         if (!entitlement) {
-          throw new UnPriceEntitlementError({
-            message: "Entitlement not found after recomputing grants",
+          // remove the entitlement from storage
+          await this.storage.delete({
+            customerId: params.customerId,
+            projectId: params.projectId,
+            featureSlug: params.featureSlug,
           })
+
+          return Ok(null)
         }
 
         // trust the analytics data and sync the entitlement usage
@@ -904,13 +902,6 @@ export class EntitlementService {
           ...params,
         })
 
-        // remove the entitlement from storage
-        await this.storage.delete({
-          customerId: params.customerId,
-          projectId: params.projectId,
-          featureSlug: params.featureSlug,
-        })
-
         return Err(new UnPriceEntitlementError({ message: err.message }))
       }
     }
@@ -932,14 +923,23 @@ export class EntitlementService {
         })
 
         if (err) {
-          throw new UnPriceEntitlementError({
-            message: `unable to get entitlement from cache - ${err.message}`,
-          })
+          return Err(
+            new UnPriceEntitlementError({
+              message: `unable to get entitlement from cache - ${err.message}`,
+            })
+          )
         }
 
         // no entitlement found, entitlement deleted from storage
         if (!entitlement) {
-          throw new UnPriceEntitlementError({ message: "Entitlement not found" })
+          // remove the entitlement from storage
+          await this.storage.delete({
+            customerId: params.customerId,
+            projectId: params.projectId,
+            featureSlug: params.featureSlug,
+          })
+
+          return Ok(null)
         }
 
         // if found let's check if the version mismatch or snapshot updated - reload
@@ -960,9 +960,22 @@ export class EntitlementService {
           })
 
           if (err) {
-            throw new UnPriceEntitlementError({
-              message: `unable to reload entitlement from DB - ${err.message}`,
+            return Err(
+              new UnPriceEntitlementError({
+                message: `unable to reload entitlement from DB - ${err.message}`,
+              })
+            )
+          }
+
+          if (!entitlementFromDB) {
+            // remove the entitlement from storage
+            await this.storage.delete({
+              customerId: params.customerId,
+              projectId: params.projectId,
+              featureSlug: params.featureSlug,
             })
+
+            return Ok(null)
           }
 
           // update revalidation time
@@ -977,33 +990,31 @@ export class EntitlementService {
           return Ok(entitlementFromDB)
         }
 
-        // update the entitlement state with the latest meter state
-        entitlementState = entitlement
+        // update the entitlement state but preserve the current meter if version matches
+        entitlementState = {
+          ...entitlement,
+          meter: cached.meter ?? entitlement.meter,
+        }
       } catch (error) {
         const err = error as UnPriceEntitlementError
         this.logger.error(err.message, {
           ...params,
         })
 
-        // remove the entitlement from storage
-        await this.storage.delete({
-          customerId: params.customerId,
-          projectId: params.projectId,
-          featureSlug: params.featureSlug,
-        })
-
         return Err(new UnPriceEntitlementError({ message: err.message }))
       }
 
       // Version matches - just update revalidation time and return the entitlement
-      entitlementState.nextRevalidateAt = params.now + this.revalidateInterval
-      // set the entitlement to the storage
-      await this.storage.set({ state: entitlementState })
+      if (entitlementState) {
+        entitlementState.nextRevalidateAt = params.now + this.revalidateInterval
+        // set the entitlement to the storage
+        await this.storage.set({ state: entitlementState })
 
-      // Update cache and fire a reconcile feature usage in background
-      this.waitUntil(this.reconcileFeatureUsage({ state: entitlementState, now: params.now }))
+        // Update cache and fire a reconcile feature usage in background
+        this.waitUntil(this.reconcileFeatureUsage({ state: entitlementState, now: params.now }))
 
-      return Ok(entitlementState)
+        return Ok(entitlementState)
+      }
     }
 
     return Ok(cached)
@@ -1098,7 +1109,7 @@ export class EntitlementService {
       skipCache?: boolean // skip cache to force revalidation
       now?: number
     }
-  }): Promise<Result<EntitlementState, FetchError | UnPriceEntitlementError>> {
+  }): Promise<Result<EntitlementState | null, FetchError | UnPriceEntitlementError>> {
     const cacheKey = this.storage.makeKey({
       customerId,
       projectId,
@@ -1167,17 +1178,11 @@ export class EntitlementService {
       )
     }
 
-    // set the cache
-    if (!opts?.skipCache) {
-      this.waitUntil(this.cache.customerEntitlement.set(cacheKey, val ?? null))
-    }
+    // set the cache with the fresh value from DB
+    this.waitUntil(this.cache.customerEntitlement.set(cacheKey, val ?? null))
 
     if (!val) {
-      return Err(
-        new UnPriceEntitlementError({
-          message: "entitlement not found",
-        })
-      )
+      return Ok(null)
     }
 
     // initialize the entitlement usage

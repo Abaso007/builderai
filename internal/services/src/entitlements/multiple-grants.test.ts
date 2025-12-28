@@ -1,6 +1,7 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { EntitlementState } from "@unprice/db/validators"
+import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache/service"
@@ -60,16 +61,23 @@ describe("EntitlementService - Multiple Grants", () => {
     allowOverage: false,
     aggregationMethod: "sum",
     mergingPolicy: "sum",
-    currentCycleUsage: "0",
-    accumulatedUsage: "0",
+    meter: {
+      usage: "0",
+      snapshotUsage: "0",
+      lastReconciledId: "rec_initial",
+      lastUpdated: now,
+      lastCycleStart: now - 10000,
+    },
     grants: [grantA, grantB],
     version: "v1",
     effectiveAt: now - 10000,
     expiresAt: now + 10000,
     nextRevalidateAt: now + 300000,
-    lastSyncAt: now,
     computedAt: now,
     resetConfig: null,
+    metadata: null,
+    createdAtM: now,
+    updatedAtM: now,
   }
 
   beforeEach(async () => {
@@ -86,6 +94,9 @@ describe("EntitlementService - Multiple Grants", () => {
     mockAnalytics = {
       ingestFeaturesVerification: vi.fn().mockResolvedValue({ successful_rows: 1 }),
       ingestFeaturesUsage: vi.fn().mockResolvedValue({ successful_rows: 1 }),
+      getFeaturesUsageCursor: vi
+        .fn()
+        .mockResolvedValue(Ok({ usage: 0, lastRecordId: "rec_initial" })),
     } as unknown as Analytics
 
     mockDb = {
@@ -116,7 +127,10 @@ describe("EntitlementService - Multiple Grants", () => {
 
     mockMetrics = {} as unknown as Metrics
 
-    mockStorage = new MemoryEntitlementStorageProvider({ logger: mockLogger })
+    mockStorage = new MemoryEntitlementStorageProvider({
+      logger: mockLogger,
+      analytics: mockAnalytics,
+    })
     await mockStorage.initialize()
 
     service = new EntitlementService({
@@ -149,7 +163,6 @@ describe("EntitlementService - Multiple Grants", () => {
       timestamp: now,
       requestId: "req_prio_1",
       idempotenceKey: "idem_prio_1",
-      fromCache: false,
       metadata: null,
     })
 
@@ -186,7 +199,6 @@ describe("EntitlementService - Multiple Grants", () => {
       timestamp: now, // Before futureGrant starts
       requestId: "req_date_1",
       idempotenceKey: "idem_date_1",
-      fromCache: false,
       metadata: null,
     })
 
@@ -221,7 +233,6 @@ describe("EntitlementService - Multiple Grants", () => {
       timestamp: now,
       requestId: "req_exp_1",
       idempotenceKey: "idem_exp_1",
-      fromCache: false,
       metadata: null,
     })
 
@@ -246,8 +257,9 @@ describe("EntitlementService - Multiple Grants", () => {
 
     const stateMixed: EntitlementState = {
       ...mockEntitlementState,
+      limit: 20, // Sum limits = 20
       grants: [grantStrict, grantFlexible],
-      mergingPolicy: "sum", // Sum limits = 20
+      mergingPolicy: "sum",
       allowOverage: true, // Computed property from grants
     }
 
@@ -267,7 +279,6 @@ describe("EntitlementService - Multiple Grants", () => {
       timestamp: now,
       requestId: "req_overage_1",
       idempotenceKey: "idem_overage_1",
-      fromCache: false,
       metadata: null,
     })
 

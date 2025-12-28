@@ -116,7 +116,7 @@ export class UsageMeter {
     const tokens = this.config.capacity - this.usageNumber
     const ceiling = this.config.capacity * (this.config.maxBurstPercentage ?? 1.0)
     // Cap at ceiling (for burst scenarios)
-    return Math.min(ceiling, Math.max(0, tokens))
+    return Math.min(ceiling, tokens)
   }
 
   private isUnlimited(): boolean {

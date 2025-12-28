@@ -312,6 +312,26 @@ export class SubscriptionMachine {
         trialing: {
           tags: ["subscription"],
           description: "Subscription is trialing, meaning is waiting for the trial to end",
+          entry: async ({ context }) => {
+            const startPhaseAt = context.currentPhase?.startAt ?? context.now
+            const computeGrantsResult = await this.grantService.computeGrantsForCustomer({
+              customerId: context.customer.id,
+              projectId: context.projectId,
+              now: startPhaseAt,
+            })
+
+            if (computeGrantsResult.err) {
+              // don't throw the error, just log it
+              this.logger.error(computeGrantsResult.err.message)
+            } else {
+              this.logger.info("Grants computed after trial end", {
+                subscriptionId: context.subscriptionId,
+                customerId: context.customer.id,
+                projectId: context.projectId,
+                now: startPhaseAt,
+              })
+            }
+          },
           on: {
             // first possible event is renew which will end the trial and update the phase
             RENEW: [
@@ -453,12 +473,14 @@ export class SubscriptionMachine {
                 "logStateTransition",
                 "notifyCustomer",
                 async ({ context }) => {
+                  const nowDate = context.subscription.renewAt
+                    ? context.subscription.renewAt + 1
+                    : context.now
                   // compute the grants for the customer
                   const computeGrantsResult = await this.grantService.computeGrantsForCustomer({
                     customerId: context.customer.id,
                     projectId: context.projectId,
-                    // generate new entitlement for the cycle start at
-                    now: context.subscription.currentCycleStartAt,
+                    now: nowDate,
                   })
 
                   if (computeGrantsResult.err) {
@@ -468,8 +490,7 @@ export class SubscriptionMachine {
                     this.logger.info("Grants computed after renewal", {
                       customerId: context.customer.id,
                       projectId: context.projectId,
-                      now: context.now,
-                      grants: computeGrantsResult.val.map((grant) => grant.id),
+                      now: nowDate,
                     })
                   }
                 },
@@ -571,6 +592,9 @@ export class SubscriptionMachine {
                 target: "error",
                 actions: assign({
                   error: ({ context }) => {
+                    const renewAtDate = context.subscription.renewAt
+                      ? new Date(context.subscription.renewAt).toLocaleString()
+                      : new Date(context.now).toLocaleString()
                     const renew = canRenew({ context })
                     const autoRenew = isAutoRenewEnabled({ context })
 
@@ -582,7 +606,7 @@ export class SubscriptionMachine {
 
                     if (!renew) {
                       return {
-                        message: "Cannot renew subscription, subscription is not due to be renewed",
+                        message: `Cannot renew subscription, subscription  will be renewed at ${renewAtDate}`,
                       }
                     }
 

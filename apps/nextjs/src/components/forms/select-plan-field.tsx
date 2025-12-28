@@ -1,7 +1,5 @@
 "use client"
-import { getBillingCycleMessage } from "@unprice/db/validators"
 import type { RouterOutputs } from "@unprice/trpc/routes"
-import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
 import {
   Command,
@@ -132,18 +130,6 @@ export default function SelectPlanFormField<TFieldValues extends FormValues>({
               </Command>
             </PopoverContent>
           </Popover>
-          {selectedPlanVersion && (
-            <div className="text-muted-foreground text-sm">
-              Plan version:{" "}
-              <b>
-                {selectedPlanVersion.plan.slug} v{selectedPlanVersion.version} -{" "}
-                {getBillingCycleMessage(selectedPlanVersion.billingConfig).message}{" "}
-              </b>
-              {selectedPlanVersion.paymentMethodRequired && (
-                <Badge variant="outline">payment method required</Badge>
-              )}
-            </div>
-          )}
           <FormMessage />
         </FormItem>
       )}

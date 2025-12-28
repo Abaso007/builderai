@@ -218,7 +218,8 @@ export function BillingConfigFeatureFormField({
           <FormItem className="flex w-full flex-col">
             <FormLabel>Billing Interval</FormLabel>
             <FormDescription>
-              The interval for this item. This is different from the billing interval of the plan.
+              How often the feature will be billed. Can be different from the billing interval of
+              the plan.
             </FormDescription>
             <Select
               onValueChange={(value) => {

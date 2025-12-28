@@ -1496,12 +1496,9 @@ export class BillingService {
             const res = await paymentProviderService.addInvoiceItem({
               invoiceId: providerInvoiceId,
               name: item.featurePlanVersion!.feature.slug,
-              // each product is created from the feature
-              // TODO: don't activate for now to avoid mismatch between internal and provider
-              // there is an edge case where if the feature is tier based with flat charges
+              // TODO: there is an edge case where if the feature is tier based with flat charges
               // the flat charge is combined with the tier charge and the total amount is not correct
               // we need to add a separate line item for the flat charge
-              // productId: item.featurePlanVersion!.feature.id,
               description: item.description ?? "",
               isProrated,
               totalAmount: item.amountTotal,

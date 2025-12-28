@@ -2,8 +2,10 @@
 
 import { Separator } from "@unprice/ui/separator"
 
-import { CopyButton } from "~/components/copy-button"
+import { Button } from "@unprice/ui/button"
+import { Settings } from "lucide-react"
 import { useActiveFeature, useActivePlanVersion } from "~/hooks/use-features"
+import { FeatureDialog } from "../../_components/feature-dialog"
 import { FeatureConfigForm } from "./feature-config-form"
 
 export function FeatureConfig({
@@ -21,9 +23,13 @@ export function FeatureConfig({
           <Separator />
           <div className="flex items-start py-4 text-sm">
             <div className="grid gap-1">
-              <div className="line-clamp-1 pb-2 font-semibold text-lg">
+              <div className="line-clamp-1 flex items-center justify-start gap-1 pb-2 font-semibold text-lg">
                 {activeFeature.feature.title}{" "}
-                <CopyButton value={activeFeature.id} className="size-4" />
+                <FeatureDialog defaultValues={activeFeature.feature}>
+                  <Button variant="link" size={"xs"} className="p-0">
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                </FeatureDialog>
               </div>
               <div className="line-clamp-1 text-xs">
                 <b>slug:</b> {activeFeature.feature.slug}

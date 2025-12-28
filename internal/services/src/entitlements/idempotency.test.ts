@@ -1,6 +1,7 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { EntitlementState } from "@unprice/db/validators"
+import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache/service"
@@ -32,6 +33,13 @@ describe("EntitlementService - Idempotency & Flush", () => {
     allowOverage: false,
     aggregationMethod: "sum",
     mergingPolicy: "sum",
+    meter: {
+      usage: "0",
+      snapshotUsage: "0",
+      lastReconciledId: "rec_initial",
+      lastUpdated: now,
+      lastCycleStart: now - 10000,
+    },
     grants: [
       {
         id: "grant_idem_1",
@@ -54,13 +62,6 @@ describe("EntitlementService - Idempotency & Flush", () => {
     metadata: null,
     createdAtM: now,
     updatedAtM: now,
-    meter: {
-      usage: "0",
-      lastReconciledId: "",
-      snapshotUsage: "0",
-      lastUpdated: now,
-      lastCycleStart: now - 10000,
-    },
   }
 
   beforeEach(async () => {
@@ -77,6 +78,9 @@ describe("EntitlementService - Idempotency & Flush", () => {
     mockAnalytics = {
       ingestFeaturesVerification: vi.fn().mockResolvedValue({ successful_rows: 1 }),
       ingestFeaturesUsage: vi.fn().mockResolvedValue({ successful_rows: 1 }),
+      getFeaturesUsageCursor: vi
+        .fn()
+        .mockResolvedValue(Ok({ usage: 0, lastRecordId: "rec_initial" })),
     } as unknown as Analytics
 
     mockDb = {
@@ -107,7 +111,10 @@ describe("EntitlementService - Idempotency & Flush", () => {
 
     mockMetrics = {} as unknown as Metrics
 
-    mockStorage = new MemoryEntitlementStorageProvider({ logger: mockLogger })
+    mockStorage = new MemoryEntitlementStorageProvider({
+      logger: mockLogger,
+      analytics: mockAnalytics,
+    })
     await mockStorage.initialize()
 
     service = new EntitlementService({
@@ -160,11 +167,9 @@ describe("EntitlementService - Idempotency & Flush", () => {
       metadata: null,
     })
 
-    // In the current implementation of `reportUsage`, it just consumes.
-    // It doesn't check if idempotency key was already processed in the current cycle for consumption logic itself.
-    // So usage WILL increase in memory state.
+    // So usage WILL NOT increase because of idempotency check.
     expect(res2.allowed).toBe(true)
-    expect(res2.usage).toBe(10) // 5 + 5
+    expect(res2.usage).toBe(5) // Still 5 because of idempotency key check
 
     // Now let's flush and verify analytics only receives ONE event
     await service.flush()
@@ -194,7 +199,6 @@ describe("EntitlementService - Idempotency & Flush", () => {
         featureSlug,
         timestamp: now + i,
         requestId: `req_ver_${i}`,
-        fromCache: i > 0,
         metadata: null,
         performanceStart: performance.now(),
       })

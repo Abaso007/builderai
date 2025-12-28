@@ -1,14 +1,10 @@
 import { and, eq, inArray } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
-import { AesGCM } from "@unprice/db/utils"
 import { calculateFlatPricePlan, planVersionSelectBaseSchema } from "@unprice/db/validators"
-import { PaymentProviderService } from "@unprice/services/payment-provider"
 import { isZero } from "dinero.js"
 import { z } from "zod"
 
 import { TRPCError } from "@trpc/server"
-import { APP_NAME } from "@unprice/config"
-import { env } from "#env"
 import { protectedProjectProcedure } from "#trpc"
 import { featureGuard } from "#utils/feature-guard"
 
@@ -80,63 +76,6 @@ export const publish = protectedProjectProcedure
       })
     }
 
-    // get config payment provider
-    const config = await opts.ctx.db.query.paymentProviderConfig.findFirst({
-      where: (config, { and, eq }) =>
-        and(
-          eq(config.projectId, project.id),
-          eq(config.paymentProvider, planVersionData.paymentProvider),
-          eq(config.active, true)
-        ),
-    })
-
-    if (!config) {
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message:
-          "Payment provider config not found or not active. Please check the payment provider config in the project > settings > payment provider.",
-      })
-    }
-
-    const aesGCM = await AesGCM.withBase64Key(env.ENCRYPTION_KEY)
-
-    const decryptedKey = await aesGCM.decrypt({
-      iv: config.keyIv,
-      ciphertext: config.key,
-    })
-
-    const paymentProviderService = new PaymentProviderService({
-      logger: opts.ctx.logger,
-      paymentProvider: planVersionData.paymentProvider,
-      token: decryptedKey,
-    })
-
-    // create the products
-    await Promise.all(
-      planVersionData.planFeatures.map(async (planFeature) => {
-        const productName = `${planVersionData.project.name} - ${planFeature.feature.slug} from ${APP_NAME}`
-
-        const { err } = await paymentProviderService.upsertProduct({
-          id: planFeature.featureId,
-          name: productName,
-          type: "service",
-          // only pass the description if it is not empty
-          ...(planFeature.feature.description
-            ? {
-                description: planFeature.feature.description,
-              }
-            : {}),
-        })
-
-        if (err) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: "Error syncs product with stripe",
-          })
-        }
-      })
-    )
-
     // verify if the payment method is required
     const { err, val: totalPricePlan } = calculateFlatPricePlan({
       planVersion: planVersionData,
@@ -164,7 +103,6 @@ export const publish = protectedProjectProcedure
 
     const paymentMethodRequired = !isZero(totalPricePlan.dinero)
 
-    // we need to create each product on the payment provider
     const planVersionDataUpdated = await opts.ctx.db.transaction(async (tx) => {
       try {
         const flatFeaturesIds = planVersionData.planFeatures

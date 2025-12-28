@@ -1,4 +1,4 @@
-import type { AnalyticsUsage, AnalyticsVerification } from "@unprice/analytics"
+import type { Analytics, AnalyticsUsage, AnalyticsVerification } from "@unprice/analytics"
 import type { EntitlementState } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
@@ -12,13 +12,17 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
   private verifications: AnalyticsVerification[] = []
   private initialized = false
   private logger: Logger
+  private analytics?: Analytics
 
   constructor({
     logger,
+    analytics,
   }: {
     logger: Logger
+    analytics?: Analytics
   }) {
     this.logger = logger
+    this.analytics = analytics
     this.initialized = false
   }
 
@@ -273,7 +277,17 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
   > {
     try {
       this.isInitialized()
-      return Ok({
+
+      if (this.analytics) {
+        if (this.usageRecords.length > 0) {
+          await this.analytics.ingestFeaturesUsage(this.usageRecords)
+        }
+        if (this.verifications.length > 0) {
+          await this.analytics.ingestFeaturesVerification(this.verifications)
+        }
+      }
+
+      const result = {
         usage: {
           count: this.usageRecords.length,
           lastId: this.usageRecords[this.usageRecords.length - 1]?.id ?? null,
@@ -282,7 +296,12 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
           count: this.verifications.length,
           lastId: this.verifications[this.verifications.length - 1]?.requestId ?? null,
         },
-      })
+      }
+
+      this.usageRecords = []
+      this.verifications = []
+
+      return Ok(result)
     } catch (error) {
       return Err(
         new UnPriceEntitlementStorageError({
