@@ -570,9 +570,9 @@ export class GrantsManager {
 
     // period scoped entitlements use the merged effective at and expires at
     // lifetime scoped entitlements use the winning grant's effective at and expires at
-    const effectiveAt = config.scope === "period" ? merged.effectiveAt : winningGrant.effectiveAt
-    const expiresAt = config.scope === "period" ? merged.expiresAt : winningGrant.expiresAt
-    const defaultResetConfig = config.scope === "period" ? localResetConfig : null
+    const effectiveAt = config.reset ? merged.effectiveAt : winningGrant.effectiveAt
+    const expiresAt = config.reset ? merged.expiresAt : winningGrant.expiresAt
+    const defaultResetConfig = config.reset ? localResetConfig : null
 
     return Ok({
       limit: merged.limit,

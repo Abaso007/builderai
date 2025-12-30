@@ -89,9 +89,7 @@
       "indexes": {
         "usage_records_feature_idx": {
           "name": "usage_records_feature_idx",
-          "columns": [
-            "featureSlug"
-          ],
+          "columns": ["featureSlug"],
           "isUnique": false
         }
       },
@@ -185,9 +183,7 @@
       "indexes": {
         "verifications_feature_idx": {
           "name": "verifications_feature_idx",
-          "columns": [
-            "featureSlug"
-          ],
+          "columns": ["featureSlug"],
           "isUnique": false
         }
       },

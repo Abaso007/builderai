@@ -41,6 +41,7 @@ export class UsageLimiterService implements UsageLimiter {
   private readonly stats: Stats
   private readonly requestId: string
   private hashCache: Map<string, string>
+  private entitlementService: EntitlementService
 
   constructor(opts: {
     namespace: DurableObjectNamespace<DurableObjectUsagelimiter>
@@ -70,6 +71,18 @@ export class UsageLimiterService implements UsageLimiter {
     this.stats = opts.stats
     this.requestId = opts.requestId
     this.hashCache = opts.hashCache
+
+    // we don't need storage for this so we don't need to call the DO
+    // instead we use the entitlement service
+    this.entitlementService = new EntitlementService({
+      db: this.db,
+      storage: new MemoryEntitlementStorageProvider({ logger: this.logger }), // we don't need storage but we need to pass it to the service
+      logger: this.logger,
+      analytics: this.analytics,
+      waitUntil: this.waitUntil,
+      cache: this.cache,
+      metrics: this.metrics,
+    })
   }
 
   // in memory cache with size and TTL limits
@@ -181,6 +194,7 @@ export class UsageLimiterService implements UsageLimiter {
     return Ok(result)
   }
 
+  // TODO: reset by featureslug
   public async resetEntitlements(params: {
     customerId: string
     projectId: string
@@ -190,34 +204,22 @@ export class UsageLimiterService implements UsageLimiter {
     )
 
     // reset the entitlements for the customer
-    await durableObject.resetEntitlements()
+    await durableObject.resetEntitlements({
+      customerId: params.customerId,
+      projectId: params.projectId,
+    })
 
     return Ok(undefined)
   }
 
   public async getActiveEntitlements(
-    data: GetEntitlementsRequest
+    params: GetEntitlementsRequest
   ): Promise<Result<MinimalEntitlement[], BaseError>> {
-    // we don't need storage for this so we don't need to call the DO
-    // instead we use the entitlement service
-    const entitlementService = new EntitlementService({
-      db: this.db,
-      storage: new MemoryEntitlementStorageProvider({ logger: this.logger }), // we don't need storage but we need to pass it to the service
-      logger: this.logger,
-      analytics: this.analytics,
-      waitUntil: this.waitUntil,
-      cache: this.cache,
-      metrics: this.metrics,
-    })
+    const durableObject = this.getStub(
+      this.getDurableObjectCustomerId(params.customerId, params.projectId)
+    )
 
-    const { val: entitlements, err } = await entitlementService.getActiveEntitlements({
-      customerId: data.customerId,
-      projectId: data.projectId,
-      opts: {
-        now: data.now,
-        skipCache: false,
-      },
-    })
+    const { val: entitlements, err } = await durableObject.getActiveEntitlements(params)
 
     if (err) {
       return Err(err)
@@ -229,15 +231,18 @@ export class UsageLimiterService implements UsageLimiter {
   public async getCurrentUsage(
     data: GetUsageRequest
   ): Promise<Result<CurrentUsage, FetchError | BaseError>> {
-    const durableObject = this.getStub(
-      this.getDurableObjectCustomerId(data.customerId, data.projectId)
-    )
-    const { val: usageDisplay, err } = await durableObject.getCurrentUsage(data)
-
+    const { val: usage, err } = await this.entitlementService.getCurrentUsage({
+      customerId: data.customerId,
+      projectId: data.projectId,
+      opts: {
+        now: data.now,
+        skipCache: false,
+      },
+    })
     if (err) {
       return Err(err)
     }
 
-    return Ok(usageDisplay)
+    return Ok(usage)
   }
 }

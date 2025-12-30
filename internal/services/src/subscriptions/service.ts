@@ -154,7 +154,7 @@ export class SubscriptionService {
     if (overlappingPhases.length > 0 && overlappingPhases.some((p) => p.id !== phase.id)) {
       return Err(
         new UnPriceSubscriptionError({
-          message: "Phases overlap, there is already a phase in the same range",
+          message: "Phases overlap, there is already a phase in the same date range",
         })
       )
     }
@@ -485,6 +485,7 @@ export class SubscriptionService {
           throw e
         })
 
+      // TODO: can this be inside the subscription machine?
       // update the status of the subscription if the phase is active
       const isActivePhase =
         phase.startAt <= Date.now() && (phase.endAt ?? Number.POSITIVE_INFINITY) >= Date.now()
@@ -509,7 +510,7 @@ export class SubscriptionService {
     // generate the billing periods for the new phase on background
     // this can fail but background jobs can retry
     this.waitUntil(
-      // TODO: report the event to analytics
+      // TODO: report the event to analytics with more context
       // this.analytics.trackEvent({
       //   event: "subscription.phase.created",
       //   properties: {

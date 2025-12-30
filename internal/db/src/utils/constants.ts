@@ -220,18 +220,19 @@ export type Behavior = "sum" | "max" | "last" | "none"
 interface MethodConfig {
   behavior: Behavior // How do we update the number? (Add, Max, Replace)
   scope: Scope // When does it reset? (Cycle end vs Never)
+  reset: boolean
 }
 
 export const AGGREGATION_CONFIG: Record<AggregationMethod, MethodConfig> = {
-  none: { behavior: "none", scope: "period" },
+  none: { behavior: "none", scope: "period", reset: false },
   // Period Scoped (Resets on Cycle)
-  sum: { behavior: "sum", scope: "period" },
-  count: { behavior: "sum", scope: "period" }, // count is just sum(+1)
-  max: { behavior: "max", scope: "period" },
-  last_during_period: { behavior: "last", scope: "period" },
+  sum: { behavior: "sum", scope: "period", reset: true },
+  count: { behavior: "sum", scope: "period", reset: true }, // count is just sum(+1)
+  max: { behavior: "max", scope: "period", reset: true },
+  last_during_period: { behavior: "last", scope: "period", reset: true },
 
   // Lifetime Scoped (Never Resets)
-  sum_all: { behavior: "sum", scope: "lifetime" },
-  count_all: { behavior: "sum", scope: "lifetime" },
-  max_all: { behavior: "max", scope: "lifetime" },
+  sum_all: { behavior: "sum", scope: "lifetime", reset: false },
+  count_all: { behavior: "sum", scope: "lifetime", reset: false },
+  max_all: { behavior: "max", scope: "lifetime", reset: false },
 }

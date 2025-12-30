@@ -89,23 +89,17 @@
       "indexes": {
         "usage_records_feature_idx": {
           "name": "usage_records_feature_idx",
-          "columns": [
-            "featureSlug"
-          ],
+          "columns": ["featureSlug"],
           "isUnique": false
         },
         "usage_records_timestamp_idx": {
           "name": "usage_records_timestamp_idx",
-          "columns": [
-            "timestamp"
-          ],
+          "columns": ["timestamp"],
           "isUnique": false
         },
         "usage_idempotence_key_idx": {
           "name": "usage_idempotence_key_idx",
-          "columns": [
-            "idempotenceKey"
-          ],
+          "columns": ["idempotenceKey"],
           "isUnique": true
         }
       },
@@ -199,9 +193,7 @@
       "indexes": {
         "verifications_feature_idx": {
           "name": "verifications_feature_idx",
-          "columns": [
-            "featureSlug"
-          ],
+          "columns": ["featureSlug"],
           "isUnique": false
         }
       },

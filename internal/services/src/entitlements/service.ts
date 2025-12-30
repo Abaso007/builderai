@@ -425,14 +425,40 @@ export class EntitlementService {
       )
     }
 
-    // set the cache with the fresh value from DB
-    this.waitUntil(this.cache.customerEntitlements.set(cacheKey, val ?? null))
+    let entitlements = val
 
-    if (!val) {
+    // 2. LAZY COMPUTATION: If missing or forcing revalidation, compute from grants
+    if (entitlements?.length === 0 || opts?.skipCache) {
+      this.logger.info("Lazy computing entitlements", {
+        customerId,
+        projectId,
+        reason: entitlements?.length === 0 ? "missing" : "revalidate",
+      })
+
+      // TODO: add negative caching for this operation when not found
+      const computeResult = await this.grantsManager.computeGrantsForCustomer({
+        customerId,
+        projectId,
+        now: opts?.now ?? Date.now(),
+      })
+
+      if (computeResult.err) {
+        return Err(new UnPriceEntitlementError({ message: computeResult.err.message }))
+      }
+
+      entitlements = computeResult.val ?? []
+
+      // Update cache with the freshly computed entitlement
+      if (entitlements.length > 0) {
+        this.cache.customerEntitlements.set(cacheKey, entitlements)
+      }
+    }
+
+    if (!entitlements || entitlements.length === 0) {
       return Ok([])
     }
 
-    return Ok(val)
+    return Ok(entitlements)
   }
 
   /**
@@ -817,11 +843,11 @@ export class EntitlementService {
     if (!cached) {
       this.logger.info("Cache miss, loading from DB", params)
 
-      // get the entitlement from cache - if not found in cache it will load from DB
+      // get the entitlement from cache
       const { val, err } = await this.getActiveEntitlement({
         ...params,
         opts: {
-          skipCache: true,
+          skipCache: false,
           now: params.now,
         },
       })
@@ -835,6 +861,7 @@ export class EntitlementService {
       }
 
       if (!val) {
+        // TODO: check renew date to see if the subscription is already renewed
         return Ok(null)
       }
 
@@ -1020,9 +1047,39 @@ export class EntitlementService {
     return Ok(cached)
   }
 
-  public async resetEntitlements(): Promise<
-    Result<void, UnPriceEntitlementError | UnPriceEntitlementStorageError>
-  > {
+  public async resetEntitlements(params: {
+    customerId: string
+    projectId: string
+  }): Promise<Result<void, UnPriceEntitlementError | UnPriceEntitlementStorageError>> {
+    const customerId = params.customerId
+    const projectId = params.projectId
+    const cacheKey = `${projectId}:${customerId}`
+
+    // reset individual keys
+    const { val: active } = await this.getActiveEntitlements({
+      customerId,
+      projectId,
+      opts: { skipCache: false },
+    })
+
+    // 2. Clear all individual feature caches
+    if (active && active.length > 0) {
+      await Promise.all(
+        active.map((e) =>
+          this.cache.customerEntitlement.remove(
+            this.storage.makeKey({
+              customerId,
+              projectId,
+              featureSlug: e.featureSlug,
+            })
+          )
+        )
+      )
+    }
+
+    // reset the cache
+    await this.cache.customerEntitlements.remove(cacheKey)
+
     // reset the storage provider
     return await this.storage.reset()
   }
@@ -1072,7 +1129,7 @@ export class EntitlementService {
   }: {
     customerId: string
     projectId: string
-  }): Promise<MinimalEntitlement[] | null> {
+  }): Promise<MinimalEntitlement[]> {
     const entitlements = await this.db.query.entitlements.findMany({
       columns: {
         id: true,
@@ -1083,19 +1140,9 @@ export class EntitlementService {
       where: (e, { and, eq }) => and(eq(e.customerId, customerId), eq(e.projectId, projectId)),
     })
 
-    if (!entitlements) return null
-
     return entitlements
   }
 
-  /**
-   * Get active entitlements for a customer
-   * @param customerId - Customer id
-   * @param projectId - Project id
-   * @param now - Current time
-   * @param opts - Options
-   * @returns Active entitlements
-   */
   private async getActiveEntitlement({
     customerId,
     projectId,
@@ -1178,17 +1225,41 @@ export class EntitlementService {
       )
     }
 
-    // set the cache with the fresh value from DB
-    this.waitUntil(this.cache.customerEntitlement.set(cacheKey, val ?? null))
+    let entitlement = val
 
-    if (!val) {
-      return Ok(null)
+    // 2. LAZY COMPUTATION: If missing or forcing revalidation, compute from grants
+    if (!entitlement || opts?.skipCache) {
+      this.logger.info("Lazy computing entitlement", {
+        customerId,
+        featureSlug,
+        reason: !entitlement ? "missing" : "revalidate",
+      })
+
+      // TODO: add negative caching for this operation when not found
+      const computeResult = await this.grantsManager.computeGrantsForCustomer({
+        customerId,
+        projectId,
+        now: opts?.now ?? Date.now(),
+      })
+
+      if (computeResult.err) {
+        return Err(new UnPriceEntitlementError({ message: computeResult.err.message }))
+      }
+
+      entitlement = computeResult.val.find((e) => e.featureSlug === featureSlug) ?? null
+
+      // Update cache with the freshly computed entitlement
+      if (entitlement) {
+        this.waitUntil(this.cache.customerEntitlement.set(cacheKey, entitlement))
+      }
     }
+
+    if (!entitlement) return Ok(null)
 
     // initialize the entitlement usage
     // neve saved on cache as it changes on every usage
     const { val: meterState, err: meterStateErr } = await this.initializeUsageMeter({
-      entitlement: val,
+      entitlement: entitlement,
       watermark: opts?.now ?? Date.now(),
     })
 
@@ -1201,7 +1272,7 @@ export class EntitlementService {
     }
 
     return Ok({
-      ...val,
+      ...entitlement,
       meter: meterState,
     })
   }
@@ -1262,10 +1333,95 @@ export class EntitlementService {
     })
   }
 
-  /**
-   * Get current usage for a customer
-   */
   public async getCurrentUsage({
+    customerId,
+    projectId,
+    opts,
+  }: {
+    customerId: string
+    projectId: string
+    opts?: {
+      skipCache?: boolean // skip cache to force revalidation
+      now?: number
+    }
+  }): Promise<
+    Result<CurrentUsage, UnPriceEntitlementError | UnPriceEntitlementStorageError | FetchError>
+  > {
+    const cacheKey = `${projectId}:${customerId}`
+
+    if (opts?.skipCache) {
+      this.logger.debug("skipping cache for getActiveEntitlement and loading from DB", {
+        customerId,
+        projectId,
+      })
+    }
+
+    // first try to get the entitlement from cache, if not found try to get it from DO,
+    const { val, err } = opts?.skipCache
+      ? await wrapResult(
+          this._getCurrentUsage({
+            customerId,
+            projectId,
+            now: opts.now ?? Date.now(),
+          }),
+          (err) =>
+            new FetchError({
+              message: `unable to query usage from _getCurrentUsage - ${err.message}`,
+              retry: false,
+              context: {
+                error: err.message,
+                url: "",
+                customerId: customerId,
+                projectId: projectId,
+                method: "_getCurrentUsage",
+              },
+            })
+        )
+      : await retry(
+          3,
+          async () =>
+            this.cache.getCurrentUsage.swr(cacheKey, () =>
+              this._getCurrentUsage({
+                customerId,
+                projectId,
+                now: opts?.now ?? Date.now(),
+              })
+            ),
+          (attempt, err) => {
+            this.logger.warn("Failed to fetch usage data from cache, retrying...", {
+              customerId: customerId,
+              projectId: projectId,
+              method: "_getCurrentUsage",
+              attempt,
+              error: err.message,
+            })
+          }
+        )
+
+    if (err) {
+      return Err(
+        new FetchError({
+          message: err.message,
+          retry: true,
+          cause: err,
+        })
+      )
+    }
+
+    // set the cache with the fresh value from DB
+    this.waitUntil(this.cache.getCurrentUsage.set(cacheKey, val ?? null))
+
+    if (!val) {
+      return Ok(this.buildEmptyUsageResponse("USD"))
+    }
+
+    return Ok(val)
+  }
+
+  /**
+   * Get current usage data
+   */
+  private async _getCurrentUsage({
     customerId,
     projectId,
     now,
@@ -1273,7 +1429,7 @@ export class EntitlementService {
     customerId: string
     projectId: string
     now: number
-  }): Promise<Result<CurrentUsage, UnPriceEntitlementError | UnPriceEntitlementStorageError>> {
+  }): Promise<CurrentUsage | null> {
     // Get grants and subscription info
     const grantsResult = await this.grantsManager.getGrantsForCustomer({
       customerId,
@@ -1282,13 +1438,17 @@ export class EntitlementService {
     })
 
     if (grantsResult.err) {
-      return Err(new UnPriceEntitlementError({ message: grantsResult.err.message }))
+      this.logger.error(`Failed to get grants for customer - ${grantsResult.err.message}`, {
+        customerId,
+        projectId,
+      })
+      return null
     }
 
     const { grants, subscription, planVersion } = grantsResult.val
 
     if (grants.length === 0 || !subscription || !planVersion) {
-      return Ok(this.buildEmptyUsageResponse(planVersion?.currency ?? "USD"))
+      return this.buildEmptyUsageResponse(planVersion?.currency ?? "USD")
     }
 
     // Compute entitlement states and get usage estimates in parallel
@@ -1298,11 +1458,22 @@ export class EntitlementService {
     ])
 
     if (entitlementsResult.err) {
-      return Err(entitlementsResult.err)
+      this.logger.error(
+        `Failed to compute entitlement states - ${entitlementsResult.err.message}`,
+        {
+          customerId,
+          projectId,
+        }
+      )
+      return null
     }
 
     if (usageEstimatesResult.err) {
-      return Err(usageEstimatesResult.err)
+      this.logger.error(`Failed to get usage estimates - ${usageEstimatesResult.err.message}`, {
+        customerId,
+        projectId,
+      })
+      return null
     }
 
     // Build feature map and process features
@@ -1318,18 +1489,16 @@ export class EntitlementService {
     )
 
     if (features.length === 0) {
-      return Ok(this.buildEmptyUsageResponse(planVersion.currency))
+      return this.buildEmptyUsageResponse(planVersion.currency)
     }
 
     // Build and return response
-    return Ok(
-      this.buildUsageResponse(
-        features,
-        subscription,
-        planVersion,
-        subscription.currentCycleEndAt,
-        usageEstimatesResult.val
-      )
+    return this.buildUsageResponse(
+      features,
+      subscription,
+      planVersion,
+      subscription.currentCycleEndAt,
+      usageEstimatesResult.val
     )
   }
 

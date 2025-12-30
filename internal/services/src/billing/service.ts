@@ -1813,6 +1813,7 @@ export class BillingService {
     let cyclesCreated = 0
 
     // for each phase, materialize the pending periods
+    // TODO: reduce complexity
     for (const phase of phases) {
       // For every subscription item, backfill missing billing periods idempotently
       for (const item of phase.items) {
@@ -1855,7 +1856,7 @@ export class BillingService {
             const values = await Promise.all(
               windows.map(async (w) => {
                 const whenToBill = phase.planVersion.whenToBill
-                // handles when to invoice this way pay in advance aligns with the cycle start
+                // handles when to invoice; this way pay in advance aligns with the cycle start
                 // and pay in arrear aligns with the cycle end
                 const invoiceAt = whenToBill === "pay_in_advance" ? w.start : w.end
                 const statementKey = await this.computeStatementKey({
@@ -1872,6 +1873,7 @@ export class BillingService {
 
                 // Check if there is an active grant for this feature/subscription item
                 // preventing duplicate/exploding grants if one is already open-ended or covers the period
+                // TODO: reduce queries here
                 const existingGrant = await tx.query.grants.findFirst({
                   where: (g, { and, eq, or, isNull, lte, gte }) =>
                     and(
@@ -1901,7 +1903,7 @@ export class BillingService {
                   // first we need to create the grant for the billing period
                   // use a scoped grants manager to ensure transactional integrity
                   const txGrantsManager = new GrantsManager({
-                    db: tx as unknown as Database,
+                    db: tx,
                     logger: this.logger,
                   })
 
