@@ -73,10 +73,10 @@ export function InvoiceTable({
                       ) : null}
                     </span>
                     <div className="flex flex-col">
-                      <span className="block font-light text-muted-foreground text-xs italic">
+                      <span className="block font-light text-muted-foreground text-xs">
                         {`From ${formatDate(item.cycleStartAt, invoice.subscription.timezone, "MMMM d, yyyy hh:mm a")}`}
                       </span>
-                      <span className="block font-light text-muted-foreground text-xs italic">
+                      <span className="block font-light text-muted-foreground text-xs">
                         {`To ${formatDate(item.cycleEndAt, invoice.subscription.timezone, "MMMM d, yyyy hh:mm a")}`}
                       </span>
                     </div>

@@ -2,6 +2,10 @@ import type { Metric } from "@unprice/metrics"
 import type { Metrics } from "./interface"
 
 export class NoopMetrics implements Metrics {
+  public x(_value: string): void {
+    return
+  }
+
   public emit(_metric: Metric): Promise<void> {
     return Promise.resolve()
   }

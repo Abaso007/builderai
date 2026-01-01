@@ -13,7 +13,7 @@ import type { App } from "~/hono/app"
 const tags = ["customer"]
 
 export const route = createRoute({
-  path: "/v1/customer/reset-entitlements",
+  path: "/v1/customer/resetEntitlements",
   operationId: "customer.resetEntitlements",
   summary: "reset entitlements",
   description: "Reset entitlements for a customer",

@@ -845,59 +845,63 @@ export class BillingService {
         const subtotalAmountChunks = []
         const descriptionChunks = []
 
-        quantityChunks.push(sql`(case`)
-        totalAmountChunks.push(sql`(case`)
-        unitAmountChunks.push(sql`(case`)
-        subtotalAmountChunks.push(sql`(case`)
-        descriptionChunks.push(sql`(case`)
+        if (billableItems.items.length > 0) {
+          quantityChunks.push(sql`(case`)
+          totalAmountChunks.push(sql`(case`)
+          unitAmountChunks.push(sql`(case`)
+          subtotalAmountChunks.push(sql`(case`)
+          descriptionChunks.push(sql`(case`)
 
-        for (const item of billableItems.items) {
-          quantityChunks.push(
-            sql`when ${invoiceItems.id} = ${item.id} then cast(${item.quantity} as int)`
-          )
-          totalAmountChunks.push(
-            sql`when ${invoiceItems.id} = ${item.id} then cast(${item.totalAmount} as int)`
-          )
-          unitAmountChunks.push(
-            sql`when ${invoiceItems.id} = ${item.id} then cast(${item.unitAmount} as int)`
-          )
-          subtotalAmountChunks.push(
-            sql`when ${invoiceItems.id} = ${item.id} then cast(${item.subtotalAmount} as int)`
-          )
-          descriptionChunks.push(sql`when ${invoiceItems.id} = ${item.id} then ${item.description}`)
-        }
-
-        // add end) to the chunks
-        quantityChunks.push(sql`end)`)
-        totalAmountChunks.push(sql`end)`)
-        unitAmountChunks.push(sql`end)`)
-        subtotalAmountChunks.push(sql`end)`)
-        descriptionChunks.push(sql`end)`)
-
-        const sqlQueryQuantity = sql.join(quantityChunks, sql.raw(" "))
-        const sqlQueryTotalAmount = sql.join(totalAmountChunks, sql.raw(" "))
-        const sqlQueryUnitAmount = sql.join(unitAmountChunks, sql.raw(" "))
-        const sqlQuerySubtotalAmount = sql.join(subtotalAmountChunks, sql.raw(" "))
-        const sqlQueryDescription = sql.join(descriptionChunks, sql.raw(" "))
-
-        // for every invoice item we update the invoice item
-        // one single query for updating the invoice items
-        await tx
-          .update(invoiceItems)
-          .set({
-            quantity: sqlQueryQuantity,
-            unitAmountCents: sqlQueryUnitAmount,
-            amountTotal: sqlQueryTotalAmount,
-            amountSubtotal: sqlQuerySubtotalAmount,
-            description: sqlQueryDescription,
-          })
-          .where(
-            and(
-              eq(invoiceItems.invoiceId, openInvoiceData.id),
-              eq(invoiceItems.projectId, projectId),
-              inArray(invoiceItems.id, billableItemsIds)
+          for (const item of billableItems.items) {
+            quantityChunks.push(
+              sql`when ${invoiceItems.id} = ${item.id} then cast(${item.quantity} as int)`
             )
-          )
+            totalAmountChunks.push(
+              sql`when ${invoiceItems.id} = ${item.id} then cast(${item.totalAmount} as int)`
+            )
+            unitAmountChunks.push(
+              sql`when ${invoiceItems.id} = ${item.id} then cast(${item.unitAmount} as int)`
+            )
+            subtotalAmountChunks.push(
+              sql`when ${invoiceItems.id} = ${item.id} then cast(${item.subtotalAmount} as int)`
+            )
+            descriptionChunks.push(
+              sql`when ${invoiceItems.id} = ${item.id} then ${item.description}`
+            )
+          }
+
+          // add end) to the chunks
+          quantityChunks.push(sql`end)`)
+          totalAmountChunks.push(sql`end)`)
+          unitAmountChunks.push(sql`end)`)
+          subtotalAmountChunks.push(sql`end)`)
+          descriptionChunks.push(sql`end)`)
+
+          const sqlQueryQuantity = sql.join(quantityChunks, sql.raw(" "))
+          const sqlQueryTotalAmount = sql.join(totalAmountChunks, sql.raw(" "))
+          const sqlQueryUnitAmount = sql.join(unitAmountChunks, sql.raw(" "))
+          const sqlQuerySubtotalAmount = sql.join(subtotalAmountChunks, sql.raw(" "))
+          const sqlQueryDescription = sql.join(descriptionChunks, sql.raw(" "))
+
+          // for every invoice item we update the invoice item
+          // one single query for updating the invoice items
+          await tx
+            .update(invoiceItems)
+            .set({
+              quantity: sqlQueryQuantity,
+              unitAmountCents: sqlQueryUnitAmount,
+              amountTotal: sqlQueryTotalAmount,
+              amountSubtotal: sqlQuerySubtotalAmount,
+              description: sqlQueryDescription,
+            })
+            .where(
+              and(
+                eq(invoiceItems.invoiceId, openInvoiceData.id),
+                eq(invoiceItems.projectId, projectId),
+                inArray(invoiceItems.id, billableItemsIds)
+              )
+            )
+        }
 
         // get the subtotal amount
         const subtotalAmount = billableItems.items.reduce((a, i) => a + i.subtotalAmount, 0)
@@ -1000,11 +1004,11 @@ export class BillingService {
     const updatedItems = [] as ComputeInvoiceItemsResult[]
 
     try {
-      // 1. Fetch all active grants for this customer
+      // 1. Fetch all active grants for this customer at the given time
       const { val: allGrants, err: grantsErr } = await this.grantsManager.getGrantsForCustomer({
         customerId: invoice.customerId,
         projectId: invoice.projectId,
-        now: Date.now(), // Or use specific time if relevant for history
+        now: invoice.dueAt, // we need the grants at the time of the invoice
       })
 
       if (grantsErr) {
@@ -1173,69 +1177,93 @@ export class BillingService {
             }
           }
 
-          for (const res of calcResult.val) {
-            let targetItem: InvoiceItemExtended | undefined
-
-            // If we have a grantId, try to find the subscription item
-            if (res.grantId) {
-              // We rely on calculateFeaturePrice resolving the subscriptionItemId
-              // Or we resolve it again?
-              // calculateFeaturePrice uses resolver to fetch usage.
-              // result doesn't have subscriptionItemId.
-              // We need to map grantId -> subscriptionItemId again.
-              const subId = subscriptionItemIdResolver(res.grantId)
-              if (subId) {
-                targetItem = itemBySubId.get(subId)
-              }
-            } else {
-              // Overage: default to first item
-              targetItem = featureItems[0]
-            }
-
-            if (targetItem) {
-              const unitAmountCents = formatAmountDinero(res.price.unitPrice.dinero).amount
-              const totalAmountCents = formatAmountDinero(res.price.totalPrice.dinero).amount
-              const subtotalAmountCents = formatAmountDinero(res.price.subtotalPrice.dinero).amount
-
-              let description = targetItem.description ?? ""
-              let descriptionDetail = ""
-
-              if (res.prorate !== 1) {
-                const billingPeriod = `${new Date(res.cycleStartAt).toISOString().split("T")[0]} to ${
-                  new Date(res.cycleEndAt).toISOString().split("T")[0]
-                }`
-
-                descriptionDetail += res.isTrial
-                  ? ` trial (${billingPeriod})`
-                  : ` prorated (${billingPeriod})`
-              }
-
-              // Switch description logic
-              switch (targetItem.featurePlanVersion!.featureType) {
-                case "usage":
-                  description = `${targetItem.featurePlanVersion!.feature.title.toUpperCase()} - tier usage ${descriptionDetail}`
-                  break
-                case "flat":
-                  description = `${targetItem.featurePlanVersion!.feature.title.toUpperCase()} - flat ${descriptionDetail}`
-                  break
-                case "package":
-                  description = `${targetItem.featurePlanVersion!.feature.title.toUpperCase()} - package ${descriptionDetail}`
-                  break
-                default:
-                  description = targetItem.featurePlanVersion!.feature.title.toUpperCase()
-              }
-
+          if (calcResult.val.length === 0) {
+            // If no calculation result (e.g. no grants), ensure we zero out the items
+            // instead of dropping them, which would cause invoice total mismatch
+            for (const item of featureItems) {
               updatedItems.push({
-                id: targetItem.id,
-                totalAmount: totalAmountCents,
-                unitAmount: unitAmountCents,
-                subtotalAmount: subtotalAmountCents,
-                prorate: res.prorate,
-                description,
-                cycleStartAt: res.cycleStartAt,
-                cycleEndAt: res.cycleEndAt,
-                quantity: res.usage,
+                id: item.id,
+                totalAmount: 0,
+                unitAmount: 0,
+                subtotalAmount: 0,
+                prorate: item.prorationFactor ?? 1,
+                description: item.description
+                  ? item.description.toUpperCase()
+                  : item.featurePlanVersion!.feature.title.toUpperCase(),
+                cycleStartAt: cycleStartAt,
+                cycleEndAt: cycleEndAt,
+                quantity: 0,
               })
+            }
+          } else {
+            for (const res of calcResult.val) {
+              let targetItem: InvoiceItemExtended | undefined
+
+              // If we have a grantId, try to find the subscription item
+              if (res.grantId) {
+                // We rely on calculateFeaturePrice resolving the subscriptionItemId
+                // Or we resolve it again?
+                // calculateFeaturePrice uses resolver to fetch usage.
+                // result doesn't have subscriptionItemId.
+                // We need to map grantId -> subscriptionItemId again.
+                const subId = subscriptionItemIdResolver(res.grantId)
+                if (subId) {
+                  targetItem = itemBySubId.get(subId)
+                }
+              } else {
+                // Overage: default to first item
+                targetItem = featureItems[0]
+              }
+
+              if (targetItem) {
+                const unitAmountCents = formatAmountDinero(res.price.unitPrice.dinero).amount
+                const totalAmountCents = formatAmountDinero(res.price.totalPrice.dinero).amount
+                const subtotalAmountCents = formatAmountDinero(
+                  res.price.subtotalPrice.dinero
+                ).amount
+
+                let description = targetItem.description ?? ""
+                let descriptionDetail = ""
+
+                if (res.prorate !== 1) {
+                  const endAt = Number.isFinite(res.cycleEndAt) ? res.cycleEndAt : cycleEndAt // fallback if somehow invalid
+
+                  const billingPeriod = `${new Date(res.cycleStartAt).toISOString().split("T")[0]} to ${
+                    new Date(endAt).toISOString().split("T")[0]
+                  }`
+
+                  descriptionDetail += res.isTrial
+                    ? ` trial (${billingPeriod})`
+                    : ` prorated (${billingPeriod})`
+                }
+
+                // Switch description logic
+                switch (targetItem.featurePlanVersion!.featureType) {
+                  case "usage":
+                    description = `${targetItem.featurePlanVersion!.feature.title.toUpperCase()} - tier usage ${descriptionDetail}`
+                    break
+                  case "flat":
+                    description = `${targetItem.featurePlanVersion!.feature.title.toUpperCase()} - flat ${descriptionDetail}`
+                    break
+                  case "package":
+                    description = `${targetItem.featurePlanVersion!.feature.title.toUpperCase()} - package ${descriptionDetail}`
+                    break
+                  default:
+                    description = targetItem.featurePlanVersion!.feature.title.toUpperCase()
+                }
+
+                updatedItems.push({
+                  id: targetItem.id,
+                  totalAmount: totalAmountCents,
+                  unitAmount: unitAmountCents,
+                  subtotalAmount: subtotalAmountCents,
+                  prorate: res.prorate,
+                  description,
+                  cycleStartAt: res.cycleStartAt,
+                  cycleEndAt: res.cycleEndAt,
+                  quantity: res.usage,
+                })
+              }
             }
           }
         }
@@ -1275,8 +1303,11 @@ export class BillingService {
           let descriptionDetail = ""
 
           if (item.prorationFactor !== 1) {
+            // cycleEndAt in invoice items is bigint, should be finite number, but checking just in case
+            const endAt = Number.isFinite(item.cycleEndAt) ? item.cycleEndAt : new Date().getTime() // fallback if somehow invalid
+
             const billingPeriod = `${new Date(item.cycleStartAt).toISOString().split("T")[0]} to ${
-              new Date(item.cycleEndAt).toISOString().split("T")[0]
+              new Date(endAt).toISOString().split("T")[0]
             }`
 
             descriptionDetail +=
@@ -1474,6 +1505,11 @@ export class BillingService {
       // get the existing invoice item id by subscription item id
       const existingId = subId ? bySubId.get(subId) : undefined
 
+      const period = {
+        start: Math.floor(item.cycleStartAt / 1000),
+        end: Math.floor(item.cycleEndAt / 1000),
+      }
+
       if (existingId) {
         tasks.push(
           limit(async () => {
@@ -1486,6 +1522,7 @@ export class BillingService {
               // add the subscription item id to the metadata to be able to update the invoice item
               metadata: subId ? { subscriptionItemId: subId } : undefined,
               description: item.description ?? "",
+              period,
             })
             if (res.err) throw new Error(`updateInvoiceItem failed: ${res.err.message}`)
           })
@@ -1506,6 +1543,7 @@ export class BillingService {
               quantity: item.quantity,
               currency: invoice.currency,
               metadata: subId ? { subscriptionItemId: subId } : undefined,
+              period,
             })
             if (res.err) throw new Error(`addInvoiceItem failed: ${res.err.message}`)
           })

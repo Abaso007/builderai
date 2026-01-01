@@ -33,7 +33,7 @@ import { Separator } from "@unprice/ui/separator"
 import { Switch } from "@unprice/ui/switch"
 import { cn } from "@unprice/ui/utils"
 import { SubmitButton } from "~/components/submit-button"
-import { usePlanFeaturesList } from "~/hooks/use-features"
+import { useActiveFeature, usePlanFeaturesList } from "~/hooks/use-features"
 import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
@@ -56,6 +56,7 @@ export function FeatureConfigForm({
 }) {
   const router = useRouter()
   const [_planFeatureList, setPlanFeatureList] = usePlanFeaturesList()
+  const [activeFeature] = useActiveFeature()
   const trpc = useTRPC()
 
   const editMode = !!defaultValues.id
@@ -383,11 +384,21 @@ export function FeatureConfigForm({
         )}
 
         {featureType === "usage" && (
-          <UsageFormFields form={form} currency={planVersion.currency} isDisabled={isPublished} />
+          <UsageFormFields
+            form={form}
+            currency={planVersion.currency}
+            units={activeFeature?.feature?.unit ?? "units"}
+            isDisabled={isPublished}
+          />
         )}
 
         {featureType === "tier" && (
-          <TierFormFields form={form} currency={planVersion.currency} isDisabled={isPublished} />
+          <TierFormFields
+            form={form}
+            currency={planVersion.currency}
+            units={activeFeature?.feature?.unit ?? "units"}
+            isDisabled={isPublished}
+          />
         )}
 
         {planVersion.status !== "published" && (

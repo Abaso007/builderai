@@ -1,0 +1,21 @@
+NODE features_usage_daily_mv_node
+SQL >
+    SELECT
+        toStartOfDay(date) AS date,
+        projectId,
+        customerId,
+        featureSlug,
+        countMergeState(count) AS count,
+        sumMergeState(sum) AS sum,
+        maxMergeState(max) AS max,
+        argMaxMergeState(last_during_period) AS last_during_period,
+        argMaxMergeState(last_id) AS last_id
+    FROM unprice_feature_usage_hourly_mv
+    GROUP BY
+        date,
+        projectId,
+        customerId,
+        featureSlug
+
+TYPE MATERIALIZED
+DATASOURCE unprice_feature_usage_daily_mv

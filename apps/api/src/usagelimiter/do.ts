@@ -90,6 +90,7 @@ export class DurableObjectUsagelimiter extends Server {
           environment: env.NODE_ENV,
           logger: this.logger,
           service: "usagelimiter",
+          durableObjectId: this.ctx.id.toString(),
         })
       : new NoopMetrics()
 
@@ -277,6 +278,10 @@ export class DurableObjectUsagelimiter extends Server {
 
   public async verify(data: VerifyRequest): Promise<VerificationResult> {
     try {
+      // set the request id for the metrics and logs
+      this.logger.x(data.requestId)
+      this.metrics.x(data.requestId)
+
       // All logic handled internally!
       const result = await this.entitlementService.verify(data)
 
@@ -299,6 +304,10 @@ export class DurableObjectUsagelimiter extends Server {
 
   public async reportUsage(data: ReportUsageRequest): Promise<ReportUsageResult> {
     try {
+      // set the request id for the metrics and logs
+      this.logger.x(data.requestId)
+      this.metrics.x(data.requestId)
+
       const result = await this.entitlementService.reportUsage(data)
 
       // Set alarm to flush buffers

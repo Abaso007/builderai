@@ -384,6 +384,7 @@ export class StripePaymentProvider implements PaymentProviderInterface {
       currency,
       description,
       metadata,
+      period,
     } = opts
 
     const descriptionItem = description ?? (isProrated ? `${name} (prorated)` : name)
@@ -409,6 +410,7 @@ export class StripePaymentProvider implements PaymentProviderInterface {
           },
           description: descriptionItem,
           metadata,
+          period,
         }
       : {
           customer: this.providerCustomerId,
@@ -417,6 +419,7 @@ export class StripePaymentProvider implements PaymentProviderInterface {
           currency,
           description: descriptionItem,
           metadata,
+          period,
         }
 
     return await this.client.invoiceItems
@@ -441,7 +444,16 @@ export class StripePaymentProvider implements PaymentProviderInterface {
         new UnPricePaymentProviderError({ message: "Customer payment provider id not set" })
       )
 
-    const { invoiceItemId, totalAmount, quantity, description, metadata, name, isProrated } = opts
+    const {
+      invoiceItemId,
+      totalAmount,
+      quantity,
+      description,
+      metadata,
+      name,
+      isProrated,
+      period,
+    } = opts
     const descriptionItem = description ?? (isProrated ? `${name} (prorated)` : name)
 
     return await this.client.invoiceItems
@@ -450,6 +462,7 @@ export class StripePaymentProvider implements PaymentProviderInterface {
         quantity,
         description: descriptionItem,
         metadata,
+        period,
       })
       .then(() => Ok(undefined))
       .catch((error) => {

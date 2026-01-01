@@ -69,9 +69,11 @@ export function QuantityFormField({
 export function LimitFormField({
   form,
   isDisabled,
+  units,
 }: {
   form: UseFormReturn<PlanVersionFeatureInsert>
   isDisabled?: boolean
+  units: string
 }) {
   return (
     <div className="w-full">
@@ -93,7 +95,7 @@ export function LimitFormField({
               <FormControl className="w-full">
                 <InputWithAddons
                   {...field}
-                  trailing={"units"}
+                  trailing={units}
                   value={field.value ?? ""}
                   disabled={isDisabled}
                 />

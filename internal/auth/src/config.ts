@@ -4,7 +4,6 @@ import Google from "@auth/core/providers/google"
 import { DrizzleAdapter } from "@auth/drizzle-adapter"
 import { createWorkspacesByUserQuery } from "@unprice/db/queries"
 import * as schema from "@unprice/db/schema"
-import type { WorkspacesJWTPayload } from "@unprice/db/validators"
 import bcrypt from "bcryptjs"
 import type { NextAuthConfig } from "next-auth"
 import { db } from "./db"
@@ -131,73 +130,42 @@ export const authConfig: NextAuthConfig = {
     // authorized({ auth }) {
     //   return !!auth?.user // this ensures there is a logged in user for -every- request
     // },
-    session: (opts) => {
-      const token = opts.token
-      const session = opts.session
+    session: async (opts) => {
+      const { session, token } = opts
 
-      if (token.sub) {
+      if (token.sub && session.user) {
         session.user.id = token.sub
-      }
 
-      if (session.user) {
-        session.user.workspaces = token.workspaces as WorkspacesJWTPayload[]
+        // We fetch the workspaces directly from the database in the session callback
+        // This keeps the session cookie tiny (only the user ID) while keeping the full session object consistent
+        // Next.js memoizes auth() calls, so this only pings the database once per request
+        const userWithWorkspaces = await createWorkspacesByUserQuery(db).execute({
+          userId: token.sub,
+        })
+
+        session.user.workspaces =
+          userWithWorkspaces?.members
+            .filter((member) => member.workspace.enabled)
+            .map((member) => ({
+              id: member.workspace.id,
+              slug: member.workspace.slug,
+              role: member.role,
+              isPersonal: member.workspace.isPersonal,
+              enabled: member.workspace.enabled,
+              unPriceCustomerId: member.workspace.unPriceCustomerId,
+              isInternal: member.workspace.isInternal,
+              isMain: member.workspace.isMain,
+            })) ?? []
       }
 
       return session
     },
     jwt: async (opts) => {
       const token = opts.token
-      const trigger = opts.trigger
       const userId = token.sub
 
-      if (!userId) return token
-      token.id = userId
-
-      // set a parameter that allows to refresh workspace data every hour
-      // this is used to avoid fetching the workspaces for the user in every request
-      // we use prepared statements to improve performance
-      if (!token.refreshWorkspacesAt) {
-        token.refreshWorkspacesAt = 0
-      }
-
-      // we get the workspaces for the user and add it to the token so it can be used in the session
-      // this is used to avoid fetching the workspaces for the user in every request
-      // we use prepared statements to improve performance
-      try {
-        const tokenDate = new Date(token.refreshWorkspacesAt as number)
-
-        // return if the token is still valid
-        // we need to refresh the workspaces if the trigger is update
-        if (token.workspaces && tokenDate > new Date() && trigger !== "update") {
-          return token
-        }
-
-        const userWithWorkspaces = await createWorkspacesByUserQuery(db).execute({
-          userId,
-        })
-
-        // filter out the workspaces that are not enabled
-        const workspaces = userWithWorkspaces?.members
-          .filter((member) => member.workspace.enabled)
-          .map((member) => ({
-            id: member.workspace.id,
-            slug: member.workspace.slug,
-            role: member.role,
-            isPersonal: member.workspace.isPersonal,
-            enabled: member.workspace.enabled,
-            unPriceCustomerId: member.workspace.unPriceCustomerId,
-            isInternal: member.workspace.isInternal,
-            isMain: member.workspace.isMain,
-          }))
-
-        token.workspaces = workspaces ? workspaces : []
-
-        token.refreshWorkspacesAt = Date.now() + 3600000 // revalidate the token in 1 hour
-      } catch (error) {
-        token.refreshWorkspacesAt = 0 // invalidate the token if there is an error
-        token.workspaces = [] // invalidate the token if there is an error
-        log.error("Error getting workspaces for user", { error })
-        throw "Error getting workspaces for user"
+      if (userId) {
+        token.id = userId
       }
 
       return token

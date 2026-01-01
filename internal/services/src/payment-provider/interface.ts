@@ -71,6 +71,10 @@ export interface AddInvoiceItemOpts {
   unitAmount?: number
   quantity: number
   currency: Currency
+  period?: {
+    start: number
+    end: number
+  }
   metadata?: Record<string, string>
 }
 
@@ -82,6 +86,10 @@ export interface UpdateInvoiceItemOpts {
   quantity: number
   metadata?: Record<string, string>
   description?: string
+  period?: {
+    start: number
+    end: number
+  }
 }
 
 export type PaymentMethod = {

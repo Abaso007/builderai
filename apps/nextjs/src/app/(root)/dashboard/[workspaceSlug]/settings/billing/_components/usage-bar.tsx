@@ -82,7 +82,7 @@ export function UsageBar({ data }: UsageBarProps) {
           : "primary"
 
   return (
-    <div className="space-y-2 px-2">
+    <div className="space-y-2 px-1">
       {/* Usage Stats - Simplified */}
       <div className="flex items-baseline justify-between">
         <div className="flex items-baseline gap-2">

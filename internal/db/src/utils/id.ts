@@ -1,6 +1,7 @@
 import baseX from "base-x"
 
-const b58 = baseX("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz")
+const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+const b58 = baseX(ALPHABET)
 
 // this simulates uuid v7 and generated ids sortable by timestamp and url safe base58 encoded
 export const prefixes = {
@@ -72,24 +73,21 @@ export function newId<TPrefix extends keyof typeof prefixes>(
   crypto.getRandomValues(buf)
 
   // Get current timestamp in milliseconds
-  const timestamp = BigInt(Date.now()) - EPOCH_TIMESTAMP
+  let timestamp = BigInt(Date.now()) - EPOCH_TIMESTAMP
 
-  // Ensure monotonicity with counter overflow protection
-  if (timestamp === lastTimestamp) {
-    if (counter >= MAX_COUNTER) {
-      // Wait for next millisecond if counter would overflow
-      while (BigInt(Date.now()) - EPOCH_TIMESTAMP === lastTimestamp) {
-        // Busy-wait
-      }
+  // Ensure monotonicity: if timestamp is same or earlier, increment counter
+  // If counter overflows, increment timestamp
+  if (timestamp <= lastTimestamp) {
+    timestamp = lastTimestamp
+    counter++
+    if (counter > MAX_COUNTER) {
+      timestamp++
       counter = 0
-      lastTimestamp = BigInt(Date.now()) - EPOCH_TIMESTAMP
-    } else {
-      counter++
     }
   } else {
     counter = 0
-    lastTimestamp = timestamp
   }
+  lastTimestamp = timestamp
 
   // Write 48-bit timestamp
   buf[0] = Number((timestamp >> BIGINT_40) & BIGINT_255)
@@ -106,11 +104,14 @@ export function newId<TPrefix extends keyof typeof prefixes>(
   // Set variant bits (RFC 4122 variant)
   buf[8] = (buf[8]! & 0x3f) | 0x80
 
-  return `${prefixes[prefix]}_${b58.encode(buf)}` as const
+  // Encode with Base58 and pad to 22 characters for lexicographical sortability
+  const encoded = b58.encode(buf).padStart(22, ALPHABET[0])
+
+  return `${prefixes[prefix]}_${encoded}` as const
 }
 
 export function randomId(): string {
-  return b58.encode(new Uint8Array(16))
+  return b58.encode(new Uint8Array(16)).padStart(22, ALPHABET[0])
 }
 
 /**
@@ -119,21 +120,28 @@ export function randomId(): string {
  * @returns timestamp in milliseconds since EPOCH_TIMESTAMP
  */
 export function getTimestampFromId(id: string): number {
-  const [, encodedPart] = id.split("_")
-  const buf = b58.decode(encodedPart!)
+  const parts = id.split("_")
+  const encodedPart = parts[parts.length - 1]
+  if (!encodedPart) {
+    throw new Error("Invalid ID format: missing encoded part")
+  }
+  const buf = b58.decode(encodedPart)
 
-  // Ensure buffer is the correct length
-  if (buf.length < 6) {
+  // The buffer might be longer than 16 bytes due to padding, or shorter if not padded.
+  // We take the last 16 bytes to ensure we're looking at the right offsets.
+  const offset = Math.max(0, buf.length - 16)
+
+  if (buf.length < offset + 6) {
     throw new Error("Invalid ID format: buffer too short")
   }
 
   const timestamp =
-    (BigInt(buf[0]!) << BIGINT_40) |
-    (BigInt(buf[1]!) << BIGINT_32) |
-    (BigInt(buf[2]!) << BIGINT_24) |
-    (BigInt(buf[3]!) << BIGINT_16) |
-    (BigInt(buf[4]!) << BIGINT_8) |
-    BigInt(buf[5]!)
+    (BigInt(buf[offset + 0]!) << BIGINT_40) |
+    (BigInt(buf[offset + 1]!) << BIGINT_32) |
+    (BigInt(buf[offset + 2]!) << BIGINT_24) |
+    (BigInt(buf[offset + 3]!) << BIGINT_16) |
+    (BigInt(buf[offset + 4]!) << BIGINT_8) |
+    BigInt(buf[offset + 5]!)
 
   return Number(timestamp + EPOCH_TIMESTAMP)
 }
@@ -151,7 +159,7 @@ export function compareIds(a: string, b: string): number {
   }
 
   // If timestamps are equal, compare encoded parts to maintain consistent ordering
-  const [, encodedA] = a.split("_")
-  const [, encodedB] = b.split("_")
-  return encodedA!.localeCompare(encodedB!)
+  const encodedA = a.split("_").pop() ?? ""
+  const encodedB = b.split("_").pop() ?? ""
+  return encodedA.localeCompare(encodedB)
 }

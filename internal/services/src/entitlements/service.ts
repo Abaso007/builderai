@@ -428,11 +428,10 @@ export class EntitlementService {
     let entitlements = val
 
     // 2. LAZY COMPUTATION: If missing or forcing revalidation, compute from grants
-    if (entitlements?.length === 0 || opts?.skipCache) {
+    if (entitlements?.length === 0) {
       this.logger.info("Lazy computing entitlements", {
         customerId,
         projectId,
-        reason: entitlements?.length === 0 ? "missing" : "revalidate",
       })
 
       // TODO: add negative caching for this operation when not found
@@ -449,9 +448,7 @@ export class EntitlementService {
       entitlements = computeResult.val ?? []
 
       // Update cache with the freshly computed entitlement
-      if (entitlements.length > 0) {
-        this.cache.customerEntitlements.set(cacheKey, entitlements)
-      }
+      this.waitUntil(this.cache.customerEntitlements.set(cacheKey, entitlements))
     }
 
     if (!entitlements || entitlements.length === 0) {
@@ -847,7 +844,7 @@ export class EntitlementService {
       const { val, err } = await this.getActiveEntitlement({
         ...params,
         opts: {
-          skipCache: false,
+          skipCache: false, // load from cache first
           now: params.now,
         },
       })
@@ -1059,7 +1056,6 @@ export class EntitlementService {
     const { val: active } = await this.getActiveEntitlements({
       customerId,
       projectId,
-      opts: { skipCache: false },
     })
 
     // 2. Clear all individual feature caches
@@ -1171,7 +1167,7 @@ export class EntitlementService {
       })
     }
 
-    // first try to get the entitlement from cache, if not found try to get it from DO,
+    // 1. Try to get the entitlement from cache, if not found try to get it from DB
     const { val, err } = opts?.skipCache
       ? await wrapResult(
           this.getActiveEntitlementFromDB({
@@ -1228,7 +1224,7 @@ export class EntitlementService {
     let entitlement = val
 
     // 2. LAZY COMPUTATION: If missing or forcing revalidation, compute from grants
-    if (!entitlement || opts?.skipCache) {
+    if (!entitlement) {
       this.logger.info("Lazy computing entitlement", {
         customerId,
         featureSlug,
@@ -1303,6 +1299,24 @@ export class EntitlementService {
     now: number
   }): Result<EntitlementState, UnPriceEntitlementError> {
     const { state, now } = params
+
+    // check if the entitlement has not yet started
+    if (state.effectiveAt && now < state.effectiveAt) {
+      return Err(
+        new UnPriceEntitlementError({
+          message: `Entitlement not yet started for customer ${state.customerId} and project ${state.projectId} and feature ${state.featureSlug}`,
+        })
+      )
+    }
+
+    // check if the entitlement is expired
+    if (state.expiresAt && now > state.expiresAt) {
+      return Err(
+        new UnPriceEntitlementError({
+          message: `Entitlement expired for customer ${state.customerId} and project ${state.projectId} and feature ${state.featureSlug}`,
+        })
+      )
+    }
 
     // check if grants are still active
     const activeGrants = state.grants

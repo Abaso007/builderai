@@ -113,7 +113,7 @@ export class ConsoleLogger implements Logger {
     return Promise.resolve()
   }
 
-  public setRequestId(requestId: string): void {
+  public x(requestId: string): void {
     this.requestId = requestId
   }
 }
