@@ -191,15 +191,17 @@ export const grants = pgTableProject(
       )
       .where(not(table.deleted)),
     // unique index for the grant
-    uniqueGrant: unique("unique_grant").on(
-      table.projectId,
-      table.subjectId,
-      table.subjectType,
-      table.featurePlanVersionId,
-      table.type,
-      table.effectiveAt,
-      table.expiresAt
-    ),
+    uniqueGrant: unique("unique_grant")
+      .on(
+        table.projectId,
+        table.subjectId,
+        table.subjectType,
+        table.featurePlanVersionId,
+        table.type,
+        table.effectiveAt,
+        table.expiresAt
+      )
+      .nullsNotDistinct(),
     // Index for grant invalidation queries by featurePlanVersion
     idxFeatureVersionEffective: index("idx_grants_feature_version_effective").on(
       table.projectId,

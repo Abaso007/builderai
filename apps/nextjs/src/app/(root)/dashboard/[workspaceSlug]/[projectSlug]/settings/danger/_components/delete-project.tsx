@@ -53,12 +53,12 @@ export function DeleteProject({
   const description = "This will delete the project and all of its data."
 
   return (
-    <Card className="border-danger">
+    <Card>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription className="flex items-center">{description}</CardDescription>
       </CardHeader>
-      <CardFooter className="border-t border-t-destructive px-6 py-4">
+      <CardFooter className="border-t px-6 py-4">
         <Dialog>
           <DialogTrigger asChild>
             <Button variant="destructive" disabled={isMain}>

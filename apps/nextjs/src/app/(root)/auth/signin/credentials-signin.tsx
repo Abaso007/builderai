@@ -17,7 +17,10 @@ export const LoginSchema = z.object({
   password: z.string().min(6),
 })
 
-export function SignInCredentials({ className }: { className?: string }) {
+export function SignInCredentials({
+  className,
+  redirectTo,
+}: { className?: string; redirectTo?: string }) {
   const [isLoading, setIsLoading] = useState(false)
   const router = useRouter()
   const form = useZodForm({
@@ -31,7 +34,7 @@ export function SignInCredentials({ className }: { className?: string }) {
 
   const onSubmit = async (data: z.infer<typeof LoginSchema>) => {
     setIsLoading(true)
-    const res = await loginWithCredentials(data)
+    const res = await loginWithCredentials({ ...data, redirectTo })
 
     if (!res.success) {
       form.setError("root", { message: res.message })

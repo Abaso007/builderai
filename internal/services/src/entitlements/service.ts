@@ -197,8 +197,10 @@ export class EntitlementService {
     // 9. return the verification result
     return {
       allowed: verifyResult.allowed,
-      message: verifyResult.allowed ? "Allowed" : "Limit exceeded",
-      deniedReason: verifyResult.allowed ? undefined : "LIMIT_EXCEEDED",
+      message: verifyResult.allowed ? "Allowed" : (verifyResult.message ?? "Limit exceeded"),
+      deniedReason: verifyResult.allowed
+        ? undefined
+        : (verifyResult.deniedReason ?? "LIMIT_EXCEEDED"),
       usage: Number(meterResult.usage),
       limit: validatedState.limit ?? undefined,
       remaining: verifyResult.remaining,

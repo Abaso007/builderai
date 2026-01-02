@@ -95,16 +95,30 @@ describe("EntitlementService - verify", () => {
     mockDb = {
       query: {
         entitlements: {
-          findFirst: vi.fn(),
+          findFirst: vi.fn().mockResolvedValue(mockEntitlementState),
+        },
+        customers: {
+          findFirst: vi.fn().mockResolvedValue({ subscriptions: [] }),
+        },
+        grants: {
+          findMany: vi.fn().mockResolvedValue([]),
         },
       },
+      update: vi.fn(() => ({
+        set: vi.fn(() => ({
+          where: vi.fn(() => ({
+            returning: vi.fn().mockResolvedValue([{ ...mockEntitlementState }]),
+          })),
+        })),
+      })),
     } as unknown as Database
 
     // Mock Cache
     mockCache = {
       customerEntitlement: {
         swr: vi.fn().mockImplementation(async (_key, fetcher) => {
-          return await fetcher()
+          const val = await fetcher()
+          return { val, fresh: true }
         }),
         set: vi.fn(),
         get: vi.fn(),
@@ -349,10 +363,17 @@ describe("EntitlementService - reportUsage", () => {
       }),
     } as unknown as Analytics
 
+    // Mock Database
     mockDb = {
       query: {
         entitlements: {
           findFirst: vi.fn(),
+        },
+        customers: {
+          findFirst: vi.fn().mockResolvedValue({ subscriptions: [] }),
+        },
+        grants: {
+          findMany: vi.fn().mockResolvedValue([]),
         },
       },
       update: vi.fn(() => ({
@@ -392,11 +413,16 @@ describe("EntitlementService - reportUsage", () => {
       cache: mockCache,
       metrics: mockMetrics,
     })
+
+    // biome-ignore lint/suspicious/noExplicitAny: on first call the entitlement is not found in the cache so we need to compute it
+    const computeSpy = vi.spyOn((service as any).grantsManager, "computeGrantsForCustomer")
+    computeSpy.mockResolvedValue(Ok([mockEntitlementState]))
   })
 
   it("should consume usage successfully and update state", async () => {
     // Setup DB mock
-    vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue({
+    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+    ;(mockDb.query.entitlements.findFirst as any).mockResolvedValue({
       ...mockEntitlementState,
       metadata: null,
       createdAtM: now,
@@ -437,7 +463,8 @@ describe("EntitlementService - reportUsage", () => {
   it("should deny usage when limit is exceeded", async () => {
     const usageAmount = 91 // 10 + 91 = 101 > 100
     // Setup DB mock
-    vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue({
+    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+    ;(mockDb.query.entitlements.findFirst as any).mockResolvedValue({
       ...mockEntitlementState,
       metadata: null,
       createdAtM: now,
@@ -468,7 +495,8 @@ describe("EntitlementService - reportUsage", () => {
   })
 
   it("should handle random usage amounts correctly", async () => {
-    vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue({
+    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+    ;(mockDb.query.entitlements.findFirst as any).mockResolvedValue({
       ...mockEntitlementState,
       metadata: null,
       createdAtM: now,

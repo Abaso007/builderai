@@ -101,7 +101,8 @@ describe("EntitlementService - Idempotency & Flush", () => {
     mockCache = {
       customerEntitlement: {
         swr: vi.fn().mockImplementation(async (_key, fetcher) => {
-          return await fetcher()
+          const val = await fetcher()
+          return { val, fresh: true }
         }),
         set: vi.fn(),
         get: vi.fn(),

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation"
 
 import { getSession } from "@unprice/auth/server-rsc"
+import { APP_DOMAIN } from "@unprice/config"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import { cn } from "@unprice/ui/utils"
 import { env } from "~/env"
@@ -10,16 +11,17 @@ import { UpdateMarketingCookie } from "../_components/update-marketing-cookie"
 import { SignUpCredentials } from "./credentials-signin"
 
 export default async function AuthenticationPage({
-  searchParams: { sessionId },
+  searchParams: { sessionId, next },
 }: {
   searchParams: {
     sessionId?: string
+    next?: string
   }
 }) {
   const session = await getSession()
 
   if (session?.user?.id) {
-    redirect("/")
+    redirect(APP_DOMAIN)
   }
 
   return (
@@ -32,8 +34,8 @@ export default async function AuthenticationPage({
         </CardHeader>
         <CardContent className="flex flex-col gap-8">
           <div className="flex w-full flex-col items-center justify-between gap-4">
-            <SignInGithub />
-            <SignInGoogle />
+            <SignInGithub redirectTo={next} />
+            <SignInGoogle redirectTo={next} />
           </div>
           {env.NODE_ENV === "development" && (
             <>

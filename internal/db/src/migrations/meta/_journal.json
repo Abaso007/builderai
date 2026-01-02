@@ -5,57 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1760788312898,
-      "tag": "0000_dapper_metal_master",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1760894333571,
-      "tag": "0001_true_kinsey_walden",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1763234942001,
-      "tag": "0002_small_screwball",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1763662260047,
-      "tag": "0003_absent_magus",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1763820521575,
-      "tag": "0004_classy_valeria_richards",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1763994383118,
-      "tag": "0005_conscious_rafael_vega",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1764457531377,
-      "tag": "0006_bent_johnny_storm",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "7",
-      "when": 1766779411154,
-      "tag": "0007_chemical_starhawk",
+      "when": 1767381237334,
+      "tag": "0000_yielding_infant_terrible",
       "breakpoints": true
     }
   ]

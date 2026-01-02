@@ -5,7 +5,7 @@ import { Fragment } from "react"
 export default function WorkSpaceSettingsDangerLoading() {
   return (
     <Fragment>
-      <Card className="border-danger">
+      <Card>
         <CardHeader>
           <CardTitle>Transfer to Personal</CardTitle>
           <CardDescription className="flex items-center">
@@ -16,7 +16,7 @@ export default function WorkSpaceSettingsDangerLoading() {
           <Button variant="destructive">Transfer to a personal workspace</Button>
         </CardFooter>
       </Card>
-      <Card className="border-danger">
+      <Card>
         <CardHeader>
           <CardTitle>Delete project</CardTitle>
           <CardDescription className="flex items-center">
@@ -27,7 +27,7 @@ export default function WorkSpaceSettingsDangerLoading() {
           <Button variant="destructive">Delete project</Button>
         </CardFooter>
       </Card>
-      <Card className="border-danger">
+      <Card>
         <CardHeader>
           <CardTitle>Transfer to Team</CardTitle>
           <CardDescription className="flex items-center">
