@@ -413,19 +413,16 @@ export class Analytics {
         featureSlugs: z.array(z.string()).optional(),
         customerId: z.string(),
         projectId: z.string(),
-        start: z.number().optional(),
-        end: z.number().optional(),
+        start: z.number(),
+        end: z.number(),
       }),
       data: z.object({
         projectId: z.string(),
         customerId: z.string(),
         featureSlug: z.string(),
-        sum_all: z.number().optional(),
-        max_all: z.number().optional(),
-        count_all: z.number().optional(),
-        sum: z.number().optional(),
-        max: z.number().optional(),
-        count: z.number().optional(),
+        sum: z.number(),
+        max: z.number(),
+        count: z.number(),
         last_during_period: z.number(),
       }),
       opts: {
@@ -519,7 +516,8 @@ export class Analytics {
     }
 
     // we use the same endpoint for billing usage as it's the
-    // more accurate one
+    // more accurate one because it's using FINAL in ClickHouse queries
+    // to merge data parts at query time to resolve updates and deletions
     const totalPeriodUsages = await this.getBillingUsage({
       customerId,
       projectId,

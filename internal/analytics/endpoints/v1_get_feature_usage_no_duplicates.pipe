@@ -2,6 +2,10 @@ TOKEN "web-apps" READ
 
 TAGS "usage, billing"
 
+DESCRIPTION >
+    Get feature usage metrics for a given project and customer, with deduplication support.
+    Using FINAL in ClickHouse queries forces the database to merge data parts at query time to resolve updates and deletions.
+
 NODE feature_usage_no_duplicates_node
 SQL >
     %
@@ -9,15 +13,9 @@ SQL >
         projectId,
         customerId,
         featureSlug,
-        {% if defined(start) & defined(end) %}
-            count() AS count,
-            sum(usage) AS sum,
-            max(usage) AS max,
-        {% else %}
-            count() AS count_all,
-            sum(usage) AS sum_all,
-            max(usage) AS max_all,
-        {% end %}
+        count() AS count,
+        sum(usage) AS sum,
+        max(usage) AS max,
         argMax(usage, timestamp) AS last_during_period
     FROM unprice_feature_usage_records FINAL
     WHERE
@@ -26,10 +24,7 @@ SQL >
         {% if defined(featureSlugs) %}
             AND featureSlug IN {{ Array(featureSlugs, 'String') }}
         {% end %}
-        {% if defined(start) & defined(end) %}
-            AND timestamp BETWEEN {{ Int64(start) }}
-            AND {{ Int64(end) }}
-        {% end %}
+        AND timestamp >= {{ Int64(start) }} AND timestamp < {{ Int64(end) }}
     GROUP BY projectId, customerId, featureSlug
 
 TYPE endpoint

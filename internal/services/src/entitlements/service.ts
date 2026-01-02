@@ -1623,42 +1623,52 @@ export class EntitlementService {
   ) {
     const grantIds = new Set(usageEstimates?.map((u) => u.grantId) ?? [])
 
-    return entitlements
-      .map((entitlement) => {
-        const planVersionFeature = featureMap.get(entitlement.featureSlug)
-        if (!planVersionFeature) return null
+    return (
+      entitlements
+        .map((entitlement) => {
+          const planVersionFeature = featureMap.get(entitlement.featureSlug)
+          if (!planVersionFeature) return null
 
-        // Find matching usage estimates by grant ID
-        const usageGrants = (usageEstimates ?? []).filter((u) =>
-          entitlement.grants.some((g) => g.id === u.grantId && grantIds.has(u.grantId ?? ""))
-        )
+          // Find matching usage estimates by grant ID
+          const usageGrants = (usageEstimates ?? []).filter((u) =>
+            entitlement.grants.some((g) => g.id === u.grantId && grantIds.has(u.grantId ?? ""))
+          )
 
-        // Aggregate usage data
-        const usage = usageGrants.reduce((acc, u) => acc + u.usage, 0)
-        const included = usageGrants.reduce((acc, u) => acc + u.included, 0)
+          // Aggregate usage data
+          const usage = usageGrants.reduce((acc, u) => acc + u.usage, 0)
+          const included = usageGrants.reduce((acc, u) => acc + u.included, 0)
 
-        // TODO: sloppy, we should use the currency from the plan version feature
-        const zeroDinero = dinero({
-          amount: 0,
-          currency: currencies[currency as keyof typeof currencies],
+          // TODO: sloppy, we should use the currency from the plan version feature
+          const zeroDinero = dinero({
+            amount: 0,
+            currency: currencies[currency as keyof typeof currencies],
+          })
+
+          // Sum prices from usageEstimates (already formatted strings, need to parse to sum)
+          const totalPriceDinero = usageGrants.reduce(
+            (acc, u) => add(acc, u.price.totalPrice.dinero),
+            zeroDinero
+          )
+
+          return {
+            entitlement,
+            planVersionFeature,
+            usage,
+            included,
+            totalPriceDinero,
+            limit: entitlement.limit,
+          }
         })
-
-        // Sum prices from usageEstimates (already formatted strings, need to parse to sum)
-        const totalPriceDinero = usageGrants.reduce(
-          (acc, u) => add(acc, u.price.totalPrice.dinero),
-          zeroDinero
-        )
-
-        return {
-          entitlement,
-          planVersionFeature,
-          usage,
-          included,
-          totalPriceDinero,
-          limit: entitlement.limit,
-        }
-      })
-      .filter((f): f is NonNullable<typeof f> => f !== null)
+        .filter((f): f is NonNullable<typeof f> => f !== null)
+        // order by feature type and price
+        .sort((a, b) => {
+          if (a.entitlement.featureSlug < b.entitlement.featureSlug) return -1
+          if (a.entitlement.featureSlug > b.entitlement.featureSlug) return 1
+          const aPrice = a.totalPriceDinero.toJSON().amount
+          const bPrice = b.totalPriceDinero.toJSON().amount
+          return bPrice - aPrice
+        })
+    )
   }
 
   private buildUsageResponse(

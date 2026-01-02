@@ -1,0 +1,6 @@
+- name: deduplicates_usage
+  description: Verifies that usage records with same idempotenceKey are deduplicated
+  parameters: projectId=p1&customerId=c1&featureSlugs=f1&start=1709251000000&end=1709251300000
+  expected_result: |
+    projectId,customerId,featureSlug,count,sum,max,last_during_period
+    p1,c1,f1,1,10,10,10
