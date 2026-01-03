@@ -23,7 +23,6 @@ We believe pricing is the most neglected growth lever in SaaS.
 
 
 ## Tech Stack & Features
-
 - Nextjs v14
 - Nextauth v5
 - Drizzle ORM
