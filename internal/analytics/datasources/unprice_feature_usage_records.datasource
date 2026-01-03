@@ -24,5 +24,3 @@ ENGINE_PARTITION_KEY toYYYYMM(fromUnixTimestamp64Milli(timestamp))
 ENGINE_SORTING_KEY projectId, customerId, featureSlug, idempotenceKey
 ENGINE_VER timestamp
 
-FORWARD_QUERY >
-  SELECT defaultValueOfTypeName('String') AS id, timestamp, featureSlug, customerId, CAST(usage, 'Decimal64(4)') AS usage, requestId, idempotenceKey, projectId, createdAt, metadata, deleted
