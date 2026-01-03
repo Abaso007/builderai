@@ -15,6 +15,7 @@ export class ConsoleLogger implements Logger {
     environment: LogSchema["environment"]
     service: LogSchema["service"]
     defaultFields?: Fields
+    // The hierarchy should be: debug < info < warn < error < fatal
     logLevel?: "debug" | "error" | "info" | "off" | "warn"
   }) {
     this.requestId = opts.requestId
@@ -71,7 +72,7 @@ export class ConsoleLogger implements Logger {
   }
 
   public warn(message: string, fields?: Fields): void {
-    if (!["debug", "warn", "info", "error"].includes(this.logLevel)) return
+    if (!["debug", "info", "warn"].includes(this.logLevel)) return
     // don't show colored output in production mode because it's not readable
     const coloredOutput = this.environment !== "production"
     this.console(
@@ -83,8 +84,8 @@ export class ConsoleLogger implements Logger {
   }
 
   public error(message: string, fields?: Fields): void {
-    // only if log level is error or debug
-    if (!["error", "debug"].includes(this.logLevel)) return
+    // errors should be shown for all levels except "off"
+    if (this.logLevel === "off") return
     // don't show colored output in production mode because it's not readable
     const coloredOutput = this.environment !== "production"
     this.console(
@@ -96,8 +97,8 @@ export class ConsoleLogger implements Logger {
   }
 
   public fatal(message: string, fields?: Fields): void {
-    // only if log level is error or debug
-    if (!["error", "debug"].includes(this.logLevel)) return
+    // fatal errors should be shown for all levels except "off"
+    if (this.logLevel === "off") return
     // don't show colored output in production mode because it's not readable
     const coloredOutput = this.environment !== "production"
     this.console(
@@ -112,7 +113,7 @@ export class ConsoleLogger implements Logger {
     return Promise.resolve()
   }
 
-  public setRequestId(requestId: string): void {
+  public x(requestId: string): void {
     this.requestId = requestId
   }
 }

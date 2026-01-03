@@ -53,10 +53,11 @@ jobs:
         env:
           VERCEL_ENV: production
           NODE_ENV: production
-          DRIZZLE_LOG: "true"
+          DRIZZLE_LOG: "false"
           DATABASE_URL: ${{ env.DATABASE_URL }}
           DATABASE_READ1_URL: ${{ env.DATABASE_READ1_URL }}
           DATABASE_READ2_URL: ${{ env.DATABASE_READ2_URL }}
+          MAIN_PROJECT_ID: ${{ env.MAIN_PROJECT_ID }}
 
   deploy-production-tinybird:
     uses: ./.github/workflows/job_tinybird_cd.yml

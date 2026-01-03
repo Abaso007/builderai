@@ -15,12 +15,14 @@ import {
 } from "@unprice/ui/dropdown-menu"
 import { MoreVertical } from "lucide-react"
 import { useParams } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { startTransition, useState } from "react"
 import { z } from "zod"
 import { PropagationStopper } from "~/components/prevent-propagation"
 import { SuperLink } from "~/components/super-link"
 import { toast } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
+
 interface DataTableRowActionsProps<TData> {
   row: Row<TData>
 }
@@ -30,13 +32,20 @@ const schemaPlanVersion = z.custom<PlanVersion>()
 
 export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TData>) {
   const { customer, ...subscription } = schemaPlanVersion.parse(row.original)
+  const router = useRouter()
   const { workspaceSlug, projectSlug } = useParams()
   const [open, setOpen] = useState(false)
 
   const trpc = useTRPC()
   const subscriptionId = subscription.id
 
-  const machine = useMutation(trpc.subscriptions.machine.mutationOptions({}))
+  const machine = useMutation(
+    trpc.subscriptions.machine.mutationOptions({
+      onSuccess: () => {
+        router.refresh()
+      },
+    })
+  )
 
   function onGenerateInvoice() {
     startTransition(() => {
@@ -102,15 +111,12 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
               See Details
             </SuperLink>
           </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={(e) => {
-              e.preventDefault()
-              onGenerateInvoice()
-              setOpen(false)
-            }}
-            disabled={machine.isPending}
-          >
-            Generate Invoices
+          <DropdownMenuItem asChild>
+            <SuperLink
+              href={`/${workspaceSlug}/${projectSlug}/customers/subscriptions/${subscriptionId}`}
+            >
+              Add Phase
+            </SuperLink>
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={(e) => {
@@ -131,6 +137,16 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
             disabled={machine.isPending}
           >
             Generate Billing Periods
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={(e) => {
+              e.preventDefault()
+              onGenerateInvoice()
+              setOpen(false)
+            }}
+            disabled={machine.isPending}
+          >
+            Generate Invoices
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

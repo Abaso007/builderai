@@ -4,13 +4,14 @@ import type { Metric } from "@unprice/metrics"
 import type { Metrics } from "./interface"
 
 export class LogdrainMetrics implements Metrics {
-  private readonly requestId: string
+  private requestId: string
   private readonly logger: Logger
   private readonly environment: LogSchema["environment"]
   private readonly service: LogSchema["service"]
   private colo?: string
   private country?: string
   private continent?: string
+  private durableObjectId?: string
 
   constructor(opts: {
     requestId: string
@@ -20,6 +21,7 @@ export class LogdrainMetrics implements Metrics {
     colo?: string
     country?: string
     continent?: string
+    durableObjectId?: string
   }) {
     this.requestId = opts.requestId
     this.logger = opts.logger
@@ -28,6 +30,7 @@ export class LogdrainMetrics implements Metrics {
     this.colo = opts.colo
     this.country = opts.country
     this.continent = opts.continent
+    this.durableObjectId = opts.durableObjectId
   }
 
   public emit(metric: Metric): void {
@@ -39,6 +42,7 @@ export class LogdrainMetrics implements Metrics {
       environment: this.environment,
       service: this.service,
       colo: this.colo,
+      durableObjectId: this.durableObjectId,
     })
 
     // colo is important to keep track of the location
@@ -56,5 +60,9 @@ export class LogdrainMetrics implements Metrics {
 
   public async flush(): Promise<void> {
     return this.logger.flush()
+  }
+
+  public x(value: string): void {
+    this.requestId = value
   }
 }

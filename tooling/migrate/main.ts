@@ -64,6 +64,7 @@ async function main() {
         plan: "PRO",
         enabled: true,
         isInternal: true,
+        isMain: true,
         createdBy: user.id,
       })
       .returning()
@@ -77,6 +78,7 @@ async function main() {
         isPersonal: false,
         isInternal: true,
         enabled: true,
+        isMain: true,
       })
       .where(eq(schema.workspaces.id, workspaceId))
       .returning()
@@ -99,22 +101,27 @@ async function main() {
     where: (fields, operators) => operators.eq(fields.slug, "unprice"),
   })
 
-  const unpriceProjectId = unpriceProject?.id ?? newId("project")
+  // if main project id is set, it must match the unprice project id
+  if (process.env.MAIN_PROJECT_ID && unpriceProject?.id !== process.env.MAIN_PROJECT_ID) {
+    throw "Main project ID does not match"
+  }
+
   let project: typeof schema.projects.$inferSelect | null = null
 
-  if (!unpriceProject?.id) {
+  if (!unpriceProject) {
     // create project
     project = await db
       .insert(schema.projects)
       .values({
-        id: unpriceProjectId,
+        id: process.env.MAIN_PROJECT_ID ?? newId("project"),
         name: "unprice",
         slug: "unprice",
         workspaceId: workspaceId,
-        url: "",
+        url: "https://unprice.dev",
         enabled: true,
         isInternal: true,
-        defaultCurrency: "USD",
+        defaultCurrency: "EUR",
+        timezone: "UTC",
       })
       .returning()
       .then((project) => project[0] ?? null)
@@ -125,9 +132,10 @@ async function main() {
       .set({
         enabled: true,
         isInternal: true,
-        defaultCurrency: "USD",
+        defaultCurrency: "EUR",
+        timezone: "UTC",
       })
-      .where(eq(schema.projects.id, unpriceProjectId))
+      .where(eq(schema.projects.id, unpriceProject.id))
       .returning()
       .then((project) => project[0] ?? null)
   }

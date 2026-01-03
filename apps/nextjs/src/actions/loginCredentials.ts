@@ -1,11 +1,13 @@
 "use server"
 
 import { signIn } from "@unprice/auth/server"
+import { APP_DOMAIN } from "@unprice/config"
 
 export async function loginWithCredentials({
   email,
   password,
-}: { email: string; password: string }) {
+  redirectTo,
+}: { email: string; password: string; redirectTo?: string }) {
   try {
     const res = await signIn("credentials", {
       email,
@@ -23,7 +25,7 @@ export async function loginWithCredentials({
     return {
       success: true,
       message: "Login successful",
-      redirect: "/",
+      redirect: redirectTo ?? APP_DOMAIN,
     }
   } catch (error) {
     const err = error as Error & { cause: { err: Error } }

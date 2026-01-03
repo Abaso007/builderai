@@ -151,9 +151,11 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
                     </Tooltip>
                   )}
 
-                  {planFeatureVersion.featureType === "usage" && (
-                    <Badge variant={"secondary"}>{planFeatureVersion.billingConfig.name}</Badge>
-                  )}
+                  {planFeatureVersion.featureType === "usage" &&
+                    activePlanVersion?.billingConfig.name !==
+                      planFeatureVersion.billingConfig.name && (
+                      <Badge variant={"secondary"}>{planFeatureVersion.billingConfig.name}</Badge>
+                    )}
 
                   {planFeatureVersion.metadata?.realtime && (
                     <Tooltip>

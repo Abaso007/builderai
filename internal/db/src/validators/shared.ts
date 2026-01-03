@@ -10,11 +10,14 @@ import {
   COLLECTION_METHODS,
   CURRENCIES,
   DUE_BEHAVIOUR,
+  ENTITLEMENT_MERGING_POLICY,
+  FEATURE_CONFIG_TYPES,
   FEATURE_TYPES,
-  FEATURE_VERSION_TYPES,
+  GRANT_TYPES,
   INVOICE_STATUS,
   PAYMENT_PROVIDERS,
   PLAN_TYPES,
+  SUBJECT_TYPES,
   SUBSCRIPTION_STATUS,
   TIER_MODES,
   USAGE_MODES,
@@ -23,6 +26,8 @@ import {
 
 extendZodWithOpenApi(z)
 
+export const subjectTypeSchema = z.enum(SUBJECT_TYPES)
+export const grantTypeSchema = z.enum(GRANT_TYPES)
 export const paymentProviderSchema = z.enum(PAYMENT_PROVIDERS)
 export const currencySchema = z.enum(CURRENCIES)
 export const typeFeatureSchema = z.enum(FEATURE_TYPES)
@@ -31,7 +36,7 @@ export const billingPeriodTypeSchema = z.enum(BILLING_PERIOD_TYPE)
 export const usageModeSchema = z.enum(USAGE_MODES)
 export const aggregationMethodSchema = z.enum(AGGREGATION_METHODS)
 export const tierModeSchema = z.enum(TIER_MODES)
-export const featureVersionType = z.enum(FEATURE_VERSION_TYPES)
+export const featureConfigType = z.enum(FEATURE_CONFIG_TYPES)
 export const unitSchema = z.coerce.number().int().min(1)
 export const collectionMethodSchema = z.enum(COLLECTION_METHODS)
 export const monthsSchema = z.coerce.number().int().min(1).max(12)
@@ -63,6 +68,7 @@ export const unpriceProjectErrorSchema = z.enum([
 export const unpricePlanErrorSchema = z.enum(["PLAN_VERSION_NOT_FOUND"])
 
 export const deniedReasonSchema = z.enum([
+  "INVALID_USAGE",
   "ERROR_SYNCING_ENTITLEMENTS_LAST_USAGE",
   "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE",
   "ENTITLEMENT_OUTSIDE_OF_CURRENT_BILLING_WINDOW",
@@ -110,6 +116,7 @@ export const deniedReasonSchema = z.enum([
   "ENTITLEMENT_NOT_FOUND",
   "SUBSCRIPTION_NOT_FOUND",
   "INVALID_ENTITLEMENT_TYPE",
+  "NO_ACTIVE_PHASE_FOUND",
 ])
 
 // --- Helper Function ---
@@ -148,10 +155,20 @@ export const billingConfigSchema = z.object({
   planType: planTypeSchema,
 })
 
+export const resetConfigSchema = z.object({
+  name: z.string().min(1),
+  resetInterval: billingIntervalSchema,
+  resetIntervalCount: billingIntervalCountSchema,
+  resetAnchor: billingAnchorSchema,
+  planType: planTypeSchema,
+})
+
+export const entitlementMergingPolicySchema = z.enum(ENTITLEMENT_MERGING_POLICY)
+
 export type Currency = z.infer<typeof currencySchema>
 export type PaymentProvider = z.infer<typeof paymentProviderSchema>
 export type FeatureType = z.infer<typeof typeFeatureSchema>
-export type FeatureVersionType = z.infer<typeof featureVersionType>
+export type FeatureConfigType = z.infer<typeof featureConfigType>
 export type Year = z.infer<typeof yearsSchema>
 export type Month = z.infer<typeof monthsSchema>
 export type AggregationMethod = z.infer<typeof aggregationMethodSchema>
@@ -163,3 +180,6 @@ export type InvoiceStatus = z.infer<typeof invoiceStatusSchema>
 export type BillingInterval = z.infer<typeof billingIntervalSchema>
 export type PlanType = z.infer<typeof planTypeSchema>
 export type BillingConfig = z.infer<typeof billingConfigSchema>
+export type ResetConfig = z.infer<typeof resetConfigSchema>
+export type EntitlementMergingPolicy = z.infer<typeof entitlementMergingPolicySchema>
+export type GrantType = z.infer<typeof grantTypeSchema>

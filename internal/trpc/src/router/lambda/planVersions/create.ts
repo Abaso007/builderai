@@ -25,7 +25,6 @@ export const create = protectedProjectProcedure
       currency,
       billingConfig,
       gracePeriod,
-      paymentMethodRequired,
       title,
       tags,
       whenToBill,
@@ -70,14 +69,6 @@ export const create = protectedProjectProcedure
       })
     }
 
-    // default plan shouldn't have a required payment method
-    if (planData.defaultPlan && paymentMethodRequired) {
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: "default plan can't have a required payment method",
-      })
-    }
-
     const planVersionId = utils.newId("plan_version")
 
     // this should happen in a transaction because we need to change the status of the previous version
@@ -102,7 +93,6 @@ export const create = protectedProjectProcedure
             status: status ?? "draft",
             paymentProvider,
             currency,
-            paymentMethodRequired,
             autoRenew: autoRenew,
             billingConfig: {
               ...billingConfig,

@@ -12,33 +12,24 @@ import type {
 } from "@unprice/analytics"
 import type {
   ApiKeyExtended,
+  CurrentUsage,
   Customer,
-  CustomerEntitlementExtended,
   CustomerPaymentMethod,
+  Entitlement,
   Feature,
-  GetCurrentUsage,
+  MinimalEntitlement,
   PlanVersionApi,
   Project,
+  ReportUsageResult,
   SubscriptionCache,
   Workspace,
 } from "@unprice/db/validators"
-import type { DenyReason } from "../customers/errors"
 
 export type ProjectFeatureCache = {
   project: {
     enabled: boolean
   }
   features: Feature[]
-}
-
-export type UsageEntitlementCache = {
-  success: boolean
-  message?: string
-  limit?: number
-  usage?: number
-  notifyUsage?: boolean
-  deniedReason?: DenyReason
-  cacheHit?: boolean
 }
 
 export type CustomerCache = Customer & {
@@ -51,11 +42,11 @@ export type CacheNamespaces = {
   apiKeyByHash: ApiKeyExtended | null
   customerSubscription: SubscriptionCache | null
   customer: CustomerCache | null
-  customerEntitlement: CustomerEntitlementExtended | null
-  customerEntitlements: CustomerEntitlementExtended[] | null
+  customerEntitlement: Entitlement | null
+  customerEntitlements: MinimalEntitlement[]
   customerPaymentMethods: CustomerPaymentMethod[] | null
   projectFeatures: ProjectFeatureCache | null
-  idempotentRequestUsageByHash: UsageEntitlementCache | null
+  idempotentRequestUsageByHash: ReportUsageResult | null
   planVersionList: PlanVersionApi[] | null
   planVersion: PlanVersionApi | null
   pageCountryVisits: PageCountryVisits | null
@@ -69,7 +60,7 @@ export type CacheNamespaces = {
   getUsage: Usage | null
   getVerifications: Verifications | null
   getVerificationRegions: VerificationRegions | null
-  getCurrentUsage: GetCurrentUsage | null
+  getCurrentUsage: CurrentUsage | null
 }
 
 export type CacheNamespace = keyof CacheNamespaces

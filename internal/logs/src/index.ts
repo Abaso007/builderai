@@ -16,6 +16,7 @@ export const logSchema = z.discriminatedUnion("type", [
     environment: z.enum(["development", "test", "production", "preview"]).default("development"),
     service: z.string(),
     colo: z.string().optional(),
+    durableObjectId: z.string().optional(),
   }),
   z.object({
     type: z.literal("metric"),
@@ -25,6 +26,7 @@ export const logSchema = z.discriminatedUnion("type", [
     environment: z.enum(["development", "test", "production", "preview"]).default("development"),
     service: z.string(),
     colo: z.string().optional(),
+    durableObjectId: z.string().optional(),
   }),
 ])
 
@@ -38,6 +40,6 @@ export class Log<TLog extends LogSchema = LogSchema> {
   }
 
   public toString(): string {
-    return JSON.stringify(this.log)
+    return JSON.stringify({ ...this.log, time: Date.now() }, null, 2)
   }
 }

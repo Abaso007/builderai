@@ -6,18 +6,14 @@ DESCRIPTION >
 TAGS "usage"
 
 SCHEMA >
+    `id` String `json:$.id`,
     `timestamp` Int64 `json:$.timestamp`,
     `featureSlug` LowCardinality(String) `json:$.featureSlug`,
     `customerId` String `json:$.customerId`,
-    `usage` Int32 `json:$.usage`,
+    `usage` Decimal64(4) `json:$.usage`,
     `requestId` String `json:$.requestId`,
     `idempotenceKey` String `json:$.idempotenceKey`,
     `projectId` String `json:$.projectId`,
-    `entitlementId` String `json:$.entitlementId`,
-    `featurePlanVersionId` String `json:$.featurePlanVersionId`,
-    `subscriptionId` Nullable(String) `json:$.subscriptionId`,
-    `subscriptionItemId` Nullable(String) `json:$.subscriptionItemId`,
-    `subscriptionPhaseId` Nullable(String) `json:$.subscriptionPhaseId`,
     `createdAt` Int64 `json:$.createdAt`,
     `metadata` Map(String, String) `json:$.metadata`,
     `deleted` UInt8 `json:$.deleted` DEFAULT 0

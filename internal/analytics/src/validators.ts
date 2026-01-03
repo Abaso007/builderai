@@ -45,7 +45,7 @@ export const stringToUInt32 = z.union([z.string(), z.number()]).transform((s) =>
 export const booleanToUInt8 = z.boolean().transform((b) => (b ? 1 : 0))
 
 export const metadataSchema = z
-  .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
+  .record(z.string(), z.any())
   .nullable()
   .transform((m) => {
     // tinybird receives a Map<string, string>
@@ -58,13 +58,8 @@ export const metadataSchema = z
 
 export const featureVerificationSchemaV1 = z.object({
   projectId: z.string(),
-  featurePlanVersionId: z.string(),
-  subscriptionItemId: z.string().nullable(),
-  subscriptionPhaseId: z.string().nullable(),
-  subscriptionId: z.string().nullable(),
-  entitlementId: z.string(),
   deniedReason: z.string().optional(),
-  success: z.boolean(),
+  allowed: z.number().int().min(0).max(1).default(0),
   timestamp: z
     .number()
     .default(Date.now())
@@ -81,25 +76,15 @@ export const featureVerificationSchemaV1 = z.object({
 })
 
 export const featureUsageSchemaV1 = z.object({
+  id: z.string(),
   idempotenceKey: z.string(),
-  subscriptionItemId: z.string().nullable(),
-  subscriptionPhaseId: z.string().nullable(),
-  subscriptionId: z.string().nullable(),
-  entitlementId: z.string(),
   featureSlug: z.string(),
-  customerId: z.string(),
-  timestamp: z
-    .number()
-    .default(Date.now())
-    .describe("timestamp of when this usage record should be billed"),
-  projectId: z.string(),
-  featurePlanVersionId: z.string(),
-  usage: stringToUInt32,
-  createdAt: z
-    .number()
-    .default(Date.now())
-    .describe("timestamp of when this usage record was created"),
   requestId: z.string(),
+  projectId: z.string(),
+  customerId: z.string(),
+  timestamp: z.number().describe("timestamp of when this usage record should be billed"),
+  usage: stringToUInt32,
+  createdAt: z.number().describe("timestamp of when this usage record was created"),
   deleted: z.number().int().min(0).max(1).default(0),
   metadata: metadataSchema,
 })
@@ -134,7 +119,6 @@ export const auditLogSchemaV1 = z.object({
 export const getAnalyticsVerificationsResponseSchema = z.object({
   projectId: z.string(),
   customerId: z.string().optional(),
-  entitlementId: z.string().optional(),
   featureSlug: z.string(),
   count: z.number(),
   p50_latency: z.number(),
@@ -145,7 +129,6 @@ export const getAnalyticsVerificationsResponseSchema = z.object({
 export const getUsageResponseSchema = z.object({
   projectId: z.string(),
   customerId: z.string().optional(),
-  entitlementId: z.string().optional(),
   featureSlug: z.string(),
   count: z.number(),
   sum: z.number(),
@@ -280,6 +263,9 @@ export type AnalyticsEvent = z.infer<typeof analyticsEventSchema>
 export type AnalyticsEventAction = z.infer<typeof analyticsEventSchema>["action"]
 export type GetUsageResponse = z.infer<typeof getUsageResponseSchema>
 
+export type AnalyticsVerification = z.infer<typeof featureVerificationSchemaV1>
+export type AnalyticsUsage = z.infer<typeof featureUsageSchemaV1>
+
 // Plan conversion response schemas
 export const planConversionResponseSchema = z.object({
   date: z.string(),
@@ -312,7 +298,7 @@ export type PageBrowserVisits = Awaited<ReturnType<Analytics["getBrowserVisits"]
 export type PageOverview = Awaited<ReturnType<Analytics["getPagesOverview"]>>["data"]
 export type FeatureHeatmap = Awaited<ReturnType<Analytics["getFeatureHeatmap"]>>["data"]
 export type FeaturesOverview = Awaited<ReturnType<Analytics["getFeaturesOverview"]>>["data"]
-export type FeaturesUsageTotal = Awaited<ReturnType<Analytics["getFeaturesUsageTotal"]>>["data"]
+export type FeaturesUsage = Awaited<ReturnType<Analytics["getFeaturesUsage"]>>["data"]
 export type PlansConversion = Awaited<ReturnType<Analytics["getPlansConversion"]>>["data"]
 export type Usage = Awaited<ReturnType<Analytics["getFeaturesUsagePeriod"]>>["data"]
 export type Verifications = Awaited<ReturnType<Analytics["getFeaturesVerifications"]>>["data"]

@@ -18,6 +18,7 @@ import {
 import { UnPriceMachineError } from "./errors"
 
 import type { CustomerService } from "../customers/service"
+import { GrantsManager } from "../entitlements/grants"
 import sendCustomerNotification, { logTransition, updateSubscription } from "./actions"
 import {
   canRenew,
@@ -61,6 +62,7 @@ export class SubscriptionMachine {
   private db: Database
   private now: number
   private customerService: CustomerService
+  private grantService: GrantsManager
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private machine: any
   // Serializes event sends to this actor to avoid concurrent transitions/races.
@@ -94,6 +96,7 @@ export class SubscriptionMachine {
     this.customerService = customer
     this.db = db
     this.machine = this.createMachineSubscription()
+    this.grantService = new GrantsManager({ db: db, logger: logger })
   }
 
   /**
@@ -547,6 +550,9 @@ export class SubscriptionMachine {
                 target: "error",
                 actions: assign({
                   error: ({ context }) => {
+                    const renewAtDate = context.subscription.renewAt
+                      ? new Date(context.subscription.renewAt).toLocaleString()
+                      : new Date(context.now).toLocaleString()
                     const renew = canRenew({ context })
                     const autoRenew = isAutoRenewEnabled({ context })
 
@@ -558,7 +564,7 @@ export class SubscriptionMachine {
 
                     if (!renew) {
                       return {
-                        message: "Cannot renew subscription, subscription is not due to be renewed",
+                        message: `Cannot renew subscription, subscription  will be renewed at ${renewAtDate}`,
                       }
                     }
 

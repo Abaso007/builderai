@@ -5,6 +5,10 @@ import m0003 from "./0003_rare_talon.sql"
 import m0004 from "./0004_unknown_black_crow.sql"
 import m0005 from "./0005_mute_peter_parker.sql"
 import m0006 from "./0006_tricky_squirrel_girl.sql"
+import m0007 from "./0007_strange_jocasta.sql"
+import m0008 from "./0008_fresh_wind_dancer.sql"
+import m0009 from "./0009_fantastic_norrin_radd.sql"
+import m0010 from "./0010_mysterious_inhumans.sql"
 import journal from "./meta/_journal.json"
 
 export default {
@@ -17,5 +21,9 @@ export default {
     m0004,
     m0005,
     m0006,
+    m0007,
+    m0008,
+    m0009,
+    m0010,
   },
 }

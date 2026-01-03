@@ -387,8 +387,8 @@ importers:
   internal/analytics:
     dependencies:
       '@jhonsfran/zod-bird':
-        specifier: ^1.0.2
-        version: 1.0.2
+        specifier: ^1.0.3
+        version: 1.0.3
       '@t3-oss/env-core':
         specifier: ^0.12.0
         version: 0.12.0(typescript@5.9.2)(zod@3.25.76)
@@ -783,6 +783,9 @@ importers:
       p-limit:
         specifier: ^7.1.1
         version: 7.1.1
+      ulid:
+        specifier: ^3.0.2
+        version: 3.0.2
       xstate:
         specifier: ^5.21.0
         version: 5.21.0
@@ -4613,8 +4616,8 @@ packages:
       minipass: 7.1.2
     dev: true
 
-  /@jhonsfran/zod-bird@1.0.2:
-    resolution: {integrity: sha512-1lAVPlJYRZY2ANOGJnreB0LEBUM93efoMbcqoNo/qwn3BQujAD4+QLwUimvoQT+Wb9EZ+Q3AnC/mVCK/mZ6Gig==}
+  /@jhonsfran/zod-bird@1.0.3:
+    resolution: {integrity: sha512-BiBlY/gSFTai+h3JVXU5m/89RW+Wc1dowK0E74TNHSi+hJCH0jUV2pfTVoUIk12lrz0lsTpTVzZ6IPCJMcHWwA==}
     dependencies:
       zod: 3.25.76
     dev: false
@@ -20418,6 +20421,11 @@ packages:
 
   /ulid@2.4.0:
     resolution: {integrity: sha512-fIRiVTJNcSRmXKPZtGzFQv9WRrZ3M9eoptl/teFJvjOzmpU+/K/JH6HZ8deBfb5vMEpicJcLn7JmvdknlMq7Zg==}
+    hasBin: true
+    dev: false
+
+  /ulid@3.0.2:
+    resolution: {integrity: sha512-yu26mwteFYzBAot7KVMqFGCVpsF6g8wXfJzQUHvu1no3+rRRSFcSV2nKeYvNPLD2J4b08jYBDhHUjeH0ygIl9w==}
     hasBin: true
     dev: false
 

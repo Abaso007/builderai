@@ -24,6 +24,12 @@ export const signUp = protectedProcedure
       cancelUrl,
       externalId: workspaceId,
       sessionId,
+      metadata: {
+        continent: opts.ctx.geolocation.continent,
+        country: opts.ctx.geolocation.country,
+        region: opts.ctx.geolocation.region,
+        city: opts.ctx.geolocation.city,
+      },
     })
 
     if (error) {

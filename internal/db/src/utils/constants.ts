@@ -53,6 +53,10 @@ export const USAGE_MODES_MAP = {
 } as const
 
 export const AGGREGATION_METHODS_MAP = {
+  none: {
+    label: "None",
+    description: "No usage aggregation method",
+  },
   sum: {
     label: "Sum",
     description: "Adds up all events values within the current cycle period",
@@ -175,7 +179,10 @@ export const SUBSCRIPTION_STATUS = [
 export const PLAN_TYPES = ["recurring", "onetime"] as const
 export const ROLES_APP = ["OWNER", "ADMIN", "MEMBER"] as const
 export const WHEN_TO_BILLING = ["pay_in_advance", "pay_in_arrear"] as const
+export const ENTITLEMENT_MERGING_POLICY = ["sum", "max", "min", "replace"] as const
 export const DUE_BEHAVIOUR = ["cancel", "downgrade"] as const
+export const GRANT_TYPES = ["subscription", "manual", "promotion", "trial", "addon"] as const
+export const SUBJECT_TYPES = ["project", "plan", "plan_version", "customer"] as const
 export const INVOICE_STATUS = ["unpaid", "paid", "waiting", "void", "draft", "failed"] as const
 export const INVOICE_ITEM_KIND = [
   "period",
@@ -185,7 +192,7 @@ export const INVOICE_ITEM_KIND = [
   "adjustment",
   "trial",
 ] as const
-export const FEATURE_VERSION_TYPES = ["feature", "addon"] as const
+export const FEATURE_CONFIG_TYPES = ["feature", "addon"] as const
 export const COLLECTION_METHODS = ["charge_automatically", "send_invoice"] as const
 export const BILLING_PERIOD_STATUS = ["pending", "invoiced", "voided"] as const
 export const BILLING_PERIOD_TYPE = ["normal", "trial"] as const
@@ -206,3 +213,26 @@ export const FEATURE_TYPES = Object.keys(FEATURE_TYPES_MAPS) as unknown as reado
   FeatureType,
   ...FeatureType[],
 ]
+
+export type Scope = "period" | "lifetime"
+export type Behavior = "sum" | "max" | "last" | "none"
+
+interface MethodConfig {
+  behavior: Behavior // How do we update the number? (Add, Max, Replace)
+  scope: Scope // When does it reset? (Cycle end vs Never)
+  reset: boolean
+}
+
+export const AGGREGATION_CONFIG: Record<AggregationMethod, MethodConfig> = {
+  none: { behavior: "none", scope: "period", reset: false },
+  // Period Scoped (Resets on Cycle)
+  sum: { behavior: "sum", scope: "period", reset: true },
+  count: { behavior: "sum", scope: "period", reset: true }, // count is just sum(+1)
+  max: { behavior: "max", scope: "period", reset: true },
+  last_during_period: { behavior: "last", scope: "period", reset: true },
+
+  // Lifetime Scoped (Never Resets)
+  sum_all: { behavior: "sum", scope: "lifetime", reset: false },
+  count_all: { behavior: "sum", scope: "lifetime", reset: false },
+  max_all: { behavior: "max", scope: "lifetime", reset: false },
+}

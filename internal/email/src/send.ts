@@ -14,7 +14,7 @@ async function getMailpitTransporter() {
   if (!mailpitTransporter) {
     const nodemailer = await import("nodemailer") // Dynamic import
     mailpitTransporter = nodemailer.createTransport({
-      host: "localhost",
+      host: "127.0.0.1",
       port: 1025,
       secure: false,
       ignoreTLS: true,

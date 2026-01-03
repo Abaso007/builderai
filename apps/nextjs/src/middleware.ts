@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 
 import { auth } from "@unprice/auth/server"
 
-import { APP_HOSTNAMES } from "@unprice/config"
+import { APP_DOMAIN, APP_HOSTNAMES } from "@unprice/config"
 import { getValidSubdomain, parse } from "~/lib/domains"
 import AppMiddleware from "~/middleware/app"
 import SitesMiddleware from "~/middleware/sites"
@@ -28,6 +28,11 @@ export default auth((req) => {
 
   // 3. validate subdomains www and empty
   if (subdomain === "" || subdomain === "www") {
+    // If the user is logged in, we redirect them to the app
+    if (req.auth?.user && path === "/") {
+      return NextResponse.redirect(new URL(APP_DOMAIN, req.url))
+    }
+
     // protect the app routes from being accessed under the base domain or www subdomain
     if (path.startsWith("/dashboard")) {
       const url = new URL(req.nextUrl.origin)

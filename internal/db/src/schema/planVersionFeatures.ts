@@ -18,8 +18,8 @@ import type {
   configFeatureSchema,
   planVersionFeatureMetadataSchema,
 } from "../validators/planVersionFeatures"
-import type { BillingConfig } from "../validators/shared"
-import { aggregationMethodEnum, typeFeatureEnum } from "./enums"
+import type { BillingConfig, ResetConfig } from "../validators/shared"
+import { aggregationMethodEnum, typeFeatureConfigEnum, typeFeatureEnum } from "./enums"
 import { features } from "./features"
 import { versions } from "./planVersions"
 import { projects } from "./projects"
@@ -32,8 +32,9 @@ export const planVersionFeatures = pgTableProject(
   {
     ...projectID,
     ...timestamps,
-    // TODO: add type in order to support addons
     planVersionId: cuid("plan_version_id").notNull(),
+    // type of the feature config - feature, addon, etc.
+    type: typeFeatureConfigEnum("feature_config_type").default("feature").notNull(),
     featureId: cuid("feature_id").notNull(),
     // type of the feature - flat, tier, usage, etc.
     featureType: typeFeatureEnum("feature_type").notNull(),
@@ -41,6 +42,9 @@ export const planVersionFeatures = pgTableProject(
     config: json("features_config").$type<z.infer<typeof configFeatureSchema>>().notNull(),
     // billing config for the feature usually the same as the plan version billing config
     billingConfig: json("billing_config").$type<BillingConfig>().notNull(),
+    // reset config for the feature usually the same as the plan version reset config
+    // if null it resets at the end of the cycle
+    resetConfig: json("reset_config").$type<ResetConfig>(),
     // metadata probably will be useful to save external data, etc.
     metadata: json("metadata").$type<z.infer<typeof planVersionFeatureMetadataSchema>>(),
     // the method to aggregate the feature quantity - use for calculated the current usage of the feature
@@ -51,6 +55,11 @@ export const planVersionFeatures = pgTableProject(
     // the limit of the feature, if nulls there is no limit, normally used for usage features to limit the usage
     // for the rest of the features types it can be used to limit the quantity of the feature
     limit: integer("limit"),
+    // allow overage is true if the limit is exceeded, but the usage is allowed
+    // otherwise the usage is denied
+    allowOverage: boolean("allow_overage").notNull().default(false),
+    // threshold to notify the user when the usage is at or above the threshold null for no usage feature
+    notifyUsageThreshold: integer("notify_usage_threshold").default(95),
     // wether the feature is hidden or not in the UI
     hidden: boolean("hidden").notNull().default(false),
   },

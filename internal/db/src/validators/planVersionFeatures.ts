@@ -11,6 +11,8 @@ import { featureSelectBaseSchema } from "./features"
 import {
   aggregationMethodSchema,
   billingConfigSchema,
+  featureConfigType,
+  resetConfigSchema,
   tierModeSchema,
   typeFeatureSchema,
   unitSchema,
@@ -98,6 +100,8 @@ export const tiersSchema = z.object({
   flatPrice: dineroSchema,
   firstUnit: z.coerce.number().int().min(1),
   lastUnit: z.coerce.number().int().min(1).nullable(),
+  // label for the tier - used to display the tier in the UI
+  label: z.string().optional(),
 })
 
 export const configTierSchema = z
@@ -326,6 +330,7 @@ export const configFeatureSchema = z.union([
 // TODO: use discriminated union
 export const planVersionFeatureSelectBaseSchema = createSelectSchema(planVersionFeatures, {
   config: configFeatureSchema,
+  resetConfig: resetConfigSchema,
   metadata: planVersionFeatureMetadataSchema,
   defaultQuantity: z.coerce.number().int().optional().default(1),
   aggregationMethod: aggregationMethodSchema,
@@ -355,8 +360,12 @@ export const planVersionFeatureInsertBaseSchema = createInsertSchema(planVersion
   metadata: planVersionFeatureMetadataSchema.optional(),
   aggregationMethod: aggregationMethodSchema.default("count"),
   billingConfig: billingConfigSchema,
+  resetConfig: resetConfigSchema.optional(),
   defaultQuantity: z.coerce.number().int(),
   limit: z.coerce.number().int().optional(),
+  allowOverage: z.boolean().optional(),
+  notifyUsageThreshold: z.coerce.number().int().optional().default(95),
+  type: featureConfigType.optional(),
 })
   .omit({
     createdAtM: true,

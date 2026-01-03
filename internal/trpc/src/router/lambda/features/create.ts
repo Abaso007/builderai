@@ -11,7 +11,7 @@ export const create = protectedProjectProcedure
   .input(featureInsertBaseSchema)
   .output(z.object({ feature: featureSelectBaseSchema }))
   .mutation(async (opts) => {
-    const { description, slug, title } = opts.input
+    const { description, slug, title, unit } = opts.input
     const project = opts.ctx.project
 
     // check if the customer has access to the feature
@@ -40,6 +40,7 @@ export const create = protectedProjectProcedure
         title,
         projectId: project.id,
         description,
+        unit,
       })
       .returning()
       .then((data) => data[0])

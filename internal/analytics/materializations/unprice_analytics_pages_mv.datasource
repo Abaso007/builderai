@@ -12,5 +12,5 @@ SCHEMA >
 
 ENGINE AggregatingMergeTree
 ENGINE_PARTITION_KEY toYYYYMM(date)
-ENGINE_SORTING_KEY date, project_id, page_id, domain
+ENGINE_SORTING_KEY project_id, page_id, domain, date
 ENGINE_TTL date + INTERVAL 6 MONTH

@@ -13,7 +13,7 @@ import type { App } from "~/hono/app"
 const tags = ["customer"]
 
 export const route = createRoute({
-  path: "/v1/customer/reset-entitlements",
+  path: "/v1/customer/resetEntitlements",
   operationId: "customer.resetEntitlements",
   summary: "reset entitlements",
   description: "Reset entitlements for a customer",
@@ -38,8 +38,6 @@ export const route = createRoute({
     [HttpStatusCodes.OK]: jsonContent(
       z.object({
         success: z.boolean(),
-        message: z.string().optional(),
-        slugs: z.array(z.string()).optional(),
       }),
       "The result of the reset entitlements"
     ),
@@ -47,17 +45,17 @@ export const route = createRoute({
   },
 })
 
-export type ResetEntitlementsV1Request = z.infer<
+export type ResetEntitlementsRequest = z.infer<
   (typeof route.request.body)["content"]["application/json"]["schema"]
 >
-export type ResetEntitlementsV1Response = z.infer<
+export type ResetEntitlementsResponse = z.infer<
   (typeof route.responses)[200]["content"]["application/json"]["schema"]
 >
 
 export const registerResetEntitlementsV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customerId, projectId } = c.req.valid("json")
-    const { entitlement } = c.get("services")
+    const { usagelimiter } = c.get("services")
 
     // validate the request
     const key = await keyAuth(c)
@@ -76,7 +74,10 @@ export const registerResetEntitlementsV1 = (app: App) =>
     startTime(c, "resetEntitlements")
 
     // delete the customer from the DO
-    const { err, val: result } = await entitlement.resetEntitlements(customerId, finalProjectId)
+    const { err } = await usagelimiter.resetEntitlements({
+      customerId,
+      projectId: finalProjectId,
+    })
 
     // end the timer
     endTime(c, "resetEntitlements")
@@ -85,5 +86,5 @@ export const registerResetEntitlementsV1 = (app: App) =>
       throw err
     }
 
-    return c.json(result, HttpStatusCodes.OK)
+    return c.json({ success: true }, HttpStatusCodes.OK)
   })

@@ -1,6 +1,5 @@
-import { type Dinero, toStripeMoney } from "@unprice/db/utils"
-import type { Currency, Customer, PaymentProvider } from "@unprice/db/validators"
-import { Err, FetchError, Ok, type Result } from "@unprice/error"
+import type { Customer, PaymentProvider } from "@unprice/db/validators"
+import { Err, FetchError, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import type { Stripe } from "@unprice/stripe"
 import type { UnPricePaymentProviderError } from "./errors"
@@ -103,20 +102,6 @@ export class PaymentProviderService implements PaymentProviderInterface {
     switch (this.paymentProvider) {
       case "stripe": {
         return await this.stripe.signUp(opts)
-      }
-      default: {
-        return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
-      }
-    }
-  }
-
-  public formatAmount(
-    price: Dinero<number>
-  ): Result<{ amount: number; currency: Currency }, FetchError> {
-    switch (this.paymentProvider) {
-      case "stripe": {
-        const result = toStripeMoney(price)
-        return Ok(result)
       }
       default: {
         return Err(new FetchError({ message: "Payment provider not supported", retry: false }))

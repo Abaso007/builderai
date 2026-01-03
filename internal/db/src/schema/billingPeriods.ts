@@ -12,6 +12,8 @@ import {
 import { pgTableProject } from "../utils/_table"
 import { cuid, timestamps } from "../utils/fields"
 import { projectID } from "../utils/sql"
+import { customers } from "./customers"
+import { grants } from "./entitlements"
 import { billingPeriodStatusEnum, billingPeriodTypeEnum, whenToBillEnum } from "./enums"
 import { invoices } from "./invoices"
 import { projects } from "./projects"
@@ -24,6 +26,10 @@ export const billingPeriods = pgTableProject(
     ...timestamps,
     // Is it necessary to have the subscription id?
     subscriptionId: cuid("subscription_id").notNull(),
+    // customer id is the id of the customer that is associated with the billing period
+    customerId: cuid("customer_id").notNull(),
+    // grant id is the id of the grant that is applied to the billing period
+    grantId: cuid("grant_id").notNull(),
     subscriptionPhaseId: cuid("subscription_phase_id").notNull(),
     subscriptionItemId: cuid("subscription_item_id").notNull(),
     status: billingPeriodStatusEnum("status").notNull().default("pending"),
@@ -60,6 +66,16 @@ export const billingPeriods = pgTableProject(
       columns: [table.subscriptionPhaseId, table.projectId],
       foreignColumns: [subscriptionPhases.id, subscriptionPhases.projectId],
       name: "billing_periods_subscription_phase_id_fkey",
+    }).onDelete("cascade"),
+    customerfk: foreignKey({
+      columns: [table.customerId, table.projectId],
+      foreignColumns: [customers.id, customers.projectId],
+      name: "billing_periods_customer_id_fkey",
+    }).onDelete("cascade"),
+    grantfk: foreignKey({
+      columns: [table.grantId, table.projectId],
+      foreignColumns: [grants.id, grants.projectId],
+      name: "billing_periods_grant_id_fkey",
     }).onDelete("cascade"),
     // project fk
     projectfk: foreignKey({
@@ -106,6 +122,14 @@ export const billingPeriodRelations = relations(billingPeriods, ({ one }) => ({
   project: one(projects, {
     fields: [billingPeriods.projectId],
     references: [projects.id],
+  }),
+  grant: one(grants, {
+    fields: [billingPeriods.grantId, billingPeriods.projectId],
+    references: [grants.id, grants.projectId],
+  }),
+  customer: one(customers, {
+    fields: [billingPeriods.customerId, billingPeriods.projectId],
+    references: [customers.id, customers.projectId],
   }),
   subscriptionPhase: one(subscriptionPhases, {
     fields: [billingPeriods.subscriptionPhaseId, billingPeriods.projectId],

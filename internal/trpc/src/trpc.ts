@@ -47,8 +47,14 @@ export interface CreateContextOptions {
   cache: C<CacheNamespaces>
   // pass this in the context so we can migrate easily to other providers
   waitUntil: (p: Promise<unknown>) => void
-  ip: string
   hashCache: Map<string, string>
+  geolocation: {
+    continent: string
+    country: string
+    region: string
+    city: string
+    ip: string
+  }
 }
 
 /**
@@ -83,6 +89,12 @@ export const createTRPCContext = async (opts: {
   headers: Headers
   session: Session | null
   req?: NextAuthRequest
+  geo?: {
+    continent: string
+    country: string
+    region: string
+    city: string
+  }
 }) => {
   const session = opts.session ?? (await auth())
   const userId = session?.user?.id || "unknown"
@@ -90,10 +102,11 @@ export const createTRPCContext = async (opts: {
   const source = opts.headers.get("unprice-request-source") || "unknown"
   const pathname = opts.req?.nextUrl.pathname || "unknown"
   const requestId = opts.headers.get("unprice-request-id") || newId("request")
-  const region = opts.headers.get("x-vercel-id") || "unknown"
-  const country = opts.headers.get("x-vercel-ip-country") || "unknown"
+  const region = opts.geo?.region || opts.headers.get("x-vercel-id") || "unknown"
+  const country = opts.geo?.country || opts.headers.get("x-vercel-ip-country") || "unknown"
+  const continent = opts.geo?.continent || opts.headers.get("x-vercel-ip-continent") || "unknown"
+  const city = opts.geo?.city || opts.headers.get("x-vercel-ip-city") || "unknown"
   const userAgent = opts.headers.get("user-agent") || "unknown"
-
   const ip = opts.headers.get("x-real-ip") || opts.headers.get("x-forwarded-for") || "unknown"
 
   const logger = env.EMIT_METRICS_LOGS
@@ -176,7 +189,6 @@ export const createTRPCContext = async (opts: {
 
   return createInnerTRPCContext({
     session,
-    ip,
     headers: opts.headers,
     req: opts.req,
     activeWorkspaceSlug,
@@ -187,6 +199,13 @@ export const createTRPCContext = async (opts: {
     cache,
     waitUntil, // abstracted to allow migration to other providers
     hashCache,
+    geolocation: {
+      continent,
+      country,
+      region,
+      city,
+      ip,
+    },
   })
 }
 

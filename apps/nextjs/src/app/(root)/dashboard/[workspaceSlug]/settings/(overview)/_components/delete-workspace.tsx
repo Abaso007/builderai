@@ -59,12 +59,12 @@ export function DeleteWorkspace({ workspace }: { workspace: Workspace }) {
   }
 
   return (
-    <Card className="border-danger">
+    <Card>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
-      <CardFooter className="border-t border-t-destructive px-6 py-4">
+      <CardFooter className="border-t px-6 py-4">
         <Dialog>
           <DialogTrigger asChild>
             <Button variant="destructive" disabled={!!isPersonal || !!isMain}>

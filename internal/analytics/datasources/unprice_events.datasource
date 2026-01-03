@@ -15,7 +15,4 @@ SCHEMA >
 
 ENGINE MergeTree
 ENGINE_PARTITION_KEY toYYYYMM(timestamp)
-ENGINE_SORTING_KEY timestamp, action
-
-FORWARD_QUERY >
-  SELECT timestamp, defaultValueOfTypeName('String') AS project_id, session_id, action, version, payload
+ENGINE_SORTING_KEY action, timestamp

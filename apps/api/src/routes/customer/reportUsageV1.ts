@@ -1,10 +1,11 @@
 import { createRoute } from "@hono/zod-openapi"
+import { reportUsageResultSchema } from "@unprice/db/validators"
 import { endTime, startTime } from "hono/timing"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 
 import { z } from "zod"
-import { keyAuth } from "~/auth/key"
+import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { reportUsageEvents } from "~/util/reportUsageEvents"
@@ -56,15 +57,7 @@ export const route = createRoute({
     ),
   },
   responses: {
-    [HttpStatusCodes.OK]: jsonContent(
-      z.object({
-        success: z.boolean(),
-        message: z.string().optional(),
-        cacheHit: z.boolean().optional(),
-        remaining: z.number().optional(),
-      }),
-      "The result of the report usage"
-    ),
+    [HttpStatusCodes.OK]: jsonContent(reportUsageResultSchema, "The result of the report usage"),
     ...openApiErrorResponses,
   },
 })
@@ -79,7 +72,7 @@ export type ReportUsageResponse = z.infer<
 export const registerReportUsageV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customerId, featureSlug, usage, idempotenceKey, metadata } = c.req.valid("json")
-    const { entitlement } = c.get("services")
+    const { usagelimiter } = c.get("services")
     const stats = c.get("stats")
     const requestId = c.get("requestId")
 
@@ -89,8 +82,10 @@ export const registerReportUsageV1 = (app: App) =>
     // start a new timer
     startTime(c, "reportUsage")
 
+    const projectId = await resolveContextProjectId(c, key.projectId, customerId)
+
     // validate usage from db
-    const { err, val: result } = await entitlement.reportUsage({
+    const { err, val: result } = await usagelimiter.reportUsage({
       customerId,
       featureSlug,
       usage,
@@ -99,7 +94,7 @@ export const registerReportUsageV1 = (app: App) =>
       idempotenceKey,
       // short ttl for dev
       flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
-      projectId: key.projectId,
+      projectId,
       requestId,
       metadata: {
         ...metadata,

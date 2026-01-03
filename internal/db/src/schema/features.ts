@@ -18,6 +18,8 @@ export const features = pgTableProject(
     // we can check if the feature has entitlements and if so, we can add them to the plan version
     // code is the unique code for the feature that is used in redis cache for the entitlements calculation (bitmap)
     code: serial("code").notNull(),
+    // unit of measurement for the feature - GB, MB, tokens, calls
+    unit: varchar("unit", { length: 24 }).notNull().default("units"),
     title: varchar("title", { length: 50 }).notNull(),
     description: text("description"),
   },

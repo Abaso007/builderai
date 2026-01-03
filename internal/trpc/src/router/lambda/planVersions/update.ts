@@ -34,7 +34,6 @@ export const update = protectedProjectProcedure
       tags,
       whenToBill,
       paymentProvider,
-      paymentMethodRequired,
       metadata,
       autoRenew,
       trialUnits,
@@ -293,7 +292,6 @@ export const update = protectedProjectProcedure
           ...(status && { status }),
           ...(metadata && { metadata }),
           ...(paymentProvider && { paymentProvider }),
-          ...(paymentMethodRequired && { paymentMethodRequired }),
           ...(trialUnits !== undefined && { trialUnits }),
           updatedAtM: Date.now(),
         })

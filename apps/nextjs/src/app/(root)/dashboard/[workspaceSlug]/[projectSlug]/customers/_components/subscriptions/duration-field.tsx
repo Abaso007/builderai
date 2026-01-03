@@ -259,6 +259,18 @@ export default function DurationFormField<TFieldValues extends FormValues>({
                         variant="ghost"
                         className="justify-start font-normal"
                         onClick={() => {
+                          const now = new Date()
+                          setEnd(now)
+                          field.onChange(now.getTime())
+                          setIsOpenPopOverEnd(false)
+                        }}
+                      >
+                        Now
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        className="justify-start font-normal"
+                        onClick={() => {
                           if (!start) {
                             toastAction("error", "Please select a start date first")
                             return

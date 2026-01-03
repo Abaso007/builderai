@@ -14,12 +14,12 @@ describe("calculateCycleWindow", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now,
-      billingConfig: {
+      config: {
         name: "test",
-        billingInterval: "onetime",
-        billingIntervalCount: 1,
+        interval: "onetime",
+        intervalCount: 1,
         planType: "onetime",
-        billingAnchor: "dayOfCreation",
+        anchor: "dayOfCreation",
       },
     })
 
@@ -36,12 +36,12 @@ describe("calculateCycleWindow", () => {
       effectiveEndDate: endMs,
       trialEndsAt: null,
       now,
-      billingConfig: {
+      config: {
         name: "test",
-        billingInterval: "month",
-        billingIntervalCount: 1,
+        interval: "month",
+        intervalCount: 1,
         planType: "recurring",
-        billingAnchor: 1,
+        anchor: 1,
       },
     })
 
@@ -49,7 +49,7 @@ describe("calculateCycleWindow", () => {
   })
 
   describe("onetime", () => {
-    it("without trial computes infinite window and elapsed seconds", () => {
+    it("without trial computes infinite window", () => {
       const startMs = utcDate("2024-01-01", "12:00:00")
       const now = utcDate("2024-01-01", "13:30:00")
 
@@ -58,20 +58,19 @@ describe("calculateCycleWindow", () => {
         effectiveEndDate: null,
         trialEndsAt: null,
         now,
-        billingConfig: {
+        config: {
           name: "test",
-          billingInterval: "onetime",
-          billingIntervalCount: 1,
+          interval: "onetime",
+          intervalCount: 1,
           planType: "onetime",
-          billingAnchor: "dayOfCreation",
+          anchor: "dayOfCreation",
         },
       })
 
       expect(result).not.toBeNull()
       expect(result!.start).toBe(startMs)
       expect(result!.end).toBe(Number.POSITIVE_INFINITY)
-      expect(result!.billableSeconds).toBe(Math.floor((now - startMs) / 1000))
-      expect(result!.prorationFactor).toBe(0)
+      // no proration/billableSeconds returned anymore
     })
 
     it("with trial returns trial window until trial end", () => {
@@ -84,21 +83,19 @@ describe("calculateCycleWindow", () => {
         effectiveEndDate: null,
         trialEndsAt: trialEndMs,
         now,
-        billingConfig: {
+        config: {
           name: "test",
-          billingInterval: "onetime",
-          billingIntervalCount: 1,
+          interval: "onetime",
+          intervalCount: 1,
           planType: "onetime",
-          billingAnchor: "dayOfCreation",
+          anchor: "dayOfCreation",
         },
       })
 
       expect(result).not.toBeNull()
       expect(result!.start).toBe(startMs)
       expect(result!.end).toBe(trialEndMs)
-      // Trial is not billable
-      expect(result!.prorationFactor).toBe(0)
-      expect(result!.billableSeconds).toBe(0)
+      // trial window only; no proration/billableSeconds on cycle window
     })
   })
 
@@ -112,12 +109,12 @@ describe("calculateCycleWindow", () => {
         effectiveEndDate: null,
         trialEndsAt: null,
         now,
-        billingConfig: {
+        config: {
           name: "test",
-          billingInterval: "month",
-          billingIntervalCount: 1,
+          interval: "month",
+          intervalCount: 1,
           planType: "recurring",
-          billingAnchor: 1,
+          anchor: 1,
         },
       })
 
@@ -125,10 +122,7 @@ describe("calculateCycleWindow", () => {
       // Validate window containment and monotonicity instead of exact boundaries
       expect(result!.start).toBeLessThanOrEqual(now)
       expect(result!.end).toBeGreaterThan(now)
-      const duration = result!.end - result!.start
-      const elapsed = now - result!.start
-      expect(result!.billableSeconds).toBe(Math.floor(elapsed / 1000))
-      expect(result!.prorationFactor).toBeCloseTo(elapsed / duration, 6)
+      // no proration/billableSeconds on cycle window
     })
 
     it("anchors to 15th and computes correct cycle when inside window", () => {
@@ -140,22 +134,19 @@ describe("calculateCycleWindow", () => {
         effectiveEndDate: null,
         trialEndsAt: null,
         now,
-        billingConfig: {
+        config: {
           name: "test",
-          billingInterval: "month",
-          billingIntervalCount: 1,
+          interval: "month",
+          intervalCount: 1,
           planType: "recurring",
-          billingAnchor: 15,
+          anchor: 15,
         },
       })
 
       expect(result).not.toBeNull()
       expect(result!.start).toBeLessThanOrEqual(now)
       expect(result!.end).toBeGreaterThan(now)
-      const duration = result!.end - result!.start
-      const elapsed = now - result!.start
-      expect(result!.billableSeconds).toBe(Math.floor(elapsed / 1000))
-      expect(result!.prorationFactor).toBeCloseTo(elapsed / duration, 6)
+      // no proration/billableSeconds on cycle window
     })
 
     it("respects effective end date capping the window end", () => {
@@ -168,12 +159,12 @@ describe("calculateCycleWindow", () => {
         effectiveEndDate: endMs,
         trialEndsAt: null,
         now,
-        billingConfig: {
+        config: {
           name: "test",
-          billingInterval: "month",
-          billingIntervalCount: 1,
+          interval: "month",
+          intervalCount: 1,
           planType: "recurring",
-          billingAnchor: 1,
+          anchor: 1,
         },
       })
 
@@ -181,10 +172,7 @@ describe("calculateCycleWindow", () => {
       expect(result!.start).toBeLessThan(endMs)
       // End is capped by effectiveEndDate
       expect(result!.end).toBe(endMs)
-      const duration = result!.end - result!.start
-      const elapsed = now - result!.start
-      expect(result!.billableSeconds).toBe(Math.floor(elapsed / 1000))
-      expect(result!.prorationFactor).toBeCloseTo(elapsed / duration, 6)
+      // no proration/billableSeconds on cycle window
     })
   })
 })
@@ -192,15 +180,13 @@ describe("calculateCycleWindow", () => {
 describe("edge cases - months, leap years, boundaries", () => {
   const utc = (d: string, t = "00:00:00.000") => new Date(`${d}T${t}Z`).getTime()
 
-  function buildConfig(
-    anchor: number
-  ): Parameters<typeof calculateCycleWindow>[0]["billingConfig"] {
+  function buildConfig(anchor: number): Parameters<typeof calculateCycleWindow>[0]["config"] {
     return {
       name: "test",
-      billingInterval: "month",
-      billingIntervalCount: 1,
+      interval: "month",
+      intervalCount: 1,
       planType: "recurring",
-      billingAnchor: anchor,
+      anchor: anchor,
     }
   }
 
@@ -213,7 +199,7 @@ describe("edge cases - months, leap years, boundaries", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now,
-      billingConfig: buildConfig(29),
+      config: buildConfig(29),
     })
     expect(result).not.toBeNull()
     // First stub: 2024-01-10 -> 2024-01-29
@@ -222,10 +208,6 @@ describe("edge cases - months, leap years, boundaries", () => {
     expect(result!.end).toBe(utc("2024-02-29"))
     expect(result!.start).toBeLessThanOrEqual(now)
     expect(result!.end).toBeGreaterThan(now)
-    const duration = result!.end - result!.start
-    const elapsed = now - result!.start
-    expect(result!.billableSeconds).toBe(Math.floor(elapsed / 1000))
-    expect(result!.prorationFactor).toBeCloseTo(elapsed / duration, 6)
   })
 
   it("handles Feb in non-leap year when anchor=29 (2025)", () => {
@@ -237,7 +219,7 @@ describe("edge cases - months, leap years, boundaries", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now,
-      billingConfig: buildConfig(29),
+      config: buildConfig(29),
     })
     expect(result).not.toBeNull()
     // Cycle should be [2025-01-29, 2025-03-01) because Feb 29 does not exist -> rolled to Mar 1
@@ -246,10 +228,7 @@ describe("edge cases - months, leap years, boundaries", () => {
     // Ensure containment
     expect(result!.start).toBeLessThanOrEqual(now)
     expect(result!.end).toBeGreaterThan(now)
-    const duration = result!.end - result!.start
-    const elapsed = now - result!.start
-    expect(result!.billableSeconds).toBe(Math.floor(elapsed / 1000))
-    expect(result!.prorationFactor).toBeCloseTo(elapsed / duration, 6)
+    // no proration/billableSeconds on cycle window
   })
 
   it("anchor=31 over short months (Jan->Feb->Mar 2024)", () => {
@@ -260,7 +239,7 @@ describe("edge cases - months, leap years, boundaries", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now,
-      billingConfig: buildConfig(31),
+      config: buildConfig(31),
     })
     expect(result).not.toBeNull()
     // Jan has 31 -> first anchor 2024-01-31, next end attempts 2024-02-31 -> rolls to Mar 2 (since Feb has 29 in 2024)
@@ -270,10 +249,7 @@ describe("edge cases - months, leap years, boundaries", () => {
     // Now is within that long cycle
     expect(result!.start).toBeLessThanOrEqual(now)
     expect(result!.end).toBeGreaterThan(now)
-    const duration = result!.end - result!.start
-    const elapsed = now - result!.start
-    expect(result!.billableSeconds).toBe(Math.floor(elapsed / 1000))
-    expect(result!.prorationFactor).toBeCloseTo(elapsed / duration, 6)
+    // no proration/billableSeconds on cycle window
   })
 
   it("anchor=30 across Apr (30) and May (31) 2024", () => {
@@ -284,16 +260,13 @@ describe("edge cases - months, leap years, boundaries", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now,
-      billingConfig: buildConfig(30),
+      config: buildConfig(30),
     })
     expect(result).not.toBeNull()
     // Now is before first anchor -> stub window from effective start to first anchor
     expect(result!.start).toBe(utc("2024-04-01"))
     expect(result!.end).toBe(utc("2024-04-30"))
-    const duration = result!.end - result!.start
-    const elapsed = now - result!.start
-    expect(result!.billableSeconds).toBe(Math.floor(elapsed / 1000))
-    expect(result!.prorationFactor).toBeCloseTo(elapsed / duration, 6)
+    // no proration/billableSeconds on cycle window
   })
 
   it("boundary: now exactly at end uses next cycle (exclusive end)", () => {
@@ -305,7 +278,7 @@ describe("edge cases - months, leap years, boundaries", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now: utc("2024-01-01"),
-      billingConfig: cfg,
+      config: cfg,
     })!
     expect(first.end).toBe(utc("2024-01-15"))
 
@@ -315,13 +288,11 @@ describe("edge cases - months, leap years, boundaries", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now: first.end,
-      billingConfig: cfg,
+      config: cfg,
     })!
     expect(atEnd.start).toBe(first.end)
     expect(atEnd.end).toBe(utc("2024-02-15"))
-    // At start of new window, proration is 0 and billableSeconds is 0
-    expect(atEnd.prorationFactor).toBe(0)
-    expect(atEnd.billableSeconds).toBe(0)
+    // At start of new window
   })
 
   it("stub period: paid starts after trial and before first anchor", () => {
@@ -335,15 +306,12 @@ describe("edge cases - months, leap years, boundaries", () => {
       effectiveEndDate: null,
       trialEndsAt: trialEnd,
       now,
-      billingConfig: cfg,
+      config: cfg,
     })!
     // Paid period starts at trialEnd; first anchor after that is Jan 15
     expect(result.start).toBe(trialEnd)
     expect(result.end).toBe(utc("2024-01-15"))
-    const duration = result.end - result.start
-    const elapsed = now - result.start
-    expect(result.billableSeconds).toBe(Math.floor(elapsed / 1000))
-    expect(result.prorationFactor).toBeCloseTo(elapsed / duration, 6)
+    // no proration/billableSeconds on cycle window
   })
 
   describe("non-monthly intervals boundaries", () => {
@@ -351,10 +319,10 @@ describe("edge cases - months, leap years, boundaries", () => {
       const start = utc("2024-01-01", "00:00:00.000")
       const cfg = {
         name: "test",
-        billingInterval: "day" as const,
-        billingIntervalCount: 1,
+        interval: "day" as const,
+        intervalCount: 1,
         planType: "recurring" as const,
-        billingAnchor: 0,
+        anchor: 0,
       }
       const now = utc("2024-01-02", "00:00:00.000") - 1
       const res = calculateCycleWindow({
@@ -362,35 +330,31 @@ describe("edge cases - months, leap years, boundaries", () => {
         effectiveEndDate: null,
         trialEndsAt: null,
         now,
-        billingConfig: cfg,
+        config: cfg,
       })!
       expect(res.end).toBe(utc("2024-01-02", "00:00:00.000"))
-      const duration = res.end - res.start
-      const elapsed = now - res.start
-      expect(res.billableSeconds).toBe(Math.floor(elapsed / 1000))
-      expect(res.prorationFactor).toBeCloseTo(elapsed / duration, 6)
+      // no proration/billableSeconds on cycle window
       // Move exactly to end -> next cycle
       const res2 = calculateCycleWindow({
         effectiveStartDate: start,
         effectiveEndDate: null,
         trialEndsAt: null,
         now: res.end,
-        billingConfig: cfg,
+        config: cfg,
       })!
       expect(res2.start).toBe(res.end)
       expect(res2.end).toBe(utc("2024-01-03", "00:00:00.000"))
-      expect(res2.prorationFactor).toBe(0)
-      expect(res2.billableSeconds).toBe(0)
+      // start of new window
     })
 
     it("weekly anchor weekday=1 (Mon) boundary at cycle end", () => {
       const start = utc("2024-01-01") // Mon Jan 1, 2024
       const cfg = {
         name: "test",
-        billingInterval: "week" as const,
-        billingIntervalCount: 1,
+        interval: "week" as const,
+        intervalCount: 1,
         planType: "recurring" as const,
-        billingAnchor: 1,
+        anchor: 1,
       }
       // Find a time just before next Monday 00:00:00
       const now = utc("2024-01-07", "23:59:59.000")
@@ -399,24 +363,21 @@ describe("edge cases - months, leap years, boundaries", () => {
         effectiveEndDate: null,
         trialEndsAt: null,
         now,
-        billingConfig: cfg,
+        config: cfg,
       })!
       // Cycle should end at Monday 00:00 -> 2024-01-08
       expect(res.end).toBe(utc("2024-01-08", "00:00:00.000"))
-      const duration = res.end - res.start
-      const elapsed = now - res.start
-      expect(res.billableSeconds).toBe(Math.floor(elapsed / 1000))
-      expect(res.prorationFactor).toBeCloseTo(elapsed / duration, 6)
+      // no proration/billableSeconds on cycle window
     })
 
     it("minute interval with second anchor=30 boundaries", () => {
       const start = utc("2024-01-01", "00:00:00.000")
       const cfg = {
         name: "test",
-        billingInterval: "minute" as const,
-        billingIntervalCount: 1,
+        interval: "minute" as const,
+        intervalCount: 1,
         planType: "recurring" as const,
-        billingAnchor: 30,
+        anchor: 30,
       }
       const now = utc("2024-01-01", "00:00:30.500")
       const res = calculateCycleWindow({
@@ -424,27 +385,23 @@ describe("edge cases - months, leap years, boundaries", () => {
         effectiveEndDate: null,
         trialEndsAt: null,
         now,
-        billingConfig: cfg,
+        config: cfg,
       })!
       // The minute anchored at second 30: [00:00:30, 00:01:30)
       expect(res.start).toBe(utc("2024-01-01", "00:00:30.000"))
       expect(res.end).toBe(utc("2024-01-01", "00:01:30.000"))
-      const duration = res.end - res.start
-      const elapsed = now - res.start
-      expect(res.billableSeconds).toBe(Math.floor(elapsed / 1000))
-      expect(res.prorationFactor).toBeCloseTo(elapsed / duration, 6)
+      // no proration/billableSeconds on cycle window
       // Move to exact end -> next window
       const res2 = calculateCycleWindow({
         effectiveStartDate: start,
         effectiveEndDate: null,
         trialEndsAt: null,
         now: res.end,
-        billingConfig: cfg,
+        config: cfg,
       })!
       expect(res2.start).toBe(res.end)
       expect(res2.end).toBe(utc("2024-01-01", "00:02:30.000"))
-      expect(res2.prorationFactor).toBe(0)
-      expect(res2.billableSeconds).toBe(0)
+      // start of new window
     })
   })
 })
@@ -461,22 +418,19 @@ describe("minute interval with intervalCount > 1", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now,
-      billingConfig: {
+      config: {
         name: "test",
-        billingInterval: "minute",
-        billingIntervalCount: 15,
+        interval: "minute",
+        intervalCount: 15,
         planType: "recurring",
-        billingAnchor: 20,
+        anchor: 20,
       },
     })!
     // Aligned windows: [..., 23:45:20, 00:00:20), [00:00:20, 00:15:20), ...
     expect(res.start).toBe(utc("2023-12-31", "23:45:20.000"))
     expect(res.end).toBe(utc("2024-01-01", "00:00:20.000"))
     // Billable begins at paid start (00:00:10) inside this full window
-    const totalMs = res.end - res.start
-    const elapsedMs = now - start
-    expect(res.billableSeconds).toBe(Math.floor(elapsedMs / 1000))
-    expect(res.prorationFactor).toBeCloseTo(elapsedMs / totalMs, 6)
+    // no proration/billableSeconds on cycle window
   })
 
   it("aligns to grid after boundary and computes correct next window", () => {
@@ -487,20 +441,17 @@ describe("minute interval with intervalCount > 1", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now,
-      billingConfig: {
+      config: {
         name: "test",
-        billingInterval: "minute",
-        billingIntervalCount: 15,
+        interval: "minute",
+        intervalCount: 15,
         planType: "recurring",
-        billingAnchor: 20,
+        anchor: 20,
       },
     })!
     // Now >= first boundary -> window [00:00:20, 00:15:20)
     expect(res.start).toBe(utc("2024-01-01", "00:00:20.000"))
     expect(res.end).toBe(utc("2024-01-01", "00:15:20.000"))
-    const totalMs = res.end - res.start
-    const elapsedMs = now - res.start
-    expect(res.billableSeconds).toBe(Math.floor(elapsedMs / 1000))
-    expect(res.prorationFactor).toBeCloseTo(elapsedMs / totalMs, 6)
+    // no proration/billableSeconds on cycle window
   })
 })

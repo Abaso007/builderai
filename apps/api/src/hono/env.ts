@@ -7,13 +7,13 @@ import type { Cache } from "@unprice/services/cache"
 import type { CustomerService } from "@unprice/services/customers"
 import type { Metrics } from "@unprice/services/metrics"
 import type { SubscriptionService } from "@unprice/services/subscriptions"
-import type { EntitlementService } from "~/entitlement"
 import type { Env } from "~/env"
 import type { ApiProjectService } from "~/project"
+import type { UsageLimiter } from "~/usagelimiter"
 
 export type ServiceContext = {
   version: string
-  entitlement: EntitlementService
+  usagelimiter: UsageLimiter
   analytics: Analytics
   cache: Cache
   logger: Logger

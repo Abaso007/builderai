@@ -23,7 +23,6 @@ import { BannerPublishedVersion } from "../[planVersionId]/_components/banner"
 import {
   CurrencyFormField,
   DescriptionFormField,
-  PaymentMethodRequiredFormField,
   PaymentProviderFormField,
   TitleFormField,
 } from "./version-fields-form"
@@ -155,10 +154,6 @@ export function PlanVersionForm({
         )}
 
         {isPublished && <BannerPublishedVersion />}
-
-        {!defaultValues.isDefault && (
-          <PaymentMethodRequiredFormField form={form} isDisabled={isPublished} />
-        )}
 
         <div className="flex flex-col gap-4 md:grid md:grid-cols-2 md:space-y-4">
           <TitleFormField form={form} isDisabled={isPublished} />

@@ -1,0 +1,1901 @@
+import type { Analytics } from "@unprice/analytics"
+import type { Database } from "@unprice/db"
+import {
+  AGGREGATION_CONFIG,
+  add,
+  currencies,
+  dinero,
+  formatMoney,
+  toDecimal,
+} from "@unprice/db/utils"
+import type { Dinero } from "@unprice/db/utils"
+import {
+  type Currency,
+  type CurrentUsage,
+  type Entitlement,
+  type EntitlementState,
+  type MeterState,
+  type MinimalEntitlement,
+  type ReportUsageRequest,
+  type ReportUsageResult,
+  type VerificationResult,
+  type VerifyRequest,
+  calculateCycleWindow,
+} from "@unprice/db/validators"
+import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
+import type { Logger } from "@unprice/logging"
+import { format, subMinutes } from "date-fns"
+import { toZonedTime } from "date-fns-tz"
+import { BillingService } from "../billing"
+import type { Cache } from "../cache/service"
+import type { Metrics } from "../metrics"
+import { retry } from "../utils/retry"
+import { UnPriceEntitlementError, type UnPriceEntitlementStorageError } from "./errors"
+import { GrantsManager } from "./grants"
+import type { UnPriceEntitlementStorage } from "./storage-provider"
+
+import { ulid } from "ulid"
+import { UsageMeter } from "./usage-meter"
+
+/**
+ * Simplified Entitlement Service
+ *
+ * Strategy:
+ * - Keep usage in cache (DO/Redis) for low latency
+ * - Smart revalidation: lightweight version check, only reload if changed
+ * - All logic encapsulated in service (minimize round-trips)
+ * - Buffering support for batch analytics
+ */
+export class EntitlementService {
+  private readonly grantsManager: GrantsManager
+  private readonly revalidateInterval: number
+  private readonly db: Database
+  private readonly storage: UnPriceEntitlementStorage
+  private readonly logger: Logger
+  private readonly analytics: Analytics
+  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+  private readonly waitUntil: (promise: Promise<any>) => void
+  private readonly cache: Cache
+  private readonly metrics: Metrics
+
+  constructor(opts: {
+    db: Database
+    storage: UnPriceEntitlementStorage
+    logger: Logger
+    analytics: Analytics
+    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+    waitUntil: (promise: Promise<any>) => void
+    cache: Cache
+    metrics: Metrics
+    config?: {
+      revalidateInterval?: number // How often to check for version changes
+    }
+  }) {
+    this.revalidateInterval = opts.config?.revalidateInterval ?? 300000 // 5 minutes default
+
+    this.grantsManager = new GrantsManager({
+      db: opts.db,
+      logger: opts.logger,
+    })
+    this.db = opts.db
+    this.storage = opts.storage
+    this.logger = opts.logger
+    this.analytics = opts.analytics
+    this.waitUntil = opts.waitUntil
+    this.cache = opts.cache
+    this.metrics = opts.metrics
+  }
+
+  /**
+   * Check if usage is allowed (low latency)
+   * Handles cache miss and revalidation internally (single network call)
+   */
+  async verify(params: VerifyRequest): Promise<VerificationResult> {
+    // 1. Get the entitlement state with revalidation
+    const { err: stateErr, val: state } = await this.getStateWithRevalidation({
+      customerId: params.customerId,
+      projectId: params.projectId,
+      featureSlug: params.featureSlug,
+      now: params.timestamp,
+      // if fromCache is false, we load from cache with swr and if not found, we load from DB
+      skipCache: !params.fromCache,
+    })
+
+    if (stateErr) {
+      return {
+        allowed: false,
+        message: stateErr.message,
+        deniedReason: "ENTITLEMENT_ERROR",
+      }
+    }
+
+    if (!state) {
+      // if no state is found, we still log the verification
+      this.waitUntil(
+        this.storage.insertVerification({
+          customerId: params.customerId,
+          projectId: params.projectId,
+          featureSlug: params.featureSlug,
+          timestamp: params.timestamp,
+          allowed: 0,
+          deniedReason: "ENTITLEMENT_NOT_FOUND",
+          metadata: params.metadata,
+          latency: performance.now() - params.performanceStart,
+          requestId: params.requestId,
+          createdAt: Date.now(),
+        })
+      )
+
+      return {
+        allowed: false,
+        message: "No entitlement found for the given customer, project and feature",
+        deniedReason: "ENTITLEMENT_NOT_FOUND",
+        usage: 0,
+        limit: undefined,
+      }
+    }
+
+    // 2. Validate entitlement state
+    const { err, val: validatedState } = this.validateEntitlementState({
+      state: state,
+      now: params.timestamp,
+    })
+
+    if (err) {
+      return {
+        allowed: false,
+        message: err.message,
+        deniedReason: "ENTITLEMENT_ERROR",
+        latency: performance.now() - params.performanceStart,
+      }
+    }
+
+    // 3. Get the meter for the feature
+    const meter = validatedState.meter
+
+    // 4. Verify the usage using the meter
+    const usageMeter = new UsageMeter(
+      {
+        capacity: validatedState.limit ?? Number.POSITIVE_INFINITY,
+        aggregationMethod: state.aggregationMethod,
+        featureType: state.featureType,
+        resetConfig: state.resetConfig,
+        startDate: state.effectiveAt,
+        threshold: 0.9, // when close to the limit, send a notification
+        endDate: state.expiresAt,
+        allowOverage: validatedState.allowOverage,
+      },
+      meter // Restore UsageMeter from persisted state
+    )
+
+    // 5. Verify the usage using the meter
+    const verifyResult = usageMeter.verify(params.timestamp)
+    const latency = performance.now() - params.performanceStart
+
+    // 6. Persist the verification record
+    this.waitUntil(
+      this.storage.insertVerification({
+        customerId: params.customerId,
+        projectId: params.projectId,
+        featureSlug: params.featureSlug,
+        timestamp: params.timestamp,
+        allowed: verifyResult.allowed ? 1 : 0,
+        deniedReason: verifyResult.deniedReason ?? undefined,
+        metadata: params.metadata,
+        latency,
+        requestId: params.requestId,
+        createdAt: Date.now(),
+      })
+    )
+
+    // 7. get the meter to persist
+    const meterResult = usageMeter.toPersist()
+
+    // 8. update the entitlement state in the storage in background
+    this.waitUntil(this.storage.set({ state: { ...validatedState, meter: meterResult } }))
+
+    // 9. return the verification result
+    return {
+      allowed: verifyResult.allowed,
+      message: verifyResult.allowed ? "Allowed" : (verifyResult.message ?? "Limit exceeded"),
+      deniedReason: verifyResult.allowed
+        ? undefined
+        : (verifyResult.deniedReason ?? "LIMIT_EXCEEDED"),
+      usage: Number(meterResult.usage),
+      limit: validatedState.limit ?? undefined,
+      remaining: verifyResult.remaining,
+      latency,
+    }
+  }
+
+  /**
+   * Report usage with priority-based consumption
+   * Handles revalidation internally (single network call)
+   */
+  async reportUsage(params: ReportUsageRequest): Promise<ReportUsageResult> {
+    // 1. get the entitlement state with revalidation
+    const { err: stateErr, val: state } = await this.getStateWithRevalidation({
+      customerId: params.customerId,
+      projectId: params.projectId,
+      featureSlug: params.featureSlug,
+      now: params.timestamp,
+    })
+
+    if (stateErr) {
+      return {
+        allowed: false,
+        message: stateErr.message,
+        deniedReason: "ENTITLEMENT_ERROR",
+        usage: 0,
+      }
+    }
+
+    if (!state) {
+      return {
+        allowed: false,
+        message: "No entitlement found for the given customer, project and feature",
+        deniedReason: "ENTITLEMENT_NOT_FOUND",
+        usage: 0,
+      }
+    }
+
+    // 2. validate entitlement state
+    const { err, val: validatedState } = this.validateEntitlementState({
+      state: state,
+      now: params.timestamp,
+    })
+
+    if (err) {
+      return {
+        allowed: false,
+        message: err.message,
+        deniedReason: "ENTITLEMENT_ERROR",
+        usage: 0,
+      }
+    }
+
+    // 3. get the meter for the feature
+    const meter = validatedState.meter
+
+    // 4. create a new usage meter
+    const usageMeter = new UsageMeter(
+      {
+        capacity: validatedState.limit ?? Number.POSITIVE_INFINITY,
+        aggregationMethod: state.aggregationMethod,
+        featureType: state.featureType,
+        resetConfig: state.resetConfig,
+        startDate: state.effectiveAt,
+        threshold: 0.9, // when close to the limit, send a notification
+        endDate: state.expiresAt,
+        allowOverage: validatedState.allowOverage,
+      },
+      meter
+    )
+
+    // 5. Check idempotence key before consuming to prevent double counting
+    const { val: keyExists, err: keyCheckErr } = await this.storage.hasIdempotenceKey(
+      params.idempotenceKey
+    )
+
+    if (keyCheckErr) {
+      this.logger.error("Failed to check idempotence key", {
+        error: keyCheckErr.message,
+        idempotenceKey: params.idempotenceKey,
+      })
+    }
+
+    if (keyExists) {
+      // Already processed, return current usage without consuming
+      const meterResult = usageMeter.toPersist()
+      return {
+        allowed: true,
+        message: "Usage already recorded (idempotent)",
+        deniedReason: undefined,
+        usage: Number(meterResult.usage),
+        limit: validatedState.limit ?? undefined,
+        notifiedOverLimit: false,
+      }
+    }
+
+    const consumeResult = usageMeter.consume(params.usage, params.timestamp)
+    const meterResult = usageMeter.toPersist()
+
+    // 6. update the entitlement state in the storage
+    await this.storage.set({
+      state: {
+        ...state,
+        meter: meterResult,
+      },
+    })
+
+    if (consumeResult.allowed) {
+      const usageRecord = {
+        id: ulid(),
+        customerId: params.customerId,
+        projectId: params.projectId,
+        featureSlug: params.featureSlug,
+        usage: params.usage,
+        timestamp: params.timestamp,
+        idempotenceKey: params.idempotenceKey,
+        requestId: params.requestId,
+        createdAt: Date.now(),
+        metadata: params.metadata,
+        deleted: 0,
+      }
+
+      // insert the usage record in the storage
+      this.waitUntil(this.storage.insertUsageRecord(usageRecord))
+    }
+
+    return {
+      allowed: consumeResult.allowed,
+      remaining: consumeResult.remaining,
+      message: consumeResult.message,
+      deniedReason: consumeResult.deniedReason,
+      usage: Number(meterResult.usage),
+      limit: validatedState.limit ?? undefined,
+      notifiedOverLimit: consumeResult.overThreshold,
+    }
+  }
+
+  public async flush(): Promise<
+    Result<void, UnPriceEntitlementError | UnPriceEntitlementStorageError>
+  > {
+    // flush the usage records
+    await this.storage.flush()
+    return Ok(undefined)
+  }
+
+  /* we cannot trust in the storage since it could be not initilize yet.
+   */
+  /**
+   * Get active entitlements for a customer
+   * @param customerId - Customer id
+   * @param projectId - Project id
+   * @param now - Current time
+   * @param opts - Options
+   * @returns Active entitlements
+   */
+  public async getActiveEntitlements({
+    customerId,
+    projectId,
+    opts,
+  }: {
+    customerId: string
+    projectId: string
+    opts?: {
+      skipCache?: boolean // skip cache to force revalidation
+      now?: number
+    }
+  }): Promise<Result<MinimalEntitlement[], FetchError | UnPriceEntitlementError>> {
+    const cacheKey = `${projectId}:${customerId}`
+
+    if (opts?.skipCache) {
+      this.logger.debug("skipping cache for getActiveEntitlements and loading from DB", {
+        customerId,
+        projectId,
+      })
+    }
+
+    // first try to get the entitlement from cache, if not found try to get it from DO,
+    const { val, err } = opts?.skipCache
+      ? await wrapResult(
+          this.getActiveEntitlementsFromDB({
+            customerId,
+            projectId,
+          }),
+          (err) =>
+            new FetchError({
+              message: `unable to query entitlements from db in getActiveEntitlementsFromDB - ${err.message}`,
+              retry: false,
+              context: {
+                error: err.message,
+                url: "",
+                customerId: customerId,
+                projectId: projectId,
+                method: "getActiveEntitlementsFromDB",
+              },
+            })
+        )
+      : await retry(
+          3,
+          async () =>
+            this.cache.customerEntitlements.swr(cacheKey, () =>
+              this.getActiveEntitlementsFromDB({
+                customerId,
+                projectId,
+              })
+            ),
+          (attempt, err) => {
+            this.logger.warn("Failed to fetch entitlements data from cache, retrying...", {
+              customerId: customerId,
+              projectId: projectId,
+              method: "getActiveEntitlementsFromDB",
+              attempt,
+              error: err.message,
+            })
+          }
+        )
+
+    if (err) {
+      return Err(
+        new FetchError({
+          message: err.message,
+          retry: true,
+          cause: err,
+        })
+      )
+    }
+
+    let entitlements = val
+
+    // 2. LAZY COMPUTATION: If missing or forcing revalidation, compute from grants
+    if (entitlements?.length === 0) {
+      this.logger.info("Lazy computing entitlements", {
+        customerId,
+        projectId,
+      })
+
+      // TODO: add negative caching for this operation when not found
+      const computeResult = await this.grantsManager.computeGrantsForCustomer({
+        customerId,
+        projectId,
+        now: opts?.now ?? Date.now(),
+      })
+
+      if (computeResult.err) {
+        return Err(new UnPriceEntitlementError({ message: computeResult.err.message }))
+      }
+
+      entitlements = computeResult.val ?? []
+
+      // Update cache with the freshly computed entitlement
+      this.waitUntil(this.cache.customerEntitlements.set(cacheKey, entitlements))
+    }
+
+    if (!entitlements || entitlements.length === 0) {
+      return Ok([])
+    }
+
+    return Ok(entitlements)
+  }
+
+  /**
+   * RECONCILE: We need to reconcile the usage in storage with the source of truth in analytics.
+   * This is extremly important to avoid double counting usage and other race conditions.
+   * To do that we use a cursor to mark the position in the analytics and we compare the usage in storage with the usage in analytics.
+   * in case of drift we add to the global counter to avoid rewrites, the global counter is a moving target as we add usage as per request.
+   *
+   * Timeline:
+   *
+   * | ◄──────────────── DO's globalCounter includes ALL of this ─────────────────────►  │
+   * |                                                                                   │
+   * ├─ effectiveAt (open ended) ────────────────────────────────────────────────────── now
+   * |                                                                                   │
+   * ├───────────| start new cycle window ──────────── end cycle window ─|───────────── now
+   * |                                                                                   │
+   * [ ... Verified in TB ... ]   [ ... In Flight / Settling ... ]   [ ... In Buffer ... ]
+   * |                                                                                   │
+   * |────────Analytics ──────|── Analytics not ready yet  ──────────|────── Storage ────|
+   *             ▲            ▲
+   *             │            │
+   *    lastReconciledId   beforeRecordId (watermark)
+   *             | -tb query- │
+   */
+  private async reconcileFeatureUsage(params: { state: EntitlementState; now: number }) {
+    const { state, now } = params
+    // 5 minutes ago is more than enough for tb to settle the usage
+    const watermark = subMinutes(new Date(now), 5).getTime()
+
+    // Immutable snapshot for avoiding race conditions
+    const snapshot: Readonly<EntitlementState> = { ...state }
+    const config = AGGREGATION_CONFIG[snapshot.aggregationMethod]
+    const meter = snapshot.meter
+
+    // if the feature is a flat feature we don't need to reconcile
+    if (snapshot.featureType === "flat") {
+      this.logger.info("skipping reconcile for flat feature", {
+        featureSlug: snapshot.featureSlug,
+        customerId: snapshot.customerId,
+        projectId: snapshot.projectId,
+      })
+      return // fire-and-forget
+    }
+
+    // drift only makes sense for sum behavior
+    if (config.behavior !== "sum") {
+      this.logger.info("skipping reconcile for non-sum behavior", {
+        behavior: config.behavior,
+        featureSlug: snapshot.featureSlug,
+        customerId: snapshot.customerId,
+        projectId: snapshot.projectId,
+        aggregationMethod: snapshot.aggregationMethod,
+        featureType: snapshot.featureType,
+      })
+      return // fire-and-forget
+    }
+
+    // calculate the cycle window for the watermark
+    // for non reset config we use the effective at
+    const watermarkCycleWindow = snapshot.resetConfig
+      ? calculateCycleWindow({
+          effectiveStartDate: snapshot.effectiveAt,
+          effectiveEndDate: snapshot.expiresAt,
+          now: watermark,
+          config: {
+            name: snapshot.resetConfig.name,
+            interval: snapshot.resetConfig.resetInterval,
+            intervalCount: snapshot.resetConfig.resetIntervalCount,
+            anchor: snapshot.resetConfig.resetAnchor,
+            planType: snapshot.resetConfig.planType,
+          },
+          trialEndsAt: null,
+        })
+      : null
+
+    // avoid reconciliation if the watermark cycle has changed against the current cycle window
+    // this avoid race condition between reset usage in cycles
+    const currentCycleWindow = snapshot.resetConfig
+      ? calculateCycleWindow({
+          effectiveStartDate: snapshot.effectiveAt,
+          effectiveEndDate: snapshot.expiresAt,
+          now: Date.now(),
+          config: {
+            name: snapshot.resetConfig.name,
+            interval: snapshot.resetConfig.resetInterval,
+            intervalCount: snapshot.resetConfig.resetIntervalCount,
+            anchor: snapshot.resetConfig.resetAnchor,
+            planType: snapshot.resetConfig.planType,
+          },
+          trialEndsAt: null,
+        })
+      : null
+
+    // avoid reconcile if there was a change in the cycle window
+    if (
+      watermarkCycleWindow &&
+      currentCycleWindow &&
+      watermarkCycleWindow.start !== currentCycleWindow.start
+    ) {
+      this.logger.info("skipping reconcile, the watermark cycle window has changed", {
+        watermarkCycleWindow: watermarkCycleWindow.start,
+        currentCycleWindow: currentCycleWindow.start,
+        featureSlug: snapshot.featureSlug,
+        customerId: snapshot.customerId,
+        projectId: snapshot.projectId,
+        aggregationMethod: snapshot.aggregationMethod,
+        featureType: snapshot.featureType,
+      })
+      return // fire-and-forget
+    }
+
+    // use the watermark cycle window start if it's available, otherwise use the effective at
+    const effectiveAt = watermarkCycleWindow?.start ?? snapshot.effectiveAt
+    const lastReconciledId = meter.lastReconciledId
+    const beforeRecordId = ulid(watermark) // ulid is more reliable than timestamp
+
+    // Only reconcile if we have at least 5 minutes of settled time
+    // in the current cycle window
+    if (lastReconciledId >= beforeRecordId) {
+      this.logger.info(
+        "skipping reconcile, reconciliation already happened in the past 5 minutes",
+        {
+          lastReconciledId,
+          beforeRecordId,
+          featureSlug: snapshot.featureSlug,
+          customerId: snapshot.customerId,
+          projectId: snapshot.projectId,
+        }
+      )
+      return // fire-and-forget
+    }
+
+    // if the cycle hasn't been started at least in the past 5 minutes we can't reconcile
+    if (watermark < effectiveAt) {
+      this.logger.info(
+        "skipping reconcile, not enough time has passed since the last reconciliation",
+        {
+          watermark,
+          effectiveAt,
+          featureSlug: snapshot.featureSlug,
+          customerId: snapshot.customerId,
+          projectId: snapshot.projectId,
+        }
+      )
+      return // fire-and-forget
+    }
+
+    // if the last reconciled id is empty we can't reconcile.
+    // this means something went wrong in the initialization of the meter or the entiltment was used for the first time.
+    if (lastReconciledId === "") {
+      this.logger.warn("skipping reconcile, the last reconciled id is empty", {
+        lastReconciledId,
+        featureSlug: snapshot.featureSlug,
+        customerId: snapshot.customerId,
+        projectId: snapshot.projectId,
+      })
+      return // fire-and-forget
+    }
+
+    // get the usage from analytics and current usage in storage at the same time
+    // this give us the exact usage at the watermark and save it in the entitlement state for the next reconciliation
+    const [analyticsResult, entitlementResult] = await Promise.all([
+      this.analytics.getFeaturesUsageCursor({
+        customerId: snapshot.customerId,
+        projectId: snapshot.projectId,
+        feature: {
+          featureSlug: snapshot.featureSlug,
+          aggregationMethod: snapshot.aggregationMethod,
+          featureType: snapshot.featureType,
+        },
+        afterRecordId: lastReconciledId,
+        beforeRecordId: beforeRecordId,
+        startAt: effectiveAt,
+      }),
+      this.storage.get({
+        customerId: snapshot.customerId,
+        projectId: snapshot.projectId,
+        featureSlug: snapshot.featureSlug,
+      }),
+    ])
+
+    if (entitlementResult.err) {
+      this.logger.error("Failed to get entitlement state", {
+        error: entitlementResult.err.message,
+      })
+      return // fire-and-forget
+    }
+
+    if (analyticsResult.err) {
+      this.logger.error("Analytics failed", {
+        error: analyticsResult.err?.message ?? String(analyticsResult.err),
+      })
+      return // fire-and-forget
+    }
+
+    const entitlementState = entitlementResult.val
+
+    if (!entitlementState) {
+      this.logger.error("Failed to get entitlement state", {
+        error: "Entitlement state not found",
+      })
+      return // fire-and-forget
+    }
+
+    // DO cursor usage and anchor
+    const snapshotCurrentUsage = Number(meter.usage ?? 0) // DO's global counter at this point in time
+    const snapshotLastReconciledUsage = Number(meter.snapshotUsage ?? 0) // DO's global counter at last reconciliation
+
+    // analytics usage and last record id
+    const analyticsUsage = Number(analyticsResult.val.usage ?? 0) // Total from analytics
+    const analyticsLastRecordId = analyticsResult.val.lastRecordId ?? beforeRecordId
+
+    // EPSILON is the tolerance for the drift
+    const EPSILON = 0.001
+    // MAX_DRIFT is the maximum drift allowed
+    const MAX_DRIFT = 1000
+
+    // Utility to keep counters consistently stringified
+    const toStore = (value: number | string) => value.toString()
+
+    // drift only makes sense for sum behavior
+    if (config.behavior === "sum") {
+      // Compare analytics usage with DO's global counter at last reconciliation
+      const drift = analyticsUsage - snapshotLastReconciledUsage
+
+      if (Math.abs(drift) > MAX_DRIFT) {
+        this.logger.error("Drift too large for sum", {
+          drift,
+          snapshotLastReconciledUsage,
+          analyticsUsage,
+          featureSlug: snapshot.featureSlug,
+          customerId: snapshot.customerId,
+          projectId: snapshot.projectId,
+          aggregationMethod: snapshot.aggregationMethod,
+          featureType: snapshot.featureType,
+        })
+        return
+      }
+
+      // only apply drift if it's greater than the tolerance
+      if (Math.abs(drift) > EPSILON) {
+        meter.usage = toStore(snapshotCurrentUsage + drift)
+      }
+
+      // update the snapshot usage and last reconciled id for the next reconciliation
+      meter.usage = toStore(snapshotCurrentUsage)
+      meter.lastReconciledId = analyticsLastRecordId
+    }
+
+    // Persist with updated reconciliation watermark, cursor position, and snapshot
+    await this.storage.set({
+      state: {
+        ...entitlementState,
+        meter: meter,
+      },
+    })
+  }
+
+  private async initializeUsageMeter(params: {
+    entitlement: Entitlement
+    watermark: number
+    forceRefresh?: boolean
+  }): Promise<Result<MeterState, FetchError | UnPriceEntitlementError>> {
+    const { entitlement, watermark, forceRefresh } = params
+
+    // this should happen as the initial state is stored in the storage
+    // so if there is a storage definition we use that on initialization
+    const { err: entitlementStateErr, val: entitlementState } = await this.storage.get({
+      customerId: entitlement.customerId,
+      projectId: entitlement.projectId,
+      featureSlug: entitlement.featureSlug,
+    })
+
+    if (entitlementStateErr) {
+      return Err(new UnPriceEntitlementError({ message: entitlementStateErr.message }))
+    }
+
+    // if the entitlement is already initialized and we don't want to force refresh, return it
+    if (!forceRefresh && entitlementState?.meter) {
+      return Ok(entitlementState.meter)
+    }
+
+    // if the entitlement is not initialized, initialize it from analytics
+    const watermarkCycleWindow = entitlement.resetConfig
+      ? calculateCycleWindow({
+          effectiveStartDate: entitlement.effectiveAt,
+          effectiveEndDate: entitlement.expiresAt,
+          now: watermark,
+          config: {
+            name: entitlement.resetConfig.name,
+            interval: entitlement.resetConfig.resetInterval,
+            intervalCount: entitlement.resetConfig.resetIntervalCount,
+            anchor: entitlement.resetConfig.resetAnchor,
+            planType: entitlement.resetConfig.planType,
+          },
+          trialEndsAt: null,
+        })
+      : null
+
+    // ulid is more reliable than timestamp because at high throughputs it can be not unique
+    const beforeRecordId = ulid(watermark)
+    // after record Id on initilization should be the begining of the cycle
+    const afterRecordId = watermarkCycleWindow
+      ? ulid(watermarkCycleWindow.start)
+      : ulid(entitlement.effectiveAt)
+
+    // analytics query will take care of calculating the usage and the cycle will be
+    // aligned to the current cycle window
+    const { err: analyticsErr, val: analyticsResult } = await this.analytics.getFeaturesUsageCursor(
+      {
+        customerId: entitlement.customerId,
+        projectId: entitlement.projectId,
+        feature: {
+          featureSlug: entitlement.featureSlug,
+          aggregationMethod: entitlement.aggregationMethod,
+          featureType: entitlement.featureType,
+        },
+        afterRecordId: afterRecordId, // from the start of the cycle
+        beforeRecordId: beforeRecordId, // Up to watermark (settled records)
+        // if the entitlement has reset config we use the start of the current cycle window
+        // otherwise we use the effective at
+        startAt: watermarkCycleWindow?.start ?? entitlement.effectiveAt,
+      }
+    )
+
+    if (analyticsErr) {
+      // No analytics data yet or error, return error
+      return Err(
+        new UnPriceEntitlementError({
+          message: "Failed to get analytics data for entitlement",
+          context: {
+            error: analyticsErr.message,
+          },
+        })
+      )
+    }
+
+    const usage = analyticsResult.usage ?? 0 // Total from effectiveAt to watermark
+    const lastRecordId = analyticsResult.lastRecordId ?? beforeRecordId
+
+    // initialize entitlement state
+    return Ok({
+      usage: usage.toString(),
+      snapshotUsage: usage.toString(),
+      lastReconciledId: lastRecordId,
+      lastUpdated: Date.now(),
+      lastCycleStart: watermarkCycleWindow?.start ?? entitlement.effectiveAt,
+    })
+  }
+
+  /**
+   * Get state with smart revalidation
+   *
+   * Strategy:
+   * 1. Try cache first
+   * 2. If cache miss, load from DB
+   * 3. If cached but nextRevalidateAt passed:
+   *    a. Do lightweight version check (just query version)
+   *    b. If version differs, reload full entitlement
+   *    c. Otherwise, just update nextRevalidateAt
+   *
+   * This minimizes DB queries while staying in sync
+   */
+  private async getStateWithRevalidation(params: {
+    customerId: string
+    projectId: string
+    featureSlug: string
+    now: number
+    skipCache?: boolean
+  }): Promise<
+    Result<EntitlementState | null, UnPriceEntitlementError | UnPriceEntitlementStorageError>
+  > {
+    // get the entitlement from the storage
+    // this is tier storage to get the entitlement from memory and if missed from kv storage
+    const { err: storageErr, val: cached } = await this.storage.get(params)
+
+    if (storageErr) {
+      return Err(new UnPriceEntitlementError({ message: storageErr.message }))
+    }
+
+    // cache miss - load from cache
+    if (!cached) {
+      this.logger.info("Cache miss, loading from DB", params)
+
+      // get the entitlement from cache
+      const { val, err } = await this.getActiveEntitlement({
+        ...params,
+        opts: {
+          skipCache: false, // load from cache first
+          now: params.now,
+        },
+      })
+
+      if (err) {
+        return Err(
+          new UnPriceEntitlementError({
+            message: `unable to get entitlement from cache - ${err.message}`,
+          })
+        )
+      }
+
+      if (!val) {
+        // TODO: check renew date to see if the subscription is already renewed
+        return Ok(null)
+      }
+
+      // set storage
+      await this.storage.set({ state: val })
+
+      return Ok(val)
+    }
+
+    // if already experied we need to reload the entitlement - expensive operation
+    // this don't happen often, entitlement are open ended most of the time
+    if (cached.expiresAt && params.now >= cached.expiresAt) {
+      this.logger.info("Current cycle ended, recomputing grants", params)
+
+      try {
+        // at expiration we need to recompute the grants because the end date has been reached
+        const result = await this.grantsManager.computeGrantsForCustomer({
+          customerId: params.customerId,
+          projectId: params.projectId,
+          now: params.now,
+          featureSlug: params.featureSlug,
+        })
+
+        if (result.err) {
+          throw new UnPriceEntitlementError({ message: result.err.message })
+        }
+
+        // get entitlements from the result
+        const entitlement = result.val.find((e) => e.featureSlug === params.featureSlug)
+
+        if (!entitlement) {
+          // remove the entitlement from storage
+          await this.storage.delete({
+            customerId: params.customerId,
+            projectId: params.projectId,
+            featureSlug: params.featureSlug,
+          })
+
+          return Ok(null)
+        }
+
+        // trust the analytics data and sync the entitlement usage
+        const meterState = await this.initializeUsageMeter({
+          entitlement: entitlement,
+          watermark: params.now,
+          forceRefresh: true, // upon entitlement expiration we force refresh the usage meter
+        })
+
+        if (meterState.err) {
+          throw new UnPriceEntitlementError({ message: meterState.err.message })
+        }
+
+        const entitlementState: EntitlementState = {
+          ...entitlement,
+          meter: meterState.val,
+        }
+
+        // set storage
+        await this.storage.set({ state: entitlementState })
+
+        return Ok(entitlementState)
+      } catch (error) {
+        const err = error as UnPriceEntitlementError
+        this.logger.error(err.message, {
+          ...params,
+        })
+
+        return Err(new UnPriceEntitlementError({ message: err.message }))
+      }
+    }
+
+    // Cache hit - no cycle boundary crossed, check if we need to revalidate
+    if (params.now >= cached.nextRevalidateAt || !cached.meter) {
+      this.logger.info("Revalidation time, checking version", params)
+
+      let entitlementState: EntitlementState | undefined = undefined
+
+      try {
+        // get the entitlement from the cache
+        const { val: entitlement, err } = await this.getActiveEntitlement({
+          ...params,
+          opts: {
+            skipCache: params.skipCache,
+            now: params.now,
+          },
+        })
+
+        if (err) {
+          return Err(
+            new UnPriceEntitlementError({
+              message: `unable to get entitlement from cache - ${err.message}`,
+            })
+          )
+        }
+
+        // no entitlement found, entitlement deleted from storage
+        if (!entitlement) {
+          // remove the entitlement from storage
+          await this.storage.delete({
+            customerId: params.customerId,
+            projectId: params.projectId,
+            featureSlug: params.featureSlug,
+          })
+
+          return Ok(null)
+        }
+
+        // if found let's check if the version mismatch or snapshot updated - reload
+        // entitlement was recomputed with changes in grants
+        if (entitlement.version !== cached.version) {
+          this.logger.info("Version mismatch detected, reloading from DB", {
+            ...params,
+            cachedVersion: cached.version,
+            dbVersion: entitlement.version,
+          })
+
+          // reload the entitlement from DB
+          const { val: entitlementFromDB, err } = await this.getActiveEntitlement({
+            ...params,
+            opts: {
+              skipCache: true, // skip cache to force revalidation from DB
+            },
+          })
+
+          if (err) {
+            return Err(
+              new UnPriceEntitlementError({
+                message: `unable to reload entitlement from DB - ${err.message}`,
+              })
+            )
+          }
+
+          if (!entitlementFromDB) {
+            // remove the entitlement from storage
+            await this.storage.delete({
+              customerId: params.customerId,
+              projectId: params.projectId,
+              featureSlug: params.featureSlug,
+            })
+
+            return Ok(null)
+          }
+
+          // update revalidation time
+          entitlementFromDB.nextRevalidateAt = params.now + this.revalidateInterval
+
+          // set storage -> this will have the latest usage
+          await this.storage.set({ state: entitlementFromDB })
+
+          // fire a reconcile feature usage in background
+          this.waitUntil(this.reconcileFeatureUsage({ state: entitlementFromDB, now: params.now }))
+
+          return Ok(entitlementFromDB)
+        }
+
+        // update the entitlement state but preserve the current meter if version matches
+        entitlementState = {
+          ...entitlement,
+          meter: cached.meter ?? entitlement.meter,
+        }
+      } catch (error) {
+        const err = error as UnPriceEntitlementError
+        this.logger.error(err.message, {
+          ...params,
+        })
+
+        return Err(new UnPriceEntitlementError({ message: err.message }))
+      }
+
+      // Version matches - just update revalidation time and return the entitlement
+      if (entitlementState) {
+        entitlementState.nextRevalidateAt = params.now + this.revalidateInterval
+        // set the entitlement to the storage
+        await this.storage.set({ state: entitlementState })
+
+        // Update cache and fire a reconcile feature usage in background
+        this.waitUntil(this.reconcileFeatureUsage({ state: entitlementState, now: params.now }))
+
+        return Ok(entitlementState)
+      }
+    }
+
+    return Ok(cached)
+  }
+
+  public async resetEntitlements(params: {
+    customerId: string
+    projectId: string
+  }): Promise<Result<void, UnPriceEntitlementError | UnPriceEntitlementStorageError>> {
+    const customerId = params.customerId
+    const projectId = params.projectId
+    const cacheKey = `${projectId}:${customerId}`
+
+    // reset individual keys
+    const { val: active } = await this.getActiveEntitlements({
+      customerId,
+      projectId,
+    })
+
+    // 2. Clear all individual feature caches
+    if (active && active.length > 0) {
+      await Promise.all(
+        active.map((e) =>
+          this.cache.customerEntitlement.remove(
+            this.storage.makeKey({
+              customerId,
+              projectId,
+              featureSlug: e.featureSlug,
+            })
+          )
+        )
+      )
+    }
+
+    // reset the cache
+    await this.cache.customerEntitlements.remove(cacheKey)
+
+    // reset the storage provider
+    return await this.storage.reset()
+  }
+
+  /**
+   * Load full entitlement from DB
+   * @param customerId - Customer id
+   * @param projectId - Project id
+   * @param featureSlug - Feature slug
+   * @param now - Current time
+   * @returns Entitlement state
+   */
+  private async getActiveEntitlementFromDB({
+    customerId,
+    projectId,
+    featureSlug,
+  }: {
+    customerId: string
+    projectId: string
+    featureSlug: string
+  }): Promise<Entitlement | null> {
+    const entitlement = await this.db.query.entitlements.findFirst({
+      where: (e, { and, eq }) =>
+        and(
+          eq(e.customerId, customerId),
+          eq(e.projectId, projectId),
+          eq(e.featureSlug, featureSlug)
+        ),
+    })
+
+    if (!entitlement) return null
+
+    return entitlement
+  }
+
+  /**
+   * Load full entitlement from DB
+   * @param customerId - Customer id
+   * @param projectId - Project id
+   * @param featureSlug - Feature slug
+   * @param now - Current time
+   * @returns Entitlement state
+   */
+  private async getActiveEntitlementsFromDB({
+    customerId,
+    projectId,
+  }: {
+    customerId: string
+    projectId: string
+  }): Promise<MinimalEntitlement[]> {
+    const entitlements = await this.db.query.entitlements.findMany({
+      columns: {
+        id: true,
+        featureSlug: true,
+        effectiveAt: true,
+        expiresAt: true,
+      },
+      where: (e, { and, eq }) => and(eq(e.customerId, customerId), eq(e.projectId, projectId)),
+    })
+
+    return entitlements
+  }
+
+  private async getActiveEntitlement({
+    customerId,
+    projectId,
+    featureSlug,
+    opts,
+  }: {
+    customerId: string
+    projectId: string
+    featureSlug: string
+    opts?: {
+      skipCache?: boolean // skip cache to force revalidation
+      now?: number
+    }
+  }): Promise<Result<EntitlementState | null, FetchError | UnPriceEntitlementError>> {
+    const cacheKey = this.storage.makeKey({
+      customerId,
+      projectId,
+      featureSlug,
+    })
+
+    if (opts?.skipCache) {
+      this.logger.debug("skipping cache for getActiveEntitlement and loading from DB", {
+        customerId,
+        projectId,
+        featureSlug,
+      })
+    }
+
+    // 1. Try to get the entitlement from cache, if not found try to get it from DB
+    const { val, err } = opts?.skipCache
+      ? await wrapResult(
+          this.getActiveEntitlementFromDB({
+            customerId,
+            projectId,
+            featureSlug,
+          }),
+          (err) =>
+            new FetchError({
+              message: `unable to query entitlement from db in getActiveEntitlementFromDB - ${err.message}`,
+              retry: false,
+              context: {
+                error: err.message,
+                url: "",
+                customerId: customerId,
+                projectId: projectId,
+                featureSlug: featureSlug,
+                method: "getActiveEntitlementFromDB",
+              },
+            })
+        )
+      : await retry(
+          3,
+          async () =>
+            this.cache.customerEntitlement.swr(cacheKey, () =>
+              this.getActiveEntitlementFromDB({
+                customerId,
+                projectId,
+                featureSlug,
+              })
+            ),
+          (attempt, err) => {
+            this.logger.warn("Failed to fetch entitlement data from cache, retrying...", {
+              customerId: customerId,
+              featureSlug,
+              projectId: projectId,
+              method: "getActiveEntitlementFromDB",
+              attempt,
+              error: err.message,
+            })
+          }
+        )
+
+    if (err) {
+      return Err(
+        new FetchError({
+          message: err.message,
+          retry: true,
+          cause: err,
+        })
+      )
+    }
+
+    let entitlement = val
+
+    // 2. LAZY COMPUTATION: If missing or forcing revalidation, compute from grants
+    if (!entitlement) {
+      this.logger.info("Lazy computing entitlement", {
+        customerId,
+        featureSlug,
+        reason: !entitlement ? "missing" : "revalidate",
+      })
+
+      // TODO: add negative caching for this operation when not found
+      const computeResult = await this.grantsManager.computeGrantsForCustomer({
+        customerId,
+        projectId,
+        now: opts?.now ?? Date.now(),
+      })
+
+      if (computeResult.err) {
+        return Err(new UnPriceEntitlementError({ message: computeResult.err.message }))
+      }
+
+      entitlement = computeResult.val.find((e) => e.featureSlug === featureSlug) ?? null
+
+      // Update cache with the freshly computed entitlement
+      if (entitlement) {
+        this.waitUntil(this.cache.customerEntitlement.set(cacheKey, entitlement))
+      }
+    }
+
+    if (!entitlement) return Ok(null)
+
+    // initialize the entitlement usage
+    // neve saved on cache as it changes on every usage
+    const { val: meterState, err: meterStateErr } = await this.initializeUsageMeter({
+      entitlement: entitlement,
+      watermark: opts?.now ?? Date.now(),
+    })
+
+    if (meterStateErr) {
+      return Err(
+        new UnPriceEntitlementError({
+          message: `unable to initialize usage meter - ${meterStateErr.message}`,
+        })
+      )
+    }
+
+    return Ok({
+      ...entitlement,
+      meter: meterState,
+    })
+  }
+
+  /**
+   * Checks if a timestamp falls within any active grant period
+   */
+  private isGrantActive(params: {
+    grant: EntitlementState["grants"][number]
+    now: number
+  }): boolean {
+    const { grant, now } = params
+    const grantStart = grant.effectiveAt
+    const grantEnd = grant.expiresAt ?? Number.POSITIVE_INFINITY
+    return now >= grantStart && now < grantEnd
+  }
+
+  /**
+   * Validates entitlement access at a specific timestamp
+   * and merge the grants to get the new limits
+   * @param params - Parameters
+   * @param params.state - Entitlement state
+   * @param params.now - Current time
+   * @returns Result<EntitlementState, UnPriceEntitlementError>
+   */
+  private validateEntitlementState(params: {
+    state: EntitlementState
+    now: number
+  }): Result<EntitlementState, UnPriceEntitlementError> {
+    const { state, now } = params
+
+    // check if the entitlement has not yet started
+    if (state.effectiveAt && now < state.effectiveAt) {
+      return Err(
+        new UnPriceEntitlementError({
+          message: `Entitlement not yet started for customer ${state.customerId} and project ${state.projectId} and feature ${state.featureSlug}`,
+        })
+      )
+    }
+
+    // check if the entitlement is expired
+    if (state.expiresAt && now > state.expiresAt) {
+      return Err(
+        new UnPriceEntitlementError({
+          message: `Entitlement expired for customer ${state.customerId} and project ${state.projectId} and feature ${state.featureSlug}`,
+        })
+      )
+    }
+
+    // check if grants are still active
+    const activeGrants = state.grants
+      .filter((grant) => this.isGrantActive({ grant, now }))
+      .sort((a, b) => b.priority - a.priority)
+
+    if (activeGrants.length === 0) {
+      return Err(
+        new UnPriceEntitlementError({
+          message: `No active grant found for customer ${state.customerId} and project ${state.projectId} and feature ${state.featureSlug}`,
+        })
+      )
+    }
+
+    // with the active grants merge them to get new limits
+    const mergedGrants = this.grantsManager.mergeGrants({
+      grants: activeGrants,
+      featureType: state.featureType,
+      policy: state.mergingPolicy,
+    })
+
+    return Ok({
+      ...state,
+      effectiveAt: mergedGrants.effectiveAt,
+      expiresAt: mergedGrants.expiresAt,
+      allowOverage: mergedGrants.allowOverage,
+      grants: mergedGrants.grants,
+    })
+  }
+
+  public async getCurrentUsage({
+    customerId,
+    projectId,
+    opts,
+  }: {
+    customerId: string
+    projectId: string
+    opts?: {
+      skipCache?: boolean // skip cache to force revalidation
+      now?: number
+    }
+  }): Promise<
+    Result<CurrentUsage, UnPriceEntitlementError | UnPriceEntitlementStorageError | FetchError>
+  > {
+    const cacheKey = `${projectId}:${customerId}`
+
+    if (opts?.skipCache) {
+      this.logger.debug("skipping cache for getActiveEntitlement and loading from DB", {
+        customerId,
+        projectId,
+      })
+    }
+
+    // first try to get the entitlement from cache, if not found try to get it from DO,
+    const { val, err } = opts?.skipCache
+      ? await wrapResult(
+          this._getCurrentUsage({
+            customerId,
+            projectId,
+            now: opts.now ?? Date.now(),
+          }),
+          (err) =>
+            new FetchError({
+              message: `unable to query usage from _getCurrentUsage - ${err.message}`,
+              retry: false,
+              context: {
+                error: err.message,
+                url: "",
+                customerId: customerId,
+                projectId: projectId,
+                method: "_getCurrentUsage",
+              },
+            })
+        )
+      : await retry(
+          3,
+          async () =>
+            this.cache.getCurrentUsage.swr(cacheKey, () =>
+              this._getCurrentUsage({
+                customerId,
+                projectId,
+                now: opts?.now ?? Date.now(),
+              })
+            ),
+          (attempt, err) => {
+            this.logger.warn("Failed to fetch usage data from cache, retrying...", {
+              customerId: customerId,
+              projectId: projectId,
+              method: "_getCurrentUsage",
+              attempt,
+              error: err.message,
+            })
+          }
+        )
+
+    if (err) {
+      return Err(
+        new FetchError({
+          message: err.message,
+          retry: true,
+          cause: err,
+        })
+      )
+    }
+
+    // set the cache with the fresh value from DB
+    this.waitUntil(this.cache.getCurrentUsage.set(cacheKey, val ?? null))
+
+    if (!val) {
+      return Ok(this.buildEmptyUsageResponse("USD"))
+    }
+
+    return Ok(val)
+  }
+
+  /**
+   * Get current usage data
+   */
+  private async _getCurrentUsage({
+    customerId,
+    projectId,
+    now,
+  }: {
+    customerId: string
+    projectId: string
+    now: number
+  }): Promise<CurrentUsage | null> {
+    // Get grants and subscription info
+    const grantsResult = await this.grantsManager.getGrantsForCustomer({
+      customerId,
+      projectId,
+      now,
+    })
+
+    if (grantsResult.err) {
+      this.logger.error(`Failed to get grants for customer - ${grantsResult.err.message}`, {
+        customerId,
+        projectId,
+      })
+      return null
+    }
+
+    const { grants, subscription, planVersion } = grantsResult.val
+
+    if (grants.length === 0 || !subscription || !planVersion) {
+      return this.buildEmptyUsageResponse(planVersion?.currency ?? "USD")
+    }
+
+    // Compute entitlement states and get usage estimates in parallel
+    const [entitlementsResult, usageEstimatesResult] = await Promise.all([
+      this.computeEntitlementStates(customerId, projectId, grants),
+      this.getUsageEstimates(customerId, projectId, now),
+    ])
+
+    if (entitlementsResult.err) {
+      this.logger.error(
+        `Failed to compute entitlement states - ${entitlementsResult.err.message}`,
+        {
+          customerId,
+          projectId,
+        }
+      )
+      return null
+    }
+
+    if (usageEstimatesResult.err) {
+      this.logger.error(`Failed to get usage estimates - ${usageEstimatesResult.err.message}`, {
+        customerId,
+        projectId,
+      })
+      return null
+    }
+
+    // Build feature map and process features
+    const featureMap = new Map(
+      grants.map((g) => [g.featurePlanVersion.feature.slug, g.featurePlanVersion])
+    )
+
+    const features = this.buildFeatures(
+      entitlementsResult.val,
+      usageEstimatesResult.val,
+      featureMap,
+      planVersion.currency
+    )
+
+    if (features.length === 0) {
+      return this.buildEmptyUsageResponse(planVersion.currency)
+    }
+
+    // Build and return response
+    return this.buildUsageResponse(
+      features,
+      subscription,
+      planVersion,
+      subscription.currentCycleEndAt,
+      usageEstimatesResult.val
+    )
+  }
+
+  private buildEmptyUsageResponse(currency: string): CurrentUsage {
+    return {
+      planName: "No Plan",
+      billingPeriod: "monthly",
+      billingPeriodLabel: "mo",
+      currency,
+      groups: [],
+      priceSummary: {
+        totalPrice: formatMoney("0", currency),
+        flatTotal: formatMoney("0", currency),
+        tieredTotal: formatMoney("0", currency),
+        packageTotal: formatMoney("0", currency),
+        usageTotal: formatMoney("0", currency),
+      },
+    }
+  }
+
+  private async computeEntitlementStates(
+    customerId: string,
+    projectId: string,
+    grants: NonNullable<
+      Awaited<ReturnType<typeof this.grantsManager.getGrantsForCustomer>>["val"]
+    >["grants"]
+  ): Promise<Result<Omit<EntitlementState, "id">[], UnPriceEntitlementError>> {
+    // Group grants by feature slug
+    const grantsByFeature = new Map<string, typeof grants>()
+    for (const grant of grants) {
+      const slug = grant.featurePlanVersion.feature.slug
+      const existing = grantsByFeature.get(slug) ?? []
+      grantsByFeature.set(slug, [...existing, grant])
+    }
+
+    // Compute entitlement states for all features in parallel
+    const entitlementPromises = Array.from(grantsByFeature.values()).map((featureGrants) =>
+      this.grantsManager.computeEntitlementState({
+        customerId,
+        projectId,
+        grants: featureGrants,
+      })
+    )
+
+    const results = await Promise.all(entitlementPromises)
+
+    // Check for errors and collect entitlements
+    const entitlements: Omit<EntitlementState, "id">[] = []
+    for (const result of results) {
+      if (result.err) {
+        return Err(new UnPriceEntitlementError({ message: result.err.message }))
+      }
+      entitlements.push({
+        ...result.val,
+        meter: {
+          usage: "0", // TODO: implement this
+          snapshotUsage: "0", // TODO: implement this
+          lastReconciledId: "", // TODO: implement this
+          lastUpdated: Date.now(),
+          lastCycleStart: undefined,
+        },
+      })
+    }
+
+    return Ok(entitlements)
+  }
+
+  private async getUsageEstimates(
+    customerId: string,
+    projectId: string,
+    now: number
+  ): Promise<
+    Result<
+      Awaited<ReturnType<BillingService["estimatePriceCurrentUsage"]>>["val"],
+      UnPriceEntitlementError
+    >
+  > {
+    const billingService = new BillingService({
+      db: this.db,
+      logger: this.logger,
+      analytics: this.analytics,
+      waitUntil: this.waitUntil,
+      cache: this.cache,
+      metrics: this.metrics,
+    })
+
+    const result = await billingService.estimatePriceCurrentUsage({
+      customerId,
+      projectId,
+      now,
+    })
+
+    return result.err
+      ? Err(new UnPriceEntitlementError({ message: result.err.message }))
+      : Ok(result.val)
+  }
+
+  private buildFeatures(
+    entitlements: Omit<EntitlementState, "id">[],
+    usageEstimates: Awaited<ReturnType<BillingService["estimatePriceCurrentUsage"]>>["val"],
+    featureMap: Map<
+      string,
+      NonNullable<
+        Awaited<ReturnType<typeof this.grantsManager.getGrantsForCustomer>>["val"]
+      >["grants"][number]["featurePlanVersion"]
+    >,
+    currency: Currency
+  ) {
+    const grantIds = new Set(usageEstimates?.map((u) => u.grantId) ?? [])
+
+    return (
+      entitlements
+        .map((entitlement) => {
+          const planVersionFeature = featureMap.get(entitlement.featureSlug)
+          if (!planVersionFeature) return null
+
+          // Find matching usage estimates by grant ID
+          const usageGrants = (usageEstimates ?? []).filter((u) =>
+            entitlement.grants.some((g) => g.id === u.grantId && grantIds.has(u.grantId ?? ""))
+          )
+
+          // Aggregate usage data
+          const usage = usageGrants.reduce((acc, u) => acc + u.usage, 0)
+          const included = usageGrants.reduce((acc, u) => acc + u.included, 0)
+
+          // TODO: sloppy, we should use the currency from the plan version feature
+          const zeroDinero = dinero({
+            amount: 0,
+            currency: currencies[currency as keyof typeof currencies],
+          })
+
+          // Sum prices from usageEstimates (already formatted strings, need to parse to sum)
+          const totalPriceDinero = usageGrants.reduce(
+            (acc, u) => add(acc, u.price.totalPrice.dinero),
+            zeroDinero
+          )
+
+          return {
+            entitlement,
+            planVersionFeature,
+            usage,
+            included,
+            totalPriceDinero,
+            limit: entitlement.limit,
+          }
+        })
+        .filter((f): f is NonNullable<typeof f> => f !== null)
+        // order by feature type and price
+        .sort((a, b) => {
+          if (a.entitlement.featureSlug < b.entitlement.featureSlug) return -1
+          if (a.entitlement.featureSlug > b.entitlement.featureSlug) return 1
+          const aPrice = a.totalPriceDinero.toJSON().amount
+          const bPrice = b.totalPriceDinero.toJSON().amount
+          return bPrice - aPrice
+        })
+    )
+  }
+
+  private buildUsageResponse(
+    features: ReturnType<typeof this.buildFeatures>,
+    subscription: NonNullable<
+      NonNullable<
+        Awaited<ReturnType<typeof this.grantsManager.getGrantsForCustomer>>["val"]
+      >["subscription"]
+    >,
+    planVersion: NonNullable<
+      NonNullable<
+        Awaited<ReturnType<typeof this.grantsManager.getGrantsForCustomer>>["val"]
+      >["planVersion"]
+    >,
+    cycleEndAt: number,
+    usageEstimates: Awaited<ReturnType<BillingService["estimatePriceCurrentUsage"]>>["val"]
+  ): CurrentUsage {
+    const billingConfig = planVersion.billingConfig
+    const billingPeriod = billingConfig.name
+    const currency = planVersion.currency
+
+    // Format renewal date
+    const date = toZonedTime(new Date(cycleEndAt), subscription.timezone)
+    const renewalDate =
+      billingConfig.billingInterval === "minute"
+        ? format(date, "MMMM d, yyyy hh:mm a")
+        : format(date, "MMMM d, yyyy")
+
+    const daysRemaining = Math.ceil((cycleEndAt - Date.now()) / (1000 * 60 * 60 * 24))
+
+    // Build feature displays ordered by feature type
+    // firt flat, then tiered, then package, then usage
+    const displayFeatures = features
+      .sort((a, b) => {
+        if (a.entitlement.featureType === "flat") return -1
+        if (b.entitlement.featureType === "flat") return 1
+        if (a.entitlement.featureType === "tier") return -1
+        if (b.entitlement.featureType === "tier") return 1
+        if (a.entitlement.featureType === "package") return -1
+        if (b.entitlement.featureType === "package") return 1
+        if (a.entitlement.featureType === "usage") return -1
+        if (b.entitlement.featureType === "usage") return 1
+        return 0
+      })
+      .map((f) => this.buildFeatureDisplay(f, planVersion))
+
+    // Use prices directly from usageEstimates using dinero objects
+    // Group by feature type by matching grants to features
+    const grantToFeatureType = new Map<string, string>()
+    for (const feature of features) {
+      for (const grant of feature.entitlement.grants) {
+        grantToFeatureType.set(grant.id, feature.entitlement.featureType)
+      }
+    }
+
+    // Initialize dinero totals with zero (using basePrice currency)
+    const zeroDinero = dinero({ amount: 0, currency: currencies[currency] })
+    let flatTotalDinero: Dinero<number> = zeroDinero
+    let tieredTotalDinero: Dinero<number> = zeroDinero
+    let packageTotalDinero: Dinero<number> = zeroDinero
+    let usageTotalDinero: Dinero<number> = zeroDinero
+
+    // Sum prices from usageEstimates by feature type using dinero
+    for (const estimate of usageEstimates ?? []) {
+      if (!estimate.grantId || !estimate.price.totalPrice.dinero) continue
+      const featureType = grantToFeatureType.get(estimate.grantId)
+      if (!featureType) continue
+
+      if (featureType === "flat") {
+        flatTotalDinero = add(flatTotalDinero, estimate.price.totalPrice.dinero)
+      } else if (featureType === "tier") {
+        tieredTotalDinero = add(tieredTotalDinero, estimate.price.totalPrice.dinero)
+      } else if (featureType === "usage") {
+        usageTotalDinero = add(usageTotalDinero, estimate.price.totalPrice.dinero)
+      } else if (featureType === "package") {
+        packageTotalDinero = add(packageTotalDinero, estimate.price.totalPrice.dinero)
+      }
+    }
+
+    // Calculate total price using dinero
+    const totalPriceDinero = add(
+      add(add(flatTotalDinero, tieredTotalDinero), packageTotalDinero),
+      usageTotalDinero
+    )
+
+    // Format prices from dinero (basePrice is already formatted, so we only format the totals)
+    const flatTotal = toDecimal(flatTotalDinero, ({ value, currency }) =>
+      formatMoney(value.toString(), currency.code)
+    )
+    const tieredTotal = toDecimal(tieredTotalDinero, ({ value, currency }) =>
+      formatMoney(value.toString(), currency.code)
+    )
+    const usageTotal = toDecimal(usageTotalDinero, ({ value, currency }) =>
+      formatMoney(value.toString(), currency.code)
+    )
+    const packageTotal = toDecimal(packageTotalDinero, ({ value, currency }) =>
+      formatMoney(value.toString(), currency.code)
+    )
+    const totalPrice = toDecimal(totalPriceDinero, ({ value, currency }) =>
+      formatMoney(value.toString(), currency.code)
+    )
+
+    return {
+      planName: subscription.planSlug ?? "No Plan",
+      planDescription: planVersion.description ?? undefined,
+      billingPeriod,
+      billingPeriodLabel: billingPeriod,
+      currency,
+      renewalDate,
+      daysRemaining: daysRemaining > 0 ? daysRemaining : undefined,
+      groups: [
+        {
+          id: "all-features",
+          name: "Features",
+          featureCount: features.length,
+          features: displayFeatures,
+        },
+      ],
+      priceSummary: {
+        totalPrice,
+        flatTotal,
+        tieredTotal,
+        packageTotal,
+        usageTotal,
+      },
+    }
+  }
+
+  private buildFeatureDisplay(
+    feature: NonNullable<ReturnType<typeof this.buildFeatures>[number]>,
+    planVersion: NonNullable<
+      NonNullable<
+        Awaited<ReturnType<typeof this.grantsManager.getGrantsForCustomer>>["val"]
+      >["planVersion"]
+    >
+  ): CurrentUsage["groups"][number]["features"][number] {
+    const { entitlement, planVersionFeature, usage, included, totalPriceDinero, limit } = feature
+
+    const featureType = entitlement.featureType
+    const billingFrequencyLabel = planVersionFeature.billingConfig.name
+    const resetFrequencyLabel = planVersionFeature.resetConfig?.name ?? billingFrequencyLabel
+
+    // Format price as string (price comes from usageEstimates)
+    const priceString = toDecimal(totalPriceDinero, ({ value, currency }) =>
+      formatMoney(value.toString(), currency.code)
+    )
+
+    const baseFeature = {
+      id: entitlement.featureSlug,
+      name: planVersionFeature.feature.title ?? entitlement.featureSlug,
+      description: planVersionFeature.feature.description ?? undefined,
+      price: priceString,
+    }
+
+    if (featureType === "flat") {
+      return {
+        ...baseFeature,
+        type: "flat" as const,
+        typeLabel: "Flat",
+        enabled: (limit ?? 0) > 0,
+        currency: planVersion.currency,
+        billing: {
+          billingFrequencyLabel,
+          resetFrequencyLabel,
+        },
+      }
+    }
+
+    if (featureType === "tier") {
+      const config = planVersionFeature.config as { tiers?: Array<unknown> } | undefined
+      const tiers =
+        (config?.tiers as Array<{
+          firstUnit: number
+          lastUnit: number | null
+          unitPrice: { displayAmount: string }
+          label?: string
+        }>) ?? []
+
+      const formattedTiers = tiers.map((tier, index) => ({
+        min: tier.firstUnit,
+        max: tier.lastUnit,
+        pricePerUnit: Number.parseFloat(tier.unitPrice?.displayAmount ?? "0"),
+        label: tier.label ?? `Tier ${index + 1}`,
+        isActive: usage >= tier.firstUnit && (tier.lastUnit === null || usage <= tier.lastUnit),
+      }))
+
+      return {
+        ...baseFeature,
+        type: "tiered" as const,
+        typeLabel: "Tiered",
+        currency: planVersion.currency,
+        billing: { billingFrequencyLabel, resetFrequencyLabel },
+        tieredDisplay: {
+          currentUsage: usage,
+          billableUsage: Math.max(0, usage - included),
+          unit: planVersionFeature.feature.unit ?? "units",
+          freeAmount: included,
+          tiers: formattedTiers,
+          currentTierLabel: formattedTiers.find((t) => t.isActive)?.label,
+        },
+      }
+    }
+
+    // Usage type
+    const limitType: "hard" | "soft" | "none" =
+      limit === null ? "none" : planVersionFeature.allowOverage ? "soft" : "hard"
+
+    return {
+      ...baseFeature,
+      type: "usage" as const,
+      typeLabel: "Usage",
+      currency: planVersion.currency,
+      billing: {
+        billingFrequencyLabel,
+        resetFrequencyLabel,
+      },
+      usageBar: {
+        current: usage,
+        included,
+        limit: limit ?? undefined,
+        limitType,
+        unit: planVersionFeature.feature.unit ?? "units",
+        notifyThreshold: planVersionFeature.notifyUsageThreshold ?? 95,
+        allowOverage: planVersionFeature.allowOverage,
+      },
+    }
+  }
+}

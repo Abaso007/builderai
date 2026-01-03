@@ -166,65 +166,99 @@ export function addByInterval(date: Date, interval: BillingInterval, count: numb
       throw new Error(`Invalid billing interval: ${interval}`)
   }
 }
-/**
- * A helper to calculate proration metrics based on a cycle's start, end, and a 'now' timestamp.
- */
-export function calculateProration(
-  start: number,
-  end: number,
-  now: number
-): { prorationFactor: number; billableSeconds: number } {
-  const totalDurationMs = end - start
-
-  if (totalDurationMs <= 0) {
-    return { prorationFactor: 0, billableSeconds: 0 }
-  }
-
-  // If we're at or before the start: bill the full window
-  if (now <= start) {
-    return {
-      prorationFactor: 1,
-      billableSeconds: Math.floor(totalDurationMs / 1000),
-    }
-  }
-
-  // If we're at or after the end: nothing to bill
-  if (now >= end) {
-    return {
-      prorationFactor: 0,
-      billableSeconds: 0,
-    }
-  }
-
-  const remainingMs = end - now
-  return {
-    prorationFactor: Math.min(1, Math.max(0, remainingMs / totalDurationMs)),
-    billableSeconds: Math.floor(remainingMs / 1000),
-  }
-}
 
 /**
- * Elapsed-fraction semantics used by billing window tests.
- * billableSeconds count from billableStart to now (clamped to [start, end]).
+ * Calculates a proration factor for a given service window [serviceStart, serviceEnd),
+ * using the real recurring cycle derived from the billing config.
+ *
+ * Semantics:
+ * - If the window is a full anchored cycle, factor = 1.
+ * - If the window is a stub (e.g., from subscription start to the first anchor),
+ *   factor = stubDuration / fullAnchoredCycleDuration (prevAnchor -> nextAnchor).
+ * - Always computed strictly by cycle duration, independent of "now".
+ * - For trials, the same fraction is returned; callers can still zero totals if desired.
  */
-export function calculateElapsedProration(
-  start: number,
-  end: number,
-  now: number,
-  billableStart?: number
-): { prorationFactor: number; billableSeconds: number } {
-  const totalDurationMs = end - start
-  if (totalDurationMs <= 0) return { prorationFactor: 0, billableSeconds: 0 }
+export function calculateProration(params: {
+  serviceStart: number
+  serviceEnd: number
+  effectiveStartDate: number
+  billingConfig: BillingConfig
+}): { prorationFactor: number; referenceCycleStart: number; referenceCycleEnd: number } {
+  const { serviceStart, serviceEnd, effectiveStartDate, billingConfig } = params
 
-  const effectiveBillableStart = billableStart ?? start
-  const clampedNow = Math.min(now, end)
-  if (clampedNow <= effectiveBillableStart) return { prorationFactor: 0, billableSeconds: 0 }
-
-  const elapsedMs = clampedNow - effectiveBillableStart
-  return {
-    prorationFactor: Math.min(1, Math.max(0, elapsedMs / totalDurationMs)),
-    billableSeconds: Math.floor(elapsedMs / 1000),
+  if (serviceEnd <= serviceStart) {
+    return { prorationFactor: 0, referenceCycleStart: serviceStart, referenceCycleEnd: serviceEnd }
   }
+
+  // Onetime plans have no recurring notion; treat any window as fully billable.
+  if (billingConfig.planType === "onetime") {
+    return { prorationFactor: 1, referenceCycleStart: serviceStart, referenceCycleEnd: serviceEnd }
+  }
+
+  const { billingInterval, billingIntervalCount } = billingConfig
+  const anchorValue = (billingConfig as Partial<BillingConfig>).billingAnchor ?? "dayOfCreation"
+  const anchor = getAnchor(effectiveStartDate, billingInterval, anchorValue)
+
+  // Compute the first anchored cycle start on or after effectiveStartDate.
+  const startRef = new Date(effectiveStartDate)
+  let firstCycleStart: Date
+  switch (billingInterval) {
+    case "minute": {
+      const c = Math.max(1, billingIntervalCount)
+      const y = startRef.getUTCFullYear()
+      const m = startRef.getUTCMonth()
+      const d = startRef.getUTCDate()
+      const h = startRef.getUTCHours()
+      const minute = startRef.getUTCMinutes()
+      const alignedMinute = minute - (minute % c)
+      firstCycleStart = new Date(Date.UTC(y, m, d, h, alignedMinute, anchor, 0))
+      break
+    }
+    case "day":
+      firstCycleStart = startOfUtcHour(setUtc(startRef, { hours: anchor }))
+      break
+    case "week":
+      firstCycleStart = startOfUtcDay(setUtcDay(startRef, anchor, 0))
+      break
+    case "month":
+    case "year":
+      firstCycleStart = startOfUtcDay(setUtc(startRef, { date: anchor }))
+      break
+    default:
+      throw new Error(`Invalid billing interval: ${billingInterval}`)
+  }
+
+  if (firstCycleStart.getTime() < effectiveStartDate) {
+    firstCycleStart = addByInterval(firstCycleStart, billingInterval, billingIntervalCount)
+  }
+
+  // Walk anchored cycles forward until we bracket the serviceEnd.
+  let cycleStart = firstCycleStart
+  let cycleEnd = addByInterval(cycleStart, billingInterval, billingIntervalCount)
+  while (serviceEnd > cycleEnd.getTime()) {
+    cycleStart = cycleEnd
+    cycleEnd = addByInterval(cycleStart, billingInterval, billingIntervalCount)
+  }
+
+  // If the service window ends at or before the current anchored start, it's a stub
+  // before the first full anchored cycle. Use the previous full anchored cycle as reference.
+  let referenceCycleStart = cycleStart.getTime()
+  let referenceCycleEnd = cycleEnd.getTime()
+  if (serviceEnd <= referenceCycleStart) {
+    const prev = addByInterval(cycleStart, billingInterval, -billingIntervalCount)
+    referenceCycleStart = prev.getTime()
+    referenceCycleEnd = cycleStart.getTime()
+  }
+
+  const fullCycleDuration = referenceCycleEnd - referenceCycleStart
+  if (fullCycleDuration <= 0) {
+    return { prorationFactor: 0, referenceCycleStart, referenceCycleEnd }
+  }
+
+  const windowDuration = serviceEnd - serviceStart
+  const prorationFactor = Math.min(1, Math.max(0, windowDuration / fullCycleDuration))
+
+  return { prorationFactor, referenceCycleStart, referenceCycleEnd }
 }
 
 export function getAnchor(date: number, interval: BillingInterval, anchor: BillingAnchor): number {

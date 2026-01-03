@@ -85,7 +85,7 @@ export function SubscriptionForm({
     if (selectedCustomer?.timezone) {
       form.setValue("timezone", selectedCustomer.timezone)
     }
-  }, [selectedCustomer?.id])
+  }, [customerId])
 
   const onSubmitForm = async (data: z.infer<typeof formSchema>) => {
     if (!defaultValues.id) {

@@ -46,13 +46,13 @@ export function TransferProjectToPersonal({
   const description = "Transfer this project to your personal workspace"
 
   return (
-    <Card className="border-danger">
+    <Card>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription className="flex items-center">{description}</CardDescription>
       </CardHeader>
 
-      <CardFooter className="border-t border-t-destructive px-6 py-4">
+      <CardFooter className="border-t px-6 py-4">
         <Dialog>
           <DialogTrigger asChild>
             <Button variant="destructive" disabled={isMain}>

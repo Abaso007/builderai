@@ -26,6 +26,7 @@ export function PricingItem({
   withQuantity,
   onQuantityChange,
   noCheckIcon = false,
+  noTitle = false,
   className,
 }: {
   feature: PlanVersionExtended["planFeatures"][number]
@@ -33,6 +34,7 @@ export function PricingItem({
   withQuantity?: boolean
   onQuantityChange?: (quantity: number) => void
   noCheckIcon?: boolean
+  noTitle?: boolean
   className?: string
 }) {
   const defaultQuantity = feature.defaultQuantity ?? 1
@@ -80,13 +82,13 @@ export function PricingItem({
   const freeUnitsText =
     freeUnits === Number.POSITIVE_INFINITY
       ? feature.limit
-        ? `Up to ${nFormatter(feature.limit)}`
+        ? `Up to ${nFormatter(feature.limit)} ${feature.feature.unit}`
         : "Unlimited"
       : freeUnits === 0
         ? feature.limit
-          ? `Up to ${nFormatter(feature.limit)}`
-          : ""
-        : nFormatter(freeUnits)
+          ? `Up to ${nFormatter(feature.limit)} ${feature.feature.unit}`
+          : "Starts at 0"
+        : `${nFormatter(freeUnits)} ${feature.feature.unit}`
 
   switch (feature.featureType) {
     case "flat": {
@@ -134,9 +136,11 @@ export function PricingItem({
         </div>
       )}
       <div className="flex w-full items-center gap-1">
-        <span className={cn("font-light text-muted-foreground text-xs", className)}>
-          {displayFeature}
-        </span>
+        {!noTitle && (
+          <span className={cn("font-light text-muted-foreground text-xs", className)}>
+            {displayFeature}
+          </span>
+        )}
 
         <Tooltip>
           <TooltipTrigger asChild>

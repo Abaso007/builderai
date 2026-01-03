@@ -1,0 +1,45 @@
+TOKEN "web-apps" READ
+
+TAGS "usage"
+
+NODE reconciliation_delta_node
+SQL >
+    %
+    WITH
+        {{ String(afterRecordId, '') }} AS after_cursor,
+        {% if defined(beforeRecordId) %}
+        {{ String(beforeRecordId) }} AS before_cursor
+        {% else %}
+        'zzzzzzzzzzzzzzzzzzzzzzzzz' AS before_cursor  -- ULID max value
+        {% end %}
+
+    SELECT
+        projectId,
+        customerId,
+        featureSlug,
+
+        -- Delta metrics (records in cursor window)
+        toUInt64(count()) AS deltaCount,
+        sum(usage) AS deltaSum,
+        max(usage) AS deltaMax,
+        argMax(usage, id) AS lastValue,
+
+        -- New cursor position
+        argMax(id, timestamp) AS lastRecordId
+
+    FROM unprice_feature_usage_records
+    WHERE
+        deleted = 0
+        AND projectId = {{ String(projectId) }}
+        AND customerId = {{ String(customerId) }}
+        AND featureSlug = {{ String(featureSlug) }}
+        -- Cursor window
+        AND id > after_cursor
+        AND id <= before_cursor
+        {% if defined(billingPeriodStart) %}
+        AND timestamp >= {{ Int64(billingPeriodStart) }}
+        {% end %}
+    GROUP BY
+        projectId, customerId, featureSlug
+
+TYPE endpoint

@@ -1,16 +1,14 @@
 import { getSession } from "@unprice/auth/server-rsc"
-import { APP_DOMAIN } from "@unprice/config"
 import { Alert, AlertDescription, AlertTitle } from "@unprice/ui/alert"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@unprice/ui/card"
 import { Typography } from "@unprice/ui/typography"
 import { AlertCircle } from "lucide-react"
 import { Fragment } from "react"
-import { PaymentMethodButton } from "~/components/forms/payment-method-form"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 import { formatDate } from "~/lib/dates"
 import { unprice } from "#utils/unprice"
-import { BillingCard } from "./_components/billing"
+import { UsageDashboard } from "./_components/usage-dashboard"
 
 export default async function BillingPage({ params }: { params: { workspaceSlug: string } }) {
   const { workspaceSlug } = params
@@ -50,39 +48,16 @@ export default async function BillingPage({ params }: { params: { workspaceSlug:
       }
     >
       <Fragment>
-        <SubscriptionCard customerId={customerId} />
-        <PaymentMethodCard workspaceSlug={workspaceSlug} customerId={customerId} />
-        <UsageCard customerId={customerId} />
+        {/* <SubscriptionCard customerId={customerId} /> */}
+        {/* <UsageCard customerId={customerId} /> */}
+        <UsageCard customerId={customerId} workspaceSlug={workspaceSlug} />
       </Fragment>
     </DashboardShell>
   )
 }
 
-async function PaymentMethodCard({
-  workspaceSlug,
-  customerId,
-}: {
-  workspaceSlug: string
-  customerId: string
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Default Payment Method</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <PaymentMethodButton
-          customerId={customerId}
-          successUrl={`${APP_DOMAIN}${workspaceSlug}/settings/billing`}
-          cancelUrl={`${APP_DOMAIN}${workspaceSlug}/settings/billing`}
-          paymentProvider="stripe"
-        />
-      </CardContent>
-    </Card>
-  )
-}
-
-async function SubscriptionCard({
+// TODO: delete this once we have a way to manage subscriptions
+async function _SubscriptionCard({
   customerId,
 }: {
   customerId: string
@@ -204,8 +179,11 @@ async function SubscriptionCard({
   )
 }
 
-async function UsageCard({ customerId }: { customerId: string }) {
-  const { error, result } = await unprice.customers.getUsage(customerId)
+async function UsageCard({
+  customerId,
+  workspaceSlug,
+}: { customerId: string; workspaceSlug: string }) {
+  const { result: usageData, error } = await unprice.customers.getUsage(customerId)
 
   if (error) {
     return (
@@ -217,7 +195,7 @@ async function UsageCard({ customerId }: { customerId: string }) {
     )
   }
 
-  if (!result)
+  if (!usageData)
     return (
       <Alert variant="info">
         <AlertTitle>No Usage Data</AlertTitle>
@@ -225,5 +203,5 @@ async function UsageCard({ customerId }: { customerId: string }) {
       </Alert>
     )
 
-  return <BillingCard usage={result} />
+  return <UsageDashboard config={usageData} customerId={customerId} workspaceSlug={workspaceSlug} />
 }

@@ -7,7 +7,7 @@ import { metrics } from "~/middleware/metrics"
 
 import serveEmojiFavicon from "stoker/middlewares/serve-emoji-favicon"
 
-export { DurableObjectUsagelimiter } from "~/entitlement/do"
+export { DurableObjectUsagelimiter } from "~/usagelimiter/do"
 export { DurableObjectProject } from "~/project/do"
 
 import { registerReportUsageV1 } from "~/routes/customer/reportUsageV1"
@@ -17,9 +17,7 @@ import { registerGetEntitlementsV1 } from "./routes/customer/getEntitlementsV1"
 import { registerGetPaymentMethodsV1 } from "./routes/customer/getPaymentMethodsV1"
 import { registerGetSubscriptionV1 } from "./routes/customer/getSubscriptionV1"
 import { registerGetUsageV1 } from "./routes/customer/getUsageV1"
-import { registerPrewarmEntitlementsV1 } from "./routes/customer/prewarmEntitlementsV1"
 import { registerResetEntitlementsV1 } from "./routes/customer/resetEntitlementsV1"
-import { registerRevalidateEntitlementV1 } from "./routes/customer/revalidateEntitlementV1"
 import { registerSignUpV1 } from "./routes/customer/signUpV1"
 import { registerStripeSetupV1 } from "./routes/paymentProvider/stripeSetupV1"
 import { registerStripeSignUpV1 } from "./routes/paymentProvider/stripeSignUpV1"
@@ -91,14 +89,12 @@ app.use(
 registerReportUsageV1(app)
 registerGetEntitlementsV1(app)
 registerCanV1(app)
-registerResetEntitlementsV1(app)
 registerGetSubscriptionV1(app)
 registerGetUsageV1(app)
 registerGetPaymentMethodsV1(app)
 registerSignUpV1(app)
 registerCreatePaymentMethodV1(app)
-registerRevalidateEntitlementV1(app)
-registerPrewarmEntitlementsV1(app)
+registerResetEntitlementsV1(app)
 
 // Project routes
 registerGetFeaturesV1(app)

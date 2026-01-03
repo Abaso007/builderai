@@ -69,9 +69,11 @@ export function QuantityFormField({
 export function LimitFormField({
   form,
   isDisabled,
+  units,
 }: {
   form: UseFormReturn<PlanVersionFeatureInsert>
   isDisabled?: boolean
+  units: string
 }) {
   return (
     <div className="w-full">
@@ -93,7 +95,7 @@ export function LimitFormField({
               <FormControl className="w-full">
                 <InputWithAddons
                   {...field}
-                  trailing={"units"}
+                  trailing={units}
                   value={field.value ?? ""}
                   disabled={isDisabled}
                 />
@@ -218,7 +220,8 @@ export function BillingConfigFeatureFormField({
           <FormItem className="flex w-full flex-col">
             <FormLabel>Billing Interval</FormLabel>
             <FormDescription>
-              The interval for this item. This is different from the billing interval of the plan.
+              How often the feature will be billed. Can be different from the billing interval of
+              the plan.
             </FormDescription>
             <Select
               onValueChange={(value) => {

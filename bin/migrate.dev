@@ -49,7 +49,7 @@ nvm use
 
 # take the first parameter as the mode id if not provided, use dev
 MODE_ID=${1:-dev}
-RESTART_TINYBIRD=${2:-false}
+COMMAND=${2:-migrate:custom}
 
 if [ "$MODE_ID" = "dev" ]; then
   # banner to show the user that we are using the preview environment
@@ -64,17 +64,25 @@ if [ "$MODE_ID" = "dev" ]; then
   VERCEL_ENV="development"
   UNPRICE_API_URL="http://localhost:8787"
   UNPRICE_API_KEY="unprice_dev_1234567890"
+  MAIN_PROJECT_ID="proj_1234567890"
   DRIZZLE_LOG="true"
   EMIT_METRICS_LOGS="false"
   EMIT_ANALYTICS="true"
   UPSTASH_REDIS_REST_URL="http://localhost:8079"
   UPSTASH_REDIS_REST_TOKEN="unprice"
 
-  echo "Generating migrations"
-  infisical run --env=preview --path=/ --recursive -- env UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY DRIZZLE_LOG=$DRIZZLE_LOG EMIT_METRICS_LOGS=$EMIT_METRICS_LOGS EMIT_ANALYTICS=$EMIT_ANALYTICS NODE_ENV=$NODE_ENV VERCEL_ENV=$VERCEL_ENV pnpm --filter db generate
+  if [ "$COMMAND" = "drop" ]; then
+    echo "Dropping database"
+    infisical run --env=preview --path=/ --recursive -- env UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG EMIT_METRICS_LOGS=$EMIT_METRICS_LOGS EMIT_ANALYTICS=$EMIT_ANALYTICS NODE_ENV=$NODE_ENV VERCEL_ENV=$VERCEL_ENV pnpm --filter db drop
+  fi
 
-  echo "Applying migrations"
-  infisical run --env=preview --path=/ --recursive -- env UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY DRIZZLE_LOG=$DRIZZLE_LOG EMIT_METRICS_LOGS=$EMIT_METRICS_LOGS EMIT_ANALYTICS=$EMIT_ANALYTICS NODE_ENV=$NODE_ENV VERCEL_ENV=$VERCEL_ENV pnpm --filter db migrate:custom
+  if [ "$COMMAND" = "migrate:custom" ]; then
+    echo "Generating migrations"
+    infisical run --env=preview --path=/ --recursive -- env UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG EMIT_METRICS_LOGS=$EMIT_METRICS_LOGS EMIT_ANALYTICS=$EMIT_ANALYTICS NODE_ENV=$NODE_ENV VERCEL_ENV=$VERCEL_ENV pnpm --filter db generate
+
+    echo "Applying migrations"
+    infisical run --env=preview --path=/ --recursive -- env UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG EMIT_METRICS_LOGS=$EMIT_METRICS_LOGS EMIT_ANALYTICS=$EMIT_ANALYTICS NODE_ENV=$NODE_ENV VERCEL_ENV=$VERCEL_ENV pnpm --filter db migrate:custom
+  fi
 else
   echo "Invalid mode: $MODE_ID"
   exit 1

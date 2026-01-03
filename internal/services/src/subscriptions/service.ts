@@ -1,11 +1,6 @@
 import type { Analytics } from "@unprice/analytics"
 import { type Database, type SQL, and, eq, inArray, sql } from "@unprice/db"
-import {
-  customerEntitlements,
-  subscriptionItems,
-  subscriptionPhases,
-  subscriptions,
-} from "@unprice/db/schema"
+import { subscriptionItems, subscriptionPhases, subscriptions } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import {
   type InsertSubscription,
@@ -20,8 +15,10 @@ import {
 } from "@unprice/db/validators"
 import { Err, Ok, type Result, type SchemaError } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
+import { BillingService } from "../billing/service"
 import type { Cache } from "../cache"
 import { CustomerService } from "../customers/service"
+import { GrantsManager } from "../entitlements/grants"
 import type { Metrics } from "../metrics"
 import { UnPriceSubscriptionError } from "./errors"
 import { SubscriptionMachine } from "./machine"
@@ -37,6 +34,8 @@ export class SubscriptionService {
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
   private customerService: CustomerService
+  private billingService: BillingService
+  private grantService: GrantsManager
 
   constructor({
     db,
@@ -68,79 +67,142 @@ export class SubscriptionService {
       cache,
       metrics,
     })
-  }
-
-  // create the entitlements for the new phase
-  public async createEntitlementsForPhase({
-    phaseId,
-    projectId,
-    customerId,
-    db,
-  }: {
-    phaseId: string
-    projectId: string
-    customerId: string
-    db?: Database
-  }): Promise<Result<void, UnPriceSubscriptionError>> {
-    // get the active phase for the subscription with the customer entitlements
-    const phase = await (db ?? this.db).query.subscriptionPhases.findFirst({
-      with: {
-        items: {
-          with: {
-            featurePlanVersion: {
-              with: {
-                feature: true,
-              },
-            },
-          },
-        },
-      },
-      where: (phase, { eq, and }) => and(eq(phase.id, phaseId), eq(phase.projectId, projectId)),
+    this.billingService = new BillingService({
+      db,
+      logger,
+      analytics,
+      waitUntil,
+      cache,
+      metrics,
     })
 
-    if (!phase) {
+    this.grantService = new GrantsManager({
+      db: db ?? this.db,
+      logger: this.logger,
+    })
+  }
+
+  private validatePhasesAction({
+    phases,
+    phase,
+    action,
+    now,
+  }: {
+    phases: SubscriptionPhase[]
+    phase: Pick<SubscriptionPhase, "startAt" | "endAt" | "id">
+    action: "update" | "create"
+    now: number
+  }): Result<void, UnPriceSubscriptionError> {
+    const orderedPhases = phases.sort((a, b) => a.startAt - b.startAt)
+
+    if (orderedPhases.length === 0) {
+      return Ok(undefined)
+    }
+
+    if (action === "update") {
+      const phaseToUpdate = orderedPhases.find((p) => p.id === phase.id)
+      if (!phaseToUpdate) {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: "Phase not found",
+          })
+        )
+      }
+
+      // validate if the phase is active
+      // if this phase is active customer can't change the start date
+      // we don't use the phase passed as parameter because it's the one with the new dates
+      const isActivePhase =
+        phaseToUpdate.startAt <= now && (phaseToUpdate.endAt ?? Number.POSITIVE_INFINITY) >= now
+
+      if (isActivePhase && phase.startAt !== phaseToUpdate.startAt) {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: "The phase is active, you can't change the start date",
+          })
+        )
+      }
+    }
+
+    if (action === "create") {
+      // active phase is the one where now is between startAt and endAt or endAt is undefined
+      const activePhase = orderedPhases.find((p) => {
+        return phase.startAt >= p.startAt && (p.endAt ? phase.startAt <= p.endAt : true)
+      })
+
+      if (activePhase) {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: "There is already an active phase in the same date range",
+          })
+        )
+      }
+    }
+
+    // verify phases don't overlap result the phases that overlap
+    const overlappingPhases = orderedPhases.filter((p) => {
+      const startAtPhase = p.startAt
+      const endAtPhase = p.endAt ?? Number.POSITIVE_INFINITY
+
+      return (
+        (startAtPhase < (phase.endAt ?? Number.POSITIVE_INFINITY) ||
+          startAtPhase === (phase.endAt ?? Number.POSITIVE_INFINITY)) &&
+        (endAtPhase > phase.startAt || endAtPhase === phase.startAt)
+      )
+    })
+
+    if (overlappingPhases.length > 0 && overlappingPhases.some((p) => p.id !== phase.id)) {
       return Err(
         new UnPriceSubscriptionError({
-          message: "Phase not found",
+          message: "Phases overlap, there is already a phase in the same date range",
         })
       )
     }
 
-    const { items, ...phaseData } = phase
+    // check if the phases are consecutive with one another starting from the end date of the previous phase
+    // the phase that the customer is updating need to be check with the new dates
+    const consecutivePhases = orderedPhases.filter((p, index) => {
+      let phaseToCheck = p
+      if (p.id === phase.id) {
+        phaseToCheck = {
+          ...p,
+          startAt: phase.startAt,
+          endAt: phase.endAt ?? null,
+        }
+      }
 
-    await (db ?? this.db)
-      .insert(customerEntitlements)
-      .values(
-        items.map((item) => ({
-          id: newId("customer_entitlement"),
-          projectId,
-          customerId,
-          subscriptionId: phaseData.subscriptionId,
-          featurePlanVersionId: item.featurePlanVersionId,
-          subscriptionItemId: item.id,
-          units: item.units,
-          usage: "0",
-          accumulatedUsage: "0",
-          // if there are defined units thats the limit
-          limit: item.units ?? item.featurePlanVersion.limit,
-          subscriptionPhaseId: phaseData.id,
-          validFrom: phaseData.startAt,
-          validTo: phaseData.endAt,
-          resetedAt: Date.now(),
-          active: true,
-          isCustom: false,
-          lastUsageUpdateAt: Date.now(),
-        }))
-      )
-      .catch((e) => {
-        this.logger.error(e.message)
-        throw new UnPriceSubscriptionError({
-          message: `Error while creating customer entitlements: ${e.message}`,
+      if (index === 0) {
+        return true
+      }
+
+      const previousPhaseOriginal = orderedPhases[index - 1]
+      if (!previousPhaseOriginal) {
+        return false
+      }
+
+      let previousPhase = previousPhaseOriginal
+      if (previousPhaseOriginal.id === phase.id) {
+        previousPhase = {
+          ...previousPhaseOriginal,
+          startAt: phase.startAt,
+          endAt: phase.endAt ?? null,
+        } as typeof previousPhaseOriginal
+      }
+
+      return previousPhase.endAt !== null && previousPhase.endAt + 1 === phaseToCheck.startAt
+    })
+
+    if (consecutivePhases.length !== orderedPhases.length) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: "Phases are not consecutive",
         })
-      })
+      )
+    }
 
     return Ok(undefined)
   }
+
   // creating a phase is a 2 step process:
   // 1. validate the input
   // 2. validate the subscription exists
@@ -223,57 +285,20 @@ export class SubscriptionService {
       return Ok(phaseAlreadyInSubscription)
     }
 
-    // order phases by startAt
-    const orderedPhases = subscriptionWithPhases.phases.sort((a, b) => a.startAt - b.startAt)
-
-    // active phase is the one where now is between startAt and endAt or endAt is undefined
-    const activePhase = orderedPhases.find((phase) => {
-      return startAtToUse >= phase.startAt && (phase.endAt ? startAtToUse <= phase.endAt : true)
+    // validate phases
+    const validatePhasesAction = this.validatePhasesAction({
+      phases: subscriptionWithPhases.phases,
+      phase: {
+        id: newId("subscription_phase"),
+        startAt: startAtToUse,
+        endAt: endAtToUse ?? null,
+      },
+      action: "create",
+      now,
     })
 
-    if (activePhase) {
-      return Err(
-        new UnPriceSubscriptionError({
-          message: "There is already an active phase in the same date range",
-        })
-      )
-    }
-
-    // verify phases don't overlap
-    // start date of the new phase is greater than the end date of the phase
-    // end date could be undefined or null which mean the phase is open ended
-    const overlappingPhases = orderedPhases.some((p) => {
-      return startAtToUse <= (p.endAt ?? Number.POSITIVE_INFINITY)
-    })
-
-    if (overlappingPhases) {
-      return Err(
-        new UnPriceSubscriptionError({
-          message: "Phases overlap, there is already a phase in the same range",
-        })
-      )
-    }
-
-    // phase have to be consecutive with one another starting from the end date of the previous phase
-    const consecutivePhases = orderedPhases.every((p, index) => {
-      const previousPhase = orderedPhases[index - 1]
-
-      if (previousPhase) {
-        if (previousPhase.endAt) {
-          // every phase end we add 1 millisecond to the end date
-          return previousPhase.endAt + 1 === p.startAt
-        }
-      }
-
-      return true
-    })
-
-    if (!consecutivePhases) {
-      return Err(
-        new UnPriceSubscriptionError({
-          message: "Phases are not consecutive",
-        })
-      )
+    if (validatePhasesAction.err) {
+      return validatePhasesAction
     }
 
     const versionData = await (db ?? this.db).query.versions.findFirst({
@@ -391,7 +416,13 @@ export class SubscriptionService {
       effectiveEndDate: endAtToUse ?? null,
       trialEndsAt: trialsEndAt,
       now: startAtToUse, // we use the start date to calculate the billing cycle
-      billingConfig: versionData.billingConfig,
+      config: {
+        name: versionData.billingConfig.name,
+        interval: versionData.billingConfig.billingInterval,
+        intervalCount: versionData.billingConfig.billingIntervalCount,
+        planType: versionData.billingConfig.planType,
+        anchor: billingAnchorToUse,
+      },
     })
 
     if (!calculatedBillingCycle) {
@@ -435,24 +466,26 @@ export class SubscriptionService {
       }
 
       // add items to the subscription
-      await Promise.all(
-        // this is important because every item has the configuration of the quantity of a feature in the subscription
-        configItemsSubscription.map((item) =>
-          trx.insert(subscriptionItems).values({
+      await trx
+        .insert(subscriptionItems)
+        .values(
+          configItemsSubscription.map((item) => ({
             id: newId("subscription_item"),
             subscriptionPhaseId: phase.id,
             projectId: projectId,
             featurePlanVersionId: item.featurePlanId,
             units: item.units,
             subscriptionId,
-          })
+          }))
         )
-      ).catch((e) => {
-        this.logger.error(e.message)
-        trx.rollback()
-        throw e
-      })
+        .returning()
+        .catch((e) => {
+          this.logger.error(e.message)
+          trx.rollback()
+          throw e
+        })
 
+      // TODO: can this be inside the subscription machine?
       // update the status of the subscription if the phase is active
       const isActivePhase =
         phase.startAt <= Date.now() && (phase.endAt ?? Number.POSITIVE_INFINITY) >= Date.now()
@@ -471,26 +504,25 @@ export class SubscriptionService {
           .where(and(eq(subscriptions.id, subscriptionId), eq(subscriptions.projectId, projectId)))
       }
 
-      // we create the entitlements for the new phase
-      const createEntitlementsResult = await this.createEntitlementsForPhase({
-        phaseId: phase.id,
-        projectId,
-        customerId: subscriptionWithPhases.customerId,
-        db: trx,
-      })
-
-      if (createEntitlementsResult.err) {
-        this.logger.error(createEntitlementsResult.err.message)
-        trx.rollback()
-        throw createEntitlementsResult.err
-      }
-
       return Ok(phase)
     })
 
     // generate the billing periods for the new phase on background
     // this can fail but background jobs can retry
-    // TODO: generate the billing periods for the new phase on background
+    this.waitUntil(
+      // TODO: report the event to analytics with more context
+      // this.analytics.trackEvent({
+      //   event: "subscription.phase.created",
+      //   properties: {
+      //     subscriptionId,
+      //   },
+      // })
+      this.billingService.generateBillingPeriods({
+        subscriptionId,
+        projectId,
+        now,
+      })
+    )
 
     return result
   }
@@ -507,6 +539,14 @@ export class SubscriptionService {
     // only allow that are not active
     // and are not in the past
     const phase = await this.db.query.subscriptionPhases.findFirst({
+      with: {
+        items: true,
+        subscription: {
+          with: {
+            customer: true,
+          },
+        },
+      },
       where: (phase, { eq, and }) => and(eq(phase.id, phaseId), eq(phase.projectId, projectId)),
     })
 
@@ -545,6 +585,13 @@ export class SubscriptionService {
         )
       }
 
+      // TODO: remove the grants for the customer
+      await this.grantService.deleteGrants({
+        grantIds: phase.items.map((item) => item.id) ?? [],
+        projectId,
+        subjectType: "customer",
+        subjectId: phase.subscription.customerId,
+      })
       return Ok(true)
     })
 
@@ -564,7 +611,7 @@ export class SubscriptionService {
     db?: Database
     now: number
   }): Promise<Result<SubscriptionPhase, UnPriceSubscriptionError | SchemaError>> {
-    const { startAt, endAt, items } = input
+    const { startAt, endAt, items, id: phaseId } = input
 
     let endAtToUse = endAt ?? undefined
 
@@ -580,6 +627,9 @@ export class SubscriptionService {
       with: {
         phases: {
           where: (phase, { gte }) => gte(phase.startAt, startAt),
+          with: {
+            items: true,
+          },
         },
       },
     })
@@ -601,9 +651,9 @@ export class SubscriptionService {
     }
 
     // order phases by startAt
-    const orderedPhases = subscriptionWithPhases.phases.sort((a, b) => a.startAt - b.startAt)
+    const phases = subscriptionWithPhases.phases
 
-    const phaseToUpdate = orderedPhases.find((p) => p.id === input.id)
+    const phaseToUpdate = phases.find((p) => p.id === input.id)
 
     if (!phaseToUpdate) {
       return Err(
@@ -613,63 +663,22 @@ export class SubscriptionService {
       )
     }
 
-    // if this phase is active customer can't change the start date
-    const isActivePhase =
-      phaseToUpdate.startAt <= now && (phaseToUpdate.endAt ?? Number.POSITIVE_INFINITY) >= now
-
-    if (isActivePhase && startAt !== phaseToUpdate.startAt) {
-      return Err(
-        new UnPriceSubscriptionError({
-          message: "The phase is active, you can't change the start date",
-        })
-      )
+    // update the phase with the new dates
+    const phase = {
+      ...phaseToUpdate,
+      startAt,
+      endAt: endAtToUse ?? null,
     }
 
-    // verify phases don't overlap result the phases that overlap
-    const overlappingPhases = orderedPhases.filter((p) => {
-      const startAtPhase = p.startAt
-      const endAtPhase = p.endAt ?? Number.POSITIVE_INFINITY
-
-      return (
-        (startAtPhase < endAtToUse! || startAtPhase === endAtToUse!) &&
-        (endAtPhase > startAt || endAtPhase === startAt)
-      )
+    const validatePhasesAction = this.validatePhasesAction({
+      phases,
+      phase,
+      action: "update",
+      now,
     })
 
-    if (overlappingPhases.length > 0 && overlappingPhases.some((p) => p.id !== phaseToUpdate.id)) {
-      return Err(
-        new UnPriceSubscriptionError({
-          message: "Phases overlap, there is already a phase in the same range",
-        })
-      )
-    }
-
-    // check if the phases are consecutive with one another starting from the end date of the previous phase
-    // the phase that the customer is updating need to be check with the new dates
-    const consecutivePhases = orderedPhases.filter((p, index) => {
-      let phaseToCheck = p
-      if (p.id === phaseToUpdate.id) {
-        phaseToCheck = {
-          ...p,
-          startAt,
-          endAt: endAtToUse ?? null,
-        }
-      }
-
-      if (index === 0) {
-        return true
-      }
-
-      const previousPhase = orderedPhases[index - 1]
-      return previousPhase ? previousPhase.endAt === phaseToCheck.startAt + 1 : false
-    })
-
-    if (consecutivePhases.length !== orderedPhases.length) {
-      return Err(
-        new UnPriceSubscriptionError({
-          message: "Phases are not consecutive",
-        })
-      )
+    if (validatePhasesAction.err) {
+      return validatePhasesAction
     }
 
     // validate the the end date is not less that the end date of the current billing cycle
@@ -703,34 +712,34 @@ export class SubscriptionService {
         )
       }
 
-      // add items to the subscription
-      if (items?.length) {
+      // add items to the subscription if they are different from the current items
+      const itemsFromPhase =
+        subscriptionWithPhases.phases.find((p) => p.id === phaseId)?.items ?? []
+
+      // if the items units are different we need to add them
+      const itemsToChange = items?.filter((item) => {
+        const itemFromPhase = itemsFromPhase.find((i) => i.id === item.id)
+        return itemFromPhase?.units !== item.units
+      })
+
+      if (itemsToChange?.length) {
         const sqlChunksItems: SQL[] = []
-        const sqlChunksEntitlements: SQL[] = []
 
         const ids: string[] = []
         sqlChunksItems.push(sql`(case`)
-        sqlChunksEntitlements.push(sql`(case`)
 
-        for (const item of items) {
+        for (const item of itemsToChange) {
           sqlChunksItems.push(
             item.units === null
               ? sql`when ${subscriptionItems.id} = ${item.id} then NULL`
               : sql`when ${subscriptionItems.id} = ${item.id} then cast(${item.units} as int)`
           )
-          sqlChunksEntitlements.push(
-            item.units === null
-              ? sql`when ${customerEntitlements.subscriptionItemId} = ${item.id} then NULL`
-              : sql`when ${customerEntitlements.subscriptionItemId} = ${item.id} then cast(${item.units} as int)`
-          )
           ids.push(item.id)
         }
 
         sqlChunksItems.push(sql`end)`)
-        sqlChunksEntitlements.push(sql`end)`)
 
         const finalSqlItems: SQL = sql.join(sqlChunksItems, sql.raw(" "))
-        const finalSqlEntitlements: SQL = sql.join(sqlChunksEntitlements, sql.raw(" "))
 
         await (db ?? this.db)
           .update(subscriptionItems)
@@ -746,16 +755,13 @@ export class SubscriptionService {
           })
 
         // update the units for the entitlements
-        await (db ?? this.db)
-          .update(customerEntitlements)
-          .set({ units: finalSqlEntitlements })
-          .where(inArray(customerEntitlements.subscriptionItemId, ids))
-          .catch((e) => {
-            this.logger.error(e.message)
-            throw new UnPriceSubscriptionError({
-              message: `Error while updating customer entitlements: ${e.message}`,
-            })
-          })
+        // await this.computeGrantsForPhase({
+        //   itemsIds: itemsToChange.map((item) => item.id),
+        //   projectId,
+        //   customerId: subscriptionWithPhases.customerId,
+        //   db: trx,
+        //   type: "subscription",
+        // })
       }
 
       return Ok(subscriptionPhase)

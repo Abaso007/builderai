@@ -11,20 +11,12 @@ SCHEMA >
     `featureSlug` LowCardinality(String) `json:$.featureSlug`,
     `customerId` String `json:$.customerId`,
     `latency` Float32 `json:$.latency`,
-    `featurePlanVersionId` String `json:$.featurePlanVersionId`,
     `requestId` String `json:$.requestId`,
     `projectId` String `json:$.projectId`,
-    `entitlementId` String `json:$.entitlementId`,
-    `subscriptionId` Nullable(String) `json:$.subscriptionId`,
-    `subscriptionItemId` Nullable(String) `json:$.subscriptionItemId`,
-    `subscriptionPhaseId` Nullable(String) `json:$.subscriptionPhaseId`,
     `deniedReason` LowCardinality(Nullable(String)) `json:$.deniedReason`,
-    `success` UInt8 `json:$.success`,
+    `allowed` UInt8 `json:$.allowed`,
     `metadata` Map(String, String) `json:$.metadata`
 
 ENGINE MergeTree
 ENGINE_PARTITION_KEY toYYYYMM(fromUnixTimestamp64Milli(timestamp, 'UTC'))
-ENGINE_SORTING_KEY (timestamp, projectId, customerId, featureSlug, entitlementId)
-
-FORWARD_QUERY >
-  SELECT timestamp, createdAt, featureSlug, customerId, latency, featurePlanVersionId, requestId, projectId, entitlementId, subscriptionId, subscriptionItemId, subscriptionPhaseId, deniedReason, defaultValueOfTypeName('UInt8') AS success, metadata
+ENGINE_SORTING_KEY projectId, customerId, featureSlug, timestamp

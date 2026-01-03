@@ -5,7 +5,6 @@ import { jsonContent } from "stoker/openapi/helpers"
 
 import type { z } from "zod"
 import { keyAuth } from "~/auth/key"
-import { UnpriceApiError } from "~/errors/http"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { getProjectFeaturesResponseSchema } from "~/project/interface"
@@ -38,13 +37,6 @@ export const registerGetFeaturesV1 = (app: App) =>
 
     // validate the request
     const key = await keyAuth(c)
-
-    if (!key) {
-      throw new UnpriceApiError({
-        code: "UNAUTHORIZED",
-        message: "Invalid API key",
-      })
-    }
 
     // start a new timer
     startTime(c, "getFeatures")

@@ -102,7 +102,7 @@ export class AxiomLogger implements Logger {
     await this.client.flush()
   }
 
-  public setRequestId(requestId: string): void {
+  public x(requestId: string): void {
     this.requestId = requestId
   }
 }

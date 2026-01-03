@@ -22,7 +22,13 @@ describe("cycles using calculateCycleWindow", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now: startAt,
-      billingConfig,
+      config: {
+        name: billingConfig.name,
+        interval: billingConfig.billingInterval,
+        intervalCount: billingConfig.billingIntervalCount,
+        anchor: billingConfig.billingAnchor,
+        planType: billingConfig.planType,
+      },
     })
     expect(first).not.toBeNull()
     expect(first!.start).toBe(startAt)
@@ -34,7 +40,13 @@ describe("cycles using calculateCycleWindow", () => {
       effectiveEndDate: null,
       trialEndsAt: null,
       now: first!.end,
-      billingConfig,
+      config: {
+        name: billingConfig.name,
+        interval: billingConfig.billingInterval,
+        intervalCount: billingConfig.billingIntervalCount,
+        anchor: billingConfig.billingAnchor,
+        planType: billingConfig.planType,
+      },
     })
 
     expect(second).not.toBeNull()
@@ -52,11 +64,11 @@ describe("cycles using calculateCycleWindow", () => {
       effectiveEndDate: endAt,
       trialEndsAt,
       now: utcDate("2024-01-05", "00:00:00.000"),
-      billingConfig: {
+      config: {
         name: "test",
-        billingInterval: "month",
-        billingIntervalCount: 1,
-        billingAnchor: 15,
+        interval: "month",
+        intervalCount: 1,
+        anchor: 15,
         planType: "recurring",
       },
     })
@@ -78,11 +90,11 @@ describe("calculateCycleWindow (utility coverage)", () => {
       effectiveEndDate: null,
       trialEndsAt: trialEnd,
       now,
-      billingConfig: {
+      config: {
         name: "test",
-        billingInterval: "month",
-        billingIntervalCount: 1,
-        billingAnchor: 1,
+        interval: "month",
+        intervalCount: 1,
+        anchor: 1,
         planType: "recurring",
       },
     })
@@ -99,9 +111,9 @@ describe("calculateNextNCycles sequences", () => {
   function monthlyCfg(anchor: number) {
     return {
       name: "test",
-      billingInterval: "month" as const,
-      billingIntervalCount: 1,
-      billingAnchor: anchor,
+      interval: "month" as const,
+      intervalCount: 1,
+      anchor: anchor,
       planType: "recurring" as const,
     }
   }
@@ -116,7 +128,7 @@ describe("calculateNextNCycles sequences", () => {
       effectiveStartDate: start,
       effectiveEndDate: null,
       trialEndsAt: null,
-      billingConfig: cfg,
+      config: cfg,
       count: 2,
     })
 
@@ -146,7 +158,7 @@ describe("calculateNextNCycles sequences", () => {
       effectiveStartDate: start,
       effectiveEndDate: null,
       trialEndsAt: null,
-      billingConfig: cfg,
+      config: cfg,
       count: 0,
     })
 
@@ -173,7 +185,7 @@ describe("calculateNextNCycles sequences", () => {
       effectiveStartDate: start,
       effectiveEndDate: null,
       trialEndsAt: null,
-      billingConfig: cfg,
+      config: cfg,
       count: 3,
     })
 
@@ -191,7 +203,7 @@ describe("calculateNextNCycles sequences", () => {
       effectiveStartDate: start,
       effectiveEndDate: endAt,
       trialEndsAt: null,
-      billingConfig: cfg,
+      config: cfg,
       count: 5,
     })
 
@@ -224,7 +236,7 @@ describe("calculateNextNCycles sequences", () => {
       effectiveStartDate: start,
       effectiveEndDate: null,
       trialEndsAt: trialEnd,
-      billingConfig: cfg,
+      config: cfg,
       count: 1,
     })
 
@@ -232,6 +244,131 @@ describe("calculateNextNCycles sequences", () => {
       [utc("2024-01-01"), utc("2024-01-07")], // trial
       [utc("2024-01-07"), utc("2024-01-15")], // stub paid until first anchor
       [utc("2024-01-15"), utc("2024-02-15")], // +1 future cycle
+    ]
+
+    expect(windows.length).toBe(expected.length)
+    for (let i = 0; i < expected.length; i++) {
+      const w = windows[i]!
+      expect(w.start).toBe(expected[i]![0])
+      expect(w.end).toBe(expected[i]![1])
+    }
+  })
+})
+
+describe("calculateNextNCycles sequences (minute interval, 5-minute windows)", () => {
+  function cfg5m(anchor: number) {
+    return {
+      name: "test",
+      interval: "minute" as const,
+      intervalCount: 5,
+      anchor: anchor,
+      planType: "recurring" as const,
+    }
+  }
+
+  it("aligns to 5-minute windows and appends count beyond the reference", () => {
+    const day = "2024-01-01"
+    const start = utcDate(day, "10:02:30.000")
+    const reference = utcDate(day, "10:07:00.000")
+
+    const windows = calculateNextNCycles({
+      referenceDate: reference,
+      effectiveStartDate: start,
+      effectiveEndDate: null,
+      trialEndsAt: null,
+      config: cfg5m(0),
+      count: 2,
+    })
+
+    const expected = [
+      [utcDate(day, "10:00:00.000"), utcDate(day, "10:05:00.000")],
+      [utcDate(day, "10:05:00.000"), utcDate(day, "10:10:00.000")],
+      [utcDate(day, "10:10:00.000"), utcDate(day, "10:15:00.000")],
+      [utcDate(day, "10:15:00.000"), utcDate(day, "10:20:00.000")],
+    ]
+
+    expect(windows.length).toBe(expected.length)
+    for (let i = 0; i < expected.length; i++) {
+      const w = windows[i]!
+      expect(w.start).toBe(expected[i]![0])
+      expect(w.end).toBe(expected[i]![1])
+    }
+  })
+
+  it("reference at exact boundary uses next window; count=0", () => {
+    const day = "2024-01-01"
+    const start = utcDate(day, "10:00:00.000")
+    const reference = utcDate(day, "10:05:00.000")
+
+    const windows = calculateNextNCycles({
+      referenceDate: reference,
+      effectiveStartDate: start,
+      effectiveEndDate: null,
+      trialEndsAt: null,
+      config: cfg5m(0),
+      count: 0,
+    })
+
+    const expected = [
+      [utcDate(day, "10:00:00.000"), utcDate(day, "10:05:00.000")],
+      [utcDate(day, "10:05:00.000"), utcDate(day, "10:10:00.000")],
+    ]
+
+    expect(windows.length).toBe(expected.length)
+    for (let i = 0; i < expected.length; i++) {
+      const w = windows[i]!
+      expect(w.start).toBe(expected[i]![0])
+      expect(w.end).toBe(expected[i]![1])
+    }
+  })
+
+  it("caps by effectiveEndDate even when appending count", () => {
+    const day = "2024-01-01"
+    const start = utcDate(day, "10:02:30.000")
+    const reference = utcDate(day, "10:06:00.000")
+    const endAt = utcDate(day, "10:12:00.000")
+
+    const windows = calculateNextNCycles({
+      referenceDate: reference,
+      effectiveStartDate: start,
+      effectiveEndDate: endAt,
+      trialEndsAt: null,
+      config: cfg5m(0),
+      count: 5,
+    })
+
+    const expected = [
+      [utcDate(day, "10:00:00.000"), utcDate(day, "10:05:00.000")],
+      [utcDate(day, "10:05:00.000"), utcDate(day, "10:10:00.000")],
+      [utcDate(day, "10:10:00.000"), endAt],
+    ]
+
+    expect(windows.length).toBe(expected.length)
+    for (let i = 0; i < expected.length; i++) {
+      const w = windows[i]!
+      expect(w.start).toBe(expected[i]![0])
+      expect(w.end).toBe(expected[i]![1])
+    }
+  })
+
+  it("honors second-level anchor inside each 5-minute window", () => {
+    const day = "2024-01-01"
+    const start = utcDate(day, "10:02:45.000")
+    const reference = utcDate(day, "10:07:00.000")
+
+    const windows = calculateNextNCycles({
+      referenceDate: reference,
+      effectiveStartDate: start,
+      effectiveEndDate: null,
+      trialEndsAt: null,
+      config: cfg5m(30),
+      count: 1,
+    })
+
+    const expected = [
+      [utcDate(day, "10:00:30.000"), utcDate(day, "10:05:30.000")],
+      [utcDate(day, "10:05:30.000"), utcDate(day, "10:10:30.000")],
+      [utcDate(day, "10:10:30.000"), utcDate(day, "10:15:30.000")],
     ]
 
     expect(windows.length).toBe(expected.length)

@@ -18,10 +18,12 @@ export function UsageFormFields({
   form,
   currency,
   isDisabled,
+  units,
 }: {
   form: UseFormReturn<PlanVersionFeatureInsert>
   currency: Currency
   isDisabled?: boolean
+  units: string
 }) {
   return (
     <div className="flex flex-col space-y-6">
@@ -36,7 +38,7 @@ export function UsageFormFields({
       <Separator />
 
       <div className="flex w-full justify-between">
-        <LimitFormField form={form} isDisabled={isDisabled} />
+        <LimitFormField form={form} isDisabled={isDisabled} units={units} />
       </div>
 
       <Separator />

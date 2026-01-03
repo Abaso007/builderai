@@ -33,7 +33,8 @@ export function PaymentMethodButton({
   const createSession = useMutation(
     trpc.customers.createPaymentMethod.mutationOptions({
       onSuccess: (data) => {
-        if (data?.url) window.location.href = data?.url
+        // redirect in a new tab to avoid blocking the UI
+        if (data?.url) window.open(data?.url, "_blank")
       },
     })
   )

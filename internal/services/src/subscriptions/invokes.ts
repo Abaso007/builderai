@@ -29,15 +29,6 @@ export async function loadSubscription(payload: {
               plan: true,
             },
           },
-          customerEntitlements: {
-            with: {
-              featurePlanVersion: {
-                with: {
-                  feature: true,
-                },
-              },
-            },
-          },
           items: {
             with: {
               featurePlanVersion: {
@@ -90,11 +81,10 @@ export async function loadSubscription(payload: {
   let resultPhase = null
 
   if (currentPhase) {
-    const { items, customerEntitlements, planVersion, ...phase } = currentPhase
+    const { items, planVersion, ...phase } = currentPhase
     resultPhase = {
       ...phase,
       items: items ?? [],
-      entitlements: customerEntitlements ?? [],
       planVersion: planVersion ?? null,
     }
   }
@@ -132,10 +122,12 @@ export async function renewSubscription(opts: {
     now: context.now,
     trialEndsAt: currentPhase.trialEndsAt,
     effectiveEndDate: currentPhase.endAt ?? null,
-    billingConfig: {
-      ...currentPhase.planVersion.billingConfig,
-      // always align the billing anchor to the phase anchor
-      billingAnchor: currentPhase.billingAnchor,
+    config: {
+      name: currentPhase.planVersion.billingConfig.name,
+      interval: currentPhase.planVersion.billingConfig.billingInterval,
+      intervalCount: currentPhase.planVersion.billingConfig.billingIntervalCount,
+      planType: currentPhase.planVersion.billingConfig.planType,
+      anchor: currentPhase.billingAnchor,
     },
     effectiveStartDate: currentPhase.startAt,
   })
@@ -151,10 +143,12 @@ export async function renewSubscription(opts: {
     now: current.end + 1,
     trialEndsAt: currentPhase.trialEndsAt,
     effectiveEndDate: currentPhase.endAt ?? null,
-    billingConfig: {
-      ...currentPhase.planVersion.billingConfig,
-      // always align the billing anchor to the phase anchor
-      billingAnchor: currentPhase.billingAnchor,
+    config: {
+      name: currentPhase.planVersion.billingConfig.name,
+      interval: currentPhase.planVersion.billingConfig.billingInterval,
+      intervalCount: currentPhase.planVersion.billingConfig.billingIntervalCount,
+      planType: currentPhase.planVersion.billingConfig.planType,
+      anchor: currentPhase.billingAnchor,
     },
     effectiveStartDate: currentPhase.startAt,
   })
@@ -171,7 +165,12 @@ export async function renewSubscription(opts: {
     subscription.currentCycleEndAt === current.end &&
     subscription.renewAt === next.start
   ) {
-    return { subscription }
+    return {
+      subscription,
+      currentCycleStartAt: current.start,
+      currentCycleEndAt: current.end,
+      renewAt: next.start,
+    }
   }
 
   try {
@@ -189,12 +188,6 @@ export async function renewSubscription(opts: {
 
     // // invalidate entitlements data in unprice API and reset the entitlements usage
     // await unprice.customers.resetEntitlements({
-    //   customerId: subscription.customerId,
-    //   projectId: subscription.projectId,
-    // })
-
-    // // prewarm the entitlements cache and the DO
-    // await unprice.customers.prewarmEntitlements({
     //   customerId: subscription.customerId,
     //   projectId: subscription.projectId,
     // })
@@ -223,6 +216,8 @@ export async function renewSubscription(opts: {
 
     return {
       subscription: subscriptionUpdated,
+      currentCycleStartAt: current.start,
+      currentCycleEndAt: current.end,
     }
   } catch (error) {
     logger.error(
@@ -315,7 +310,11 @@ export async function invoiceSubscription({
       with: {
         subscriptionItem: {
           with: {
-            featurePlanVersion: true,
+            featurePlanVersion: {
+              with: {
+                feature: true,
+              },
+            },
           },
         },
       },
@@ -347,8 +346,17 @@ export async function invoiceSubscription({
       try {
         const invoiceAt = periodItemGroup.invoiceAt
         // wait so we can aovid late usage records being flushed from analytics system
-        const waitPeriodAdvance = 1000 * 60 * 15 // 15 minutes
-        const waitPeriodArrear = 1000 * 60 * 60 // 1 hour
+        const waitPeriodAdvance = ["minute"].includes(
+          phase.planVersion.billingConfig.billingInterval
+        )
+          ? 1000 * 60 * 1
+          : 1000 * 60 * 15 // 1 minute for minute interval, 15 minutes for other intervals
+
+        const waitPeriodArrear = ["minute"].includes(
+          phase.planVersion.billingConfig.billingInterval
+        )
+          ? 1000 * 60 * 1
+          : 1000 * 60 * 60 // 1 minute for minute interval, 1 hour for other intervals
 
         // statement date string is the date that is shown on the invoice
         // take the timezone from the subscription
@@ -358,7 +366,7 @@ export async function invoiceSubscription({
         const statementDateString = ["minute"].includes(
           phase.planVersion.billingConfig.billingInterval
         )
-          ? format(date, "MMMM d, yyyy hh:mm")
+          ? format(date, "MMMM d, yyyy hh:mm a")
           : format(date, "MMMM d, yyyy")
 
         // pay in advance have smaller grace period
@@ -402,9 +410,9 @@ export async function invoiceSubscription({
             dueAt: dueAt,
             // all this is calculated in finalizeInvoice
             paidAt: null,
-            subtotal: 0,
+            subtotalCents: 0,
             paymentAttempts: [],
-            total: 0,
+            totalCents: 0,
             amountCreditUsed: 0,
             issueDate: null, // we don't have a issue date yet
             metadata: { note: "Invoiced by scheduler" },
@@ -453,10 +461,21 @@ export async function invoiceSubscription({
         }
 
         const invoiceItemsData = billingPeriodsToInvoice.map((period) => {
-          const prorationFactor =
-            period.type === "trial"
-              ? 0
-              : calculateProration(period.cycleStartAt, period.cycleEndAt, now).prorationFactor
+          const itemBillingConfig = {
+            ...period.subscriptionItem.featurePlanVersion.billingConfig,
+            // ensure numeric anchor alignment to phase anchor
+            billingAnchor: phase.billingAnchor,
+          }
+
+          const proration = calculateProration({
+            serviceStart: period.cycleStartAt,
+            serviceEnd: period.cycleEndAt,
+            effectiveStartDate: phase.startAt,
+            billingConfig: itemBillingConfig,
+          })
+
+          // trial is not billable
+          const prorationFactor = period.type === "trial" ? 0 : proration.prorationFactor
 
           return {
             id: newId("invoice_item"),
@@ -473,7 +492,7 @@ export async function invoiceSubscription({
             amountSubtotal: 0,
             amountTotal: 0,
             prorationFactor: prorationFactor,
-            description: period.type === "trial" ? "Trial" : "Billing period",
+            description: period.subscriptionItem.featurePlanVersion.feature.title,
             itemProviderId: null,
           }
         })

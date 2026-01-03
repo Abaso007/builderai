@@ -31,6 +31,10 @@ export const update = protectedProjectProcedure
       limit,
       billingConfig,
       hidden,
+      resetConfig,
+      type,
+      allowOverage,
+      notifyUsageThreshold,
     } = opts.input
 
     // we purposely don't allow to update the currency and the payment provider
@@ -78,13 +82,19 @@ export const update = protectedProjectProcedure
         }),
         ...(limit !== undefined && { limit: limit === 0 ? null : limit }),
         ...(hidden !== undefined && { hidden }),
-        ...(aggregationMethod && { aggregationMethod }),
+        ...(aggregationMethod !== undefined && {
+          aggregationMethod: featureType === "flat" ? "none" : aggregationMethod,
+        }),
         ...(billingConfigUpdate && {
           billingConfig: {
             ...billingConfigUpdate,
             billingAnchor: planVersionData.billingConfig.billingAnchor,
           },
         }),
+        ...(resetConfig && { resetConfig }),
+        ...(type && { type }),
+        ...(allowOverage !== undefined && { allowOverage }),
+        ...(notifyUsageThreshold !== undefined && { notifyUsageThreshold }),
         updatedAtM: Date.now(),
       })
       .where(

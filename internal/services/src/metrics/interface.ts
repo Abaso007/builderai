@@ -2,6 +2,11 @@ import type { Metric } from "@unprice/metrics"
 
 export interface Metrics {
   /**
+   * setRequestId sets the request id for the metrics
+   */
+  x(value: string): void
+
+  /**
    * Emit stores a new metric event
    */
   emit(metric: Metric): void

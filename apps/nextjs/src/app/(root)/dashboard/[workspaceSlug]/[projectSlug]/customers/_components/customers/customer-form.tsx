@@ -90,6 +90,7 @@ export function CustomerForm({
   const deleteCustomer = useMutation(
     trpc.customers.remove.mutationOptions({
       onSuccess: () => {
+        // TODO: if the form is inside a page, we need to refresh and go back to the previous page
         form.reset()
         router.refresh()
       },

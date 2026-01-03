@@ -1,12 +1,12 @@
 import { createRoute } from "@hono/zod-openapi"
 import { endTime } from "hono/timing"
 import { startTime } from "hono/timing"
+import { verificationResultSchema } from "node_modules/@unprice/db/src/validators/entitlements"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 
 import { z } from "zod"
-import { keyAuth } from "~/auth/key"
-import { canResponseSchema } from "~/entitlement/interface"
+import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { reportUsageEvents } from "~/util/reportUsageEvents"
@@ -55,7 +55,7 @@ export const route = createRoute({
     ),
   },
   responses: {
-    [HttpStatusCodes.OK]: jsonContent(canResponseSchema, "The result of the can check"),
+    [HttpStatusCodes.OK]: jsonContent(verificationResultSchema, "The result of the can check"),
     ...openApiErrorResponses,
   },
 })
@@ -70,7 +70,7 @@ export type CanResponse = z.infer<
 export const registerCanV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customerId, featureSlug, metadata, fromCache } = c.req.valid("json")
-    const { entitlement } = c.get("services")
+    const { usagelimiter } = c.get("services")
     const stats = c.get("stats")
     const requestId = c.get("requestId")
     const performanceStart = c.get("performanceStart")
@@ -79,15 +79,16 @@ export const registerCanV1 = (app: App) =>
     const key = await keyAuth(c)
 
     const canType = fromCache ? "canCache" : "can"
+    const projectId = await resolveContextProjectId(c, key.projectId, customerId)
 
     // start a new timer
     startTime(c, canType)
 
     // validate usage from db
-    const { err, val: result } = await entitlement.can({
+    const { err, val: result } = await usagelimiter.verify({
       customerId,
       featureSlug,
-      projectId: key.projectId,
+      projectId,
       requestId,
       performanceStart,
       fromCache,

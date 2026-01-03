@@ -101,7 +101,7 @@ export class PlanService {
           : freeUnits === 0
             ? planFeature.limit
               ? `Up to ${nFormatter(planFeature.limit)}`
-              : ""
+              : "Starts at 0"
             : nFormatter(freeUnits)
 
       switch (planFeature.featureType) {

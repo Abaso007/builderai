@@ -2,6 +2,7 @@
 
 import type { ColumnDef } from "@tanstack/react-table"
 
+import { formatMoney } from "@unprice/db/utils"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
 import { Checkbox } from "@unprice/ui/checkbox"
@@ -9,9 +10,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { Typography } from "@unprice/ui/typography"
 import { format } from "date-fns"
 import { InfoIcon } from "lucide-react"
-import Link from "next/link"
+import { useParams } from "next/navigation"
 import { DataTableColumnHeader } from "~/components/data-table/data-table-column-header"
-import { formatDate } from "~/lib/dates"
+import { SuperLink } from "~/components/super-link"
 import { DataTableRowActions } from "./data-table-row-actions"
 
 type InvoiceCustomer =
@@ -50,19 +51,30 @@ export const columns: ColumnDef<InvoiceCustomer>[] = [
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Invoice" />,
     cell: ({ row }) => {
+      const { workspaceSlug, projectSlug, customerId } = useParams()
       return (
         <div className="whitespace-nowrap text-sm">
-          <Link
-            href={row.original.invoicePaymentProviderUrl ?? ""}
-            target="_blank"
+          <SuperLink
+            href={`/${workspaceSlug}/${projectSlug}/customers/${customerId}/invoices/${row.original.id}`}
             className="hover:underline"
           >
             {row.original.id}
-          </Link>
+          </SuperLink>
         </div>
       )
     },
     size: 40,
+    filterFn: (row, _, filterValue) => {
+      // search by id
+      const searchValue = filterValue.toLowerCase()
+      const id = row.original.id.toLowerCase()
+
+      if (id.includes(searchValue)) {
+        return true
+      }
+
+      return false
+    },
   },
   {
     accessorKey: "status",
@@ -95,23 +107,29 @@ export const columns: ColumnDef<InvoiceCustomer>[] = [
     header: ({ column }) => <DataTableColumnHeader column={column} title="Amount" />,
     cell: ({ row }) => (
       <Badge>
-        {row.original.total} {row.original.currency}
+        {formatMoney((row.original.totalCents / 100).toString(), row.original.currency)}
       </Badge>
     ),
     size: 20,
   },
   {
-    accessorKey: "createdAtM",
-    header: ({ column }) => <DataTableColumnHeader column={column} title="Created at" />,
+    accessorKey: "startDate",
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Start date" />,
     cell: ({ row }) => (
-      <div className="flex items-center space-x-1 whitespace-nowrap">
-        <Typography variant="p" affects="removePaddingMargin">
-          {formatDate(row.original.createdAtM)}
-        </Typography>
-      </div>
+      <Typography variant="p" affects="removePaddingMargin" className="whitespace-nowrap">
+        {format(new Date(row.original.statementStartAt), "PPpp")}
+      </Typography>
     ),
-    enableSorting: true,
-    enableHiding: true,
+    size: 40,
+  },
+  {
+    accessorKey: "endDate",
+    header: ({ column }) => <DataTableColumnHeader column={column} title="End date" />,
+    cell: ({ row }) => (
+      <Typography variant="p" affects="removePaddingMargin" className="whitespace-nowrap">
+        {format(new Date(row.original.statementEndAt), "PPpp")}
+      </Typography>
+    ),
     size: 40,
   },
   {

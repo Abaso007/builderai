@@ -1,4 +1,15 @@
-import { type Dinero, multiply, toSnapshot, transformScale, up } from "dinero.js"
+import * as currencies from "@dinero.js/currencies"
+import {
+  type Dinero,
+  add,
+  dinero,
+  isZero,
+  multiply,
+  toDecimal,
+  toSnapshot,
+  transformScale,
+  up,
+} from "dinero.js"
 
 export * from "./utils/_table"
 export * from "./utils/aesGcm"
@@ -8,7 +19,7 @@ export * from "./utils/id"
 export * from "./utils/pagination"
 export * from "./utils/nformatter"
 
-export type { Dinero } from "dinero.js"
+export { dinero, type Dinero, currencies, add, toDecimal, isZero }
 
 import { generateSlug } from "random-word-slugs"
 import type { Currency } from "./validators"
@@ -29,7 +40,8 @@ export const currencySymbol = (curr: string) =>
   })[curr] ?? curr
 
 export const isSlug = (str?: string) => {
-  return /^[a-z0-9-]+-[a-z0-9-]+$/.test(str ?? "")
+  // slug are always two words separated by a dash
+  return str?.split("-").length === 2
 }
 
 export const slugify = (str: string, forDisplayingInput?: boolean) => {
@@ -58,7 +70,7 @@ export const slugify = (str: string, forDisplayingInput?: boolean) => {
 }
 
 // return the price to stripe money format cents
-export function toStripeMoney(price: Dinero<number>) {
+export function formatAmountDinero(price: Dinero<number>) {
   const { currency } = toSnapshot(price)
 
   // we need to return the amount in cents rounded up to the nearest cent

@@ -32,8 +32,8 @@ export interface paths {
       cookie?: never
     }
     /**
-     * get entitlements
-     * @description Get entitlements for a customer
+     * get minimal entitlements
+     * @description Get minimal entitlements for a customer
      */
     get: operations["customer.getEntitlements"]
     put?: never
@@ -58,26 +58,6 @@ export interface paths {
      * @description Check if a customer can use a feature
      */
     post: operations["customer.can"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/customer/reset-entitlements": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * reset entitlements
-     * @description Reset entitlements for a customer
-     */
-    post: operations["customer.resetEntitlements"]
     delete?: never
     options?: never
     head?: never
@@ -184,7 +164,7 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  "/v1/customer/revalidate-entitlement": {
+  "/v1/customer/resetEntitlements": {
     parameters: {
       query?: never
       header?: never
@@ -194,30 +174,10 @@ export interface paths {
     get?: never
     put?: never
     /**
-     * revalidate entitlement
-     * @description Revalidate entitlement for a customer
+     * reset entitlements
+     * @description Reset entitlements for a customer
      */
-    post: operations["customer.revalidateEntitlement"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/customer/prewarm-entitlements": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * prewarm entitlements
-     * @description Prewarm entitlements for a customer
-     */
-    post: operations["customer.prewarmEntitlements"]
+    post: operations["customer.resetEntitlements"]
     delete?: never
     options?: never
     head?: never
@@ -794,10 +754,63 @@ export interface operations {
         }
         content: {
           "application/json": {
-            success: boolean
+            allowed: boolean
             message?: string
-            cacheHit?: boolean
+            limit?: number
+            usage?: number
+            notifiedOverLimit?: boolean
             remaining?: number
+            /** @enum {string} */
+            deniedReason?:
+              | "INVALID_USAGE"
+              | "ERROR_SYNCING_ENTITLEMENTS_LAST_USAGE"
+              | "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE"
+              | "ENTITLEMENT_OUTSIDE_OF_CURRENT_BILLING_WINDOW"
+              | "ERROR_RESETTING_DO"
+              | "RATE_LIMITED"
+              | "ENTITLEMENT_NOT_FOUND"
+              | "LIMIT_EXCEEDED"
+              | "ENTITLEMENT_EXPIRED"
+              | "ENTITLEMENT_NOT_ACTIVE"
+              | "DO_NOT_INITIALIZED"
+              | "INCORRECT_USAGE_REPORTING"
+              | "ERROR_INSERTING_USAGE_DO"
+              | "ERROR_INSERTING_VERIFICATION_DO"
+              | "PROJECT_DISABLED"
+              | "CUSTOMER_DISABLED"
+              | "SUBSCRIPTION_DISABLED"
+              | "FETCH_ERROR"
+              | "SUBSCRIPTION_ERROR"
+              | "ENTITLEMENT_ERROR"
+              | "SUBSCRIPTION_EXPIRED"
+              | "NO_DEFAULT_PLAN_FOUND"
+              | "SUBSCRIPTION_NOT_ACTIVE"
+              | "PHASE_NOT_CREATED"
+              | "FEATURE_NOT_FOUND_IN_SUBSCRIPTION"
+              | "CUSTOMER_NOT_FOUND"
+              | "CUSTOMER_ENTITLEMENTS_NOT_FOUND"
+              | "FEATURE_TYPE_NOT_SUPPORTED"
+              | "PROJECT_DISABLED"
+              | "CUSTOMER_DISABLED"
+              | "PLAN_VERSION_NOT_PUBLISHED"
+              | "PLAN_VERSION_NOT_ACTIVE"
+              | "PAYMENT_PROVIDER_CONFIG_NOT_FOUND"
+              | "ENTITLEMENT_EXPIRED"
+              | "ENTITLEMENT_NOT_ACTIVE"
+              | "CUSTOMER_SESSION_NOT_CREATED"
+              | "CUSTOMER_SESSION_NOT_FOUND"
+              | "PLAN_VERSION_NOT_FOUND"
+              | "PAYMENT_PROVIDER_ERROR"
+              | "SUBSCRIPTION_NOT_CREATED"
+              | "CUSTOMER_NOT_CREATED"
+              | "SUBSCRIPTION_NOT_CANCELED"
+              | "CUSTOMER_PHASE_NOT_FOUND"
+              | "CURRENCY_MISMATCH"
+              | "BILLING_INTERVAL_MISMATCH"
+              | "ENTITLEMENT_NOT_FOUND"
+              | "SUBSCRIPTION_NOT_FOUND"
+              | "INVALID_ENTITLEMENT_TYPE"
+              | "NO_ACTIVE_PHASE_FOUND"
           }
         }
       }
@@ -886,77 +899,18 @@ export interface operations {
     }
     requestBody?: never
     responses: {
-      /** @description The result of the delete customer */
+      /** @description The result of the get minimal entitlements */
       200: {
         headers: {
           [name: string]: unknown
         }
         content: {
           "application/json": {
-            entitlements: {
-              id: string
-              projectId: string
-              createdAtM: number
-              updatedAtM: number
-              customerId: string
-              subscriptionId: string
-              featurePlanVersionId: string
-              subscriptionPhaseId: string
-              subscriptionItemId: string | null
-              limit: number | null
-              units: number | null
-              currentCycleUsage: string
-              accumulatedUsage: string
-              realtime: boolean
-              resetedAt: number
-              active: boolean
-              isCustom: boolean
-              lastUsageUpdateAt: number
-              metadata: {
-                [key: string]: (string | number | boolean | unknown | unknown) | undefined
-              } | null
-              /** @enum {string} */
-              featureType: "flat" | "tier" | "package" | "usage"
-              /** @enum {string} */
-              aggregationMethod:
-                | "sum"
-                | "sum_all"
-                | "last_during_period"
-                | "count"
-                | "count_all"
-                | "max"
-                | "max_all"
-              featureSlug: string
-              project: {
-                enabled: boolean
-              }
-              customer: {
-                active: boolean
-              }
-              subscription: {
-                active: boolean
-                currentCycleStartAt: number
-                currentCycleEndAt: number
-              }
-              activePhase: {
-                startAt: number
-                endAt: number | null
-                billingAnchor: number
-                /** @default 0 */
-                trialUnits: number | null
-                trialEndsAt: number | null
-                billingConfig: {
-                  name: string
-                  /** @enum {string} */
-                  billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
-                  billingIntervalCount: number
-                  billingAnchor: number | "dayOfCreation"
-                  /** @enum {string} */
-                  planType: "recurring" | "onetime"
-                }
-              }
-            }[]
-          }
+            id: string
+            featureSlug: string
+            effectiveAt: number
+            expiresAt: number | null
+          }[]
         }
       }
       /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
@@ -1081,10 +1035,11 @@ export interface operations {
         }
         content: {
           "application/json": {
-            success: boolean
+            allowed: boolean
             message?: string
             /** @enum {string} */
             deniedReason?:
+              | "INVALID_USAGE"
               | "ERROR_SYNCING_ENTITLEMENTS_LAST_USAGE"
               | "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE"
               | "ENTITLEMENT_OUTSIDE_OF_CURRENT_BILLING_WINDOW"
@@ -1132,123 +1087,12 @@ export interface operations {
               | "ENTITLEMENT_NOT_FOUND"
               | "SUBSCRIPTION_NOT_FOUND"
               | "INVALID_ENTITLEMENT_TYPE"
+              | "NO_ACTIVE_PHASE_FOUND"
             cacheHit?: boolean
             remaining?: number
             limit?: number
             usage?: number
             latency?: number
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "customer.resetEntitlements": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description The customer ID */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The customer ID
-           * @example cus_1H7KQFLr7RepUyQBKdnvY
-           */
-          customerId: string
-          /**
-           * @description The project ID
-           * @example proj_1H7KQFLr7RepUyQBKdnvY
-           */
-          projectId: string
-        }
-      }
-    }
-    responses: {
-      /** @description The result of the reset entitlements */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            success: boolean
-            message?: string
-            slugs?: string[]
           }
         }
       }
@@ -1500,326 +1344,6 @@ export interface operations {
                 paymentMethodRequired: boolean
                 version: number
               }
-              customerEntitlements: {
-                id: string
-                projectId: string
-                createdAtM: number
-                updatedAtM: number
-                customerId: string
-                subscriptionId: string
-                featurePlanVersionId: string
-                subscriptionPhaseId: string
-                subscriptionItemId: string | null
-                limit: number | null
-                units: number | null
-                currentCycleUsage: string
-                accumulatedUsage: string
-                realtime: boolean
-                resetedAt: number
-                active: boolean
-                isCustom: boolean
-                lastUsageUpdateAt: number
-                metadata: {
-                  [key: string]: (string | number | boolean | unknown | unknown) | undefined
-                } | null
-                featurePlanVersion: {
-                  id: string
-                  projectId: string
-                  createdAtM: number
-                  updatedAtM: number
-                  planVersionId: string
-                  featureId: string
-                  /** @enum {string} */
-                  featureType: "flat" | "tier" | "package" | "usage"
-                  config:
-                    | {
-                        tiers?: {
-                          unitPrice: {
-                            dinero: {
-                              /** @description The amount of the dinero object */
-                              amount: number
-                              currency: {
-                                /** @description The currency code of the dinero object */
-                                code: string
-                                /** @description The base of the dinero object */
-                                base: number | number[]
-                                /** @description The exponent of the dinero object */
-                                exponent: number
-                              }
-                              /** @description The scale of the dinero object */
-                              scale: number
-                            }
-                            displayAmount: string
-                          }
-                          flatPrice: {
-                            dinero: {
-                              /** @description The amount of the dinero object */
-                              amount: number
-                              currency: {
-                                /** @description The currency code of the dinero object */
-                                code: string
-                                /** @description The base of the dinero object */
-                                base: number | number[]
-                                /** @description The exponent of the dinero object */
-                                exponent: number
-                              }
-                              /** @description The scale of the dinero object */
-                              scale: number
-                            }
-                            displayAmount: string
-                          }
-                          firstUnit: number
-                          lastUnit: number | null
-                        }[]
-                        price: {
-                          dinero: {
-                            /** @description The amount of the dinero object */
-                            amount: number
-                            currency: {
-                              /** @description The currency code of the dinero object */
-                              code: string
-                              /** @description The base of the dinero object */
-                              base: number | number[]
-                              /** @description The exponent of the dinero object */
-                              exponent: number
-                            }
-                            /** @description The scale of the dinero object */
-                            scale: number
-                          }
-                          displayAmount: string
-                        }
-                        /** @enum {string} */
-                        usageMode?: "tier" | "package" | "unit"
-                        /** @enum {string} */
-                        tierMode?: "volume" | "graduated"
-                        units?: number
-                      }
-                    | {
-                        price?: {
-                          dinero: {
-                            /** @description The amount of the dinero object */
-                            amount: number
-                            currency: {
-                              /** @description The currency code of the dinero object */
-                              code: string
-                              /** @description The base of the dinero object */
-                              base: number | number[]
-                              /** @description The exponent of the dinero object */
-                              exponent: number
-                            }
-                            /** @description The scale of the dinero object */
-                            scale: number
-                          }
-                          displayAmount: string
-                        }
-                        /** @enum {string} */
-                        tierMode: "volume" | "graduated"
-                        tiers: {
-                          unitPrice: {
-                            dinero: {
-                              /** @description The amount of the dinero object */
-                              amount: number
-                              currency: {
-                                /** @description The currency code of the dinero object */
-                                code: string
-                                /** @description The base of the dinero object */
-                                base: number | number[]
-                                /** @description The exponent of the dinero object */
-                                exponent: number
-                              }
-                              /** @description The scale of the dinero object */
-                              scale: number
-                            }
-                            displayAmount: string
-                          }
-                          flatPrice: {
-                            dinero: {
-                              /** @description The amount of the dinero object */
-                              amount: number
-                              currency: {
-                                /** @description The currency code of the dinero object */
-                                code: string
-                                /** @description The base of the dinero object */
-                                base: number | number[]
-                                /** @description The exponent of the dinero object */
-                                exponent: number
-                              }
-                              /** @description The scale of the dinero object */
-                              scale: number
-                            }
-                            displayAmount: string
-                          }
-                          firstUnit: number
-                          lastUnit: number | null
-                        }[]
-                        /** @enum {string} */
-                        usageMode?: "tier" | "package" | "unit"
-                        units?: number
-                      }
-                    | {
-                        price?: {
-                          dinero: {
-                            /** @description The amount of the dinero object */
-                            amount: number
-                            currency: {
-                              /** @description The currency code of the dinero object */
-                              code: string
-                              /** @description The base of the dinero object */
-                              base: number | number[]
-                              /** @description The exponent of the dinero object */
-                              exponent: number
-                            }
-                            /** @description The scale of the dinero object */
-                            scale: number
-                          }
-                          displayAmount: string
-                        }
-                        /** @enum {string} */
-                        usageMode: "tier" | "package" | "unit"
-                        /** @enum {string} */
-                        tierMode?: "volume" | "graduated"
-                        tiers?: {
-                          unitPrice: {
-                            dinero: {
-                              /** @description The amount of the dinero object */
-                              amount: number
-                              currency: {
-                                /** @description The currency code of the dinero object */
-                                code: string
-                                /** @description The base of the dinero object */
-                                base: number | number[]
-                                /** @description The exponent of the dinero object */
-                                exponent: number
-                              }
-                              /** @description The scale of the dinero object */
-                              scale: number
-                            }
-                            displayAmount: string
-                          }
-                          flatPrice: {
-                            dinero: {
-                              /** @description The amount of the dinero object */
-                              amount: number
-                              currency: {
-                                /** @description The currency code of the dinero object */
-                                code: string
-                                /** @description The base of the dinero object */
-                                base: number | number[]
-                                /** @description The exponent of the dinero object */
-                                exponent: number
-                              }
-                              /** @description The scale of the dinero object */
-                              scale: number
-                            }
-                            displayAmount: string
-                          }
-                          firstUnit: number
-                          lastUnit: number | null
-                        }[]
-                        units?: number
-                      }
-                    | {
-                        tiers?: {
-                          unitPrice: {
-                            dinero: {
-                              /** @description The amount of the dinero object */
-                              amount: number
-                              currency: {
-                                /** @description The currency code of the dinero object */
-                                code: string
-                                /** @description The base of the dinero object */
-                                base: number | number[]
-                                /** @description The exponent of the dinero object */
-                                exponent: number
-                              }
-                              /** @description The scale of the dinero object */
-                              scale: number
-                            }
-                            displayAmount: string
-                          }
-                          flatPrice: {
-                            dinero: {
-                              /** @description The amount of the dinero object */
-                              amount: number
-                              currency: {
-                                /** @description The currency code of the dinero object */
-                                code: string
-                                /** @description The base of the dinero object */
-                                base: number | number[]
-                                /** @description The exponent of the dinero object */
-                                exponent: number
-                              }
-                              /** @description The scale of the dinero object */
-                              scale: number
-                            }
-                            displayAmount: string
-                          }
-                          firstUnit: number
-                          lastUnit: number | null
-                        }[]
-                        price: {
-                          dinero: {
-                            /** @description The amount of the dinero object */
-                            amount: number
-                            currency: {
-                              /** @description The currency code of the dinero object */
-                              code: string
-                              /** @description The base of the dinero object */
-                              base: number | number[]
-                              /** @description The exponent of the dinero object */
-                              exponent: number
-                            }
-                            /** @description The scale of the dinero object */
-                            scale: number
-                          }
-                          displayAmount: string
-                        }
-                        /** @enum {string} */
-                        usageMode?: "tier" | "package" | "unit"
-                        /** @enum {string} */
-                        tierMode?: "volume" | "graduated"
-                        /** @description Units for the package */
-                        units: number
-                      }
-                  billingConfig: {
-                    name: string
-                    /** @enum {string} */
-                    billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
-                    billingIntervalCount: number
-                    billingAnchor: number | "dayOfCreation"
-                    /** @enum {string} */
-                    planType: "recurring" | "onetime"
-                  }
-                  metadata: {
-                    stripeProductId?: string
-                    realtime?: boolean
-                  } | null
-                  /** @enum {string} */
-                  aggregationMethod:
-                    | "sum"
-                    | "sum_all"
-                    | "last_during_period"
-                    | "count"
-                    | "count_all"
-                    | "max"
-                    | "max_all"
-                  order: number
-                  /** @default 1 */
-                  defaultQuantity: number | null
-                  limit?: number | null
-                  hidden: boolean
-                  feature: {
-                    id: string
-                    projectId: string
-                    createdAtM: number
-                    updatedAtM: number
-                    slug: string
-                    code: number
-                    title: string
-                    description: string | null
-                  }
-                }
-              }[]
             }
           }
         }
@@ -1916,346 +1440,108 @@ export interface operations {
         }
         content: {
           "application/json": {
-            planVersion: {
-              description: string
-              flatPrice: string
-              currentTotalPrice: string
-              billingConfig: {
-                name: string
-                /** @enum {string} */
-                billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
-                billingIntervalCount: number
-                billingAnchor: number | "dayOfCreation"
-                /** @enum {string} */
-                planType: "recurring" | "onetime"
-              }
-            }
-            subscription: {
-              planSlug: string
-              /** @enum {string} */
-              status: "active" | "trialing" | "canceled" | "expired" | "past_due"
-              currentCycleEndAt: number
-              timezone: string
-              currentCycleStartAt: number
-              prorationFactor: number
-              prorated: boolean
-            }
-            phase: {
-              trialEndsAt: number | null
-              endAt: number | null
-              trialUnits: number
-              isTrial: boolean
-            }
-            entitlement: {
-              featureSlug: string
-              /** @enum {string} */
-              featureType: "flat" | "tier" | "package" | "usage"
-              isCustom: boolean
-              limit: number | null
-              usage: number
-              freeUnits: number
-              max: number | null
-              units: number | null
-              included: number
-              featureVersion: {
-                id: string
-                projectId: string
-                createdAtM: number
-                updatedAtM: number
-                planVersionId: string
-                featureId: string
-                /** @enum {string} */
-                featureType: "flat" | "tier" | "package" | "usage"
-                config:
-                  | {
-                      tiers?: {
-                        unitPrice: {
-                          dinero: {
-                            /** @description The amount of the dinero object */
-                            amount: number
-                            currency: {
-                              /** @description The currency code of the dinero object */
-                              code: string
-                              /** @description The base of the dinero object */
-                              base: number | number[]
-                              /** @description The exponent of the dinero object */
-                              exponent: number
-                            }
-                            /** @description The scale of the dinero object */
-                            scale: number
-                          }
-                          displayAmount: string
-                        }
-                        flatPrice: {
-                          dinero: {
-                            /** @description The amount of the dinero object */
-                            amount: number
-                            currency: {
-                              /** @description The currency code of the dinero object */
-                              code: string
-                              /** @description The base of the dinero object */
-                              base: number | number[]
-                              /** @description The exponent of the dinero object */
-                              exponent: number
-                            }
-                            /** @description The scale of the dinero object */
-                            scale: number
-                          }
-                          displayAmount: string
-                        }
-                        firstUnit: number
-                        lastUnit: number | null
-                      }[]
-                      price: {
-                        dinero: {
-                          /** @description The amount of the dinero object */
-                          amount: number
-                          currency: {
-                            /** @description The currency code of the dinero object */
-                            code: string
-                            /** @description The base of the dinero object */
-                            base: number | number[]
-                            /** @description The exponent of the dinero object */
-                            exponent: number
-                          }
-                          /** @description The scale of the dinero object */
-                          scale: number
-                        }
-                        displayAmount: string
-                      }
-                      /** @enum {string} */
-                      usageMode?: "tier" | "package" | "unit"
-                      /** @enum {string} */
-                      tierMode?: "volume" | "graduated"
-                      units?: number
+            planName: string
+            planDescription?: string
+            billingPeriod: string
+            billingPeriodLabel: string
+            currency: string
+            renewalDate?: string
+            daysRemaining?: number
+            groups: {
+              id: string
+              name: string
+              featureCount: number
+              features: (
+                | {
+                    id: string
+                    name: string
+                    description?: string
+                    /** @enum {string} */
+                    type: "flat"
+                    typeLabel: string
+                    currency: string
+                    price: string
+                    enabled: boolean
+                    billing: {
+                      billingFrequencyLabel: string
+                      resetFrequencyLabel: string
                     }
-                  | {
-                      price?: {
-                        dinero: {
-                          /** @description The amount of the dinero object */
-                          amount: number
-                          currency: {
-                            /** @description The currency code of the dinero object */
-                            code: string
-                            /** @description The base of the dinero object */
-                            base: number | number[]
-                            /** @description The exponent of the dinero object */
-                            exponent: number
-                          }
-                          /** @description The scale of the dinero object */
-                          scale: number
-                        }
-                        displayAmount: string
-                      }
-                      /** @enum {string} */
-                      tierMode: "volume" | "graduated"
+                  }
+                | {
+                    id: string
+                    name: string
+                    description?: string
+                    /** @enum {string} */
+                    type: "tiered"
+                    typeLabel: string
+                    currency: string
+                    price: string
+                    billing: {
+                      billingFrequencyLabel: string
+                      resetFrequencyLabel: string
+                    }
+                    tieredDisplay: {
+                      currentUsage: number
+                      billableUsage: number
+                      unit: string
+                      freeAmount: number
                       tiers: {
-                        unitPrice: {
-                          dinero: {
-                            /** @description The amount of the dinero object */
-                            amount: number
-                            currency: {
-                              /** @description The currency code of the dinero object */
-                              code: string
-                              /** @description The base of the dinero object */
-                              base: number | number[]
-                              /** @description The exponent of the dinero object */
-                              exponent: number
-                            }
-                            /** @description The scale of the dinero object */
-                            scale: number
-                          }
-                          displayAmount: string
-                        }
-                        flatPrice: {
-                          dinero: {
-                            /** @description The amount of the dinero object */
-                            amount: number
-                            currency: {
-                              /** @description The currency code of the dinero object */
-                              code: string
-                              /** @description The base of the dinero object */
-                              base: number | number[]
-                              /** @description The exponent of the dinero object */
-                              exponent: number
-                            }
-                            /** @description The scale of the dinero object */
-                            scale: number
-                          }
-                          displayAmount: string
-                        }
-                        firstUnit: number
-                        lastUnit: number | null
+                        min: number
+                        max: number | null
+                        pricePerUnit: number
+                        label?: string
+                        isActive: boolean
                       }[]
-                      /** @enum {string} */
-                      usageMode?: "tier" | "package" | "unit"
-                      units?: number
+                      currentTierLabel?: string
                     }
-                  | {
-                      price?: {
-                        dinero: {
-                          /** @description The amount of the dinero object */
-                          amount: number
-                          currency: {
-                            /** @description The currency code of the dinero object */
-                            code: string
-                            /** @description The base of the dinero object */
-                            base: number | number[]
-                            /** @description The exponent of the dinero object */
-                            exponent: number
-                          }
-                          /** @description The scale of the dinero object */
-                          scale: number
-                        }
-                        displayAmount: string
-                      }
-                      /** @enum {string} */
-                      usageMode: "tier" | "package" | "unit"
-                      /** @enum {string} */
-                      tierMode?: "volume" | "graduated"
-                      tiers?: {
-                        unitPrice: {
-                          dinero: {
-                            /** @description The amount of the dinero object */
-                            amount: number
-                            currency: {
-                              /** @description The currency code of the dinero object */
-                              code: string
-                              /** @description The base of the dinero object */
-                              base: number | number[]
-                              /** @description The exponent of the dinero object */
-                              exponent: number
-                            }
-                            /** @description The scale of the dinero object */
-                            scale: number
-                          }
-                          displayAmount: string
-                        }
-                        flatPrice: {
-                          dinero: {
-                            /** @description The amount of the dinero object */
-                            amount: number
-                            currency: {
-                              /** @description The currency code of the dinero object */
-                              code: string
-                              /** @description The base of the dinero object */
-                              base: number | number[]
-                              /** @description The exponent of the dinero object */
-                              exponent: number
-                            }
-                            /** @description The scale of the dinero object */
-                            scale: number
-                          }
-                          displayAmount: string
-                        }
-                        firstUnit: number
-                        lastUnit: number | null
-                      }[]
-                      units?: number
+                  }
+                | {
+                    id: string
+                    name: string
+                    description?: string
+                    /** @enum {string} */
+                    type: "usage"
+                    typeLabel: string
+                    currency: string
+                    price: string
+                    billing: {
+                      billingFrequencyLabel: string
+                      resetFrequencyLabel: string
                     }
-                  | {
-                      tiers?: {
-                        unitPrice: {
-                          dinero: {
-                            /** @description The amount of the dinero object */
-                            amount: number
-                            currency: {
-                              /** @description The currency code of the dinero object */
-                              code: string
-                              /** @description The base of the dinero object */
-                              base: number | number[]
-                              /** @description The exponent of the dinero object */
-                              exponent: number
-                            }
-                            /** @description The scale of the dinero object */
-                            scale: number
-                          }
-                          displayAmount: string
-                        }
-                        flatPrice: {
-                          dinero: {
-                            /** @description The amount of the dinero object */
-                            amount: number
-                            currency: {
-                              /** @description The currency code of the dinero object */
-                              code: string
-                              /** @description The base of the dinero object */
-                              base: number | number[]
-                              /** @description The exponent of the dinero object */
-                              exponent: number
-                            }
-                            /** @description The scale of the dinero object */
-                            scale: number
-                          }
-                          displayAmount: string
-                        }
-                        firstUnit: number
-                        lastUnit: number | null
-                      }[]
-                      price: {
-                        dinero: {
-                          /** @description The amount of the dinero object */
-                          amount: number
-                          currency: {
-                            /** @description The currency code of the dinero object */
-                            code: string
-                            /** @description The base of the dinero object */
-                            base: number | number[]
-                            /** @description The exponent of the dinero object */
-                            exponent: number
-                          }
-                          /** @description The scale of the dinero object */
-                          scale: number
-                        }
-                        displayAmount: string
-                      }
+                    usageBar: {
+                      current: number
+                      included: number
+                      limit?: number
                       /** @enum {string} */
-                      usageMode?: "tier" | "package" | "unit"
-                      /** @enum {string} */
-                      tierMode?: "volume" | "graduated"
-                      /** @description Units for the package */
-                      units: number
+                      limitType: "hard" | "soft" | "none"
+                      unit: string
+                      notifyThreshold?: number
+                      allowOverage: boolean
                     }
-                billingConfig: {
-                  name: string
-                  /** @enum {string} */
-                  billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
-                  billingIntervalCount: number
-                  billingAnchor: number | "dayOfCreation"
-                  /** @enum {string} */
-                  planType: "recurring" | "onetime"
-                }
-                metadata: {
-                  stripeProductId?: string
-                  realtime?: boolean
-                } | null
-                /** @enum {string} */
-                aggregationMethod:
-                  | "sum"
-                  | "sum_all"
-                  | "last_during_period"
-                  | "count"
-                  | "count_all"
-                  | "max"
-                  | "max_all"
-                order: number
-                /** @default 1 */
-                defaultQuantity: number | null
-                limit?: number | null
-                hidden: boolean
-                feature: {
-                  id: string
-                  projectId: string
-                  createdAtM: number
-                  updatedAtM: number
-                  slug: string
-                  code: number
-                  title: string
-                  description: string | null
-                }
-              }
-              price: string | null
+                  }
+                | {
+                    id: string
+                    name: string
+                    description?: string
+                    /** @enum {string} */
+                    type: "package"
+                    typeLabel: string
+                    currency: string
+                    price: string
+                    billing: {
+                      billingFrequencyLabel: string
+                      resetFrequencyLabel: string
+                    }
+                  }
+              )[]
             }[]
+            priceSummary: {
+              totalPrice: string
+              flatTotal: string
+              tieredTotal: string
+              packageTotal: string
+              usageTotal: string
+            }
           }
         }
       }
@@ -2817,181 +2103,7 @@ export interface operations {
       }
     }
   }
-  "customer.revalidateEntitlement": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description The customer ID and feature slug to revalidate */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The customer ID
-           * @example cus_1H7KQFLr7RepUyQBKdnvY
-           */
-          customerId: string
-          /**
-           * @description The feature slug
-           * @example tokens
-           */
-          featureSlug: string
-        }
-      }
-    }
-    responses: {
-      /** @description The result of the revalidate entitlement */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            success: boolean
-            message?: string
-            entitlement?: {
-              id: string
-              projectId: string
-              createdAtM: number
-              updatedAtM: number
-              customerId: string
-              subscriptionId: string
-              featurePlanVersionId: string
-              subscriptionPhaseId: string
-              subscriptionItemId: string | null
-              limit: number | null
-              units: number | null
-              currentCycleUsage: string
-              accumulatedUsage: string
-              realtime: boolean
-              resetedAt: number
-              active: boolean
-              isCustom: boolean
-              lastUsageUpdateAt: number
-              metadata: {
-                [key: string]: (string | number | boolean | unknown | unknown) | undefined
-              } | null
-              /** @enum {string} */
-              featureType: "flat" | "tier" | "package" | "usage"
-              /** @enum {string} */
-              aggregationMethod:
-                | "sum"
-                | "sum_all"
-                | "last_during_period"
-                | "count"
-                | "count_all"
-                | "max"
-                | "max_all"
-              featureSlug: string
-              project: {
-                enabled: boolean
-              }
-              customer: {
-                active: boolean
-              }
-              subscription: {
-                active: boolean
-                currentCycleStartAt: number
-                currentCycleEndAt: number
-              }
-              activePhase: {
-                startAt: number
-                endAt: number | null
-                billingAnchor: number
-                /** @default 0 */
-                trialUnits: number | null
-                trialEndsAt: number | null
-                billingConfig: {
-                  name: string
-                  /** @enum {string} */
-                  billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
-                  billingIntervalCount: number
-                  billingAnchor: number | "dayOfCreation"
-                  /** @enum {string} */
-                  planType: "recurring" | "onetime"
-                }
-              }
-            }
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "customer.prewarmEntitlements": {
+  "customer.resetEntitlements": {
     parameters: {
       query?: never
       header?: never
@@ -3016,7 +2128,7 @@ export interface operations {
       }
     }
     responses: {
-      /** @description The result of the prewarm entitlements */
+      /** @description The result of the reset entitlements */
       200: {
         headers: {
           [name: string]: unknown
@@ -3024,8 +2136,6 @@ export interface operations {
         content: {
           "application/json": {
             success: boolean
-            message?: string
-            slugs?: string[]
           }
         }
       }
@@ -3124,6 +2234,7 @@ export interface operations {
               projectId: string
               slug: string
               code: number
+              unit: string
               title: string
               description: string | null
             }[]
@@ -3289,6 +2400,8 @@ export interface operations {
                 createdAtM: number
                 updatedAtM: number
                 planVersionId: string
+                /** @enum {string} */
+                type: "feature" | "addon"
                 featureId: string
                 /** @enum {string} */
                 featureType: "flat" | "tier" | "package" | "usage"
@@ -3331,6 +2444,7 @@ export interface operations {
                         }
                         firstUnit: number
                         lastUnit: number | null
+                        label?: string
                       }[]
                       price: {
                         dinero: {
@@ -3412,6 +2526,7 @@ export interface operations {
                         }
                         firstUnit: number
                         lastUnit: number | null
+                        label?: string
                       }[]
                       /** @enum {string} */
                       usageMode?: "tier" | "package" | "unit"
@@ -3476,6 +2591,7 @@ export interface operations {
                         }
                         firstUnit: number
                         lastUnit: number | null
+                        label?: string
                       }[]
                       units?: number
                     }
@@ -3517,6 +2633,7 @@ export interface operations {
                         }
                         firstUnit: number
                         lastUnit: number | null
+                        label?: string
                       }[]
                       price: {
                         dinero: {
@@ -3551,12 +2668,22 @@ export interface operations {
                   /** @enum {string} */
                   planType: "recurring" | "onetime"
                 }
+                resetConfig: {
+                  name: string
+                  /** @enum {string} */
+                  resetInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
+                  resetIntervalCount: number
+                  resetAnchor: number | "dayOfCreation"
+                  /** @enum {string} */
+                  planType: "recurring" | "onetime"
+                } | null
                 metadata: {
                   stripeProductId?: string
                   realtime?: boolean
                 } | null
                 /** @enum {string} */
                 aggregationMethod:
+                  | "none"
                   | "sum"
                   | "sum_all"
                   | "last_during_period"
@@ -3568,6 +2695,8 @@ export interface operations {
                 /** @default 1 */
                 defaultQuantity: number | null
                 limit?: number | null
+                allowOverage: boolean
+                notifyUsageThreshold: number | null
                 hidden: boolean
                 /** @description The text you can use to show the clients */
                 displayFeatureText: string
@@ -3579,6 +2708,7 @@ export interface operations {
                   updatedAtM: number
                   slug: string
                   code: number
+                  unit: string
                   title: string
                   description: string | null
                 }
@@ -3779,6 +2909,8 @@ export interface operations {
                 createdAtM: number
                 updatedAtM: number
                 planVersionId: string
+                /** @enum {string} */
+                type: "feature" | "addon"
                 featureId: string
                 /** @enum {string} */
                 featureType: "flat" | "tier" | "package" | "usage"
@@ -3821,6 +2953,7 @@ export interface operations {
                         }
                         firstUnit: number
                         lastUnit: number | null
+                        label?: string
                       }[]
                       price: {
                         dinero: {
@@ -3902,6 +3035,7 @@ export interface operations {
                         }
                         firstUnit: number
                         lastUnit: number | null
+                        label?: string
                       }[]
                       /** @enum {string} */
                       usageMode?: "tier" | "package" | "unit"
@@ -3966,6 +3100,7 @@ export interface operations {
                         }
                         firstUnit: number
                         lastUnit: number | null
+                        label?: string
                       }[]
                       units?: number
                     }
@@ -4007,6 +3142,7 @@ export interface operations {
                         }
                         firstUnit: number
                         lastUnit: number | null
+                        label?: string
                       }[]
                       price: {
                         dinero: {
@@ -4041,12 +3177,22 @@ export interface operations {
                   /** @enum {string} */
                   planType: "recurring" | "onetime"
                 }
+                resetConfig: {
+                  name: string
+                  /** @enum {string} */
+                  resetInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
+                  resetIntervalCount: number
+                  resetAnchor: number | "dayOfCreation"
+                  /** @enum {string} */
+                  planType: "recurring" | "onetime"
+                } | null
                 metadata: {
                   stripeProductId?: string
                   realtime?: boolean
                 } | null
                 /** @enum {string} */
                 aggregationMethod:
+                  | "none"
                   | "sum"
                   | "sum_all"
                   | "last_during_period"
@@ -4058,6 +3204,8 @@ export interface operations {
                 /** @default 1 */
                 defaultQuantity: number | null
                 limit?: number | null
+                allowOverage: boolean
+                notifyUsageThreshold: number | null
                 hidden: boolean
                 /** @description The text you can use to show the clients */
                 displayFeatureText: string
@@ -4069,6 +3217,7 @@ export interface operations {
                   updatedAtM: number
                   slug: string
                   code: number
+                  unit: string
                   title: string
                   description: string | null
                 }
@@ -4194,7 +3343,6 @@ export interface operations {
             usage: {
               projectId: string
               customerId?: string
-              entitlementId?: string
               featureSlug: string
               count: number
               sum: number
@@ -4319,7 +3467,6 @@ export interface operations {
             verifications: {
               projectId: string
               customerId?: string
-              entitlementId?: string
               featureSlug: string
               count: number
               p50_latency: number

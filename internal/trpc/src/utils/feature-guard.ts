@@ -22,7 +22,10 @@ export const featureGuard = async ({
   isMain?: boolean
   /** Metadata to include in the feature verification. Defaults to an empty object */
   metadata?: Record<string, string | undefined>
-}) => {
+}): Promise<{
+  success: boolean
+  deniedReason?: string
+}> => {
   // internal workspaces have unlimited access to all features
   if (isMain) {
     return {
@@ -35,7 +38,7 @@ export const featureGuard = async ({
       customerId,
       featureSlug,
       metadata,
-      fromCache: false, // call the DO directly
+      fromCache: true,
     })
 
     if (data.error) {
@@ -45,7 +48,10 @@ export const featureGuard = async ({
       })
     }
 
-    return data.result
+    return {
+      success: data.result.allowed,
+      deniedReason: data.result.deniedReason ?? undefined,
+    }
   } catch (e) {
     throw new TRPCError({
       code: "INTERNAL_SERVER_ERROR",

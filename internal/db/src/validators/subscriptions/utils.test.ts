@@ -106,48 +106,7 @@ describe("getBillingCycleMessage", () => {
   })
 })
 
-describe("calculateProration (remaining fraction semantics)", () => {
-  const ms = (s: number) => s * 1000
-
-  it("returns 0 when start is greater than or equal to end", () => {
-    expect(calculateProration(ms(10), ms(10), ms(10))).toEqual({
-      prorationFactor: 0,
-      billableSeconds: 0,
-    })
-    expect(calculateProration(ms(10), ms(9), ms(10))).toEqual({
-      prorationFactor: 0,
-      billableSeconds: 0,
-    })
-  })
-
-  it("returns 1 when now is at or before start (bill full window)", () => {
-    const start = ms(10)
-    const end = ms(20)
-    const atStart = calculateProration(start, end, start)
-    const beforeStart = calculateProration(start, end, ms(5))
-    expect(atStart.prorationFactor).toBe(1)
-    expect(atStart.billableSeconds).toBe(Math.floor((end - start) / 1000))
-    expect(beforeStart.prorationFactor).toBe(1)
-    expect(beforeStart.billableSeconds).toBe(Math.floor((end - start) / 1000))
-  })
-
-  it("returns 0 when now is at or after end (nothing to bill)", () => {
-    const start = ms(10)
-    const end = ms(20)
-    const result = calculateProration(start, end, ms(21))
-    expect(result.prorationFactor).toBe(0)
-    expect(result.billableSeconds).toBe(0)
-  })
-
-  it("returns ~0.5 when now is in the middle (bill remaining)", () => {
-    const start = ms(10)
-    const end = ms(20)
-    const now = ms(15)
-    const result = calculateProration(start, end, now)
-    expect(result.prorationFactor).toBeCloseTo(0.5, 6)
-    expect(result.billableSeconds).toBe(Math.floor((end - now) / 1000))
-  })
-})
+// replaced old now-based proration tests with cycle-aware proration tests below
 
 describe("getAnchor", () => {
   const utc = (d: string, t = "00:00:00.000") => new Date(`${d}T${t}Z`).getTime()
@@ -175,5 +134,69 @@ describe("getAnchor", () => {
     // when aligning, the month end cap is applied (tested in billing tests)
     const apr30 = utc("2024-04-30")
     expect(getAnchor(apr30, "month", 31)).toBe(30)
+  })
+})
+
+describe("calculateProration", () => {
+  const utc = (d: string, t = "00:00:00.000") => new Date(`${d}T${t}Z`).getTime()
+
+  it("returns 1 for a full monthly anchored cycle", () => {
+    const effectiveStart = utc("2024-01-10")
+    const serviceStart = utc("2024-01-15")
+    const serviceEnd = utc("2024-02-15")
+    const { prorationFactor } = calculateProration({
+      serviceStart,
+      serviceEnd,
+      effectiveStartDate: effectiveStart,
+      billingConfig: {
+        name: "m",
+        billingInterval: "month",
+        billingIntervalCount: 1,
+        billingAnchor: 15,
+        planType: "recurring",
+      },
+    })
+    expect(prorationFactor).toBeCloseTo(1)
+  })
+
+  it("computes stub fraction before first monthly anchor", () => {
+    const effectiveStart = utc("2024-01-10")
+    const serviceStart = utc("2024-01-10")
+    const serviceEnd = utc("2024-01-15")
+    // Reference full cycle is [Jan 15, Feb 15) so denominator is 31 days
+    const { prorationFactor } = calculateProration({
+      serviceStart,
+      serviceEnd,
+      effectiveStartDate: effectiveStart,
+      billingConfig: {
+        name: "m",
+        billingInterval: "month",
+        billingIntervalCount: 1,
+        billingAnchor: 15,
+        planType: "recurring",
+      },
+    })
+    // 5 days / 31 days ≈ 0.16129
+    expect(prorationFactor).toBeCloseTo(5 / 31, 5)
+  })
+
+  it("aligns to 5-minute cycles and prorates a partial window", () => {
+    const day = "2024-01-01"
+    const effectiveStart = utc(day, "10:02:30.000")
+    const serviceStart = utc(day, "10:05:00.000")
+    const serviceEnd = utc(day, "10:07:30.000") // 150 seconds within a 300s cycle
+    const { prorationFactor } = calculateProration({
+      serviceStart,
+      serviceEnd,
+      effectiveStartDate: effectiveStart,
+      billingConfig: {
+        name: "5m",
+        billingInterval: "minute",
+        billingIntervalCount: 5,
+        billingAnchor: 0,
+        planType: "recurring",
+      },
+    })
+    expect(prorationFactor).toBeCloseTo(0.5, 5)
   })
 })

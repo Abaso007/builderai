@@ -27,14 +27,18 @@ export default function HeaderTab({
             <Badge
               className={cn("ml-2 hidden md:flex", {
                 info: ["active", "published"].includes(label),
-                danger: ["inactive"].includes(label),
+                warning: ["pending"].includes(label),
+                success: ["paid", "void"].includes(label),
+                danger: ["inactive", "unpaid", "failed"].includes(label),
                 default: ["archived", "draft"].includes(label),
               })}
             >
               <span
                 className={cn("flex h-2 w-2 rounded-full", {
                   "bg-info-solid": ["active", "published"].includes(label),
-                  "bg-danger-solid": ["inactive"].includes(label),
+                  "bg-warning-solid": ["pending"].includes(label),
+                  "bg-success-solid": ["paid", "void"].includes(label),
+                  "bg-danger-solid": ["inactive", "unpaid", "failed"].includes(label),
                   "bg-gray-solid": ["archived", "draft"].includes(label),
                 })}
               />
@@ -44,7 +48,7 @@ export default function HeaderTab({
           {id && <CopyButton value={id} />}
         </div>
         {description && (
-          <Typography variant="normal" className="hidden md:flex">
+          <Typography variant="normal" className="hidden text-background-solidHover md:flex">
             {description}
           </Typography>
         )}

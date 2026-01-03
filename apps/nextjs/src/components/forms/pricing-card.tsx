@@ -31,7 +31,7 @@ export function PricingCard({
         {!planVersion.plan.enterprisePlan && (
           <div className="mt-8 flex items-baseline space-x-2">
             <span className="font-extrabold text-4xl">{val.displayAmount}</span>
-            <span className="text-sm">{planVersion.billingConfig.billingInterval}</span>
+            <span className="text-sm">{planVersion.billingConfig.name}</span>
           </div>
         )}
       </CardHeader>
@@ -56,7 +56,7 @@ export function PricingCard({
                 .map((feature) => {
                   return (
                     <li key={feature.id} className="flex w-full flex-col justify-start">
-                      <PricingItem feature={feature} withCalculator />
+                      <PricingItem feature={feature} withCalculator withQuantity />
                     </li>
                   )
                 })}
