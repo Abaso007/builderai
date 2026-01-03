@@ -70,7 +70,7 @@ if [ "$MODE_ID" = "dev" ]; then
   UNPRICE_API_URL="http://localhost:8787"
   # INFO: Replace with local key
   UNPRICE_API_KEY="unprice_dev_1234567890"
-  MAIN_PROJECT_ID="proj_1Py3BMYSnv68DhZBz5RQ7"
+  MAIN_PROJECT_ID="proj_1234567890"
   DRIZZLE_LOG="false"
   EMIT_METRICS_LOGS="false"
   EMIT_ANALYTICS="true"

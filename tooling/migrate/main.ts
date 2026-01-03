@@ -101,6 +101,7 @@ async function main() {
     where: (fields, operators) => operators.eq(fields.slug, "unprice"),
   })
 
+  // if main project id is set, it must match the unprice project id
   if (process.env.MAIN_PROJECT_ID && unpriceProject?.id !== process.env.MAIN_PROJECT_ID) {
     throw "Main project ID does not match"
   }
@@ -112,14 +113,14 @@ async function main() {
     project = await db
       .insert(schema.projects)
       .values({
-        id: process.env.MAIN_PROJECT_ID!,
+        id: process.env.MAIN_PROJECT_ID ?? newId("project"),
         name: "unprice",
         slug: "unprice",
         workspaceId: workspaceId,
-        url: "",
+        url: "https://unprice.dev",
         enabled: true,
         isInternal: true,
-        defaultCurrency: "USD",
+        defaultCurrency: "EUR",
         timezone: "UTC",
       })
       .returning()
@@ -131,7 +132,7 @@ async function main() {
       .set({
         enabled: true,
         isInternal: true,
-        defaultCurrency: "USD",
+        defaultCurrency: "EUR",
         timezone: "UTC",
       })
       .where(eq(schema.projects.id, unpriceProject.id))
