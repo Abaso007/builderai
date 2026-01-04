@@ -61,14 +61,17 @@ async function generateData(customerId: string, async?: boolean) {
 
     if (randomFeatureSlug) {
       // verify the usage
+      const nowDate = Date.now()
       const result = await unprice.customers.can({
         customerId,
         featureSlug: randomFeatureSlug,
-        fromCache: true,
       })
 
+      const latency = Date.now() - nowDate
+      console.info(`Latency: ${latency}ms`)
+
       console.info(
-        `Verification ${randomFeatureSlug} verified for ${customerId} in ${result.result?.latency}ms`
+        `Verification ${randomFeatureSlug}, cache hit: ${result.result?.cacheHit} verified for ${customerId} in ${result.result?.latency}ms`
       )
 
       if (result.result?.allowed) {
@@ -107,7 +110,7 @@ async function generateData(customerId: string, async?: boolean) {
 
 async function main() {
   // const customerFree = "cus_1MeUjVxFbv8DP9X7f1UW9"
-  const customerPro = "cus_1SMcnoeftNRV6mrugxakE"
+  const customerPro = "cus_11SVcMF8uSePPMPoxrmnMb"
   // const customerEnterprise = "cus_1MVdMxZ45uJKDo5z48hYJ"
 
   // PRO plan

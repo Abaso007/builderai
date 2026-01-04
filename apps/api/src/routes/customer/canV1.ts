@@ -30,16 +30,6 @@ export const route = createRoute({
           description: "The feature slug",
           example: "tokens",
         }),
-        fromCache: z.boolean().optional().openapi({
-          description:
-            "if true will check the entitlement from cache. This will reduce latency for the request but won't have 100% accuracy. If false, the entitlement will be validated synchronously 100% accurate but will have a higher latency",
-          example: true,
-          default: false,
-        }),
-        // timestamp: z.number().optional().openapi({
-        //   description: "The timestamp of the request",
-        //   example: 1717852800,
-        // }),
         metadata: z
           .record(z.string(), z.string())
           .openapi({
@@ -69,7 +59,7 @@ export type CanResponse = z.infer<
 
 export const registerCanV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId, featureSlug, metadata, fromCache } = c.req.valid("json")
+    const { customerId, featureSlug, metadata } = c.req.valid("json")
     const { usagelimiter } = c.get("services")
     const stats = c.get("stats")
     const requestId = c.get("requestId")
@@ -78,11 +68,10 @@ export const registerCanV1 = (app: App) =>
     // validate the request
     const key = await keyAuth(c)
 
-    const canType = fromCache ? "canCache" : "can"
     const projectId = await resolveContextProjectId(c, key.projectId, customerId)
 
     // start a new timer
-    startTime(c, canType)
+    startTime(c, "can")
 
     // validate usage from db
     const { err, val: result } = await usagelimiter.verify({
@@ -91,7 +80,6 @@ export const registerCanV1 = (app: App) =>
       projectId,
       requestId,
       performanceStart,
-      fromCache,
       // short ttl for dev
       flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
       timestamp: Date.now(), // for now we report the usage at the time of the request
@@ -109,11 +97,11 @@ export const registerCanV1 = (app: App) =>
     })
 
     // end the timer
-    endTime(c, canType)
+    endTime(c, "can")
 
     // send analytics event for the unprice customer
     c.executionCtx.waitUntil(
-      reportUsageEvents(c, { action: canType, status: err ? "error" : "success" })
+      reportUsageEvents(c, { action: "can", status: err ? "error" : "success" })
     )
 
     if (err) {

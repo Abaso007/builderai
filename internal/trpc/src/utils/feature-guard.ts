@@ -38,7 +38,6 @@ export const featureGuard = async ({
       customerId,
       featureSlug,
       metadata,
-      fromCache: true,
     })
 
     if (data.error) {

@@ -132,14 +132,11 @@ export class UsageLimiterService implements UsageLimiter {
     const key = `verify:${data.projectId}:${data.customerId}:${data.featureSlug}:`
     const cached = this.hashCache.get(key)
 
-    // if we hit the same isolate we can return the cached result
-    // only for request that are denied.
-    // we don't use the normal swr cache here because it doesn't make sense to call
-    // the cache layer, the idea is to speed up the next request and memory is our friend.
-    if (cached && env.VERCEL_ENV === "production") {
-      const result = JSON.parse(cached) as VerificationResult
+    const parsedCached = cached ? (JSON.parse(cached) as VerificationResult) : undefined
 
-      return Ok({ ...result, cacheHit: true })
+    // if we hit the same isolate we can return the cached result, only for request that are denied.
+    if (parsedCached && parsedCached.allowed === false && env.VERCEL_ENV === "production") {
+      return Ok({ ...parsedCached, cacheHit: true })
     }
 
     const durableObject = this.getStub(

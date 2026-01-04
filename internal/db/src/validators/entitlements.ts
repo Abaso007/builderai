@@ -72,12 +72,6 @@ export const verifySchema = z.object({
   metadata: z.record(z.string(), z.any()).nullable(),
   flushTime: z.number().optional(),
   performanceStart: z.number(),
-  fromCache: z
-    .boolean()
-    .optional()
-    .describe(
-      "if true will check the entitlement from cache. This will reduce latency for the request but won't have 100% accuracy. If false, the entitlement will be validated synchronously 100% accurate but will have a higher latency"
-    ),
 })
 
 export type ReportUsageRequest = z.infer<typeof reportUsageSchema>

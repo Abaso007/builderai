@@ -503,7 +503,7 @@ describe("EntitlementService - reportUsage", () => {
       updatedAtM: now,
     })
 
-    // Pre-populate storage so we can use fromCache: true and accumulate
+    // Pre-populate storage so we can accumulate
     await mockStorage.set({ state: mockEntitlementState })
 
     let currentUsage = 10 // Start with 10

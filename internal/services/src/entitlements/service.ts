@@ -97,8 +97,6 @@ export class EntitlementService {
       projectId: params.projectId,
       featureSlug: params.featureSlug,
       now: params.timestamp,
-      // if fromCache is false, we load from cache with swr and if not found, we load from DB
-      skipCache: !params.fromCache,
     })
 
     if (stateErr) {
