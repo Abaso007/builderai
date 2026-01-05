@@ -5,6 +5,8 @@ import { isZero } from "dinero.js"
 import { z } from "zod"
 
 import { TRPCError } from "@trpc/server"
+import { FEATURE_SLUGS } from "@unprice/config"
+import { CustomerService } from "@unprice/services/customers"
 import { protectedProjectProcedure } from "#trpc"
 import { featureGuard } from "#utils/feature-guard"
 
@@ -27,7 +29,7 @@ export const publish = protectedProjectProcedure
     // check if the customer has access to the feature
     const result = await featureGuard({
       customerId: workspace.unPriceCustomerId,
-      featureSlug: "plans",
+      featureSlug: FEATURE_SLUGS.PLANS.SLUG,
       isMain: workspace.isMain,
       metadata: {
         action: "publish",
@@ -93,16 +95,34 @@ export const publish = protectedProjectProcedure
       })
     }
 
-    // if the flat price is not zero, then the payment method is required
-    if (!isZero(totalPricePlan.dinero) && !planVersionData.paymentMethodRequired) {
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: "Plan total price is not zero, but payment method is not required",
-      })
-    }
-
     const paymentMethodRequired = !isZero(totalPricePlan.dinero)
 
+    if (paymentMethodRequired) {
+      const customerService = new CustomerService({
+        db: opts.ctx.db,
+        logger: opts.ctx.logger,
+        analytics: opts.ctx.analytics,
+        waitUntil: opts.ctx.waitUntil,
+        cache: opts.ctx.cache,
+        metrics: opts.ctx.metrics,
+      })
+
+      const { err: validatePaymentMethodErr } = await customerService.validatePaymentMethod({
+        customerId: workspace.unPriceCustomerId,
+        projectId: project.id,
+        paymentProvider: planVersionData.paymentProvider,
+        requiredPaymentMethod: true,
+      })
+
+      if (validatePaymentMethodErr) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: validatePaymentMethodErr.message,
+        })
+      }
+    }
+
+    // update the plan version in a transaction
     const planVersionDataUpdated = await opts.ctx.db.transaction(async (tx) => {
       try {
         const flatFeaturesIds = planVersionData.planFeatures

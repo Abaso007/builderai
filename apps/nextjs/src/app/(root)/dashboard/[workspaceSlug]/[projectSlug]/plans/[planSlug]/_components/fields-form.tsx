@@ -284,7 +284,7 @@ export function AggregationMethodFormField({
                 </SelectTrigger>
               </FormControl>
               <SelectContent className="text-xs">
-                {AGGREGATION_METHODS.map((mode) => (
+                {AGGREGATION_METHODS.filter((mode) => mode !== "none").map((mode) => (
                   <SelectItem
                     value={mode}
                     key={mode}

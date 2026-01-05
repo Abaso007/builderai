@@ -1118,9 +1118,7 @@ export class CustomerService {
           waitUntil: this.waitUntil,
           cache: this.cache,
           metrics: this.metrics,
-          // pass the transaction to the subscription service
-          // so we can rollback the transaction if something goes wrong
-          db: trx,
+          db: this.db,
         })
 
         const { err, val: newSubscription } = await subscriptionService.createSubscription({
@@ -1130,6 +1128,7 @@ export class CustomerService {
             timezone: timezone ?? planVersion.project.timezone,
           },
           projectId: projectId,
+          db: trx,
         })
 
         if (err) {

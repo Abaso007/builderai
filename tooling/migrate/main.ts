@@ -1,4 +1,5 @@
 import { Pool, neonConfig } from "@neondatabase/serverless"
+import { FEATURE_SLUGS } from "@unprice/config"
 import * as schema from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import { eq } from "drizzle-orm"
@@ -22,8 +23,6 @@ async function main() {
       schema: schema,
     }
   )
-
-  // await migrate(db, { migrationsFolder: "migrations/custom" })
 
   // create user
   const user = await db
@@ -168,13 +167,20 @@ async function main() {
     .set({ unPriceCustomerId: unpriceOwner.id })
     .where(eq(schema.workspaces.id, workspace.id))
 
-  // create features
-
-  // create a plan
-
-  // subscribe to the free plan
-
-  // print all relevant data and save it to unfisical
+  // create default features
+  await db
+    .insert(schema.features)
+    .values(
+      Object.values(FEATURE_SLUGS).map((feature) => ({
+        id: newId("feature"),
+        slug: feature,
+        title: feature,
+        description: feature,
+        projectId: project.id,
+        unit: "units",
+      }))
+    )
+    .onConflictDoNothing()
 
   process.exit(0)
 }

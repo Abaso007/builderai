@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server"
+import { FEATURE_SLUGS } from "@unprice/config"
 import { featureSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -13,7 +14,7 @@ export const getBySlug = protectedProjectProcedure
 
     const result = await featureGuard({
       customerId: project.workspace.unPriceCustomerId,
-      featureSlug: "plans",
+      featureSlug: FEATURE_SLUGS.PLANS.SLUG,
       isMain: project.workspace.isMain,
       metadata: {
         action: "getBySlug",

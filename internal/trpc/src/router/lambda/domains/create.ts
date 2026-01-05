@@ -17,7 +17,7 @@ export const create = protectedWorkspaceProcedure
     const workspace = opts.ctx.workspace
     const domain = opts.input.name
     const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.DOMAINS
+    const featureSlug = FEATURE_SLUGS.DOMAINS.SLUG
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 

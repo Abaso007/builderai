@@ -20,7 +20,7 @@ export const rename = protectedProjectProcedure
     const project = opts.ctx.project
     const workspace = project.workspace
     const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.PROJECTS
+    const featureSlug = FEATURE_SLUGS.PROJECTS.SLUG
 
     // only owner and admin can rename a project
     opts.ctx.verifyRole(["OWNER", "ADMIN"])

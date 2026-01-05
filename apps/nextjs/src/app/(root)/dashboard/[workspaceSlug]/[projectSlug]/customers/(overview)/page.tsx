@@ -26,7 +26,7 @@ export default async function ProjectUsersPage(props: {
   const baseUrl = `/${workspaceSlug}/${projectSlug}/customers`
   const filters = dataTableParams(props.searchParams)
 
-  const isCustomersEnabled = await entitlementFlag(FEATURE_SLUGS.CUSTOMERS)
+  const isCustomersEnabled = await entitlementFlag(FEATURE_SLUGS.CUSTOMERS.SLUG)
 
   if (!isCustomersEnabled) {
     return <UpgradePlanError />

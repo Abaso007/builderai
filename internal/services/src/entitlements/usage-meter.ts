@@ -169,7 +169,7 @@ export class UsageMeter {
     const allowOverage = this.config.allowOverage ?? false
     const currentTokens = this.tokens
 
-    if (currentTokens < 0 && !allowOverage) {
+    if (currentTokens <= 0 && !allowOverage) {
       return {
         allowed: false,
         remaining: this.tokens,
@@ -203,6 +203,18 @@ export class UsageMeter {
     deniedReason?: DenyReason
     message?: string
   } {
+    // 0. Check if the feature is flat
+    if (this.config.featureType === "flat") {
+      return {
+        allowed: false,
+        remaining: this.tokens,
+        retryAfterMs: 0,
+        overThreshold: false,
+        deniedReason: "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE",
+        message: "Flat feature not allowed to be reported",
+      }
+    }
+
     // 1. Sync Logic (Check if we jumped to a new mathematical period)
     this.sync(now)
 

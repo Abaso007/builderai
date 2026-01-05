@@ -39,7 +39,7 @@ export const update = protectedProjectProcedure
     const { project } = opts.ctx
 
     const unPriceCustomerId = project.workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.CUSTOMERS
+    const featureSlug = FEATURE_SLUGS.CUSTOMERS.SLUG
 
     const result = await featureGuard({
       customerId: unPriceCustomerId,

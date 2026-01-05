@@ -103,15 +103,75 @@ export const COOKIES_APP = {
   SESSION: "session-id",
 }
 
-// TODO: add this to migrations
 export const FEATURE_SLUGS = {
-  API_KEYS: "apikeys", // core
-  PLANS: "plans", // core
-  PROJECTS: "projects", // core
-  ACCESS_PRO: "access-pro",
-  ACCESS_FREE: "access-free", // core
-  EVENTS: "events", // core
-  CUSTOMERS: "customers", // core
-  DOMAINS: "domains",
-  PAGES: "pages",
+  API_KEYS: {
+    SLUG: "apikeys",
+    TITLE: "API Keys",
+    DESCRIPTION: "authentication and authorization",
+    UNIT: "key",
+  },
+  PLANS: {
+    SLUG: "plans",
+    TITLE: "Plans",
+    DESCRIPTION: "pricing and billing",
+    UNIT: "plan",
+  },
+  PLAN_VERSIONS: {
+    SLUG: "plan-versions",
+    TITLE: "Plan Versions",
+    DESCRIPTION: "iterate on your plans and add new features",
+    UNIT: "version",
+  },
+  PROJECTS: {
+    SLUG: "projects",
+    TITLE: "Projects",
+    DESCRIPTION: "organize your resources",
+    UNIT: "project",
+  },
+  ACCESS_PRO: {
+    SLUG: "access-pro",
+    TITLE: "Access Pro",
+    DESCRIPTION: "grant access to paid features",
+    UNIT: "access",
+  },
+  ACCESS_FREE: {
+    SLUG: "access-free",
+    TITLE: "Access Free",
+    DESCRIPTION: "grant access to basic features",
+    UNIT: "access",
+  },
+  EVENTS: {
+    SLUG: "events",
+    TITLE: "Events",
+    DESCRIPTION: "track and analytics",
+    UNIT: "event",
+  },
+  CUSTOMERS: {
+    SLUG: "customers",
+    TITLE: "Customers",
+    DESCRIPTION: "manage your customers and subscriptions",
+    UNIT: "customer",
+  },
+  DOMAINS: {
+    SLUG: "domains",
+    TITLE: "Domains",
+    DESCRIPTION: "manage your domains and DNS",
+    UNIT: "domain",
+  },
+  PAGES: {
+    SLUG: "pages",
+    TITLE: "Pages",
+    DESCRIPTION: "manage your pricing pages",
+    UNIT: "page",
+  },
 }
+
+export const DEFAULT_PLAN_FEATURES = [
+  FEATURE_SLUGS.API_KEYS,
+  FEATURE_SLUGS.PLANS,
+  FEATURE_SLUGS.PLAN_VERSIONS,
+  FEATURE_SLUGS.PROJECTS,
+  FEATURE_SLUGS.ACCESS_FREE,
+  FEATURE_SLUGS.EVENTS,
+  FEATURE_SLUGS.CUSTOMERS,
+]

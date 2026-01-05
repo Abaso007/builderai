@@ -22,7 +22,7 @@ export const transferToPersonal = protectedWorkspaceProcedure
     const userId = opts.ctx.userId
     const workspace = opts.ctx.workspace
     const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.PROJECTS
+    const featureSlug = FEATURE_SLUGS.PROJECTS.SLUG
 
     // only owner can transfer a project to personal
     opts.ctx.verifyRole(["OWNER"])

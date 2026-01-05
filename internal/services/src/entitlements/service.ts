@@ -168,6 +168,7 @@ export class EntitlementService {
 
     // 5. Verify the usage using the meter
     const verifyResult = usageMeter.verify(params.timestamp)
+
     const latency = performance.now() - params.performanceStart
 
     // 6. Persist the verification record
@@ -242,6 +243,16 @@ export class EntitlementService {
       state: state,
       now: params.timestamp,
     })
+
+    // flat features are always allowed
+    if (state.featureType === "flat") {
+      return {
+        allowed: false,
+        message: "Flat feature not allowed to be reported",
+        deniedReason: "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE",
+        usage: 0,
+      }
+    }
 
     if (err) {
       return {

@@ -21,7 +21,7 @@ export const create = protectedProjectProcedure
     const { name, expiresAt } = opts.input
     const project = opts.ctx.project
     const customerId = project.workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.API_KEYS
+    const featureSlug = FEATURE_SLUGS.API_KEYS.SLUG
     const isRoot = project.workspace.isMain
 
     // only owner and admin

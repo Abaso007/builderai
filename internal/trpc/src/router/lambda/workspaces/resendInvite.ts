@@ -19,7 +19,7 @@ export const resendInvite = protectedWorkspaceProcedure
   .mutation(async (opts) => {
     const { email } = opts.input
     const workspace = opts.ctx.workspace
-    const featureSlug = FEATURE_SLUGS.ACCESS_PRO
+    const featureSlug = FEATURE_SLUGS.ACCESS_PRO.SLUG
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 

@@ -125,14 +125,23 @@ export class BillingService {
     // new options
     lock?: boolean
     ttlMs?: number
+    db?: Database
     run: (m: SubscriptionMachine) => Promise<T>
   }): Promise<T> {
-    const { subscriptionId, projectId, now, run, lock: shouldLock = true, ttlMs = 30_000 } = args
+    const {
+      subscriptionId,
+      projectId,
+      now,
+      run,
+      lock: shouldLock = true,
+      ttlMs = 30_000,
+      db,
+    } = args
+
+    const trx = db ?? this.db
 
     // create the lock if it should be locked
-    const lock = shouldLock
-      ? new SubscriptionLock({ db: this.db, projectId, subscriptionId })
-      : null
+    const lock = shouldLock ? new SubscriptionLock({ db: trx, projectId, subscriptionId }) : null
 
     if (lock) {
       const acquired = await lock.acquire({
@@ -197,7 +206,7 @@ export class BillingService {
       logger: this.logger,
       analytics: this.analytics,
       customer: this.customerService,
-      db: this.db,
+      db: trx,
     })
 
     if (err) {
@@ -219,10 +228,12 @@ export class BillingService {
     subscriptionId,
     projectId,
     now = Date.now(),
+    db,
   }: {
     subscriptionId: string
     projectId: string
     now?: number
+    db?: Database
   }): Promise<Result<{ cyclesCreated: number; phasesProcessed: number }, UnPriceBillingError>> {
     try {
       const status = await this.withSubscriptionMachine({
@@ -230,11 +241,13 @@ export class BillingService {
         projectId,
         now,
         lock: true, // we need to lock the subscription to avoid cross-worker races
+        db,
         run: async () => {
           const s1 = await this._generateBillingPeriods({
             subscriptionId,
             projectId,
             now,
+            db,
           })
 
           if (s1.err) throw s1.err
@@ -1806,10 +1819,12 @@ export class BillingService {
     subscriptionId,
     projectId,
     now,
+    db,
   }: {
     subscriptionId: string
     projectId: string
     now: number
+    db?: Database
   }): Promise<
     Result<
       {
@@ -1822,8 +1837,10 @@ export class BillingService {
     const lookbackDays = 7 // lookback days to materialize pending periods
     const batch = 100 // process a max of 100 phases per trigger run
 
+    const trx = db ?? this.db
+
     // fetch phases that are active now OR ended recently
-    const phases = await this.db.query.subscriptionPhases.findMany({
+    const phases = await trx.query.subscriptionPhases.findMany({
       with: {
         planVersion: true,
         subscription: true,
@@ -1850,195 +1867,190 @@ export class BillingService {
 
     let cyclesCreated = 0
 
-    // for each phase, materialize the pending periods
-    // TODO: reduce complexity
-    for (const phase of phases) {
-      // For every subscription item, backfill missing billing periods idempotently
-      for (const item of phase.items) {
-        // Find the last period for this item to make per-item backfill
-        const lastForItem = await this.db.query.billingPeriods.findFirst({
-          where: (bp, ops) =>
-            ops.and(
-              ops.eq(bp.projectId, phase.projectId),
-              ops.eq(bp.subscriptionId, phase.subscriptionId),
-              ops.eq(bp.subscriptionPhaseId, phase.id),
-              ops.eq(bp.subscriptionItemId, item.id)
-            ),
-          orderBy: (bp, ops) => ops.desc(bp.cycleEndAt),
+    const result = await trx
+      .transaction(async (tx) => {
+        const txGrantsManager = new GrantsManager({
+          db: tx,
+          logger: this.logger,
         })
 
-        const cursorStart = lastForItem ? lastForItem.cycleEndAt : phase.startAt
-        const itemBillingConfig = item.featurePlanVersion.billingConfig
+        for (const phase of phases) {
+          for (const item of phase.items) {
+            // 1. Find the last period for this item to make per-item backfill
+            const lastForItem = await tx.query.billingPeriods.findFirst({
+              where: (bp, ops) =>
+                ops.and(
+                  ops.eq(bp.projectId, phase.projectId),
+                  ops.eq(bp.subscriptionId, phase.subscriptionId),
+                  ops.eq(bp.subscriptionPhaseId, phase.id),
+                  ops.eq(bp.subscriptionItemId, item.id)
+                ),
+              orderBy: (bp, ops) => ops.desc(bp.cycleEndAt),
+            })
 
-        const windows = calculateNextNCycles({
-          referenceDate: now, // we use the now to start the calculation
-          effectiveStartDate: cursorStart,
-          trialEndsAt: phase.trialEndsAt,
-          effectiveEndDate: phase.endAt,
-          config: {
-            name: itemBillingConfig.name,
-            interval: itemBillingConfig.billingInterval,
-            intervalCount: itemBillingConfig.billingIntervalCount,
-            planType: itemBillingConfig.planType,
-            anchor: phase.billingAnchor,
-          },
-          count: 0, // we only need until the end of the current cycle
-        })
+            const cursorStart = lastForItem ? lastForItem.cycleEndAt : phase.startAt
+            const itemBillingConfig = item.featurePlanVersion.billingConfig
 
-        if (windows.length === 0) continue
+            const windows = calculateNextNCycles({
+              referenceDate: now,
+              effectiveStartDate: cursorStart,
+              trialEndsAt: phase.trialEndsAt,
+              effectiveEndDate: phase.endAt,
+              config: {
+                name: itemBillingConfig.name,
+                interval: itemBillingConfig.billingInterval,
+                intervalCount: itemBillingConfig.billingIntervalCount,
+                planType: itemBillingConfig.planType,
+                anchor: phase.billingAnchor,
+              },
+              count: 0,
+            })
 
-        // all happens in a single transaction
-        await this.db.transaction(async (tx) => {
-          try {
-            // Insert periods idempotently with unique index protection
-            const values = await Promise.all(
+            if (windows.length === 0) continue
+
+            // 2. Resolve grants (fetch existing or create) for needed types
+            const needsTrial = windows.some((w) => w.isTrial)
+            const needsNormal = windows.some((w) => !w.isTrial)
+            const grantIds: Record<string, string> = {}
+
+            for (const type of [
+              needsTrial ? ("trial" as const) : null,
+              needsNormal ? ("subscription" as const) : null,
+            ].filter(Boolean)) {
+              if (!type) continue
+              const expiresAt = type === "trial" ? phase.trialEndsAt : phase.endAt
+
+              const existingGrant = await tx.query.grants.findFirst({
+                where: (g, { and, eq, or, isNull, lte, gte }) =>
+                  and(
+                    eq(g.projectId, phase.projectId),
+                    eq(g.subjectType, "customer"),
+                    eq(g.subjectId, phase.subscription.customerId),
+                    eq(g.featurePlanVersionId, item.featurePlanVersion.id),
+                    eq(g.type, type),
+                    eq(g.deleted, false),
+                    lte(g.effectiveAt, phase.startAt),
+                    or(isNull(g.expiresAt), expiresAt ? gte(g.expiresAt, expiresAt) : undefined)
+                  ),
+                orderBy: (g, { desc }) => desc(g.effectiveAt),
+              })
+
+              if (existingGrant) {
+                grantIds[type] = existingGrant.id
+              } else {
+                const createGrantResult = await txGrantsManager.createGrant({
+                  grant: {
+                    id: newId("grant"),
+                    name: "Base Plan",
+                    projectId: phase.projectId,
+                    effectiveAt: phase.startAt,
+                    expiresAt: expiresAt,
+                    type: type,
+                    subjectType: "customer",
+                    subjectId: phase.subscription.customerId,
+                    featurePlanVersionId: item.featurePlanVersion.id,
+                    autoRenew: false,
+                    limit: item.units ?? item.featurePlanVersion.limit ?? null,
+                    allowOverage: item.featurePlanVersion.allowOverage,
+                    units: item.units,
+                    anchor: phase.billingAnchor,
+                    metadata: {
+                      note: "Billing period grant created by billing service",
+                    },
+                  },
+                })
+                if (createGrantResult.err) throw createGrantResult.err
+                grantIds[type] = createGrantResult.val.id
+              }
+            }
+
+            // 3. Prepare all billing period values for this item
+            const billingPeriodValues = await Promise.all(
               windows.map(async (w) => {
                 const whenToBill = phase.planVersion.whenToBill
-                // handles when to invoice; this way pay in advance aligns with the cycle start
-                // and pay in arrear aligns with the cycle end
-                const invoiceAt = whenToBill === "pay_in_advance" ? w.start : w.end
+                const invoiceAt = w.isTrial
+                  ? w.end
+                  : whenToBill === "pay_in_advance"
+                    ? w.start
+                    : w.end
                 const statementKey = await this.computeStatementKey({
                   projectId: phase.projectId,
                   customerId: phase.subscription.customerId,
                   subscriptionId: phase.subscriptionId,
-                  invoiceAt: invoiceAt,
+                  invoiceAt,
                   currency: phase.planVersion.currency,
                   paymentProvider: phase.planVersion.paymentProvider,
                   collectionMethod: phase.planVersion.collectionMethod,
                 })
 
-                let grantId = ""
+                const type = w.isTrial ? "trial" : "subscription"
+                const grantId = grantIds[type]
+                if (!grantId) throw new Error(`Failed to resolve grant for type: ${type}`)
 
-                // Check if there is an active grant for this feature/subscription item
-                // preventing duplicate/exploding grants if one is already open-ended or covers the period
-                // TODO: reduce queries here
-                const existingGrant = await tx.query.grants.findFirst({
-                  where: (g, { and, eq, or, isNull, lte, gte }) =>
-                    and(
-                      eq(g.projectId, phase.projectId),
-                      eq(g.subjectType, "customer"),
-                      eq(g.subjectId, phase.subscription.customerId),
-                      eq(g.featurePlanVersionId, item.featurePlanVersion.id),
-                      eq(g.type, w.isTrial ? "trial" : "subscription"),
-                      eq(g.deleted, false),
-                      lte(g.effectiveAt, phase.startAt),
-                      or(
-                        isNull(g.expiresAt),
-                        // if trial we check if the grant expires at the trial end, otherwise we check if the grant expires at the end of the phase
-                        w.isTrial && phase.trialEndsAt
-                          ? gte(g.expiresAt, phase.trialEndsAt)
-                          : phase.endAt
-                            ? gte(g.expiresAt, phase.endAt)
-                            : undefined
-                      )
-                    ),
-                  orderBy: (g, { desc }) => desc(g.effectiveAt),
-                })
-
-                if (existingGrant) {
-                  grantId = existingGrant.id
-                } else {
-                  // first we need to create the grant for the billing period
-                  // use a scoped grants manager to ensure transactional integrity
-                  const txGrantsManager = new GrantsManager({
-                    db: tx,
-                    logger: this.logger,
-                  })
-
-                  const createGrantResult = await txGrantsManager.createGrant({
-                    grant: {
-                      id: newId("grant"),
-                      name: "Base Plan",
-                      projectId: phase.projectId,
-                      effectiveAt: phase.startAt,
-                      // if trial, the grant expires at the trial end
-                      // if not trial, the grant expires at the end of the phase
-                      expiresAt: w.isTrial ? phase.trialEndsAt : phase.endAt,
-                      type: w.isTrial ? "trial" : "subscription",
-                      subjectType: "customer",
-                      subjectId: phase.subscription.customerId,
-                      featurePlanVersionId: item.featurePlanVersion.id,
-                      autoRenew: false, // we don't auto renew subscriptions grants, they are open ended
-                      limit: item.units ?? item.featurePlanVersion.limit ?? null,
-                      allowOverage: item.featurePlanVersion.allowOverage,
-                      units: item.units,
-                      anchor: phase.billingAnchor,
-                      metadata: {
-                        note: "Billing period grant created by billing service",
-                      },
-                    },
-                  })
-
-                  if (createGrantResult.err) {
-                    this.logger.error("Failed to create grant", {
-                      error: createGrantResult.err.message,
-                    })
-                    throw createGrantResult.err
-                  }
-                  grantId = createGrantResult.val.id
+                return {
+                  id: newId("billing_period"),
+                  projectId: phase.projectId,
+                  subscriptionId: phase.subscriptionId,
+                  customerId: phase.subscription.customerId,
+                  subscriptionPhaseId: phase.id,
+                  subscriptionItemId: item.id,
+                  status: "pending" as const,
+                  type: w.isTrial ? ("trial" as const) : ("normal" as const),
+                  cycleStartAt: w.start,
+                  cycleEndAt: w.end,
+                  statementKey,
+                  invoiceAt,
+                  whenToBill,
+                  invoiceId: null,
+                  amountEstimateCents: null,
+                  reason: w.isTrial ? ("trial" as const) : ("normal" as const),
+                  grantId,
                 }
-
-                // create the billing period
-                await tx
-                  .insert(billingPeriods)
-                  .values({
-                    id: newId("billing_period"),
-                    projectId: phase.projectId,
-                    subscriptionId: phase.subscriptionId,
-                    customerId: phase.subscription.customerId,
-                    subscriptionPhaseId: phase.id,
-                    subscriptionItemId: item.id,
-                    status: "pending" as const,
-                    type: w.isTrial ? ("trial" as const) : ("normal" as const),
-                    cycleStartAt: w.start,
-                    cycleEndAt: w.end,
-                    statementKey: statementKey,
-                    // if trial, we invoice at the end always
-                    invoiceAt: w.isTrial ? w.end : invoiceAt,
-                    whenToBill: whenToBill,
-                    invoiceId: null,
-                    amountEstimateCents: null,
-                    reason: w.isTrial ? ("trial" as const) : ("normal" as const),
-                    grantId: grantId,
-                  })
-                  .onConflictDoNothing({
-                    target: [
-                      billingPeriods.projectId,
-                      billingPeriods.subscriptionId,
-                      billingPeriods.subscriptionPhaseId,
-                      billingPeriods.subscriptionItemId,
-                      billingPeriods.cycleStartAt,
-                      billingPeriods.cycleEndAt,
-                    ],
-                  })
-                  .catch((error) => {
-                    this.logger.error("Error creating billing period", {
-                      error: error instanceof Error ? error.message : String(error),
-                      billingPeriodId: newId("billing_period"),
-                    })
-                    throw error
-                  })
               })
             )
 
-            cyclesCreated += values.length
-          } catch (e) {
-            this.logger.warn("Skipping existing billing periods (likely conflict)", {
-              phaseId: phase.id,
-              subscriptionId: phase.subscriptionId,
-              projectId: phase.projectId,
-              error: (e as Error)?.message,
-            })
-            throw e
+            // 4. Batch insert billing periods for this item
+            if (billingPeriodValues.length > 0) {
+              await tx
+                .insert(billingPeriods)
+                .values(billingPeriodValues)
+                .onConflictDoNothing({
+                  target: [
+                    billingPeriods.projectId,
+                    billingPeriods.subscriptionId,
+                    billingPeriods.subscriptionPhaseId,
+                    billingPeriods.subscriptionItemId,
+                    billingPeriods.cycleStartAt,
+                    billingPeriods.cycleEndAt,
+                  ],
+                })
+              cyclesCreated += billingPeriodValues.length
+            }
           }
-        })
-      }
-    }
+        }
+        return Ok({ phasesProcessed: phases.length, cyclesCreated })
+      })
+      .catch((error) => {
+        this.logger.error(
+          `Error in billing period backfill transaction, ${error instanceof Error ? error.message : String(error)}`,
+          {
+            error,
+            subscriptionId,
+            projectId,
+            now,
+            phases: phases.length,
+            cyclesCreated,
+          }
+        )
 
-    return Ok({
-      phasesProcessed: phases.length,
-      cyclesCreated: cyclesCreated,
-    })
+        return Err(
+          new UnPriceBillingError({
+            message: error instanceof Error ? error.message : "Internal transaction error",
+          })
+        )
+      })
+
+    return result
   }
 
   /**

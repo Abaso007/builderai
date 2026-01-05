@@ -7,7 +7,10 @@ import {
 } from "@unprice/db/validators"
 import { z } from "zod"
 
+import { FEATURE_SLUGS } from "@unprice/config"
 import { protectedProjectProcedure } from "#trpc"
+import { featureGuard } from "#utils/feature-guard"
+import { reportUsageFeature } from "#utils/shared"
 
 export const create = protectedProjectProcedure
   .input(planVersionFeatureInsertBaseSchema)
@@ -36,8 +39,28 @@ export const create = protectedProjectProcedure
     } = opts.input
     const project = opts.ctx.project
 
+    const workspace = project.workspace
+    const customerId = workspace.unPriceCustomerId
+    const featureSlug = FEATURE_SLUGS.PLAN_VERSIONS.SLUG
+
     // only owner and admin can create a feature
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
+
+    const result = await featureGuard({
+      customerId,
+      featureSlug,
+      isMain: workspace.isMain,
+      metadata: {
+        action: "create",
+      },
+    })
+
+    if (!result.success) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: `You don't have access to this feature ${result.deniedReason}`,
+      })
+    }
 
     const planVersionData = await opts.ctx.db.query.versions.findFirst({
       where: (version, { eq, and }) =>
@@ -101,7 +124,7 @@ export const create = protectedProjectProcedure
         allowOverage,
         notifyUsageThreshold,
         // flat features don't have a meter so we don't need to store the aggregation method
-        aggregationMethod: featureType === "flat" ? "none" : aggregationMethod,
+        aggregationMethod: featureType !== "usage" ? "none" : aggregationMethod,
       })
       .returning()
       .then((re) => re[0])
@@ -131,6 +154,18 @@ export const create = protectedProjectProcedure
         message: "Error fetching the created feature",
       })
     }
+
+    opts.ctx.waitUntil(
+      reportUsageFeature({
+        customerId,
+        featureSlug,
+        usage: 1,
+        isMain: workspace.isMain,
+        metadata: {
+          action: "create",
+        },
+      })
+    )
 
     return {
       planVersionFeature: planVersionFeatureData,

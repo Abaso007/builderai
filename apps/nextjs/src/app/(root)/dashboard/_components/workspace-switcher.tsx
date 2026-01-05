@@ -36,7 +36,7 @@ export function WorkspaceSwitcher({
   const router = useRouter()
   const [switcherOpen, setSwitcherOpen] = useState(false)
 
-  const isProEnabled = useFlags(FEATURE_SLUGS.ACCESS_PRO)
+  const isProEnabled = useFlags(FEATURE_SLUGS.ACCESS_PRO.SLUG)
 
   const { data: dataWorkspaces } = useSuspenseQuery(
     trpc.workspaces.listWorkspacesByActiveUser.queryOptions(undefined, {

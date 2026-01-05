@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import { TRPCError } from "@trpc/server"
+import { FEATURE_SLUGS } from "@unprice/config"
 import { protectedProjectProcedure } from "#trpc"
 import { featureGuard } from "#utils/feature-guard"
 
@@ -13,7 +14,7 @@ export const exist = protectedProjectProcedure
 
     const result = await featureGuard({
       customerId: project.workspace.unPriceCustomerId,
-      featureSlug: "plans",
+      featureSlug: FEATURE_SLUGS.PLANS.SLUG,
       isMain: project.workspace.isMain,
       metadata: {
         action: "exist",

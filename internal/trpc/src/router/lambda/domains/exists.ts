@@ -10,7 +10,7 @@ export const exists = protectedWorkspaceProcedure
   .mutation(async (opts) => {
     const workspace = opts.ctx.workspace
     const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.DOMAINS
+    const featureSlug = FEATURE_SLUGS.DOMAINS.SLUG
 
     // check if the customer has access to the feature
     const result = await featureGuard({

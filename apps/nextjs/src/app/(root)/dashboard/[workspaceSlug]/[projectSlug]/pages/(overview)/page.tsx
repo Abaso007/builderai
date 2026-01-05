@@ -19,7 +19,7 @@ export default async function PageOverviewPage(props: {
 }) {
   const { projectSlug, workspaceSlug } = props.params
 
-  const isPagesEnabled = await entitlementFlag(FEATURE_SLUGS.PAGES)
+  const isPagesEnabled = await entitlementFlag(FEATURE_SLUGS.PAGES.SLUG)
 
   if (!isPagesEnabled) {
     return <UpgradePlanError />

@@ -79,7 +79,7 @@ async function generateData(customerId: string, async?: boolean) {
 
         // report usage
         // wait 200ms
-        await new Promise((resolve) => setTimeout(resolve, 200))
+        await new Promise((resolve) => setTimeout(resolve, 10))
 
         const result = await unprice.customers.reportUsage({
           customerId,
@@ -110,7 +110,7 @@ async function generateData(customerId: string, async?: boolean) {
 
 async function main() {
   // const customerFree = "cus_1MeUjVxFbv8DP9X7f1UW9"
-  const customerPro = "cus_11SVcMF8uSePPMPoxrmnMb"
+  const customerPro = "cus_11SZ9JgwieLHaEPzg4fyfM"
   // const customerEnterprise = "cus_1MVdMxZ45uJKDo5z48hYJ"
 
   // PRO plan

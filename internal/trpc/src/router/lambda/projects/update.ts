@@ -20,7 +20,7 @@ export const update = protectedProjectProcedure
     const { id, name, defaultCurrency, timezone, url, contactEmail } = opts.input
     const workspace = opts.ctx.project.workspace
     const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.PROJECTS
+    const featureSlug = FEATURE_SLUGS.PROJECTS.SLUG
 
     // only owner and admin can update a plan
     opts.ctx.verifyRole(["OWNER", "ADMIN"])

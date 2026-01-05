@@ -25,7 +25,7 @@ export const deleteProject = protectedProjectProcedure
     const project = opts.ctx.project
     const workspace = opts.ctx.project.workspace
     const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.PROJECTS
+    const featureSlug = FEATURE_SLUGS.PROJECTS.SLUG
 
     // only owner can delete a project
     opts.ctx.verifyRole(["OWNER"])

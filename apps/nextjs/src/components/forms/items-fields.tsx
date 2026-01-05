@@ -262,16 +262,20 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
                   return "error calculating free units"
                 }
 
+                const showUnits =
+                  feature.featureType === "usage" &&
+                  !feature.feature.slug.includes(feature.feature.unit)
+
                 const freeUnitsText =
                   freeUnits === Number.POSITIVE_INFINITY
                     ? feature.limit
-                      ? `Up to ${nFormatter(feature.limit)}`
+                      ? `Up to ${nFormatter(feature.limit)} ${showUnits ? feature.feature.unit : ""}`
                       : "Unlimited"
                     : freeUnits === 0
                       ? feature.limit
-                        ? `Up to ${nFormatter(feature.limit)}`
+                        ? `Up to ${nFormatter(feature.limit)} ${showUnits ? feature.feature.unit : ""}`
                         : "Starts at 0"
-                      : nFormatter(freeUnits)
+                      : `${nFormatter(freeUnits)} ${showUnits ? feature.feature.unit : ""}`
 
                 return (
                   <TableRow key={item.id} className="border-b bg-transparent">

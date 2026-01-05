@@ -520,7 +520,7 @@ export class SubscriptionService {
       this.billingService.generateBillingPeriods({
         subscriptionId,
         projectId,
-        now,
+        now: Date.now(), // get the periods until the current date
       })
     )
 
@@ -773,13 +773,17 @@ export class SubscriptionService {
   public async createSubscription({
     input,
     projectId,
+    db,
   }: {
     input: Omit<InsertSubscription, "phases">
     projectId: string
+    db?: Database
   }): Promise<Result<Subscription, UnPriceSubscriptionError | SchemaError>> {
     const { customerId, metadata, timezone } = input
 
-    const customerData = await this.db.query.customers.findFirst({
+    const trx = db ?? this.db
+
+    const customerData = await trx.query.customers.findFirst({
       with: {
         subscriptions: {
           // get active subscriptions of the customer
@@ -820,13 +824,13 @@ export class SubscriptionService {
     const timezoneToUse = timezone || customerData.project.timezone
 
     // execute this in a transaction
-    const result = await this.db.transaction(async (trx) => {
+    const result = await trx.transaction(async (innerTrx) => {
       try {
         // create the subscription
         const subscriptionId = newId("subscription")
 
         // create the subscription and then phases
-        const newSubscription = await trx
+        const newSubscription = await innerTrx
           .insert(subscriptions)
           .values({
             id: subscriptionId,
@@ -844,7 +848,6 @@ export class SubscriptionService {
           .then((re) => re[0])
           .catch((e) => {
             this.logger.error(e.message)
-            trx.rollback()
             return null
           })
 
@@ -862,8 +865,11 @@ export class SubscriptionService {
           error: JSON.stringify(e),
         })
 
-        trx.rollback()
-        throw e // this is never reach because rollback will throw an error
+        return Err(
+          new UnPriceSubscriptionError({
+            message: "Error while creating subscription",
+          })
+        )
       }
     })
 

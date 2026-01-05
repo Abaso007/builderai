@@ -18,7 +18,7 @@ export const getBySlug = protectedWorkspaceProcedure
   .query(async (opts) => {
     const workspace = opts.ctx.workspace
     const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.PROJECTS
+    const featureSlug = FEATURE_SLUGS.PROJECTS.SLUG
 
     // check if the customer has access to the feature
     const result = await featureGuard({

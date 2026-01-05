@@ -18,7 +18,7 @@ export default async function ApiKeysPage(props: {
   params: { projectSlug: string; workspaceSlug: string }
   searchParams: SearchParams
 }) {
-  const isApiKeysEnabled = await entitlementFlag(FEATURE_SLUGS.API_KEYS)
+  const isApiKeysEnabled = await entitlementFlag(FEATURE_SLUGS.API_KEYS.SLUG)
 
   if (!isApiKeysEnabled) {
     return <UpgradePlanError />

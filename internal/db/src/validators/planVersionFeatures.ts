@@ -333,7 +333,7 @@ export const planVersionFeatureSelectBaseSchema = createSelectSchema(planVersion
   resetConfig: resetConfigSchema,
   metadata: planVersionFeatureMetadataSchema,
   defaultQuantity: z.coerce.number().int().optional().default(1),
-  aggregationMethod: aggregationMethodSchema,
+  aggregationMethod: aggregationMethodSchema.default("sum"),
   limit: z.coerce.number().int().optional(),
   featureType: typeFeatureSchema,
   billingConfig: billingConfigSchema,

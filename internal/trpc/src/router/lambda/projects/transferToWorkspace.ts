@@ -21,7 +21,7 @@ export const transferToWorkspace = protectedWorkspaceProcedure
     const { targetWorkspaceId, projectSlug } = opts.input
     const workspace = opts.ctx.workspace
     const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.PROJECTS
+    const featureSlug = FEATURE_SLUGS.PROJECTS.SLUG
 
     // only owner can transfer a project to a workspace
     opts.ctx.verifyRole(["OWNER"])

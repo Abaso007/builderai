@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server"
+import { FEATURE_SLUGS } from "@unprice/config"
 import {
   featureSelectBaseSchema,
   planSelectBaseSchema,
@@ -35,7 +36,7 @@ export const getById = protectedProjectProcedure
     // check if the customer has access to the feature
     const result = await featureGuard({
       customerId: workspace.unPriceCustomerId,
-      featureSlug: "plans",
+      featureSlug: FEATURE_SLUGS.PLANS.SLUG,
       isMain: workspace.isMain,
       metadata: {
         action: "getById",

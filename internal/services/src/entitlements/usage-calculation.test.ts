@@ -94,7 +94,7 @@ describe("UsageMeter Calculation", () => {
       expect(meter.toPersist().usage).toBe("25")
     })
 
-    it("should always allow usage for flat features", () => {
+    it("shouldn't allow report usage for flat features", () => {
       const flatConfig = {
         ...baseConfig,
         featureType: "flat" as const,
@@ -104,8 +104,9 @@ describe("UsageMeter Calculation", () => {
       const meter = new UsageMeter(flatConfig, baseMeterState)
       const result = meter.consume(100, now)
 
-      expect(result.allowed).toBe(true)
-      expect(result.remaining).toBe(Number.POSITIVE_INFINITY)
+      expect(result.allowed).toBe(false)
+      expect(result.deniedReason).toBe("FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE")
+      expect(result.message).toBe("Flat feature not allowed to be reported")
     })
   })
 

@@ -1158,8 +1158,11 @@ importers:
       '@neondatabase/serverless':
         specifier: ^0.10.4
         version: 0.10.4
+      '@unprice/config':
+        specifier: workspace:^
+        version: link:../../internal/config
       '@unprice/db':
-        specifier: ^0.1.0
+        specifier: workspace:^
         version: link:../../internal/db
       drizzle-orm:
         specifier: ^0.44.5

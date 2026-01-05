@@ -3,7 +3,9 @@ import { z } from "zod"
 
 import { planVersionFeatureDragDropSchema } from "@unprice/db/validators"
 
+import { FEATURE_SLUGS } from "@unprice/config"
 import { protectedProjectProcedure } from "#trpc"
+import { featureGuard } from "#utils/feature-guard"
 
 export const getByPlanVersionId = protectedProjectProcedure
   .input(
@@ -19,6 +21,26 @@ export const getByPlanVersionId = protectedProjectProcedure
   .query(async (opts) => {
     const { planVersionId } = opts.input
     const project = opts.ctx.project
+
+    const workspace = project.workspace
+    const customerId = workspace.unPriceCustomerId
+    const featureSlug = FEATURE_SLUGS.PLAN_VERSIONS.SLUG
+
+    const result = await featureGuard({
+      customerId,
+      featureSlug,
+      isMain: workspace.isMain,
+      metadata: {
+        action: "getByPlanVersionId",
+      },
+    })
+
+    if (!result.success) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: `You don't have access to this feature ${result.deniedReason}`,
+      })
+    }
 
     const planVersionData = await opts.ctx.db.query.versions.findFirst({
       where: (version, { and, eq }) =>

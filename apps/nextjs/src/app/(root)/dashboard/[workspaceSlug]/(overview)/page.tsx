@@ -16,7 +16,7 @@ import { ProjectCard, ProjectCardSkeleton } from "../_components/project-card"
 export default async function WorkspaceOverviewPage(props: {
   params: { workspaceSlug: string }
 }) {
-  const isProjectsEnabled = await entitlementFlag(FEATURE_SLUGS.PROJECTS)
+  const isProjectsEnabled = await entitlementFlag(FEATURE_SLUGS.PROJECTS.SLUG)
 
   if (!isProjectsEnabled) {
     return <UpgradePlanError />
@@ -30,7 +30,7 @@ export default async function WorkspaceOverviewPage(props: {
     <DashboardShell
       header={
         <HeaderTab
-          title="Apps"
+          title="Projects"
           description="All your projects for this Workspace"
           action={
             <SuperLink href={`/${props.params.workspaceSlug}/onboarding`}>

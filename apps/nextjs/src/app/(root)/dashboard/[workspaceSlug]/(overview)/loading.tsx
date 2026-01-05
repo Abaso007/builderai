@@ -12,7 +12,7 @@ export default function Loading() {
     <DashboardShell
       header={
         <HeaderTab
-          title="Apps"
+          title="Projects"
           description="All your projects for this Workspace"
           action={
             <SuperLink href={"/onboarding"}>

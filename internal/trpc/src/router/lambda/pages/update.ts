@@ -34,7 +34,7 @@ export const update = protectedProjectProcedure
     const project = opts.ctx.project
     const workspace = opts.ctx.project.workspace
     const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.PAGES
+    const featureSlug = FEATURE_SLUGS.PAGES.SLUG
 
     const result = await featureGuard({
       customerId,
@@ -53,13 +53,13 @@ export const update = protectedProjectProcedure
     }
 
     const pageData = await opts.ctx.db.query.pages.findFirst({
-      where: (plan, { eq, and }) => and(eq(plan.id, id), eq(plan.projectId, project.id)),
+      where: (page, { eq, and }) => and(eq(page.id, id), eq(page.projectId, project.id)),
     })
 
     if (!pageData?.id) {
       throw new TRPCError({
         code: "NOT_FOUND",
-        message: "plan not found",
+        message: "page not found",
       })
     }
 

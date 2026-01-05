@@ -20,7 +20,7 @@ export const inviteMember = protectedWorkspaceProcedure
     const { email, role, name } = opts.input
     const userId = opts.ctx.userId
     const workspace = opts.ctx.workspace
-    const featureSlug = FEATURE_SLUGS.ACCESS_PRO
+    const featureSlug = FEATURE_SLUGS.ACCESS_PRO.SLUG
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 

@@ -26,7 +26,7 @@ export const create = protectedProjectProcedure
     const { project } = opts.ctx
 
     const unPriceCustomerId = project.workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.CUSTOMERS
+    const featureSlug = FEATURE_SLUGS.CUSTOMERS.SLUG
 
     // check if the customer has access to the feature
     const result = await featureGuard({

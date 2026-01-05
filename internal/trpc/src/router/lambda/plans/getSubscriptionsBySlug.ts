@@ -33,7 +33,7 @@ export const getSubscriptionsBySlug = protectedProjectProcedure
     const customerColumns = getTableColumns(schema.customers)
     const workspace = opts.ctx.project.workspace
     const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.PLANS
+    const featureSlug = FEATURE_SLUGS.PLANS.SLUG
 
     const result = await featureGuard({
       customerId,

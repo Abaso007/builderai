@@ -4,6 +4,7 @@ import * as schema from "@unprice/db/schema"
 import { invitesSelectBase } from "@unprice/db/validators"
 import { z } from "zod"
 
+import { FEATURE_SLUGS } from "@unprice/config"
 import { protectedWorkspaceProcedure } from "#trpc"
 import { featureGuard } from "#utils/feature-guard"
 
@@ -27,7 +28,7 @@ export const deleteInvite = protectedWorkspaceProcedure
     // check if the customer has access to the feature
     const result = await featureGuard({
       customerId: workspace.unPriceCustomerId,
-      featureSlug: "access-pro",
+      featureSlug: FEATURE_SLUGS.ACCESS_PRO.SLUG,
       isMain: workspace.isMain,
       metadata: {
         action: "deleteInvite",

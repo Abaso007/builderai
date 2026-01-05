@@ -19,7 +19,7 @@ export const roll = protectedProjectProcedure
   .mutation(async (opts) => {
     const { hashKey } = opts.input
     const project = opts.ctx.project
-    const featureSlug = FEATURE_SLUGS.API_KEYS
+    const featureSlug = FEATURE_SLUGS.API_KEYS.SLUG
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 

@@ -4,6 +4,7 @@ import * as schema from "@unprice/db/schema"
 import { planVersionSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 
+import { FEATURE_SLUGS } from "@unprice/config"
 import { protectedProjectProcedure } from "#trpc"
 import { featureGuard } from "#utils/feature-guard"
 import { reportUsageFeature } from "#utils/shared"
@@ -28,7 +29,7 @@ export const remove = protectedProjectProcedure
     // check if the customer has access to the feature
     const result = await featureGuard({
       customerId: workspace.unPriceCustomerId,
-      featureSlug: "plans",
+      featureSlug: FEATURE_SLUGS.PLANS.SLUG,
       isMain: workspace.isMain,
       metadata: {
         action: "remove",

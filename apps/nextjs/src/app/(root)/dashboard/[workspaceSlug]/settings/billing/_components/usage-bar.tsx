@@ -19,7 +19,7 @@ function formatNumber(num: number | null | undefined, unit = ""): string {
     return unit ? `∞ ${unit}` : "∞"
   }
   const formatted = nFormatter(num, { digits: 1 })
-  return unit ? `${formatted} ${unit}` : formatted
+  return unit ? `${formatted} ${unit}${Number(num) > 1 ? "s" : ""}` : formatted
 }
 
 export function UsageBar({ data }: UsageBarProps) {

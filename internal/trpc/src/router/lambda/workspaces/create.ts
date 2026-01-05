@@ -23,7 +23,7 @@ export const create = protectedProcedure
   )
   .mutation(async (opts) => {
     const userId = opts.ctx.userId
-    const featureSlug = FEATURE_SLUGS.ACCESS_PRO
+    const featureSlug = FEATURE_SLUGS.ACCESS_PRO.SLUG
 
     let isPersonal = true
 

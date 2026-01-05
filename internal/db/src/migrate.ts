@@ -1,8 +1,9 @@
-import { eq } from "drizzle-orm"
+import { eq, sql } from "drizzle-orm"
 import { createConnection } from "./createConnection"
 import * as schema from "./schema"
 import { hashStringSHA256, newId } from "./utils"
 
+import { FEATURE_SLUGS } from "@unprice/config"
 import { migrate } from "drizzle-orm/neon-serverless/migrator"
 import { env } from "../env"
 
@@ -188,6 +189,28 @@ async function main() {
     .update(schema.workspaces)
     .set({ unPriceCustomerId: unpriceOwner.id })
     .where(eq(schema.workspaces.id, workspace.id))
+
+  // upsert default features configuration
+  await db
+    .insert(schema.features)
+    .values(
+      Object.values(FEATURE_SLUGS).map((feature) => ({
+        id: newId("feature"),
+        slug: feature.SLUG,
+        title: feature.TITLE,
+        description: feature.DESCRIPTION,
+        projectId: project.id,
+        unit: feature.UNIT,
+      }))
+    )
+    .onConflictDoUpdate({
+      target: [schema.features.slug, schema.features.projectId],
+      set: {
+        title: sql`excluded.title`,
+        description: sql`excluded.description`,
+        unit: sql`excluded.unit`,
+      },
+    })
 
   // create api key for the user
   if (env.UNPRICE_API_KEY) {

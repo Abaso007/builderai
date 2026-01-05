@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import { TRPCError } from "@trpc/server"
+import { FEATURE_SLUGS } from "@unprice/config"
 import { and, eq } from "@unprice/db"
 import { customers } from "@unprice/db/schema"
 import { customerSelectSchema } from "@unprice/db/validators"
@@ -26,7 +27,7 @@ export const remove = protectedProjectProcedure
 
     const result = await featureGuard({
       customerId: unPriceCustomerId,
-      featureSlug: "customers",
+      featureSlug: FEATURE_SLUGS.CUSTOMERS.SLUG,
       isMain: project.workspace.isMain,
       metadata: {
         action: "remove",

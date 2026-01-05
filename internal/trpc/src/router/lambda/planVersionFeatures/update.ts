@@ -8,7 +8,9 @@ import {
   planVersionFeatureSelectBaseSchema,
 } from "@unprice/db/validators"
 
+import { FEATURE_SLUGS } from "@unprice/config"
 import { protectedProjectProcedure } from "#trpc"
+import { featureGuard } from "#utils/feature-guard"
 
 export const update = protectedProjectProcedure
   .input(planVersionFeatureSelectBaseSchema.partial().required({ id: true, planVersionId: true }))
@@ -42,8 +44,28 @@ export const update = protectedProjectProcedure
 
     const project = opts.ctx.project
 
+    const workspace = project.workspace
+    const customerId = workspace.unPriceCustomerId
+    const featureSlug = FEATURE_SLUGS.PLAN_VERSIONS.SLUG
+
     // only owner and admin can update a feature
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
+
+    const result = await featureGuard({
+      customerId,
+      featureSlug,
+      isMain: workspace.isMain,
+      metadata: {
+        action: "update",
+      },
+    })
+
+    if (!result.success) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: `You don't have access to this feature ${result.deniedReason}`,
+      })
+    }
 
     const planVersionData = await opts.ctx.db.query.versions.findFirst({
       where: (version, { and, eq }) =>
@@ -83,7 +105,7 @@ export const update = protectedProjectProcedure
         ...(limit !== undefined && { limit: limit === 0 ? null : limit }),
         ...(hidden !== undefined && { hidden }),
         ...(aggregationMethod !== undefined && {
-          aggregationMethod: featureType === "flat" ? "none" : aggregationMethod,
+          aggregationMethod: featureType !== "usage" ? "none" : aggregationMethod,
         }),
         ...(billingConfigUpdate && {
           billingConfig: {

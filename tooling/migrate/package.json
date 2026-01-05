@@ -11,7 +11,8 @@
   "license": "AGPL-3.0",
   "dependencies": {
     "@neondatabase/serverless": "^0.10.4",
-    "@unprice/db": "^0.1.0",
+    "@unprice/config": "workspace:^",
+    "@unprice/db": "workspace:^",
     "drizzle-orm": "^0.44.5",
     "ws": "^8.17.1"
   },

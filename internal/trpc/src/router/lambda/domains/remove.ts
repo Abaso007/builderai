@@ -20,7 +20,7 @@ export const remove = protectedWorkspaceProcedure
   .mutation(async (opts) => {
     const workspace = opts.ctx.workspace
     const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.DOMAINS
+    const featureSlug = FEATURE_SLUGS.DOMAINS.SLUG
 
     // only owner can remove a domain
     opts.ctx.verifyRole(["OWNER"])

@@ -7,7 +7,9 @@ import {
   planVersionSelectBaseSchema,
 } from "@unprice/db/validators"
 
+import { FEATURE_SLUGS } from "@unprice/config"
 import { protectedProjectProcedure } from "#trpc"
+import { featureGuard } from "#utils/feature-guard"
 
 export const getById = protectedProjectProcedure
   .input(
@@ -26,6 +28,26 @@ export const getById = protectedProjectProcedure
   .query(async (opts) => {
     const { id } = opts.input
     const project = opts.ctx.project
+
+    const workspace = project.workspace
+    const customerId = workspace.unPriceCustomerId
+    const featureSlug = FEATURE_SLUGS.PLAN_VERSIONS.SLUG
+
+    const result = await featureGuard({
+      customerId,
+      featureSlug,
+      isMain: workspace.isMain,
+      metadata: {
+        action: "getById",
+      },
+    })
+
+    if (!result.success) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: `You don't have access to this feature ${result.deniedReason}`,
+      })
+    }
 
     const planVersionFeatureData = await opts.ctx.db.query.planVersionFeatures.findFirst({
       with: {

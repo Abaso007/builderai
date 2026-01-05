@@ -61,7 +61,7 @@ export function FeatureConfigForm({
 
   const editMode = !!defaultValues.id
   const isPublished = planVersion?.status === "published"
-  // const isProEnabled = useFlags(FEATURE_SLUGS.ACCESS_PRO)
+  // const isProEnabled = useFlags(FEATURE_SLUGS.ACCESS_PRO.SLUG)
 
   // we set all possible values for the form so react-hook-form don't complain
   const controlledDefaultValues = {
@@ -267,6 +267,12 @@ export function FeatureConfigForm({
                       <Select
                         onValueChange={(value) => {
                           field.onChange(value)
+
+                          if (value === "usage") {
+                            form.setValue("aggregationMethod", "sum")
+                          } else {
+                            form.setValue("aggregationMethod", "none")
+                          }
                         }}
                         value={field.value ?? ""}
                       >

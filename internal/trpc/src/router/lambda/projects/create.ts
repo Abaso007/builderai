@@ -15,7 +15,7 @@ export const create = protectedWorkspaceProcedure
     const { name, url, defaultCurrency, timezone, contactEmail } = opts.input
     const workspace = opts.ctx.workspace
     const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.PROJECTS
+    const featureSlug = FEATURE_SLUGS.PROJECTS.SLUG
 
     // only owner and admin can create a project
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
