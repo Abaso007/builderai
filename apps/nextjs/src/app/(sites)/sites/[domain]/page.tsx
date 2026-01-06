@@ -32,9 +32,10 @@ export default async function DomainPage({
     revalidate?: string
   }
 }) {
-  // we use `getPageData` to fetch the page data and cache it.
-  // Instead of using `api.pages.findFirst` directly
-  const page = await getPageData(domain)
+  // Skip cache when in preview mode (when revalidate param is present)
+  // This ensures preview mode always shows fresh data and doesn't pollute the cache
+  const skipCache = !!revalidate
+  const page = await getPageData(domain, skipCache)
 
   if (!page) {
     notFound()

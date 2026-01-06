@@ -9,6 +9,7 @@ import { LoadingAnimation } from "@unprice/ui/loading-animation"
 import { toast } from "@unprice/ui/sonner"
 
 import { useMutation } from "@tanstack/react-query"
+import { revalidatePageDomain } from "~/actions/revalidate"
 import { ConfirmAction } from "~/components/confirm-action"
 import { useTRPC } from "~/trpc/client"
 
@@ -26,7 +27,10 @@ const PagePublish = forwardRef<ElementRef<"button">, PagePublishProps>((props, r
 
   const publishPage = useMutation(
     trpc.pages.publish.mutationOptions({
-      onSuccess: () => {
+      onSuccess: async (data) => {
+        // Revalidate the cache for the page domain to clear any preview mode cache
+        const domain = data.page.customDomain ?? data.page.subdomain
+        await revalidatePageDomain(domain)
         router.refresh()
       },
     })

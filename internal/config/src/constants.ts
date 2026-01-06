@@ -143,7 +143,7 @@ export const FEATURE_SLUGS = {
   EVENTS: {
     SLUG: "events",
     TITLE: "Events",
-    DESCRIPTION: "track and analytics",
+    DESCRIPTION: "verification and usage tracking events",
     UNIT: "event",
   },
   CUSTOMERS: {
