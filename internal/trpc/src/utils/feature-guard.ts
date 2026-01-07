@@ -25,6 +25,7 @@ export const featureGuard = async ({
 }): Promise<{
   success: boolean
   deniedReason?: string
+  featureType?: string
 }> => {
   // internal workspaces have unlimited access to all features
   if (isMain) {
@@ -50,6 +51,7 @@ export const featureGuard = async ({
     return {
       success: data.result.allowed,
       deniedReason: data.result.deniedReason ?? undefined,
+      featureType: data.result.featureType ?? undefined,
     }
   } catch (e) {
     throw new TRPCError({

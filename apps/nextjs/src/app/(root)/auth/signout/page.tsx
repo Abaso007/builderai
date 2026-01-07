@@ -1,9 +1,9 @@
 import { signOut } from "@unprice/auth/server"
-import { Button } from "@unprice/ui/button"
 
 import { AUTH_ROUTES } from "@unprice/config"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import { cn } from "@unprice/ui/utils"
+import { AuthButton } from "../_components/auth-button"
 
 export default function AuthenticationPage() {
   return (
@@ -16,7 +16,8 @@ export default function AuthenticationPage() {
         <CardContent>
           <form className="flex w-full flex-col items-center justify-between gap-4">
             <div className="flex w-full flex-col gap-2">
-              <Button
+              <AuthButton
+                provider="none"
                 className="w-full"
                 variant="destructive"
                 formAction={async () => {
@@ -28,7 +29,7 @@ export default function AuthenticationPage() {
                 }}
               >
                 Confirm
-              </Button>
+              </AuthButton>
             </div>
           </form>
         </CardContent>

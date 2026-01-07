@@ -55,16 +55,17 @@ export const create = protectedProjectProcedure
 
     opts.ctx.waitUntil(
       Promise.all([
-        reportUsageFeature({
-          customerId: project.workspace.unPriceCustomerId,
-          featureSlug: "plans",
-          usage: 1,
-          isMain: project.workspace.isMain,
-          metadata: {
-            action: "create",
-            module: "feature",
-          },
-        }),
+        result.featureType !== "flat" &&
+          reportUsageFeature({
+            customerId: project.workspace.unPriceCustomerId,
+            featureSlug: "plans",
+            usage: 1,
+            isMain: project.workspace.isMain,
+            metadata: {
+              action: "create",
+              module: "feature",
+            },
+          }),
         opts.ctx.analytics.ingestFeatures({
           id: featureId,
           project_id: project.id,

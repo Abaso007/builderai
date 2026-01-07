@@ -45,18 +45,21 @@ export const remove = protectedProjectProcedure
       })
     }
 
-    opts.ctx.waitUntil(
-      reportUsageFeature({
-        customerId: project.workspace.unPriceCustomerId,
-        featureSlug: FEATURE_SLUGS.PLANS.SLUG,
-        usage: -1,
-        isMain: project.workspace.isMain,
-        metadata: {
-          action: "remove",
-          module: "feature",
-        },
-      })
-    )
+    // avoid reporting usage for flat features
+    if (result.featureType !== "flat") {
+      opts.ctx.waitUntil(
+        reportUsageFeature({
+          customerId: project.workspace.unPriceCustomerId,
+          featureSlug: FEATURE_SLUGS.PLANS.SLUG,
+          usage: -1,
+          isMain: project.workspace.isMain,
+          metadata: {
+            action: "remove",
+            module: "feature",
+          },
+        })
+      )
+    }
 
     return {
       feature: deletedFeature,

@@ -167,19 +167,22 @@ export const duplicate = protectedProjectProcedure
       })
     }
 
-    opts.ctx.waitUntil(
-      // report usage
-      reportUsageFeature({
-        customerId: workspace.unPriceCustomerId,
-        featureSlug: "plans",
-        usage: 1,
-        isMain: workspace.isMain,
-        metadata: {
-          action: "duplicate",
-          module: "planVersion",
-        },
-      })
-    )
+    // avoid reporting usage for flat features
+    if (result.featureType !== "flat") {
+      opts.ctx.waitUntil(
+        // report usage
+        reportUsageFeature({
+          customerId: workspace.unPriceCustomerId,
+          featureSlug: "plans",
+          usage: 1,
+          isMain: workspace.isMain,
+          metadata: {
+            action: "duplicate",
+            module: "planVersion",
+          },
+        })
+      )
+    }
 
     return {
       planVersion: duplicatedVersion,

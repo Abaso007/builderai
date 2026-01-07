@@ -81,6 +81,7 @@ export const verificationResultSchema = z.object({
   allowed: z.boolean(),
   message: z.string().optional(),
   deniedReason: deniedReasonSchema.optional(),
+  featureType: typeFeatureSchema.optional(),
   cacheHit: z.boolean().optional(),
   remaining: z.number().optional(),
   limit: z.number().optional(),

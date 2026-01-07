@@ -54,15 +54,16 @@ export const revoke = protectedProjectProcedure
       Promise.all([
         ...data.map(async (apikey) => opts.ctx.cache.apiKeyByHash.remove(apikey.hash)),
         // report usage
-        reportUsageFeature({
-          customerId: project.workspace.unPriceCustomerId,
-          featureSlug,
-          usage: -data.length,
-          isMain: project.workspace.isMain,
-          metadata: {
-            action: "revoke",
-          },
-        }),
+        result.featureType !== "flat" &&
+          reportUsageFeature({
+            customerId: project.workspace.unPriceCustomerId,
+            featureSlug,
+            usage: -data.length,
+            isMain: project.workspace.isMain,
+            metadata: {
+              action: "revoke",
+            },
+          }),
       ])
     )
 

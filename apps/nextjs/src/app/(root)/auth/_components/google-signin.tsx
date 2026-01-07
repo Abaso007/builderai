@@ -1,8 +1,7 @@
 import { signIn } from "@unprice/auth/server"
 import { APP_DOMAIN } from "@unprice/config"
-import { Button } from "@unprice/ui/button"
-import { Google } from "@unprice/ui/icons"
 import { cn } from "@unprice/ui/utils"
+import { AuthButton } from "./auth-button"
 
 export function SignInGoogle({
   className,
@@ -10,9 +9,8 @@ export function SignInGoogle({
 }: { className?: string; redirectTo?: string }) {
   return (
     <form className={cn("w-full", className)}>
-      <Button
-        className="w-full"
-        variant="default"
+      <AuthButton
+        provider="google"
         formAction={async () => {
           "use server"
           await signIn("google", {
@@ -20,9 +18,8 @@ export function SignInGoogle({
           })
         }}
       >
-        <Google className="mr-2 size-4" />
         Google
-      </Button>
+      </AuthButton>
     </form>
   )
 }

@@ -1,8 +1,7 @@
 import { signIn } from "@unprice/auth/server"
 import { APP_DOMAIN } from "@unprice/config"
-import { Button } from "@unprice/ui/button"
-import { GitHub } from "@unprice/ui/icons"
 import { cn } from "@unprice/ui/utils"
+import { AuthButton } from "./auth-button"
 
 export function SignInGithub({
   className,
@@ -10,9 +9,8 @@ export function SignInGithub({
 }: { className?: string; redirectTo?: string }) {
   return (
     <form className={cn("w-full", className)}>
-      <Button
-        className="w-full"
-        variant="default"
+      <AuthButton
+        provider="github"
         formAction={async () => {
           "use server"
           await signIn("github", {
@@ -20,9 +18,8 @@ export function SignInGithub({
           })
         }}
       >
-        <GitHub className="mr-2 size-4" />
         Github
-      </Button>
+      </AuthButton>
     </form>
   )
 }

@@ -67,17 +67,20 @@ export const deleteProject = protectedProjectProcedure
       })
     }
 
-    opts.ctx.waitUntil(
-      reportUsageFeature({
-        customerId,
-        featureSlug,
-        usage: -1,
-        isMain: workspace.isMain,
-        metadata: {
-          action: "remove",
-        },
-      })
-    )
+    // avoid reporting usage for flat features
+    if (result.featureType !== "flat") {
+      opts.ctx.waitUntil(
+        reportUsageFeature({
+          customerId,
+          featureSlug,
+          usage: -1,
+          isMain: workspace.isMain,
+          metadata: {
+            action: "remove",
+          },
+        })
+      )
+    }
 
     return {
       project: deletedProject,

@@ -76,18 +76,21 @@ export const create = protectedProjectProcedure
       })
     }
 
-    opts.ctx.waitUntil(
-      // report usage for the new project in background
-      reportUsageFeature({
-        customerId: unPriceCustomerId,
-        featureSlug,
-        usage: 1,
-        isMain: project.workspace.isMain,
-        metadata: {
-          action: "create",
-        },
-      })
-    )
+    // avoid reporting usage for flat features
+    if (result.featureType !== "flat") {
+      opts.ctx.waitUntil(
+        // report usage for the new project in background
+        reportUsageFeature({
+          customerId: unPriceCustomerId,
+          featureSlug,
+          usage: 1,
+          isMain: project.workspace.isMain,
+          metadata: {
+            action: "create",
+          },
+        })
+      )
+    }
 
     return {
       customer: customerData,

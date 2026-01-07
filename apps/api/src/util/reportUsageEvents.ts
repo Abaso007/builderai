@@ -39,7 +39,7 @@ export const reportUsageEvents = async (
     await usagelimiter
       .reportUsage({
         customerId: unPriceCustomer.id,
-        featureSlug: FEATURE_SLUGS.EVENTS,
+        featureSlug: FEATURE_SLUGS.EVENTS.SLUG,
         projectId: unPriceCustomer.projectId,
         requestId,
         usage: 1,

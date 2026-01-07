@@ -1082,6 +1082,8 @@ export interface operations {
               | "SUBSCRIPTION_NOT_FOUND"
               | "INVALID_ENTITLEMENT_TYPE"
               | "NO_ACTIVE_PHASE_FOUND"
+            /** @enum {string} */
+            featureType?: "flat" | "tier" | "package" | "usage"
             cacheHit?: boolean
             remaining?: number
             limit?: number
@@ -2675,7 +2677,10 @@ export interface operations {
                   stripeProductId?: string
                   realtime?: boolean
                 } | null
-                /** @enum {string} */
+                /**
+                 * @default sum
+                 * @enum {string}
+                 */
                 aggregationMethod:
                   | "none"
                   | "sum"
@@ -3184,7 +3189,10 @@ export interface operations {
                   stripeProductId?: string
                   realtime?: boolean
                 } | null
-                /** @enum {string} */
+                /**
+                 * @default sum
+                 * @enum {string}
+                 */
                 aggregationMethod:
                   | "none"
                   | "sum"

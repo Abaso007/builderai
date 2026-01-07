@@ -73,17 +73,20 @@ export const create = protectedWorkspaceProcedure
       })
     }
 
-    opts.ctx.waitUntil(
-      reportUsageFeature({
-        customerId,
-        featureSlug,
-        usage: 1,
-        isMain: workspace.isMain,
-        metadata: {
-          action: "create",
-        },
-      })
-    )
+    // avoid reporting usage for flat features
+    if (result.featureType !== "flat") {
+      opts.ctx.waitUntil(
+        reportUsageFeature({
+          customerId,
+          featureSlug,
+          usage: 1,
+          isMain: workspace.isMain,
+          metadata: {
+            action: "create",
+          },
+        })
+      )
+    }
 
     return {
       project: newProject,

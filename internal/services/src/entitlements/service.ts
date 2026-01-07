@@ -145,6 +145,7 @@ export class EntitlementService {
         message: err.message,
         deniedReason: "ENTITLEMENT_ERROR",
         latency: performance.now() - params.performanceStart,
+        featureType: state.featureType,
       }
     }
 
@@ -204,6 +205,7 @@ export class EntitlementService {
       limit: validatedState.limit ?? undefined,
       remaining: verifyResult.remaining,
       latency,
+      featureType: state.featureType,
     }
   }
 
