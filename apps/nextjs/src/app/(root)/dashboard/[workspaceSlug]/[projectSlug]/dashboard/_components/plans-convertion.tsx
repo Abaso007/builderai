@@ -8,7 +8,7 @@ import { useIntervalFilter } from "~/hooks/use-filter"
 import { useQueryInvalidation } from "~/hooks/use-query-invalidation"
 import { useTRPC } from "~/trpc/client"
 import { ANALYTICS_STALE_TIME } from "~/trpc/shared"
-import { columns } from "./table/columns"
+import { columns } from "./plans/columns"
 
 export function PlansConversionSkeleton() {
   const [intervalFilter] = useIntervalFilter()

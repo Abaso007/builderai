@@ -1,25 +1,33 @@
 "use client"
 
+import { FEATURE_SLUGS } from "@unprice/config"
 import { Kbd } from "@unprice/ui/kbd"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useHotkeys } from "react-hotkeys-hook"
 import { SuperLink } from "~/components/super-link"
+import { useFlags } from "~/hooks/use-flags"
 
-const tabs = ["overview", "plans", "features", "pages"] as const
+export const tabs = ["overview", "latency", "plans", "pages"] as const
 
 const TabsDashboard = ({
   baseUrl,
   activeTab,
 }: { baseUrl: string; activeTab: (typeof tabs)[number] }) => {
+  const isPagesEnabled = useFlags(FEATURE_SLUGS.PAGES.SLUG)
+
   // add a query params in the url to avoid wipe the filters
   const params = useSearchParams()
   const allParams = params.toString()
   const router = useRouter()
 
+  const tabs = isPagesEnabled ? ["overview", "latency", "plans", "pages"] : ["overview", "latency"]
+
+  const tabKeys = isPagesEnabled ? ["1", "2", "3", "4"] : ["1", "2"]
+
   // handle hotkeys
   useHotkeys(
-    ["1", "2", "3", "4"],
+    tabKeys,
     (_, handler) => {
       const key = handler.keys?.at(0) as string
       if (!key) return
@@ -57,30 +65,34 @@ const TabsDashboard = ({
             </Kbd>
           </SuperLink>
         </TabNavigationLink>
-        <TabNavigationLink active={activeTab === "plans"} asChild>
-          <SuperLink href={`${baseUrl}/dashboard/plans${allParams ? `?${allParams}` : ""}`}>
-            Plans{" "}
+        <TabNavigationLink active={activeTab === "latency"} asChild>
+          <SuperLink href={`${baseUrl}/dashboard/latency${allParams ? `?${allParams}` : ""}`}>
+            Latency{" "}
             <Kbd abbrTitle="2" className="ml-2">
               2
             </Kbd>
           </SuperLink>
         </TabNavigationLink>
-        <TabNavigationLink active={activeTab === "features"} asChild>
-          <SuperLink href={`${baseUrl}/dashboard/features${allParams ? `?${allParams}` : ""}`}>
-            Features{" "}
-            <Kbd abbrTitle="3" className="ml-2">
-              3
-            </Kbd>
-          </SuperLink>
-        </TabNavigationLink>
-        <TabNavigationLink active={activeTab === "pages"} asChild>
-          <SuperLink href={`${baseUrl}/dashboard/pages${allParams ? `?${allParams}` : ""}`}>
-            Pages{" "}
-            <Kbd abbrTitle="4" className="ml-2">
-              4
-            </Kbd>
-          </SuperLink>
-        </TabNavigationLink>
+        {isPagesEnabled && (
+          <TabNavigationLink active={activeTab === "plans"} asChild>
+            <SuperLink href={`${baseUrl}/dashboard/plans${allParams ? `?${allParams}` : ""}`}>
+              Plans{" "}
+              <Kbd abbrTitle="3" className="ml-2">
+                3
+              </Kbd>
+            </SuperLink>
+          </TabNavigationLink>
+        )}
+        {isPagesEnabled && (
+          <TabNavigationLink active={activeTab === "pages"} asChild>
+            <SuperLink href={`${baseUrl}/dashboard/pages${allParams ? `?${allParams}` : ""}`}>
+              Pages{" "}
+              <Kbd abbrTitle="4" className="ml-2">
+                4
+              </Kbd>
+            </SuperLink>
+          </TabNavigationLink>
+        )}
       </div>
     </TabNavigation>
   )

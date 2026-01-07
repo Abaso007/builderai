@@ -25,6 +25,7 @@ export const projectInsertBaseSchema = createInsertSchema(schema.projects, {
   .partial({
     id: true,
     workspaceId: true,
+    contactEmail: true,
   })
   .omit({
     createdAtM: true,

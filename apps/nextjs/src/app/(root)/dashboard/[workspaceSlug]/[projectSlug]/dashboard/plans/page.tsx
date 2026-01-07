@@ -2,14 +2,17 @@ import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 
 import { prepareInterval } from "@unprice/analytics"
+import { FEATURE_SLUGS } from "@unprice/config"
 import { IntervalFilter } from "~/components/analytics/interval-filter"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
+import UpgradePlanError from "~/components/layout/error"
+import { entitlementFlag } from "~/lib/flags"
 import { intervalParams } from "~/lib/searchParams"
 import { HydrateClient, batchPrefetch, trpc } from "~/trpc/server"
 import { ANALYTICS_STALE_TIME } from "~/trpc/shared"
+import { PlansConversion, PlansConversionSkeleton } from "../_components/plans-convertion"
+import PlansStats, { PlansStatsSkeleton } from "../_components/plans-stats"
 import TabsDashboard from "../_components/tabs-dashboard"
-import { PlansConversion, PlansConversionSkeleton } from "./_components/plans-convertion"
-import PlansStats, { PlansStatsSkeleton } from "./_components/plans-stats"
 
 export const dynamic = "force-dynamic"
 
@@ -17,6 +20,12 @@ export default async function DashboardPlans(props: {
   params: { workspaceSlug: string; projectSlug: string }
   searchParams: SearchParams
 }) {
+  const isPagesEnabled = await entitlementFlag(FEATURE_SLUGS.PAGES.SLUG)
+
+  if (!isPagesEnabled) {
+    return <UpgradePlanError />
+  }
+
   const { projectSlug, workspaceSlug } = props.params
   const baseUrl = `/${workspaceSlug}/${projectSlug}`
   const filter = intervalParams(props.searchParams)

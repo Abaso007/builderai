@@ -16,6 +16,7 @@ export const create = protectedWorkspaceProcedure
     const workspace = opts.ctx.workspace
     const customerId = workspace.unPriceCustomerId
     const featureSlug = FEATURE_SLUGS.PROJECTS.SLUG
+    const defaultContactEmail = opts.ctx.session.user.email
 
     // only owner and admin can create a project
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
@@ -52,7 +53,7 @@ export const create = protectedWorkspaceProcedure
         timezone,
         isMain: false,
         isInternal: workspace.isInternal,
-        contactEmail,
+        contactEmail: contactEmail || defaultContactEmail,
       })
       .returning()
       .catch((err) => {

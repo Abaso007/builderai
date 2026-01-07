@@ -12,6 +12,15 @@ export const flagsAtom = atom<{
   customerId: "",
 })
 
+export function useEntitlements(): {
+  [x: string]: boolean
+}[] {
+  const [data] = useAtom(flagsAtom)
+  const { entitlements } = data
+
+  return entitlements
+}
+
 export function useFlags(featureSlug: string): boolean {
   const [data] = useAtom(flagsAtom)
   const { isMain, entitlements } = data

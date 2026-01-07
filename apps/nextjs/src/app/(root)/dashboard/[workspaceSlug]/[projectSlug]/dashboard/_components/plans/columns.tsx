@@ -21,8 +21,8 @@ import { BarChart3, Eye, Loader2, MousePointerClick, UserCheck2 } from "lucide-r
 import { DataTableColumnHeader } from "~/components/data-table/data-table-column-header"
 import { useMediaQuery } from "~/hooks/use-media-query"
 import { useTRPC } from "~/trpc/client"
-import { PageForm } from "../../../../pages/_components/page-form"
-import { PlanVersionForm } from "../../../../plans/[planSlug]/_components/plan-version-form"
+import { PageForm } from "../../../pages/_components/page-form"
+import { PlanVersionForm } from "../../../plans/[planSlug]/_components/plan-version-form"
 
 type PlanConversion = Awaited<ReturnType<typeof analytics.getPlansConversion>>["data"][number]
 

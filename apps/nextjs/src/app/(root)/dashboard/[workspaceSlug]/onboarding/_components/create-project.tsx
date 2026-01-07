@@ -6,7 +6,11 @@ import { useParams, useRouter } from "next/navigation"
 import { Balancer } from "react-wrap-balancer"
 import { ProjectForm } from "../../_components/project-form"
 
-export default function CreateProject() {
+export default function CreateProject({
+  nextStep,
+}: {
+  nextStep: string
+}) {
   const router = useRouter()
   const workspaceSlug = useParams().workspaceSlug as string
 
@@ -71,7 +75,7 @@ export default function CreateProject() {
             <ProjectForm
               onSuccess={({ slug }) => {
                 const searchParams = new URLSearchParams(window.location.search)
-                searchParams.set("step", "create-payment-config")
+                searchParams.set("step", nextStep)
                 searchParams.set("projectSlug", slug)
                 router.push(`/${workspaceSlug}/onboarding?${searchParams.toString()}`)
               }}
@@ -80,8 +84,6 @@ export default function CreateProject() {
                 timezone: "UTC",
                 name: "Acme project",
                 url: "https://acme.com",
-                // TODO: pass the contact email from the user
-                contactEmail: "",
               }}
             />
           </m.div>

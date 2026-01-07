@@ -9,7 +9,7 @@ import { DashboardShell } from "~/components/layout/dashboard-shell"
 import { intervalParams } from "~/lib/searchParams"
 import { HydrateClient, batchPrefetch, trpc } from "~/trpc/server"
 import { ANALYTICS_STALE_TIME } from "~/trpc/shared"
-import { LatencyTable, LatencyTableSkeleton } from "./_components/latency-table"
+import { FeaturesStats, FeaturesStatsSkeleton } from "./_components/features-stats"
 import OverviewStats, { OverviewStatsSkeleton } from "./_components/overview-stats"
 import TabsDashboard from "./_components/tabs-dashboard"
 
@@ -33,6 +33,22 @@ export default async function DashboardOverview(props: {
         staleTime: ANALYTICS_STALE_TIME,
       }
     ),
+    trpc.analytics.getFeatureHeatmap.queryOptions(
+      {
+        intervalDays: interval.intervalDays,
+      },
+      {
+        staleTime: ANALYTICS_STALE_TIME,
+      }
+    ),
+    trpc.analytics.getFeaturesOverview.queryOptions(
+      {
+        intervalDays: interval.intervalDays,
+      },
+      {
+        staleTime: ANALYTICS_STALE_TIME,
+      }
+    ),
     trpc.analytics.getVerifications.queryOptions(
       {
         intervalDays: interval.intervalDays,
@@ -42,14 +58,6 @@ export default async function DashboardOverview(props: {
       }
     ),
     trpc.analytics.getUsage.queryOptions(
-      {
-        intervalDays: interval.intervalDays,
-      },
-      {
-        staleTime: ANALYTICS_STALE_TIME,
-      }
-    ),
-    trpc.analytics.getVerificationRegions.queryOptions(
       {
         intervalDays: interval.intervalDays,
       },
@@ -69,8 +77,8 @@ export default async function DashboardOverview(props: {
         <Suspense fallback={<OverviewStatsSkeleton isLoading={true} />}>
           <OverviewStats />
         </Suspense>
-        <Suspense fallback={<LatencyTableSkeleton />}>
-          <LatencyTable />
+        <Suspense fallback={<FeaturesStatsSkeleton isLoading={true} />}>
+          <FeaturesStats />
         </Suspense>
         <AnalyticsCard
           className="w-full"

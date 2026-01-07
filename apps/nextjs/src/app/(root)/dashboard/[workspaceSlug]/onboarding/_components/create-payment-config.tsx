@@ -5,7 +5,11 @@ import { useEffect } from "react"
 import { Balancer } from "react-wrap-balancer"
 import { StripePaymentConfigForm } from "../../[projectSlug]/settings/payment/_components/stripe-payment-config-form"
 
-export default function CreatePaymentConfig() {
+export default function CreatePaymentConfig({
+  nextStep,
+}: {
+  nextStep: string
+}) {
   const router = useRouter()
   const params = useParams()
   const workspaceSlug = params.workspaceSlug as string
@@ -61,7 +65,7 @@ export default function CreatePaymentConfig() {
           >
             <Typography variant="p">
               Unprice uses different payment providers to configure your plans and features. This
-              API key is used to create the configurations for the payment provider.
+              API key is used to create invoices and manage customer payment methods.
             </Typography>
           </m.div>
           <m.div
@@ -79,7 +83,7 @@ export default function CreatePaymentConfig() {
               skip={true}
               onSuccess={() => {
                 const searchParams = new URLSearchParams(window.location.search)
-                searchParams.set("step", "create-api-key")
+                searchParams.set("step", nextStep)
                 router.push(`/${workspaceSlug}/onboarding?${searchParams.toString()}`)
               }}
             />

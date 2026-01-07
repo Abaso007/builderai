@@ -128,7 +128,7 @@ export function ProjectForm(props: {
             )}
           />
 
-          <FormField
+          {/* <FormField
             control={form.control}
             name="url"
             render={({ field }) => (
@@ -141,9 +141,9 @@ export function ProjectForm(props: {
                 <FormMessage />
               </FormItem>
             )}
-          />
+          /> */}
 
-          <FormField
+          {/* <FormField
             control={form.control}
             name="contactEmail"
             render={({ field }) => (
@@ -156,7 +156,7 @@ export function ProjectForm(props: {
                 <FormMessage />
               </FormItem>
             )}
-          />
+          /> */}
 
           <FormField
             control={form.control}

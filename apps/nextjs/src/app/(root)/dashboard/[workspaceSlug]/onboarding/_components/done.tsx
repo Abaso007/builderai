@@ -11,7 +11,6 @@ export default function Done(props: { workspaceSlug: string }) {
   const search = useSearchParams()
   const step = search.get("step")
   const projectSlug = search.get("projectSlug")
-  const apiKey = search.get("apiKey")
 
   const [_, startTransition] = useTransition()
   useEffect(() => {
@@ -21,9 +20,9 @@ export default function Done(props: { workspaceSlug: string }) {
           router.push(`/${props.workspaceSlug}/${projectSlug}`)
           router.refresh()
         })
-      }, 1500)
+      }, 500)
     }
-  }, [projectSlug, props.workspaceSlug, router, step, apiKey])
+  }, [projectSlug, props.workspaceSlug, router, step])
 
   return (
     <LazyMotion features={domAnimation}>

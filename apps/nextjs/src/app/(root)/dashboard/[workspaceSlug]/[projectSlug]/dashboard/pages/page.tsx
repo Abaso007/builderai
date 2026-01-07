@@ -1,16 +1,19 @@
 import { prepareInterval, preparePage } from "@unprice/analytics"
+import { FEATURE_SLUGS } from "@unprice/config"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 import { IntervalFilter } from "~/components/analytics/interval-filter"
 import { PageFilter } from "~/components/analytics/page-filter"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
+import UpgradePlanError from "~/components/layout/error"
+import { entitlementFlag } from "~/lib/flags"
 import { intervalParams, pageParams } from "~/lib/searchParams"
 import { HydrateClient, api, batchPrefetch, trpc } from "~/trpc/server"
 import { ANALYTICS_STALE_TIME } from "~/trpc/shared"
+import { Browsers, BrowsersSkeleton } from "../_components/browsers"
+import { Countries, CountriesSkeleton } from "../_components/countries"
+import { PageVisits, PageVisitsSkeleton } from "../_components/page-visits"
 import TabsDashboard from "../_components/tabs-dashboard"
-import { Browsers, BrowsersSkeleton } from "./_components/browsers"
-import { Countries, CountriesSkeleton } from "./_components/countries"
-import { PageVisits, PageVisitsSkeleton } from "./_components/page-visits"
 
 export const dynamic = "force-dynamic"
 
@@ -18,6 +21,12 @@ export default async function DashboardPages(props: {
   params: { workspaceSlug: string; projectSlug: string }
   searchParams: SearchParams
 }) {
+  const isPagesEnabled = await entitlementFlag(FEATURE_SLUGS.PAGES.SLUG)
+
+  if (!isPagesEnabled) {
+    return <UpgradePlanError />
+  }
+
   const { projectSlug, workspaceSlug } = props.params
   const baseUrl = `/${workspaceSlug}/${projectSlug}`
   const intervalFilter = intervalParams(props.searchParams)

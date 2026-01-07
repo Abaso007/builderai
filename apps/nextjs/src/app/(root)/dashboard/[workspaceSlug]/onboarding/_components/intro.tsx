@@ -8,11 +8,15 @@ import { Button } from "@unprice/ui/button"
 
 import { useDebounce } from "~/hooks/use-debounce"
 
-export default function Intro() {
+export default function Intro({
+  nextStep,
+}: {
+  nextStep: string
+}) {
   const router = useRouter()
   const workspaceSlug = useParams().workspaceSlug as string
 
-  const showText = useDebounce(true, 800)
+  const showText = useDebounce(true, 400)
 
   return (
     <LazyMotion features={domAnimation}>
@@ -73,7 +77,7 @@ export default function Intro() {
               <Button
                 onClick={() =>
                   router.push(`
-                  /${workspaceSlug}/onboarding?step=create-project
+                  /${workspaceSlug}/onboarding?step=${nextStep}
                 `)
                 }
               >

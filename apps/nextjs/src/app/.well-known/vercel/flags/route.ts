@@ -30,6 +30,9 @@ export async function GET(request: NextRequest) {
 
     const response = NextResponse.json({ definitions })
 
+    // Make cache vary by Cookie header so different workspaces (via workspace cookie) get different cached responses
+    response.headers.set("Vary", "Cookie")
+
     // Add cache control headers only in production
     if (!isDevelopment) {
       response.headers.set("Cache-Control", "s-maxage=60")
@@ -44,6 +47,9 @@ export async function GET(request: NextRequest) {
     const response = NextResponse.json({
       definitions: {}, // Empty definitions object when there's an error
     })
+
+    // Make cache vary by Cookie header even for error responses
+    response.headers.set("Vary", "Cookie")
 
     // Add cache headers even for error responses in production
     if (!isDevelopment) {

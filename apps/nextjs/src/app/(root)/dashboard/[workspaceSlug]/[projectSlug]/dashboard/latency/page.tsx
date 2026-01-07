@@ -6,16 +6,12 @@ import { DashboardShell } from "~/components/layout/dashboard-shell"
 import { intervalParams } from "~/lib/searchParams"
 import { HydrateClient, batchPrefetch, trpc } from "~/trpc/server"
 import { ANALYTICS_STALE_TIME } from "~/trpc/shared"
+import { LatencyTable, LatencyTableSkeleton } from "../_components/latency-table"
 import TabsDashboard from "../_components/tabs-dashboard"
-import FeatureUsageHeatmap, {
-  FeatureUsageHeatmapContent,
-  FeatureUsageHeatmapSkeleton,
-} from "./_components/features-heat-map"
-import { FeaturesStats, FeaturesStatsSkeleton } from "./_components/features-stats"
 
 export const dynamic = "force-dynamic"
 
-export default async function DashboardFeatures(props: {
+export default async function DashboardLatency(props: {
   params: { workspaceSlug: string; projectSlug: string }
   searchParams: SearchParams
 }) {
@@ -26,15 +22,7 @@ export default async function DashboardFeatures(props: {
   const interval = prepareInterval(filter.intervalFilter)
 
   batchPrefetch([
-    trpc.analytics.getFeatureHeatmap.queryOptions(
-      {
-        intervalDays: interval.intervalDays,
-      },
-      {
-        staleTime: ANALYTICS_STALE_TIME,
-      }
-    ),
-    trpc.analytics.getFeaturesOverview.queryOptions(
+    trpc.analytics.getVerificationRegions.queryOptions(
       {
         intervalDays: interval.intervalDays,
       },
@@ -47,15 +35,15 @@ export default async function DashboardFeatures(props: {
   return (
     <DashboardShell>
       <div className="flex flex-col gap-8 md:flex-row md:items-center md:justify-between">
-        <TabsDashboard baseUrl={baseUrl} activeTab="features" />
+        <TabsDashboard baseUrl={baseUrl} activeTab="latency" />
         <IntervalFilter className="ml-auto" />
       </div>
 
       <HydrateClient>
-        <Suspense fallback={<FeaturesStatsSkeleton isLoading={true} />}>
-          <FeaturesStats />
+        <Suspense fallback={<LatencyTableSkeleton />}>
+          <LatencyTable />
         </Suspense>
-        <Suspense
+        {/* <Suspense
           fallback={
             <FeatureUsageHeatmap>
               <FeatureUsageHeatmapSkeleton isLoading={true} />
@@ -65,7 +53,7 @@ export default async function DashboardFeatures(props: {
           <FeatureUsageHeatmap>
             <FeatureUsageHeatmapContent />
           </FeatureUsageHeatmap>
-        </Suspense>
+        </Suspense> */}
       </HydrateClient>
     </DashboardShell>
   )
