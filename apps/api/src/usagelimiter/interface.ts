@@ -34,4 +34,5 @@ export interface UsageLimiter {
   resetEntitlements(params: { customerId: string; projectId: string }): Promise<
     Result<void, BaseError>
   >
+  isCustomerBlocked(data: { customerId: string; projectId: string; now: number }): Promise<boolean>
 }

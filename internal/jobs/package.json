@@ -21,6 +21,7 @@
     "@unprice/stripe": "workspace:^0.1.0",
     "@unprice/services": "workspace:^",
     "@unprice/analytics": "workspace:^",
+    "@unprice/api": "workspace:^",
     "date-fns": "^3.3.1",
     "trigger.dev": "3.3.17",
     "zod": "^3.24.2"

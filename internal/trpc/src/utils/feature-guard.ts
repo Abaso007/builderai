@@ -11,6 +11,7 @@ import { unprice } from "./unprice"
 export const featureGuard = async ({
   customerId,
   featureSlug,
+  usage,
   isMain = false,
   metadata = {},
 }: {
@@ -18,6 +19,8 @@ export const featureGuard = async ({
   customerId: string
   /** The feature slug to verify access to */
   featureSlug: string
+  /** The usage to check feature access for */
+  usage?: number
   /** Whether this is an internal workspace with unlimited access. Defaults to false */
   isMain?: boolean
   /** Metadata to include in the feature verification. Defaults to an empty object */
@@ -39,6 +42,7 @@ export const featureGuard = async ({
       customerId,
       featureSlug,
       metadata,
+      usage,
     })
 
     if (data.error) {

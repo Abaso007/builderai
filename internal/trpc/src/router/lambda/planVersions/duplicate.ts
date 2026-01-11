@@ -132,7 +132,7 @@ export const duplicate = protectedProjectProcedure
                   ...feature,
                   id: planVersionFeatureId,
                   planVersionId: planVersionId,
-                  metadata: {},
+                  metadata: feature.metadata,
                   createdAtM: Date.now(),
                   updatedAtM: Date.now(),
                 })

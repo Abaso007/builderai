@@ -250,11 +250,10 @@ export const schemaPlanVersionFeature = z.object({
   feature_id: z.string(),
   feature_type: z.string(),
   config: z.string(),
-  metadata: z.string(),
   aggregation_method: z.string(),
   default_quantity: z.number().nullable(),
   limit: z.number().nullable(),
-  hidden: z.boolean(),
+  metadata: metadataSchema,
   timestamp: z.string().datetime(),
 })
 

@@ -240,11 +240,10 @@ export const publish = protectedProjectProcedure
             feature_id: feature.id,
             feature_type: feature.featureType,
             config: JSON.stringify(feature.config),
-            metadata: JSON.stringify(feature.metadata),
+            metadata: feature.metadata,
             aggregation_method: feature.aggregationMethod,
             default_quantity: feature.defaultQuantity,
             limit: feature.limit,
-            hidden: feature.hidden,
             timestamp: new Date(feature.createdAtM).toISOString(),
           }))
         ),

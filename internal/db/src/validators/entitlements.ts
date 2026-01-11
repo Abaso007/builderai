@@ -8,6 +8,7 @@ import {
   deniedReasonSchema,
   entitlementMergingPolicySchema,
   grantTypeSchema,
+  overageStrategySchema,
   resetConfigSchema,
 } from "./shared"
 import { aggregationMethodSchema, typeFeatureSchema } from "./shared"
@@ -67,6 +68,7 @@ export const verifySchema = z.object({
   timestamp: z.number(),
   customerId: z.string(),
   featureSlug: z.string(),
+  usage: z.number().optional(), // Atomic verify + consume support
   projectId: z.string(),
   requestId: z.string(),
   metadata: z.record(z.string(), z.any()).nullable(),
@@ -120,8 +122,8 @@ export const entitlementGrantsSnapshotSchema = z.object({
   effectiveAt: z.number(),
   expiresAt: z.number().nullable(),
   limit: z.number().nullable(),
+  overageStrategy: overageStrategySchema,
   realtime: z.boolean(),
-  allowOverage: z.boolean(),
   featurePlanVersionId: z.string(),
 })
 
@@ -134,6 +136,7 @@ export const entitlementSchema = createSelectSchema(schema.entitlements, {
   aggregationMethod: aggregationMethodSchema,
   featureType: typeFeatureSchema,
   mergingPolicy: entitlementMergingPolicySchema,
+  overageStrategy: overageStrategySchema,
 })
 
 export const meterStateSchema = z.object({
@@ -165,7 +168,7 @@ const usageBarDisplaySchema = z.object({
   limitType: limitTypeSchema,
   unit: z.string(),
   notifyThreshold: z.number().optional(),
-  allowOverage: z.boolean(),
+  overageStrategy: overageStrategySchema.optional(),
 })
 
 const tierDisplaySchema = z.object({

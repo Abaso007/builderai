@@ -4,7 +4,13 @@ import { DollarSignIcon, HelpCircle, Plus, XCircle } from "lucide-react"
 import type { UseFormReturn } from "react-hook-form"
 import { useFieldArray } from "react-hook-form"
 
-import { AGGREGATION_METHODS, AGGREGATION_METHODS_MAP, BILLING_CONFIG } from "@unprice/db/utils"
+import {
+  AGGREGATION_METHODS,
+  AGGREGATION_METHODS_MAP,
+  BILLING_CONFIG,
+  OVERAGE_STRATEGIES_MAP,
+  RESET_CONFIG,
+} from "@unprice/db/utils"
 import type { Currency, PlanVersionFeatureInsert } from "@unprice/db/validators"
 
 import { currencySymbol } from "@unprice/db/utils"
@@ -188,6 +194,72 @@ export function UnitsFormField({
   )
 }
 
+export function ResetConfigFeatureFormField({
+  form,
+  isDisabled,
+}: {
+  form: UseFormReturn<PlanVersionFeatureInsert>
+  isDisabled?: boolean
+}) {
+  // filter dev option when node_env is production
+  const options = Object.entries(RESET_CONFIG)
+    .filter(([key]) => {
+      if (process.env.NODE_ENV === "production") {
+        return RESET_CONFIG[key]?.dev !== true
+      }
+
+      // deactivate yearly for now
+      return !["yearly", "onetime"].includes(key)
+    })
+    .map(([key, value]) => ({
+      label: value.label,
+      key,
+      description: value.description,
+    }))
+
+  return (
+    <div className="w-full">
+      <FormField
+        control={form.control}
+        name={"resetConfig.name"}
+        render={({ field }) => (
+          <FormItem className="flex w-full flex-col">
+            <FormLabel>Reset Config</FormLabel>
+            <FormDescription>How often the feature usage will be reset.</FormDescription>
+            <Select
+              onValueChange={(value) => {
+                const config = RESET_CONFIG[value]
+                if (!config) return
+
+                form.setValue("resetConfig.planType", config.planType)
+                form.setValue("resetConfig.resetIntervalCount", config.resetIntervalCount)
+                form.setValue("resetConfig.resetInterval", config.resetInterval)
+                form.setValue("resetConfig.name", value)
+              }}
+              value={field.value?.toString() ?? ""}
+              disabled={isDisabled}
+            >
+              <FormControl>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a reset interval" />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent className="text-xs">
+                {options.map((value) => (
+                  <SelectItem value={value.key} key={value.key} description={value.description}>
+                    {value.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+    </div>
+  )
+}
+
 export function BillingConfigFeatureFormField({
   form,
   isDisabled,
@@ -244,6 +316,46 @@ export function BillingConfigFeatureFormField({
               <SelectContent className="text-xs">
                 {options.map((value) => (
                   <SelectItem value={value.key} key={value.key} description={value.description}>
+                    {value.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+    </div>
+  )
+}
+
+export function OverageStrategyFormField({
+  form,
+  isDisabled,
+}: {
+  form: UseFormReturn<PlanVersionFeatureInsert>
+  isDisabled?: boolean
+}) {
+  return (
+    <div className="w-full">
+      <FormField
+        control={form.control}
+        name="metadata.overageStrategy"
+        render={({ field }) => (
+          <FormItem className="flex flex-col">
+            <FormLabel>Overage Strategy</FormLabel>
+            <FormDescription>
+              How to handle usage that exceeds the limit. This is ignored if the limit is not set.
+            </FormDescription>
+            <Select onValueChange={field.onChange} value={field.value ?? ""} disabled={isDisabled}>
+              <FormControl className="truncate">
+                <SelectTrigger disabled={isDisabled}>
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent className="text-xs">
+                {Object.entries(OVERAGE_STRATEGIES_MAP).map(([key, value]) => (
+                  <SelectItem value={key} key={key} description={value.description}>
                     {value.label}
                   </SelectItem>
                 ))}

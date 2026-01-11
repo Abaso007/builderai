@@ -179,6 +179,16 @@ export default function SubscriptionPhaseFormField({
 
                 if (!selectedPlanVersion) return null
 
+                // default trial unit is days but when the interval is minute, we need to show the minutes
+                const trialUnitsMessage =
+                  phase.trialUnits === 1
+                    ? selectedPlanVersion.billingConfig.billingInterval === "minute"
+                      ? "minute"
+                      : "day"
+                    : selectedPlanVersion.billingConfig.billingInterval === "minute"
+                      ? "minutes"
+                      : "days"
+
                 return (
                   <div key={phase.id} className="relative">
                     <div
@@ -195,7 +205,9 @@ export default function SubscriptionPhaseFormField({
                             {index + 1}. {selectedPlanVersion.title} v{selectedPlanVersion.version}{" "}
                             - {selectedPlanVersion.billingConfig.name}
                             {phase.trialUnits && phase.trialUnits > 0 ? (
-                              <Badge className="ml-2">{phase.trialUnits} units trial</Badge>
+                              <Badge className="ml-2">
+                                {phase.trialUnits} {trialUnitsMessage} trial
+                              </Badge>
                             ) : (
                               <Badge className="ml-2">no trial</Badge>
                             )}

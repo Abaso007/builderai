@@ -85,7 +85,11 @@ export function InvoiceTable({
                     {item.quantity}
                   </TableCell>
                   <TableCell className="text-right text-muted-foreground">
-                    {item.prorationFactor}
+                    {Intl.NumberFormat("en-US", {
+                      style: "decimal",
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    }).format(item.prorationFactor)}
                   </TableCell>
                   <TableCell className="text-right font-medium">
                     {formatMoney((item.amountSubtotal / 100).toString(), invoice.currency)}

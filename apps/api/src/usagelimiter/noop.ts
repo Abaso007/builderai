@@ -17,6 +17,14 @@ export class NoopUsageLimiter implements UsageLimiter {
     return Ok(undefined)
   }
 
+  public async isCustomerBlocked(_data: {
+    customerId: string
+    projectId: string
+    now: number
+  }): Promise<boolean> {
+    return false
+  }
+
   public async verify(_req: VerifyRequest): Promise<Result<VerificationResult, BaseError>> {
     return Ok({ allowed: true, message: "Allowed" })
   }

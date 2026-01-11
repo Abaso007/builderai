@@ -8,13 +8,14 @@ import { z } from "zod"
 import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { bouncer } from "~/util/bouncer"
 import { reportUsageEvents } from "~/util/reportUsageEvents"
 
 const tags = ["customer"]
 
 export const route = createRoute({
   path: "/v1/customer/reportUsage",
-  operationId: "customer.reportUsage",
+  operationId: "customers.reportUsage",
   summary: "report usage",
   description: "Report usage for a customer",
   method: "post",
@@ -79,10 +80,16 @@ export const registerReportUsageV1 = (app: App) =>
     // validate the request
     const key = await keyAuth(c)
 
+    const projectId = await resolveContextProjectId(c, key.projectId, customerId)
+
+    // check if the customer is blocked
+    // ONLY bounce if usage is positive (consuming) because negative usage is a correction
+    if (usage >= 0) {
+      await bouncer(c, customerId, projectId)
+    }
+
     // start a new timer
     startTime(c, "reportUsage")
-
-    const projectId = await resolveContextProjectId(c, key.projectId, customerId)
 
     // validate usage from db
     const { err, val: result } = await usagelimiter.reportUsage({

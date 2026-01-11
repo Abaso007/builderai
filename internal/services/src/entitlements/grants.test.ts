@@ -297,7 +297,7 @@ describe("GrantsManager", () => {
       expect(result.err).toBeUndefined()
       const entitlement = result.val![0]
       expect(entitlement).toBeDefined()
-      expect(entitlement!.allowOverage).toBe(true)
+      expect(entitlement!.overageStrategy).toBe("always")
     })
 
     it("should allow overage if ANY grant allows it (max policy)", async () => {
@@ -307,14 +307,14 @@ describe("GrantsManager", () => {
           ...baseGrant,
           id: "g_strict",
           limit: 100,
-          allowOverage: false,
+          overageStrategy: "none",
           featurePlanVersion: tierFeature,
         },
         {
           ...baseGrant,
           id: "g_loose",
           limit: 50,
-          allowOverage: true,
+          overageStrategy: "always",
           featurePlanVersion: tierFeature,
         },
       ]
@@ -330,7 +330,7 @@ describe("GrantsManager", () => {
       expect(result.err).toBeUndefined()
       const entitlement = result.val![0]
       expect(entitlement).toBeDefined()
-      expect(entitlement!.allowOverage).toBe(true)
+      expect(entitlement!.overageStrategy).toBe("always")
     })
 
     it("should require ALL grants to allow overage for min policy", async () => {
@@ -345,7 +345,7 @@ describe("GrantsManager", () => {
           limit: 100,
           priority: 10,
           realtime: false,
-          allowOverage: true,
+          overageStrategy: "always",
           featurePlanVersionId: "fpv1",
           subscriptionItemId: null,
           subscriptionPhaseId: null,
@@ -360,7 +360,7 @@ describe("GrantsManager", () => {
           limit: 50,
           priority: 20,
           realtime: false,
-          allowOverage: false,
+          overageStrategy: "none",
           featurePlanVersionId: "fpv1",
           subscriptionItemId: null,
           subscriptionPhaseId: null,
@@ -375,7 +375,7 @@ describe("GrantsManager", () => {
       })
 
       expect(merged.limit).toBe(50)
-      expect(merged.allowOverage).toBe(false) // every(true, false) is false
+      expect(merged.overageStrategy).toBe("none") // every(true, false) is false
       expect(merged.grants[0]!.id).toBe("g2")
     })
 

@@ -1,6 +1,6 @@
 import { type Connection, Server } from "partyserver"
 
-import { CloudflareStore } from "@unkey/cache/stores"
+import { CloudflareStore, UpstashRedisStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
 import type {
@@ -13,7 +13,7 @@ import type {
 } from "@unprice/db/validators"
 import type { BaseError, Result } from "@unprice/error"
 import { AxiomLogger, ConsoleLogger, type Logger } from "@unprice/logging"
-import { CacheService } from "@unprice/services/cache"
+import { CacheService, createRedis } from "@unprice/services/cache"
 import type { DenyReason } from "@unprice/services/customers"
 import { EntitlementService } from "@unprice/services/entitlements"
 import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/metrics"
@@ -116,11 +116,29 @@ export class DurableObjectUsagelimiter extends Server {
           })
         : undefined
 
+    const upstashCacheStore =
+      env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN
+        ? new UpstashRedisStore({
+            redis: createRedis({
+              token: env.UPSTASH_REDIS_REST_TOKEN,
+              url: env.UPSTASH_REDIS_REST_URL,
+              latencyLogging: env.NODE_ENV === "development",
+            }),
+          })
+        : undefined
+
     const stores = []
 
     // push the cloudflare store first to hit it first
     if (cloudflareCacheStore) {
       stores.push(cloudflareCacheStore)
+    }
+
+    // push upstash as last tier
+    // because cloudflare and vercel can't shared cache we use upstash as bridge
+    // upstash is slower that cloudflare
+    if (upstashCacheStore) {
+      stores.push(upstashCacheStore)
     }
 
     // register the cloudflare store if it is configured
@@ -221,6 +239,14 @@ export class DurableObjectUsagelimiter extends Server {
     await this.ctx.storage.put("config", {
       ...config,
     })
+  }
+
+  public async isCustomerBlocked(data: {
+    customerId: string
+    projectId: string
+    now: number
+  }): Promise<boolean> {
+    return await this.entitlementService.isCustomerBlocked(data)
   }
 
   public async getCurrentUsage(data: {

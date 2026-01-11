@@ -95,11 +95,10 @@ export const migrate = protectedProjectProcedure
           feature_id: featureVersion.featureId,
           feature_type: featureVersion.featureType,
           config: JSON.stringify(featureVersion.config),
-          metadata: JSON.stringify(featureVersion.metadata),
           aggregation_method: featureVersion.aggregationMethod,
           default_quantity: featureVersion.defaultQuantity,
           limit: featureVersion.limit,
-          hidden: featureVersion.hidden,
+          metadata: featureVersion.metadata,
           timestamp: new Date(featureVersion.createdAtM).toISOString(),
         })
 

@@ -1,10 +1,10 @@
-import { CloudflareStore } from "@unkey/cache/stores"
+import { CloudflareStore, UpstashRedisStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
 import { AxiomLogger, ConsoleLogger } from "@unprice/logging"
 import { ApiKeysService } from "@unprice/services/apikey"
-import { CacheService } from "@unprice/services/cache"
+import { CacheService, createRedis } from "@unprice/services/cache"
 import { CustomerService } from "@unprice/services/customers"
 import { LogdrainMetrics, NoopMetrics } from "@unprice/services/metrics"
 import type { MiddlewareHandler } from "hono"
@@ -159,11 +159,29 @@ export function init(): MiddlewareHandler<HonoEnv> {
           })
         : undefined
 
+    const upstashCacheStore =
+      c.env.UPSTASH_REDIS_REST_URL && c.env.UPSTASH_REDIS_REST_TOKEN
+        ? new UpstashRedisStore({
+            redis: createRedis({
+              token: c.env.UPSTASH_REDIS_REST_TOKEN,
+              url: c.env.UPSTASH_REDIS_REST_URL,
+              latencyLogging: c.env.NODE_ENV === "development",
+            }),
+          })
+        : undefined
+
     const stores = []
 
     // push the cloudflare store first to hit it first
     if (cloudflareCacheStore) {
       stores.push(cloudflareCacheStore)
+    }
+
+    // push upstash as last tier
+    // because cloudflare and vercel can't shared cache we use upstash as bridge
+    // upstash is slower that cloudflare
+    if (upstashCacheStore) {
+      stores.push(upstashCacheStore)
     }
 
     // register the cloudflare store if it is configured

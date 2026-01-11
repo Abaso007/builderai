@@ -1,5 +1,5 @@
 import type { Analytics } from "@unprice/analytics"
-import type { Database } from "@unprice/db"
+import { type Database, and, eq } from "@unprice/db"
 import {
   AGGREGATION_CONFIG,
   add,
@@ -34,6 +34,7 @@ import { UnPriceEntitlementError, type UnPriceEntitlementStorageError } from "./
 import { GrantsManager } from "./grants"
 import type { UnPriceEntitlementStorage } from "./storage-provider"
 
+import { entitlements } from "@unprice/db/schema"
 import { ulid } from "ulid"
 import { UsageMeter } from "./usage-meter"
 
@@ -162,13 +163,13 @@ export class EntitlementService {
         startDate: state.effectiveAt,
         threshold: 0.9, // when close to the limit, send a notification
         endDate: state.expiresAt,
-        allowOverage: validatedState.allowOverage,
+        overageStrategy: validatedState.overageStrategy ?? undefined,
       },
       meter // Restore UsageMeter from persisted state
     )
 
     // 5. Verify the usage using the meter
-    const verifyResult = usageMeter.verify(params.timestamp)
+    const verifyResult = usageMeter.verify(params.timestamp, params.usage)
 
     const latency = performance.now() - params.performanceStart
 
@@ -192,7 +193,19 @@ export class EntitlementService {
     const meterResult = usageMeter.toPersist()
 
     // 8. update the entitlement state in the storage in background
-    this.waitUntil(this.storage.set({ state: { ...validatedState, meter: meterResult } }))
+    this.waitUntil(
+      Promise.all([
+        this.storage.set({ state: { ...validatedState, meter: meterResult } }),
+        // if feature is blocked then set the blocked customer flag in cache
+        verifyResult.deniedReason === "LIMIT_EXCEEDED"
+          ? this.setBlockedCustomer({
+              customerId: params.customerId,
+              projectId: params.projectId,
+              isBlocked: true,
+            })
+          : Promise.resolve(),
+      ])
+    )
 
     // 9. return the verification result
     return {
@@ -278,7 +291,7 @@ export class EntitlementService {
         startDate: state.effectiveAt,
         threshold: 0.9, // when close to the limit, send a notification
         endDate: state.expiresAt,
-        allowOverage: validatedState.allowOverage,
+        overageStrategy: validatedState.overageStrategy ?? undefined,
       },
       meter
     )
@@ -319,6 +332,7 @@ export class EntitlementService {
       },
     })
 
+    // if allowed, insert the usage record in the storage
     if (consumeResult.allowed) {
       const usageRecord = {
         id: ulid(),
@@ -337,6 +351,34 @@ export class EntitlementService {
       // insert the usage record in the storage
       this.waitUntil(this.storage.insertUsageRecord(usageRecord))
     }
+
+    // this is the way we activaly check if the customer should be blocked.
+    // for now we block right away but later we can support some kind of policy
+    // that blocked the customer only if there is a flag that says so. it's up to the client to decide
+    // if their customers are blocked once the hard limit is reached.
+    // TODO: add the flag here: blockCustomer flag - by default this is false
+    // if (validatedState.blockCustomer) {
+    if (consumeResult.deniedReason === "LIMIT_EXCEEDED") {
+      // set the blocked customer flag in cache
+      this.waitUntil(
+        this.setBlockedCustomer({
+          customerId: params.customerId,
+          projectId: params.projectId,
+          isBlocked: true,
+        })
+      )
+    } else if (params.usage < 0 && consumeResult.allowed && consumeResult.remaining > 0) {
+      // If they reported negative usage and are now back under the limit,
+      // we unblock them immediately.
+      this.waitUntil(
+        this.setBlockedCustomer({
+          customerId: params.customerId,
+          projectId: params.projectId,
+          isBlocked: false,
+        })
+      )
+    }
+    // }
 
     return {
       allowed: consumeResult.allowed,
@@ -1057,6 +1099,31 @@ export class EntitlementService {
     return Ok(cached)
   }
 
+  /**
+   * Set the blocked customer flag in cache,
+   * this is used to check if the customer is blocked by the usage limiter
+   * @param params - The parameters
+   * @param params.customerId - The customer ID
+   * @param params.projectId - The project ID
+   * @param params.isBlocked - Whether the customer is blocked
+   */
+  public async setBlockedCustomer(params: {
+    customerId: string
+    projectId: string
+    isBlocked: boolean
+  }): Promise<void> {
+    const { customerId, projectId, isBlocked } = params
+    const cacheKey = `${projectId}:${customerId}`
+
+    this.logger.debug("setBlockedCustomer", { cacheKey, isBlocked })
+
+    if (isBlocked) {
+      await this.cache.blockedCustomers.set(cacheKey, isBlocked)
+    } else {
+      await this.cache.blockedCustomers.remove(cacheKey)
+    }
+  }
+
   public async resetEntitlements(params: {
     customerId: string
     projectId: string
@@ -1066,15 +1133,15 @@ export class EntitlementService {
     const cacheKey = `${projectId}:${customerId}`
 
     // reset individual keys
-    const { val: active } = await this.getActiveEntitlements({
+    const { val: entitlementsData } = await this.getActiveEntitlements({
       customerId,
       projectId,
     })
 
     // 2. Clear all individual feature caches
-    if (active && active.length > 0) {
+    if (entitlementsData && entitlementsData.length > 0) {
       await Promise.all(
-        active.map((e) =>
+        entitlementsData.map((e) =>
           this.cache.customerEntitlement.remove(
             this.storage.makeKey({
               customerId,
@@ -1086,11 +1153,86 @@ export class EntitlementService {
       )
     }
 
-    // reset the cache
-    await this.cache.customerEntitlements.remove(cacheKey)
+    // reset the cache and blocked customer flag
+    await Promise.all([
+      this.cache.customerEntitlements.remove(cacheKey),
+      this.setBlockedCustomer({
+        customerId,
+        projectId,
+        isBlocked: false,
+      }),
+      this.cache.getCurrentUsage.remove(cacheKey),
+      this.storage.reset(),
+      // delete the entitlements from the database
+      this.db
+        .delete(entitlements)
+        .where(and(eq(entitlements.customerId, customerId), eq(entitlements.projectId, projectId))),
+    ])
 
-    // reset the storage provider
-    return await this.storage.reset()
+    return Ok(undefined)
+  }
+
+  public async isCustomerBlocked(params: {
+    customerId: string
+    projectId: string
+    now?: number
+  }): Promise<boolean> {
+    const { customerId, projectId, now } = params
+    const cacheKey = `${projectId}:${customerId}`
+    const { val: isBlocked, err: isBlockedErr } = await this.cache.blockedCustomers.swr(
+      cacheKey,
+      async () => {
+        const { val: usage, err: usageErr } = await this.getCurrentUsage({
+          customerId,
+          projectId,
+          opts: {
+            now: now,
+          },
+        })
+
+        if (usageErr) {
+          this.logger.error("Failed to get current usage", {
+            customerId,
+            projectId,
+            error: usageErr.message,
+          })
+          return false
+        }
+
+        // if any of the groups has a usage >= limit then the customer is blocked
+        // only for usage features with hard limits
+        const isBlocked = usage.groups.some((group) =>
+          group.features.some(
+            (feature) =>
+              feature &&
+              feature.type === "usage" &&
+              feature.usageBar.limitType === "hard" &&
+              feature.usageBar.limit !== undefined &&
+              feature.usageBar.limit > 0 &&
+              feature.usageBar.current >= feature.usageBar.limit
+          )
+        )
+
+        this.logger.debug("isCustomerBlocked check", {
+          customerId,
+          projectId,
+          isBlocked,
+        })
+
+        return isBlocked
+      }
+    )
+
+    if (isBlockedErr) {
+      this.logger.error("Failed to check if customer is blocked", {
+        customerId,
+        projectId,
+        error: isBlockedErr.message,
+      })
+      return false
+    }
+
+    return isBlocked ?? false
   }
 
   /**
@@ -1241,6 +1383,7 @@ export class EntitlementService {
       this.logger.info("Lazy computing entitlement", {
         customerId,
         featureSlug,
+        projectId,
         reason: !entitlement ? "missing" : "revalidate",
       })
 
@@ -1355,7 +1498,7 @@ export class EntitlementService {
       ...state,
       effectiveAt: mergedGrants.effectiveAt,
       expiresAt: mergedGrants.expiresAt,
-      allowOverage: mergedGrants.allowOverage,
+      overageStrategy: mergedGrants.overageStrategy,
       grants: mergedGrants.grants,
     })
   }
@@ -1886,8 +2029,9 @@ export class EntitlementService {
     }
 
     // Usage type
-    const limitType: "hard" | "soft" | "none" =
-      limit === null ? "none" : planVersionFeature.allowOverage ? "soft" : "hard"
+    const isHardLimit =
+      planVersionFeature.metadata?.overageStrategy === "none" ||
+      planVersionFeature.metadata?.overageStrategy === "last-call"
 
     return {
       ...baseFeature,
@@ -1902,10 +2046,10 @@ export class EntitlementService {
         current: usage,
         included,
         limit: limit ?? undefined,
-        limitType,
+        limitType: isHardLimit ? "hard" : "soft",
         unit: planVersionFeature.feature.unit ?? "units",
-        notifyThreshold: planVersionFeature.notifyUsageThreshold ?? 95,
-        allowOverage: planVersionFeature.allowOverage,
+        notifyThreshold: planVersionFeature.metadata?.notifyUsageThreshold ?? 95,
+        overageStrategy: planVersionFeature.metadata?.overageStrategy ?? "none",
       },
     }
   }

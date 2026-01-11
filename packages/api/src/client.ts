@@ -328,6 +328,20 @@ export class Unprice {
           body: req,
         })
       },
+
+      resetEntitlements: async (
+        req: paths["/v1/customer/resetEntitlements"]["post"]["requestBody"]["content"]["application/json"]
+      ): Promise<
+        Result<
+          paths["/v1/customer/resetEntitlements"]["post"]["responses"]["200"]["content"]["application/json"]
+        >
+      > => {
+        return await this.fetch({
+          path: ["v1", "customer", "resetEntitlements"],
+          method: "POST",
+          body: req,
+        })
+      },
     }
   }
 

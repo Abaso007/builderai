@@ -30,7 +30,7 @@ describe("EntitlementService - Idempotency & Flush", () => {
     featureSlug,
     featureType: "usage",
     limit: 100,
-    allowOverage: false,
+    overageStrategy: "none",
     aggregationMethod: "sum",
     mergingPolicy: "sum",
     meter: {
@@ -48,7 +48,7 @@ describe("EntitlementService - Idempotency & Flush", () => {
         expiresAt: now + 10000,
         limit: 100,
         priority: 10,
-        allowOverage: false,
+        overageStrategy: "none",
         featurePlanVersionId: "fpv_1",
         realtime: false,
       },

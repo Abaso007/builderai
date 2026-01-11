@@ -546,12 +546,8 @@ export class CustomerService {
     try {
       const customerId = paymentProviderService.getCustomerId()
 
+      // if no customer id, return empty array
       if (!customerId) {
-        this.logger.error("payment provider customer ID not found", {
-          customerId,
-          projectId,
-          provider,
-        })
         return []
       }
 

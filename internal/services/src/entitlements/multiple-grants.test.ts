@@ -30,7 +30,7 @@ describe("EntitlementService - Multiple Grants", () => {
     limit: 100,
     effectiveAt: now - 10000,
     expiresAt: now + 10000,
-    allowOverage: false,
+    overageStrategy: "none" as const,
     featurePlanVersionId: "fpv_A",
     subjectType: "customer",
     subjectId: customerId,
@@ -44,7 +44,7 @@ describe("EntitlementService - Multiple Grants", () => {
     limit: 50,
     effectiveAt: now - 10000,
     expiresAt: now + 10000,
-    allowOverage: false,
+    overageStrategy: "none" as const,
     featurePlanVersionId: "fpv_B",
     subjectType: "customer",
     subjectId: customerId,
@@ -58,7 +58,7 @@ describe("EntitlementService - Multiple Grants", () => {
     featureSlug,
     featureType: "usage",
     limit: 150, // Sum of limits (100 + 50)
-    allowOverage: false,
+    overageStrategy: "none",
     aggregationMethod: "sum",
     mergingPolicy: "sum",
     meter: {
@@ -246,14 +246,14 @@ describe("EntitlementService - Multiple Grants", () => {
       ...grantA,
       id: "grant_strict",
       limit: 10,
-      allowOverage: false,
+      overageStrategy: "none" as const,
     }
 
     const grantFlexible = {
       ...grantB,
       id: "grant_flexible",
       limit: 10,
-      allowOverage: true,
+      overageStrategy: "always" as const,
     }
 
     const stateMixed: EntitlementState = {
@@ -261,7 +261,7 @@ describe("EntitlementService - Multiple Grants", () => {
       limit: 20, // Sum limits = 20
       grants: [grantStrict, grantFlexible],
       mergingPolicy: "sum",
-      allowOverage: true, // Computed property from grants
+      overageStrategy: "always", // Computed property from grants
     }
 
     vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue({

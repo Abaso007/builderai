@@ -30,11 +30,8 @@ export const create = protectedProjectProcedure
       defaultQuantity,
       limit,
       billingConfig,
-      hidden,
       resetConfig,
       type,
-      allowOverage,
-      notifyUsageThreshold,
       aggregationMethod,
     } = opts.input
     const project = opts.ctx.project
@@ -118,11 +115,8 @@ export const create = protectedProjectProcedure
         order: order ?? "1024",
         defaultQuantity: defaultQuantity === 0 ? null : defaultQuantity,
         limit: limit === 0 ? null : limit,
-        hidden,
         resetConfig,
         type,
-        allowOverage,
-        notifyUsageThreshold,
         // flat features don't have a meter so we don't need to store the aggregation method
         aggregationMethod: featureType !== "usage" ? "none" : aggregationMethod,
       })

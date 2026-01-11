@@ -139,10 +139,14 @@ export function SubscriptionPhaseForm({
         <div className="flex flex-col items-center justify-start gap-4 lg:flex-row">
           <DurationFormField form={form} startDisabled={editMode} className="w-full" />
 
-          <TrialUnitsFormField form={form} isDisabled={editMode} className="w-full" />
+          <TrialUnitsFormField
+            form={form}
+            isDisabled={editMode || !selectedPlanVersion?.paymentMethodRequired}
+            className="w-full"
+          />
         </div>
 
-        {selectedPlanVersion?.paymentProvider && (
+        {selectedPlanVersion?.paymentProvider && selectedPlanVersion?.paymentMethodRequired && (
           <PaymentMethodsFormField
             form={form}
             withSeparator

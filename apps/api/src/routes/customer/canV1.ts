@@ -9,12 +9,13 @@ import { z } from "zod"
 import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { bouncer } from "~/util/bouncer"
 import { reportUsageEvents } from "~/util/reportUsageEvents"
 const tags = ["customer"]
 
 export const route = createRoute({
   path: "/v1/customer/can",
-  operationId: "customer.can",
+  operationId: "customers.can",
   summary: "can feature",
   description: "Check if a customer can use a feature",
   method: "post",
@@ -69,6 +70,9 @@ export const registerCanV1 = (app: App) =>
     const key = await keyAuth(c)
 
     const projectId = await resolveContextProjectId(c, key.projectId, customerId)
+
+    // check if the customer is blocked
+    await bouncer(c, customerId, projectId)
 
     // start a new timer
     startTime(c, "can")

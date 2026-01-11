@@ -36,9 +36,8 @@ const app = newApp()
 
 app.use(timing())
 app.use(serveEmojiFavicon("◎"))
-
-app.use("*", init())
 app.use("*", cors())
+app.use("*", init())
 app.use("*", metrics())
 
 // Handle websocket connections for Durable Objects

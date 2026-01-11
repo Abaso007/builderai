@@ -1,6 +1,6 @@
 "use client"
 
-import { add, addDays, endOfDay, startOfDay, startOfMonth, subDays } from "date-fns"
+import { add, addDays, endOfDay, startOfDay, startOfMonth } from "date-fns"
 import { ArrowRight, CalendarIcon } from "lucide-react"
 import { useState } from "react"
 import type { FieldErrors, FieldPath, UseFormReturn } from "react-hook-form"
@@ -120,15 +120,20 @@ export default function DurationFormField<TFieldValues extends FormValues>({
                           return
                         }
 
-                        const midnight = startOfDay(date)
-                        field.onChange(midnight.getTime())
+                        const today = startOfDay(new Date())
+                        if (startOfDay(date).getTime() === today.getTime()) {
+                          field.onChange(Date.now())
+                        } else {
+                          const midnight = startOfDay(date)
+                          field.onChange(midnight.getTime())
+                        }
                       }}
                       defaultMonth={start}
                       initialFocus
                       disabled={(date) => {
-                        const yesterday = subDays(new Date(), 1)
+                        const today = startOfDay(new Date())
                         // disable dates before today
-                        if (date < yesterday) return true
+                        if (date < today) return true
                         // if disabled, disable all dates
                         if (startDisabled) return true
                         return false
@@ -142,9 +147,9 @@ export default function DurationFormField<TFieldValues extends FormValues>({
                         variant="ghost"
                         className="justify-start font-normal"
                         onClick={() => {
-                          const midnight = startOfDay(new Date())
-                          setStart(midnight)
-                          field.onChange(midnight.getTime())
+                          const now = Date.now()
+                          setStart(new Date(now))
+                          field.onChange(now)
                           setIsOpenPopOverStart(false)
                         }}
                       >
@@ -234,10 +239,23 @@ export default function DurationFormField<TFieldValues extends FormValues>({
                           return
                         }
 
-                        const endday = endOfDay(date)
-                        field.onChange(endday.getTime())
+                        const today = startOfDay(new Date())
+                        if (startOfDay(date).getTime() === today.getTime()) {
+                          field.onChange(Date.now())
+                        } else {
+                          const endday = endOfDay(date)
+                          field.onChange(endday.getTime())
+                        }
                       }}
-                      disabled={(date) => !start || date <= start || !!endDisabled}
+                      disabled={(date) => {
+                        const today = startOfDay(new Date())
+                        return (
+                          !start ||
+                          startOfDay(date) < startOfDay(start) ||
+                          date < today ||
+                          !!endDisabled
+                        )
+                      }}
                       initialFocus
                     />
                   </div>
@@ -259,9 +277,9 @@ export default function DurationFormField<TFieldValues extends FormValues>({
                         variant="ghost"
                         className="justify-start font-normal"
                         onClick={() => {
-                          const now = new Date()
-                          setEnd(now)
-                          field.onChange(now.getTime())
+                          const now = Date.now()
+                          setEnd(new Date(now))
+                          field.onChange(now)
                           setIsOpenPopOverEnd(false)
                         }}
                       >
@@ -278,6 +296,12 @@ export default function DurationFormField<TFieldValues extends FormValues>({
 
                           const date = add(start, { months: 1 })
                           const endday = endOfDay(date)
+
+                          const today = startOfDay(new Date())
+                          if (endday < today) {
+                            toastAction("error", "The calculated end date is in the past")
+                            return
+                          }
 
                           setEnd(endday)
                           field.onChange(endday.getTime())
@@ -297,6 +321,12 @@ export default function DurationFormField<TFieldValues extends FormValues>({
                           const date = add(start, { months: 2 })
                           const endday = endOfDay(date)
 
+                          const today = startOfDay(new Date())
+                          if (startOfDay(endday) < today) {
+                            toastAction("error", "The calculated end date is in the past")
+                            return
+                          }
+
                           setEnd(endday)
                           field.onChange(endday.getTime())
                           setIsOpenPopOverEnd(false)
@@ -314,6 +344,12 @@ export default function DurationFormField<TFieldValues extends FormValues>({
                           }
                           const date = add(start, { months: 3 })
                           const endday = endOfDay(date)
+
+                          const today = startOfDay(new Date())
+                          if (startOfDay(endday) < today) {
+                            toastAction("error", "The calculated end date is in the past")
+                            return
+                          }
 
                           setEnd(endday)
                           field.onChange(endday.getTime())
@@ -333,6 +369,12 @@ export default function DurationFormField<TFieldValues extends FormValues>({
                           const date = add(start, { months: 6 })
                           const endday = endOfDay(date)
 
+                          const today = startOfDay(new Date())
+                          if (startOfDay(endday) < today) {
+                            toastAction("error", "The calculated end date is in the past")
+                            return
+                          }
+
                           setEnd(endday)
                           field.onChange(endday.getTime())
                           setIsOpenPopOverEnd(false)
@@ -350,6 +392,12 @@ export default function DurationFormField<TFieldValues extends FormValues>({
                           }
                           const date = add(start, { months: 12 })
                           const endday = endOfDay(date)
+
+                          const today = startOfDay(new Date())
+                          if (startOfDay(endday) < today) {
+                            toastAction("error", "The calculated end date is in the past")
+                            return
+                          }
 
                           setEnd(endday)
                           field.onChange(endday.getTime())

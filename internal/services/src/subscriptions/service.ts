@@ -20,6 +20,7 @@ import type { Cache } from "../cache"
 import { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
 import type { Metrics } from "../metrics"
+import { unprice } from "../utils/unprice"
 import { UnPriceSubscriptionError } from "./errors"
 import { SubscriptionMachine } from "./machine"
 import { SubscriptionLock } from "./subscriptionLock"
@@ -271,18 +272,17 @@ export class SubscriptionService {
     }
 
     // validate if the phase is already in the subscription
-    // the same plan version and start and end date
-    // this makes this function idempotent
-    const phaseAlreadyInSubscription = subscriptionWithPhases.phases.find((p) => {
-      return (
-        p.planVersionId === planVersionId &&
-        p.startAt <= startAtToUse &&
-        (p.endAt === endAtToUse || p.endAt === null)
-      )
+    const activePhase = subscriptionWithPhases.phases.find((p) => {
+      return p.startAt <= now && (p.endAt ?? Number.POSITIVE_INFINITY) >= now
     })
 
-    if (phaseAlreadyInSubscription) {
-      return Ok(phaseAlreadyInSubscription)
+    if (activePhase?.planVersionId === planVersionId) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message:
+            "There is already an active phase with the same plan version, you can't create a new phase with the same plan version",
+        })
+      )
     }
 
     // validate phases
@@ -353,12 +353,17 @@ export class SubscriptionService {
 
     // check if payment method is required for the plan version
     const paymentMethodRequired = versionData.paymentMethodRequired
-    const trialUnitsToUse = trialUnits ?? versionData.trialUnits ?? 0
+    const trialUnitsToUse =
+      paymentMethodRequired && paymentMethodId && paymentMethodId !== ""
+        ? (trialUnits ?? versionData.trialUnits ?? 0)
+        : 0
     const billingAnchorToUse = getAnchor(
       startAtToUse,
       versionData.billingConfig.billingInterval,
       versionData.billingConfig.billingAnchor
     )
+
+    // TODO: evaluate if we need to use the billing interval of the subscription
     // const billingIntervalToUse = versionData.billingConfig.billingInterval
     // const subscriptionTimezone = subscriptionWithPhases.timezone
 
@@ -399,16 +404,17 @@ export class SubscriptionService {
       configItemsSubscription = config
     }
 
-    const trialsEndAt =
-      trialUnitsToUse > 0
-        ? calculateDateAt({
-            startDate: startAtToUse,
-            config: {
-              interval: versionData.billingConfig.billingInterval,
-              units: trialUnitsToUse,
-            },
-          })
-        : null
+    // calculate trials only if payment method is set and required for the plan version
+    let trialsEndAt = null
+    if (trialUnitsToUse > 0) {
+      trialsEndAt = calculateDateAt({
+        startDate: startAtToUse,
+        config: {
+          interval: versionData.billingConfig.billingInterval,
+          units: trialUnitsToUse,
+        },
+      })
+    }
 
     // get the billing cycle for the subscription given the start date
     const calculatedBillingCycle = calculateCycleWindow({
@@ -495,13 +501,22 @@ export class SubscriptionService {
           .update(subscriptions)
           .set({
             active: true,
-            status: Number(trialUnitsToUse) > 0 ? "trialing" : "active",
+            status: trialUnitsToUse > 0 ? "trialing" : "active",
             planSlug: versionData.plan.slug,
             currentCycleStartAt: calculatedBillingCycle.start,
             currentCycleEndAt: calculatedBillingCycle.end,
             renewAt: calculatedBillingCycle.start, // we schedule the renewal for the start of the cycle always
           })
           .where(and(eq(subscriptions.id, subscriptionId), eq(subscriptions.projectId, projectId)))
+
+        // reset entitlements for the customer
+        // TODO: change this when implementing webhooks service + qstash
+        this.waitUntil(
+          unprice.customers.resetEntitlements({
+            customerId: subscriptionWithPhases.customerId,
+            projectId,
+          })
+        )
       }
 
       return Ok(phase)
@@ -585,7 +600,7 @@ export class SubscriptionService {
         )
       }
 
-      // TODO: remove the grants for the customer
+      // remove the grants for the customer - soft delete
       await this.grantService.deleteGrants({
         grantIds: phase.items.map((item) => item.id) ?? [],
         projectId,
@@ -615,7 +630,6 @@ export class SubscriptionService {
 
     let endAtToUse = endAt ?? undefined
 
-    // TODO: check this
     // if the end date is in the past, set it to the current date
     if (endAt && endAt < now) {
       endAtToUse = now
@@ -681,17 +695,8 @@ export class SubscriptionService {
       return validatePhasesAction
     }
 
-    // validate the the end date is not less that the end date of the current billing cycle
-    const currentCycleEndAt = subscriptionWithPhases.currentCycleEndAt
-
-    if (endAt && endAt < currentCycleEndAt) {
-      return Err(
-        new UnPriceSubscriptionError({
-          message: `The end date is less than the current billing cycle end date, set a date greater than ${new Date(currentCycleEndAt).toISOString()}`,
-        })
-      )
-    }
-
+    // we allow to set the end date before the current billing cycle end date to allow mid-cycle cancellations
+    // if the end date is less than the current date, it will be set to the current date by endAtToUse logic above
     const result = await (db ?? this.db).transaction(async (trx) => {
       // create the subscription phase
       const subscriptionPhase = await trx
@@ -766,6 +771,16 @@ export class SubscriptionService {
 
       return Ok(subscriptionPhase)
     })
+
+    if (!result.err) {
+      this.waitUntil(
+        this.billingService.generateBillingPeriods({
+          subscriptionId,
+          projectId,
+          now: Date.now(),
+        })
+      )
+    }
 
     return result
   }

@@ -131,7 +131,7 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
                       </div>
                     </div>
                   )}
-                  {planFeatureVersion.hidden && (
+                  {planFeatureVersion.metadata?.hidden && (
                     <Tooltip>
                       <div className="flex items-center justify-center gap-2 font-normal text-xs">
                         <span>
@@ -155,6 +155,11 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
                     activePlanVersion?.billingConfig.name !==
                       planFeatureVersion.billingConfig.name && (
                       <Badge variant={"secondary"}>{planFeatureVersion.billingConfig.name}</Badge>
+                    )}
+                  {planFeatureVersion.featureType === "usage" &&
+                    planFeatureVersion.resetConfig?.name !==
+                      activePlanVersion?.billingConfig?.name && (
+                      <Badge variant={"secondary"}>{planFeatureVersion?.resetConfig?.name}</Badge>
                     )}
 
                   {planFeatureVersion.metadata?.realtime && (
@@ -271,7 +276,7 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
                           ? `${toDecimal(
                               dinero(planFeatureVersion?.config?.price.dinero),
                               ({ value, currency }) => `${currencySymbol(currency.code)}${value}`
-                            )} per ${planFeatureVersion?.config?.units} units`
+                            )} per ${planFeatureVersion?.config?.units} ${planFeatureVersion?.feature.unit ?? "units"}`
                           : toDecimal(
                               dinero(planFeatureVersion?.config?.price.dinero),
                               ({ value, currency }) => `${currencySymbol(currency.code)}${value}`

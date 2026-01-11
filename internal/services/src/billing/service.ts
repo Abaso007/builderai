@@ -1875,6 +1875,129 @@ export class BillingService {
         })
 
         for (const phase of phases) {
+          // 0. Cap any existing pending periods for this phase that exceed the phase end date
+          // this is useful for mid-cycle cancellations or plan changes
+          if (phase.endAt) {
+            await tx
+              .update(billingPeriods)
+              .set({
+                cycleEndAt: sql`LEAST(${billingPeriods.cycleEndAt}, ${phase.endAt})`,
+                invoiceAt:
+                  phase.planVersion.whenToBill === "pay_in_arrear"
+                    ? sql`LEAST(${billingPeriods.invoiceAt}, ${phase.endAt})`
+                    : billingPeriods.invoiceAt,
+              })
+              .where(
+                and(
+                  eq(billingPeriods.subscriptionPhaseId, phase.id),
+                  eq(billingPeriods.status, "pending"),
+                  sql`${billingPeriods.cycleEndAt} > ${phase.endAt}`
+                )
+              )
+
+            // 0.1 Handle credits for already invoiced/paid periods that are now shortened (Prepaid Billing)
+            const invoicedPeriods = await tx.query.billingPeriods.findMany({
+              where: (bp, ops) =>
+                ops.and(
+                  ops.eq(bp.subscriptionPhaseId, phase.id),
+                  ops.eq(bp.status, "invoiced"),
+                  ops.gt(bp.cycleEndAt, phase.endAt!)
+                ),
+            })
+
+            for (const period of invoicedPeriods) {
+              // Find the specific invoice item for this billing period to get the actual amount paid
+              const itemLine = await tx.query.invoiceItems.findFirst({
+                with: {
+                  invoice: true,
+                  subscriptionItem: {
+                    with: {
+                      featurePlanVersion: true,
+                    },
+                  },
+                },
+                where: (ii, ops) =>
+                  ops.and(
+                    ops.eq(ii.billingPeriodId, period.id),
+                    ops.eq(ii.projectId, phase.projectId)
+                  ),
+              })
+
+              // do not consider draft or void invoices
+              if (
+                itemLine?.subscriptionItem &&
+                itemLine.amountTotal > 0 &&
+                itemLine.invoice.status === "paid" &&
+                // IMPORTANT: Proration only makes sense for non-usage items (Flat, Tier, Package)
+                // For usage items, the customer pays for what they used up to the end date.
+                itemLine.subscriptionItem.featurePlanVersion.featureType !== "usage"
+              ) {
+                // Check if we've already generated a credit for this specific billing period
+                const existingCredit = await tx.query.creditGrants.findFirst({
+                  where: (cg, ops) =>
+                    ops.and(
+                      ops.eq(cg.projectId, phase.projectId),
+                      ops.eq(cg.customerId, phase.subscription.customerId),
+                      // double check we are not duplicating the credit
+                      sql`${cg.metadata}->>'billingPeriodId' = ${period.id}`
+                    ),
+                })
+
+                if (!existingCredit) {
+                  // Use the item's own billing config for accurate proration
+                  const itemBillingConfig =
+                    itemLine.subscriptionItem.featurePlanVersion.billingConfig
+                  const oldProrationFactor = itemLine.prorationFactor ?? 1
+
+                  const proration = calculateProration({
+                    serviceStart: period.cycleStartAt,
+                    serviceEnd: phase.endAt!,
+                    effectiveStartDate: phase.startAt,
+                    billingConfig: {
+                      ...itemBillingConfig,
+                      // Ensure we use the numeric anchor from the phase
+                      billingAnchor: phase.billingAnchor,
+                    },
+                  })
+
+                  const newProrationFactor = proration.prorationFactor
+
+                  if (newProrationFactor < oldProrationFactor) {
+                    // Calculate credit based on the reduction in the proration factor
+                    const unearnedFraction = 1 - newProrationFactor / oldProrationFactor
+                    const creditAmount = Math.floor(itemLine.amountTotal * unearnedFraction)
+
+                    if (creditAmount > 0) {
+                      await tx.insert(creditGrants).values({
+                        id: newId("customer_credit"),
+                        projectId: phase.projectId,
+                        customerId: phase.subscription.customerId,
+                        currency: phase.planVersion.currency,
+                        paymentProvider: phase.planVersion.paymentProvider,
+                        totalAmount: creditAmount,
+                        amountUsed: 0,
+                        reason: "mid_cycle_change",
+                        active: true,
+                        metadata: {
+                          billingPeriodId: period.id,
+                          originalInvoiceId: itemLine.invoiceId,
+                          originalInvoiceStatus: itemLine.invoice.status,
+                          note: `Prorated refund for shortened cycle ${new Date(period.cycleStartAt).toISOString()} - ${new Date(period.cycleEndAt).toISOString()}`,
+                        },
+                      })
+                    }
+                  }
+                }
+              }
+
+              // Update the invoiced period to reflect the new shortened end date in the database
+              await tx
+                .update(billingPeriods)
+                .set({ cycleEndAt: phase.endAt })
+                .where(eq(billingPeriods.id, period.id))
+            }
+          }
+
           for (const item of phase.items) {
             // 1. Find the last period for this item to make per-item backfill
             const lastForItem = await tx.query.billingPeriods.findFirst({
@@ -1951,7 +2074,7 @@ export class BillingService {
                     featurePlanVersionId: item.featurePlanVersion.id,
                     autoRenew: false,
                     limit: item.units ?? item.featurePlanVersion.limit ?? null,
-                    allowOverage: item.featurePlanVersion.allowOverage,
+                    overageStrategy: item.featurePlanVersion.metadata?.overageStrategy ?? "none",
                     units: item.units,
                     anchor: phase.billingAnchor,
                     metadata: {

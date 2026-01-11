@@ -225,6 +225,18 @@ export class UsageLimiterService implements UsageLimiter {
     return Ok(entitlements)
   }
 
+  public async isCustomerBlocked(data: {
+    customerId: string
+    projectId: string
+    now: number
+  }): Promise<boolean> {
+    const durableObject = this.getStub(
+      this.getDurableObjectCustomerId(data.customerId, data.projectId)
+    )
+
+    return await durableObject.isCustomerBlocked(data)
+  }
+
   public async getCurrentUsage(
     data: GetUsageRequest
   ): Promise<Result<CurrentUsage, FetchError | BaseError>> {

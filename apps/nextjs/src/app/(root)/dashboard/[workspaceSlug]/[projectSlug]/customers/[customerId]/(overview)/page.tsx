@@ -55,7 +55,7 @@ export default async function CustomerPage({
               <div className="button-primary flex items-center space-x-1 rounded-md">
                 <div className="sm:col-span-full">
                   <SuperLink href={`/${workspaceSlug}/${projectSlug}/customers/subscriptions/new`}>
-                    <Button variant={"primary"}>
+                    <Button variant={"custom"}>
                       <Plus className="mr-2 h-4 w-4" />
                       Subscription
                     </Button>
