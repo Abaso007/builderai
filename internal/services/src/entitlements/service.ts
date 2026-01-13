@@ -27,6 +27,7 @@ import type { Logger } from "@unprice/logging"
 import { format, subMinutes } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
 import { BillingService } from "../billing"
+import type { CacheNamespaces } from "../cache/namespaces"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
 import { retry } from "../utils/retry"
@@ -34,8 +35,9 @@ import { UnPriceEntitlementError, type UnPriceEntitlementStorageError } from "./
 import { GrantsManager } from "./grants"
 import type { UnPriceEntitlementStorage } from "./storage-provider"
 
-import { entitlements } from "@unprice/db/schema"
+import { customers, entitlements, subscriptions } from "@unprice/db/schema"
 import { ulid } from "ulid"
+import { CustomerService } from "../customers/service"
 import { UsageMeter } from "./usage-meter"
 
 /**
@@ -58,6 +60,7 @@ export class EntitlementService {
   private readonly waitUntil: (promise: Promise<any>) => void
   private readonly cache: Cache
   private readonly metrics: Metrics
+  private readonly customerService: CustomerService
 
   constructor(opts: {
     db: Database
@@ -85,6 +88,14 @@ export class EntitlementService {
     this.waitUntil = opts.waitUntil
     this.cache = opts.cache
     this.metrics = opts.metrics
+    this.customerService = new CustomerService({
+      db: opts.db,
+      logger: opts.logger,
+      analytics: opts.analytics,
+      waitUntil: opts.waitUntil,
+      cache: opts.cache,
+      metrics: opts.metrics,
+    })
   }
 
   /**
@@ -163,7 +174,7 @@ export class EntitlementService {
         startDate: state.effectiveAt,
         threshold: 0.9, // when close to the limit, send a notification
         endDate: state.expiresAt,
-        overageStrategy: validatedState.overageStrategy ?? undefined,
+        overageStrategy: validatedState.metadata?.overageStrategy,
       },
       meter // Restore UsageMeter from persisted state
     )
@@ -192,16 +203,21 @@ export class EntitlementService {
     // 7. get the meter to persist
     const meterResult = usageMeter.toPersist()
 
+    // should we block the customer right away?
+    const shouldBlockCustomer =
+      verifyResult.deniedReason === "LIMIT_EXCEEDED" &&
+      validatedState.metadata?.blockCustomer === true
+
     // 8. update the entitlement state in the storage in background
     this.waitUntil(
       Promise.all([
         this.storage.set({ state: { ...validatedState, meter: meterResult } }),
         // if feature is blocked then set the blocked customer flag in cache
-        verifyResult.deniedReason === "LIMIT_EXCEEDED"
-          ? this.setBlockedCustomer({
+        shouldBlockCustomer
+          ? this.customerService.updateAccessControlList({
               customerId: params.customerId,
               projectId: params.projectId,
-              isBlocked: true,
+              updates: { customerUsageLimitReached: true },
             })
           : Promise.resolve(),
       ])
@@ -291,7 +307,7 @@ export class EntitlementService {
         startDate: state.effectiveAt,
         threshold: 0.9, // when close to the limit, send a notification
         endDate: state.expiresAt,
-        overageStrategy: validatedState.overageStrategy ?? undefined,
+        overageStrategy: validatedState.metadata?.overageStrategy,
       },
       meter
     )
@@ -352,29 +368,29 @@ export class EntitlementService {
       this.waitUntil(this.storage.insertUsageRecord(usageRecord))
     }
 
+    // should we block the customer right away?
+    const shouldBlockCustomer =
+      consumeResult.deniedReason === "LIMIT_EXCEEDED" &&
+      validatedState.metadata?.blockCustomer === true
+
     // this is the way we activaly check if the customer should be blocked.
     // for now we block right away but later we can support some kind of policy
     // that blocked the customer only if there is a flag that says so. it's up to the client to decide
     // if their customers are blocked once the hard limit is reached.
     // TODO: add the flag here: blockCustomer flag - by default this is false
     // if (validatedState.blockCustomer) {
-    if (consumeResult.deniedReason === "LIMIT_EXCEEDED") {
-      // set the blocked customer flag in cache
+    if (
+      shouldBlockCustomer ||
+      (params.usage < 0 && consumeResult.allowed && consumeResult.remaining > 0)
+    ) {
+      // Update only the customerUsageLimitReached flag in the accessControlList
       this.waitUntil(
-        this.setBlockedCustomer({
+        this.customerService.updateAccessControlList({
           customerId: params.customerId,
           projectId: params.projectId,
-          isBlocked: true,
-        })
-      )
-    } else if (params.usage < 0 && consumeResult.allowed && consumeResult.remaining > 0) {
-      // If they reported negative usage and are now back under the limit,
-      // we unblock them immediately.
-      this.waitUntil(
-        this.setBlockedCustomer({
-          customerId: params.customerId,
-          projectId: params.projectId,
-          isBlocked: false,
+          updates: {
+            customerUsageLimitReached: shouldBlockCustomer,
+          },
         })
       )
     }
@@ -1099,31 +1115,6 @@ export class EntitlementService {
     return Ok(cached)
   }
 
-  /**
-   * Set the blocked customer flag in cache,
-   * this is used to check if the customer is blocked by the usage limiter
-   * @param params - The parameters
-   * @param params.customerId - The customer ID
-   * @param params.projectId - The project ID
-   * @param params.isBlocked - Whether the customer is blocked
-   */
-  public async setBlockedCustomer(params: {
-    customerId: string
-    projectId: string
-    isBlocked: boolean
-  }): Promise<void> {
-    const { customerId, projectId, isBlocked } = params
-    const cacheKey = `${projectId}:${customerId}`
-
-    this.logger.debug("setBlockedCustomer", { cacheKey, isBlocked })
-
-    if (isBlocked) {
-      await this.cache.blockedCustomers.set(cacheKey, isBlocked)
-    } else {
-      await this.cache.blockedCustomers.remove(cacheKey)
-    }
-  }
-
   public async resetEntitlements(params: {
     customerId: string
     projectId: string
@@ -1156,11 +1147,7 @@ export class EntitlementService {
     // reset the cache and blocked customer flag
     await Promise.all([
       this.cache.customerEntitlements.remove(cacheKey),
-      this.setBlockedCustomer({
-        customerId,
-        projectId,
-        isBlocked: false,
-      }),
+      this.customerService.invalidateAccessControlList(customerId, projectId),
       this.cache.getCurrentUsage.remove(cacheKey),
       this.storage.reset(),
       // delete the entitlements from the database
@@ -1172,16 +1159,16 @@ export class EntitlementService {
     return Ok(undefined)
   }
 
-  public async isCustomerBlocked(params: {
+  public async getAccessControlList(params: {
     customerId: string
     projectId: string
     now?: number
-  }): Promise<boolean> {
+  }): Promise<CacheNamespaces["accessControlList"]> {
     const { customerId, projectId, now } = params
     const cacheKey = `${projectId}:${customerId}`
-    const { val: isBlocked, err: isBlockedErr } = await this.cache.blockedCustomers.swr(
+    const { val: acl, err: aclErr } = await this.cache.accessControlList.swr(
       cacheKey,
-      async () => {
+      async (_key: string) => {
         const { val: usage, err: usageErr } = await this.getCurrentUsage({
           customerId,
           projectId,
@@ -1196,12 +1183,12 @@ export class EntitlementService {
             projectId,
             error: usageErr.message,
           })
-          return false
+          return null
         }
 
         // if any of the groups has a usage >= limit then the customer is blocked
         // only for usage features with hard limits
-        const isBlocked = usage.groups.some((group) =>
+        const customerUsageLimitReached = usage.groups.some((group) =>
           group.features.some(
             (feature) =>
               feature &&
@@ -1213,26 +1200,56 @@ export class EntitlementService {
           )
         )
 
-        this.logger.debug("isCustomerBlocked check", {
+        // check if customer is disabled
+        const [customer] = await this.db
+          .select({ active: customers.active })
+          .from(customers)
+          .where(and(eq(customers.id, customerId), eq(customers.projectId, projectId)))
+          .limit(1)
+
+        const customerDisabled = customer ? !customer.active : false
+
+        // check if customer has due invoices (past due subscription)
+        const [subscription] = await this.db
+          .select({ status: subscriptions.status })
+          .from(subscriptions)
+          .where(
+            and(
+              eq(subscriptions.customerId, customerId),
+              eq(subscriptions.projectId, projectId),
+              eq(subscriptions.active, true)
+            )
+          )
+          .limit(1)
+
+        const subscriptionStatus = subscription ? subscription.status : null
+
+        const result = {
+          customerUsageLimitReached,
+          customerDisabled,
+          subscriptionStatus,
+        }
+
+        this.logger.debug("getAccessControlList check", {
           customerId,
           projectId,
-          isBlocked,
+          ...result,
         })
 
-        return isBlocked
+        return result
       }
     )
 
-    if (isBlockedErr) {
+    if (aclErr) {
       this.logger.error("Failed to check if customer is blocked", {
         customerId,
         projectId,
-        error: isBlockedErr.message,
+        error: aclErr.message,
       })
-      return false
+      return null
     }
 
-    return isBlocked ?? false
+    return acl ?? null
   }
 
   /**
@@ -1498,7 +1515,6 @@ export class EntitlementService {
       ...state,
       effectiveAt: mergedGrants.effectiveAt,
       expiresAt: mergedGrants.expiresAt,
-      overageStrategy: mergedGrants.overageStrategy,
       grants: mergedGrants.grants,
     })
   }

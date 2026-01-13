@@ -38,7 +38,6 @@ describe("EntitlementService - Reset Cycles", () => {
     featureSlug,
     featureType: "usage",
     limit: 100, // Weekly limit
-    overageStrategy: "none",
     aggregationMethod: "sum",
     mergingPolicy: "sum",
     metadata: null,
@@ -59,9 +58,6 @@ describe("EntitlementService - Reset Cycles", () => {
         expiresAt: jan1 + 30 * 24 * 60 * 60 * 1000, // 30 days
         limit: 100,
         priority: 10,
-        overageStrategy: "none",
-        featurePlanVersionId: "fpv_reset_1",
-        realtime: false,
       },
     ],
     version: "v1",

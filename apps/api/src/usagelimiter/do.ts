@@ -223,14 +223,6 @@ export class DurableObjectUsagelimiter extends Server {
     })
   }
 
-  public async isCustomerBlocked(data: {
-    customerId: string
-    projectId: string
-    now: number
-  }): Promise<boolean> {
-    return await this.entitlementService.isCustomerBlocked(data)
-  }
-
   public async getCurrentUsage(data: {
     customerId: string
     projectId: string

@@ -15,7 +15,7 @@ import type {
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import { env } from "../../env"
-import type { CustomerCache } from "../cache"
+import type { CacheNamespaces, CustomerCache } from "../cache"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
 import { PaymentProviderService } from "../payment-provider/service"
@@ -356,6 +356,47 @@ export class CustomerService {
     }
 
     return Ok(val)
+  }
+
+  public async invalidateAccessControlList(customerId: string, projectId: string): Promise<void> {
+    await this.cache.accessControlList.remove(`${projectId}:${customerId}`)
+  }
+
+  /**
+   * Updates the access control list in the cache
+   * @param customerId - Customer id
+   * @param projectId - Project id
+   * @param updates - Updates to the ACL
+   * @returns void
+   */
+  public async updateAccessControlList(params: {
+    customerId: string
+    projectId: string
+    updates: Partial<NonNullable<CacheNamespaces["accessControlList"]>>
+  }): Promise<void> {
+    const cacheKey = `${params.projectId}:${params.customerId}`
+    const { val: currentAcl } = await this.cache.accessControlList.get(cacheKey)
+
+    // If not in cache, we don't set it to avoid partial state.
+    // The next getAccessControlList call will fetch the full fresh state from DB.
+    if (!currentAcl) {
+      // set only the updates
+      await this.cache.accessControlList.set(cacheKey, {
+        customerUsageLimitReached: params.updates.customerUsageLimitReached ?? null,
+        customerDisabled: params.updates.customerDisabled ?? null,
+        subscriptionStatus: params.updates.subscriptionStatus ?? null,
+      })
+      return
+    }
+
+    const newAcl = {
+      customerUsageLimitReached:
+        params.updates.customerUsageLimitReached ?? currentAcl.customerUsageLimitReached,
+      customerDisabled: params.updates.customerDisabled ?? currentAcl.customerDisabled,
+      subscriptionStatus: params.updates.subscriptionStatus ?? currentAcl.subscriptionStatus,
+    }
+
+    await this.cache.accessControlList.set(cacheKey, newAcl)
   }
 
   /**
@@ -1256,6 +1297,9 @@ export class CustomerService {
             })
           )
         })
+
+      // Invalidate the ACL cache so the next request fetches the disabled status
+      this.waitUntil(this.invalidateAccessControlList(customerId, projectId))
     })
 
     return Ok({

@@ -84,7 +84,7 @@ export class CacheService {
         fresh: 1000 * 60 * 60 * 24, // 24 hours
         stale: 1000 * 60 * 60 * 1, // 1 hour
       }),
-      blockedCustomers: new Namespace<CacheNamespaces["blockedCustomers"]>(this.context, {
+      accessControlList: new Namespace<CacheNamespaces["accessControlList"]>(this.context, {
         ...defaultOpts,
         fresh: 1000 * 60 * 5, // Consider them "fresh" for 5 minutes
         stale: 1000 * 60 * 60, // Use old data for 1 hour while fetching new data in background

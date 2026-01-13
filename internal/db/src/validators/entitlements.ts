@@ -25,17 +25,25 @@ export const customerEntitlementMetadataSchema = z.record(
   z.union([z.string(), z.number(), z.boolean(), z.null()])
 )
 
-export const entitlementMetadataSchema = z.record(
+export const entitlementMetadataSchema = z.object({
+  realtime: z.boolean().optional().default(false),
+  notifyUsageThreshold: z.number().int().optional().default(95),
+  overageStrategy: overageStrategySchema.optional().default("none"),
+  blockCustomer: z.boolean().optional().default(false),
+  hidden: z.boolean().optional().default(false),
+})
+
+export const grantsMetadataSchema = z.record(
   z.string(),
   z.union([z.string(), z.number(), z.boolean(), z.null()])
 )
 
 export const grantSchema = createSelectSchema(schema.grants, {
-  metadata: entitlementMetadataSchema,
+  metadata: grantsMetadataSchema,
 })
 
 export const grantInsertSchema = createInsertSchema(schema.grants, {
-  metadata: entitlementMetadataSchema.nullable(),
+  metadata: grantsMetadataSchema.nullable(),
 })
 
 export const grantSchemaExtended = grantSchema.extend({
@@ -122,13 +130,10 @@ export const entitlementGrantsSnapshotSchema = z.object({
   effectiveAt: z.number(),
   expiresAt: z.number().nullable(),
   limit: z.number().nullable(),
-  overageStrategy: overageStrategySchema,
-  realtime: z.boolean(),
-  featurePlanVersionId: z.string(),
 })
 
 export const entitlementSchema = createSelectSchema(schema.entitlements, {
-  metadata: entitlementMetadataSchema,
+  metadata: entitlementMetadataSchema.nullable(),
   grants: entitlementGrantsSnapshotSchema.array(),
   resetConfig: resetConfigSchema.extend({
     resetAnchor: z.number(),
@@ -136,7 +141,6 @@ export const entitlementSchema = createSelectSchema(schema.entitlements, {
   aggregationMethod: aggregationMethodSchema,
   featureType: typeFeatureSchema,
   mergingPolicy: entitlementMergingPolicySchema,
-  overageStrategy: overageStrategySchema,
 })
 
 export const meterStateSchema = z.object({

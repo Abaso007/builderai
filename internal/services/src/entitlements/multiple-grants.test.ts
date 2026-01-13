@@ -58,7 +58,6 @@ describe("EntitlementService - Multiple Grants", () => {
     featureSlug,
     featureType: "usage",
     limit: 150, // Sum of limits (100 + 50)
-    overageStrategy: "none",
     aggregationMethod: "sum",
     mergingPolicy: "sum",
     meter: {
@@ -75,7 +74,13 @@ describe("EntitlementService - Multiple Grants", () => {
     nextRevalidateAt: now + 300000,
     computedAt: now,
     resetConfig: null,
-    metadata: null,
+    metadata: {
+      overageStrategy: "none" as const,
+      realtime: false,
+      notifyUsageThreshold: 0,
+      blockCustomer: false,
+      hidden: false,
+    },
     createdAtM: now,
     updatedAtM: now,
   }
@@ -261,12 +266,17 @@ describe("EntitlementService - Multiple Grants", () => {
       limit: 20, // Sum limits = 20
       grants: [grantStrict, grantFlexible],
       mergingPolicy: "sum",
-      overageStrategy: "always", // Computed property from grants
+      metadata: {
+        overageStrategy: "always" as const,
+        realtime: false,
+        notifyUsageThreshold: 0,
+        blockCustomer: false,
+        hidden: false,
+      },
     }
 
     vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue({
       ...stateMixed,
-      metadata: null,
       createdAtM: now,
       updatedAtM: now,
     })

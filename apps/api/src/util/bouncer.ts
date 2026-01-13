@@ -1,5 +1,4 @@
 import type { Context } from "hono"
-import { endTime, startTime } from "hono/timing"
 import { UnpriceApiError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
 
@@ -13,20 +12,28 @@ import type { HonoEnv } from "~/hono/env"
 export const bouncer = async (c: Context<HonoEnv>, customerId: string, projectId: string) => {
   const { usagelimiter } = c.get("services")
 
-  // start a new timer for bouncer, this is a quick check so we can return a 403 early
-  // in case the customer is blocked by the usage limiter
-  startTime(c, "bouncer")
-
-  // Check a "Kill Switch" flag in cache (Edge-cached, ~0-10ms latency)
-  const isBlocked = await usagelimiter.isCustomerBlocked({
+  // Check access control list in cache (Edge-cached, ~0-10ms latency)
+  const acl = await usagelimiter.getAccessControlList({
     customerId,
     projectId,
     now: Date.now(),
   })
 
-  endTime(c, "bouncer")
+  if (acl?.customerDisabled) {
+    throw new UnpriceApiError({
+      code: "FORBIDDEN",
+      message: "Your account has been disabled. Please contact support.",
+    })
+  }
 
-  if (isBlocked) {
+  if (acl?.subscriptionStatus === "past_due") {
+    throw new UnpriceApiError({
+      code: "FORBIDDEN",
+      message: "You have an outstanding invoice. Please pay to continue using the API.",
+    })
+  }
+
+  if (acl?.customerUsageLimitReached) {
     throw new UnpriceApiError({
       code: "FORBIDDEN",
       message: "Your UnPrice API limit has been reached. Please upgrade to continue.",

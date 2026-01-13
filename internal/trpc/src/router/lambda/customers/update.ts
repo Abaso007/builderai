@@ -7,6 +7,7 @@ import { customers } from "@unprice/db/schema"
 import { customerSelectSchema } from "@unprice/db/validators"
 import { protectedProjectProcedure } from "#trpc"
 import { featureGuard } from "#utils/feature-guard"
+import { unprice } from "#utils/unprice"
 
 export const update = protectedProjectProcedure
   .meta({
@@ -26,6 +27,7 @@ export const update = protectedProjectProcedure
         email: true,
         metadata: true,
         timezone: true,
+        active: true,
       })
       .partial({
         description: true,
@@ -35,7 +37,7 @@ export const update = protectedProjectProcedure
   )
   .output(z.object({ customer: customerSelectSchema }))
   .mutation(async (opts) => {
-    const { email, id, description, metadata, name, timezone } = opts.input
+    const { email, id, description, metadata, name, timezone, active } = opts.input
     const { project } = opts.ctx
 
     const unPriceCustomerId = project.workspace.unPriceCustomerId
@@ -81,6 +83,7 @@ export const update = protectedProjectProcedure
           },
         }),
         ...(timezone && { timezone }),
+        ...(active !== undefined && { active }),
         updatedAtM: Date.now(),
       })
       .where(and(eq(customers.id, id), eq(customers.projectId, project.id)))
@@ -91,6 +94,22 @@ export const update = protectedProjectProcedure
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
         message: "Error updating customer",
+      })
+    }
+
+    // if the customer is disabled, update the ACL
+    if (updatedCustomer.active === false) {
+      await unprice.customers.updateACL({
+        customerId: unPriceCustomerId,
+        updates: { customerDisabled: true },
+      })
+    }
+
+    // if the customer is enabled, update the ACL
+    if (updatedCustomer.active === true) {
+      await unprice.customers.updateACL({
+        customerId: unPriceCustomerId,
+        updates: { customerDisabled: false },
       })
     }
 

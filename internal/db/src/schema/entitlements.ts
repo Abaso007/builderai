@@ -19,6 +19,7 @@ import { cuid, timestamps } from "../utils/fields"
 import type {
   entitlementGrantsSnapshotSchema,
   entitlementMetadataSchema,
+  grantsMetadataSchema,
 } from "../validators/entitlements"
 import type { resetConfigSchema } from "../validators/shared"
 import { customers } from "./customers"
@@ -67,7 +68,6 @@ export const entitlements = pgTableProject(
 
     // Computed from active grants
     limit: integer("limit"), // null = unlimited
-    overageStrategy: overageStrategyEnum("overage_strategy").notNull().default("none"),
 
     // effective at is the date when the entitlement was created
     effectiveAt: bigint("effective_at", { mode: "number" }).notNull(),
@@ -172,7 +172,7 @@ export const grants = pgTableProject(
     anchor: integer("anchor").notNull().default(0),
     // ****************** end overrides from plan version feature ******************
 
-    metadata: json("metadata").$type<z.infer<typeof entitlementMetadataSchema>>(),
+    metadata: json("metadata").$type<z.infer<typeof grantsMetadataSchema>>(),
   },
   (table) => ({
     primary: primaryKey({

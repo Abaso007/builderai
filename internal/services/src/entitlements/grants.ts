@@ -3,7 +3,6 @@ import { entitlements, grants } from "@unprice/db/schema"
 import { AGGREGATION_CONFIG, type UsageMode, hashStringSHA256, newId } from "@unprice/db/utils"
 import {
   type FeatureType,
-  type OverageStrategy,
   calculateCycleWindow,
   type entitlementGrantsSnapshotSchema,
 } from "@unprice/db/validators"
@@ -514,12 +513,6 @@ export class GrantsManager {
       expiresAt: g.expiresAt,
       limit: g.limit,
       priority: g.priority,
-      realtime: g.featurePlanVersion.metadata?.realtime ?? false,
-      overageStrategy: g.featurePlanVersion.metadata?.overageStrategy ?? "none",
-      featurePlanVersionId: g.featurePlanVersionId,
-      subscriptionItemId: g.subscriptionItem?.id ?? null,
-      subscriptionPhaseId: g.subscriptionItem?.subscriptionPhaseId ?? null,
-      subscriptionId: g.subscriptionItem?.subscription?.id ?? null,
     }))
 
     // Merge grants according to merging policy derived from feature type
@@ -527,7 +520,6 @@ export class GrantsManager {
       grants: grantsSnapshot,
       featureType: bestPriorityGrant.featurePlanVersion.featureType,
       usageMode: bestPriorityGrant.featurePlanVersion.config.usageMode,
-      overageStrategy: bestPriorityGrant.featurePlanVersion.metadata?.overageStrategy ?? "none",
     })
 
     // The effective configuration should come from the "winning" grant(s)
@@ -537,6 +529,37 @@ export class GrantsManager {
 
     const winningGrantSnapshot = merged.grants[0] ?? grantsSnapshot[0]!
     const winningGrant = grants.find((g) => g.id === winningGrantSnapshot.id) ?? bestPriorityGrant
+
+    // Merge overage strategy from all grants based on merging policy
+    let overageStrategy = winningGrant.featurePlanVersion.metadata?.overageStrategy ?? "none"
+    if (merged.mergingPolicy === "sum" || merged.mergingPolicy === "max") {
+      if (grants.some((g) => g.featurePlanVersion.metadata?.overageStrategy === "always")) {
+        overageStrategy = "always"
+      } else if (
+        grants.some((g) => g.featurePlanVersion.metadata?.overageStrategy === "last-call")
+      ) {
+        overageStrategy = "last-call"
+      }
+    } else if (merged.mergingPolicy === "min") {
+      if (grants.some((g) => g.featurePlanVersion.metadata?.overageStrategy === "none")) {
+        overageStrategy = "none"
+      } else if (
+        grants.some((g) => g.featurePlanVersion.metadata?.overageStrategy === "last-call")
+      ) {
+        overageStrategy = "last-call"
+      } else {
+        overageStrategy = "always"
+      }
+    }
+
+    const winningGrantMetadata = {
+      ...(winningGrant.featurePlanVersion.metadata ?? {}),
+      overageStrategy,
+      realtime: winningGrant.featurePlanVersion.metadata?.realtime ?? false,
+      notifyUsageThreshold: winningGrant.featurePlanVersion.metadata?.notifyUsageThreshold ?? 90,
+      blockCustomer: winningGrant.featurePlanVersion.metadata?.blockCustomer ?? false,
+      hidden: winningGrant.featurePlanVersion.metadata?.hidden ?? false,
+    }
 
     // Derive overall effective/expires for cycle computation
     // Compute cycle window from reset config (half-open style via bounds)
@@ -578,7 +601,6 @@ export class GrantsManager {
 
     return Ok({
       limit: merged.limit,
-      overageStrategy: merged.overageStrategy,
       mergingPolicy: merged.mergingPolicy,
       effectiveAt: effectiveAt,
       expiresAt: expiresAt,
@@ -594,7 +616,7 @@ export class GrantsManager {
       computedAt: Date.now(),
       createdAtM: Date.now(),
       updatedAtM: Date.now(),
-      metadata: {},
+      metadata: winningGrantMetadata,
     })
   }
 
@@ -656,7 +678,6 @@ export class GrantsManager {
       featureSlug: computedState.featureSlug,
       featureType: computedState.featureType,
       limit: computedState.limit,
-      overageStrategy: computedState.overageStrategy,
       aggregationMethod: computedState.aggregationMethod,
       resetConfig: computedState.resetConfig,
       mergingPolicy: computedState.mergingPolicy,
@@ -667,6 +688,7 @@ export class GrantsManager {
       nextRevalidateAt: Date.now() + this.revalidateInterval,
       computedAt: Date.now(),
       updatedAtM: Date.now(),
+      metadata: computedState.metadata,
     }
 
     const newEntitlement = await this.db
@@ -707,27 +729,18 @@ export class GrantsManager {
     featureType?: FeatureType | undefined
     usageMode?: UsageMode | undefined
     policy?: EntitlementMergingPolicy | undefined
-    overageStrategy?: OverageStrategy | undefined
   }): {
     limit: number | null
-    overageStrategy: OverageStrategy
     grants: z.infer<typeof entitlementGrantsSnapshotSchema>[]
     effectiveAt: number
     expiresAt: number | null
     mergingPolicy: EntitlementMergingPolicy
   } {
-    const {
-      grants,
-      featureType,
-      usageMode,
-      policy: explicitPolicy,
-      overageStrategy: explicitStrategy,
-    } = params
+    const { grants, featureType, usageMode, policy: explicitPolicy } = params
 
     if (grants.length === 0) {
       return {
         limit: null,
-        overageStrategy: "none",
         grants: [],
         effectiveAt: 0,
         expiresAt: null,
@@ -773,7 +786,6 @@ export class GrantsManager {
 
     let result: {
       limit: number | null
-      overageStrategy: OverageStrategy
       grants: z.infer<typeof entitlementGrantsSnapshotSchema>[]
       effectiveAt: number
       expiresAt: number | null
@@ -784,14 +796,6 @@ export class GrantsManager {
       case "sum": {
         const limit = sorted.reduce((sum, g) => sum + (g.limit ?? 0), 0)
 
-        // Strategy merge: if any is always -> always, else if any is last-call -> last-call, else none
-        let strategy: OverageStrategy = "none"
-        if (sorted.some((g) => g.overageStrategy === "always")) {
-          strategy = "always"
-        } else if (sorted.some((g) => g.overageStrategy === "last-call")) {
-          strategy = "last-call"
-        }
-
         // For sum, the validity range is the union of all grants
         const minStart = Math.min(...sorted.map((g) => g.effectiveAt))
         // max end or null if no expires at
@@ -799,7 +803,6 @@ export class GrantsManager {
 
         result = {
           limit: limit > 0 ? limit : null,
-          overageStrategy: strategy,
           // we take all the grants that were used to calculate the limit
           grants: sorted,
           effectiveAt: minStart,
@@ -812,13 +815,6 @@ export class GrantsManager {
       case "max": {
         const limits = sorted.map((g) => g.limit).filter((l): l is number => l !== null)
 
-        let strategy: OverageStrategy = "none"
-        if (sorted.some((g) => g.overageStrategy === "always")) {
-          strategy = "always"
-        } else if (sorted.some((g) => g.overageStrategy === "last-call")) {
-          strategy = "last-call"
-        }
-
         const maxLimit = limits.length > 0 ? Math.max(...limits) : null
 
         // Filter grants: keep only the highest priority grant that offers the max limit
@@ -827,7 +823,6 @@ export class GrantsManager {
 
         result = {
           limit: maxLimit,
-          overageStrategy: strategy,
           // we take the highest limit grant that was used to calculate the limit
           grants: [winningGrant],
           effectiveAt: winningGrant.effectiveAt,
@@ -840,16 +835,6 @@ export class GrantsManager {
       case "min": {
         const limits = sorted.map((g) => g.limit).filter((l): l is number => l !== null)
 
-        // For min, we take the strictest strategy that is common?
-        // Or just the strictest strategy across all?
-        // Let's say: if any is none -> none, else if any is last-call -> last-call, else always
-        let strategy: OverageStrategy = "always"
-        if (sorted.some((g) => g.overageStrategy === "none")) {
-          strategy = "none"
-        } else if (sorted.some((g) => g.overageStrategy === "last-call")) {
-          strategy = "last-call"
-        }
-
         const minLimit = limits.length > 0 ? Math.min(...limits) : null
 
         // Filter grants: keep only the highest priority grant that offers the min limit
@@ -857,7 +842,6 @@ export class GrantsManager {
 
         result = {
           limit: minLimit,
-          overageStrategy: strategy,
           // we take the lowest limit grant that was used to calculate the limit
           grants: [winningGrant],
           effectiveAt: winningGrant.effectiveAt,
@@ -872,7 +856,6 @@ export class GrantsManager {
         const highest = sorted[0]!
         result = {
           limit: highest.limit,
-          overageStrategy: highest.overageStrategy,
           // grants are replaced, so we take the highest priority grant
           grants: [highest],
           effectiveAt: highest.effectiveAt,
@@ -887,7 +870,6 @@ export class GrantsManager {
         const highest = sorted[0]!
         result = {
           limit: highest.limit ?? null,
-          overageStrategy: highest.overageStrategy,
           // grants are replaced, so we take the highest priority grant
           grants: [highest],
           effectiveAt: highest.effectiveAt,
@@ -898,9 +880,6 @@ export class GrantsManager {
       }
     }
 
-    return {
-      ...result,
-      overageStrategy: explicitStrategy ?? result.overageStrategy,
-    }
+    return result
   }
 }

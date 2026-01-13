@@ -31,6 +31,7 @@ import { ConsoleLogger } from "@unprice/logging"
 import { timing } from "hono/timing"
 import { registerGetAnalyticsUsageV1 } from "./routes/analitycs/getUsageV1"
 import { registerGetAnalyticsVerificationsV1 } from "./routes/analitycs/getVerificationsV1"
+import { registerUpdateACLV1 } from "./routes/customer/updateACLV1"
 
 const app = newApp()
 
@@ -94,6 +95,7 @@ registerGetPaymentMethodsV1(app)
 registerSignUpV1(app)
 registerCreatePaymentMethodV1(app)
 registerResetEntitlementsV1(app)
+registerUpdateACLV1(app)
 
 // Project routes
 registerGetFeaturesV1(app)

@@ -15,6 +15,13 @@
       "when": 1768133391406,
       "tag": "0001_nice_hydra",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1768336315014,
+      "tag": "0002_colorful_the_watchers",
+      "breakpoints": true
     }
   ]
 }

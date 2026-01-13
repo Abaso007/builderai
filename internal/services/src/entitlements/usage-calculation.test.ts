@@ -24,7 +24,7 @@ describe("UsageMeter Calculation", () => {
     startDate: now - 10000,
     endDate: now + 30 * 24 * 60 * 60 * 1000, // 30 days in future
     resetConfig: null,
-    allowOverage: false,
+    overageStrategy: "none" as const,
   }
 
   beforeEach(() => {
@@ -115,7 +115,7 @@ describe("UsageMeter Calculation", () => {
       const overageConfig = {
         ...baseConfig,
         capacity: 50,
-        allowOverage: true,
+        overageStrategy: "always" as const,
       }
 
       const meter = new UsageMeter(overageConfig, baseMeterState)
@@ -130,7 +130,7 @@ describe("UsageMeter Calculation", () => {
       const strictConfig = {
         ...baseConfig,
         capacity: 50,
-        allowOverage: false,
+        overageStrategy: "none" as const,
       }
 
       const meter = new UsageMeter(strictConfig, baseMeterState)

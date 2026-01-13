@@ -48,6 +48,9 @@ describe("GrantsManager", () => {
         planType: "recurring",
         resetAnchor: 1,
       },
+      metadata: {
+        overageStrategy: "none" as const,
+      },
     },
     anchor: 1,
   }
@@ -274,15 +277,19 @@ describe("GrantsManager", () => {
           ...baseGrant,
           id: "g_strict",
           limit: 100,
-          allowOverage: false,
-          featurePlanVersion: usageFeature,
+          featurePlanVersion: {
+            ...usageFeature,
+            metadata: { overageStrategy: "none" },
+          },
         },
         {
           ...baseGrant,
           id: "g_loose",
           limit: 50,
-          allowOverage: true,
-          featurePlanVersion: usageFeature,
+          featurePlanVersion: {
+            ...usageFeature,
+            metadata: { overageStrategy: "always" },
+          },
         },
       ]
 
@@ -297,7 +304,7 @@ describe("GrantsManager", () => {
       expect(result.err).toBeUndefined()
       const entitlement = result.val![0]
       expect(entitlement).toBeDefined()
-      expect(entitlement!.overageStrategy).toBe("always")
+      expect(entitlement!.metadata?.overageStrategy).toBe("always")
     })
 
     it("should allow overage if ANY grant allows it (max policy)", async () => {
@@ -307,15 +314,19 @@ describe("GrantsManager", () => {
           ...baseGrant,
           id: "g_strict",
           limit: 100,
-          overageStrategy: "none",
-          featurePlanVersion: tierFeature,
+          featurePlanVersion: {
+            ...tierFeature,
+            metadata: { overageStrategy: "none" },
+          },
         },
         {
           ...baseGrant,
           id: "g_loose",
           limit: 50,
-          overageStrategy: "always",
-          featurePlanVersion: tierFeature,
+          featurePlanVersion: {
+            ...tierFeature,
+            metadata: { overageStrategy: "always" },
+          },
         },
       ]
 
@@ -330,7 +341,7 @@ describe("GrantsManager", () => {
       expect(result.err).toBeUndefined()
       const entitlement = result.val![0]
       expect(entitlement).toBeDefined()
-      expect(entitlement!.overageStrategy).toBe("always")
+      expect(entitlement!.metadata?.overageStrategy).toBe("always")
     })
 
     it("should require ALL grants to allow overage for min policy", async () => {
@@ -338,33 +349,21 @@ describe("GrantsManager", () => {
       const grants = [
         {
           id: "g1",
-          type: "subscription",
+          type: "subscription" as const,
           name: "g1",
           effectiveAt: now,
           expiresAt: now + 1000,
           limit: 100,
           priority: 10,
-          realtime: false,
-          overageStrategy: "always",
-          featurePlanVersionId: "fpv1",
-          subscriptionItemId: null,
-          subscriptionPhaseId: null,
-          subscriptionId: null,
         },
         {
           id: "g2",
-          type: "subscription",
+          type: "subscription" as const,
           name: "g2",
           effectiveAt: now,
           expiresAt: now + 1000,
           limit: 50,
           priority: 20,
-          realtime: false,
-          overageStrategy: "none",
-          featurePlanVersionId: "fpv1",
-          subscriptionItemId: null,
-          subscriptionPhaseId: null,
-          subscriptionId: null,
         },
       ]
 
@@ -375,7 +374,6 @@ describe("GrantsManager", () => {
       })
 
       expect(merged.limit).toBe(50)
-      expect(merged.overageStrategy).toBe("none") // every(true, false) is false
       expect(merged.grants[0]!.id).toBe("g2")
     })
 

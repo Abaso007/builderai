@@ -342,6 +342,20 @@ export class Unprice {
           body: req,
         })
       },
+
+      updateACL: async (
+        req: paths["/v1/customer/updateACL"]["post"]["requestBody"]["content"]["application/json"]
+      ): Promise<
+        Result<
+          paths["/v1/customer/updateACL"]["post"]["responses"]["200"]["content"]["application/json"]
+        >
+      > => {
+        return await this.fetch({
+          path: ["v1", "customer", "updateACL"],
+          method: "POST",
+          body: req,
+        })
+      },
     }
   }
 

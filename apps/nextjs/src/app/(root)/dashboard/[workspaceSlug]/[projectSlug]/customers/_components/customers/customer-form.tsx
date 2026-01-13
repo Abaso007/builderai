@@ -48,6 +48,7 @@ export function CustomerForm({
     schema: formSchema,
     defaultValues: {
       ...defaultValues,
+      active: defaultValues.active ?? false,
       timezone: defaultValues.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
     },
   })
@@ -109,6 +110,7 @@ export function CustomerForm({
       await updateCustomer.mutateAsync({
         ...data,
         id: defaultValues.id,
+        active: defaultValues.active ?? false,
       })
     }
   }

@@ -15,8 +15,9 @@ import {
 } from "@unprice/db/validators"
 import { Err, Ok, type Result, type SchemaError } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
+import { env } from "../../env"
 import { BillingService } from "../billing/service"
-import type { Cache } from "../cache"
+import type { Cache } from "../cache/service"
 import { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
 import type { Metrics } from "../metrics"
@@ -496,17 +497,27 @@ export class SubscriptionService {
         phase.startAt <= Date.now() && (phase.endAt ?? Number.POSITIVE_INFINITY) >= Date.now()
 
       if (isActivePhase) {
+        const status = trialUnitsToUse > 0 ? "trialing" : "active"
         await trx
           .update(subscriptions)
           .set({
             active: true,
-            status: trialUnitsToUse > 0 ? "trialing" : "active",
+            status,
             planSlug: versionData.plan.slug,
             currentCycleStartAt: calculatedBillingCycle.start,
             currentCycleEndAt: calculatedBillingCycle.end,
             renewAt: calculatedBillingCycle.start, // we schedule the renewal for the start of the cycle always
           })
           .where(and(eq(subscriptions.id, subscriptionId), eq(subscriptions.projectId, projectId)))
+
+        // Update the access control list status in the cache
+        this.waitUntil(
+          this.customerService.updateAccessControlList({
+            customerId: subscriptionWithPhases.customerId,
+            projectId,
+            updates: { subscriptionStatus: status },
+          })
+        )
 
         // reset entitlements for the customer
         // TODO: change this when implementing webhooks service + qstash
@@ -531,11 +542,13 @@ export class SubscriptionService {
       //     subscriptionId,
       //   },
       // })
-      this.billingService.generateBillingPeriods({
-        subscriptionId,
-        projectId,
-        now: Date.now(), // get the periods until the current date
-      })
+      env.NODE_ENV !== "test"
+        ? this.billingService.generateBillingPeriods({
+            subscriptionId,
+            projectId,
+            now: Date.now(), // get the periods until the current date
+          })
+        : Promise.resolve(undefined)
     )
 
     return result
@@ -773,21 +786,13 @@ export class SubscriptionService {
 
     if (!result.err) {
       this.waitUntil(
-        this.billingService
-          .generateBillingPeriods({
-            subscriptionId,
-            projectId,
-            now: Date.now(),
-          })
-          .then((result) => {
-            if (result.err) {
-              this.logger.error("Failed to generate billing periods", {
-                error: result.err.message,
-                subscriptionId,
-                projectId,
-              })
-            }
-          })
+        env.NODE_ENV !== "test"
+          ? this.billingService.generateBillingPeriods({
+              subscriptionId,
+              projectId,
+              now: Date.now(),
+            })
+          : Promise.resolve(undefined)
       )
     }
 

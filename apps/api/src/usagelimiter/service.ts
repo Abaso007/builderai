@@ -6,13 +6,14 @@ import type {
   MinimalEntitlement,
   ReportUsageRequest,
   ReportUsageResult,
+  SubscriptionStatus,
   VerificationResult,
   VerifyRequest,
 } from "@unprice/db/validators"
 import type { CurrentUsage } from "@unprice/db/validators"
 import { type BaseError, Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
-import type { Cache } from "@unprice/services/cache"
+import type { Cache, CacheNamespaces } from "@unprice/services/cache"
 import type { CustomerService } from "@unprice/services/customers"
 import type { UnPriceCustomerError } from "@unprice/services/customers"
 import {
@@ -35,13 +36,13 @@ export class UsageLimiterService implements UsageLimiter {
   private readonly analytics: Analytics
   private readonly cache: Cache
   private readonly db: Database
+  private readonly customerService: CustomerService
+  private readonly entitlementService: EntitlementService
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
-  private readonly customerService: CustomerService
   private readonly stats: Stats
   private readonly requestId: string
   private hashCache: Map<string, string>
-  private entitlementService: EntitlementService
 
   constructor(opts: {
     namespace: DurableObjectNamespace<DurableObjectUsagelimiter>
@@ -191,7 +192,6 @@ export class UsageLimiterService implements UsageLimiter {
     return Ok(result)
   }
 
-  // TODO: reset by featureslug
   public async resetEntitlements(params: {
     customerId: string
     projectId: string
@@ -225,16 +225,24 @@ export class UsageLimiterService implements UsageLimiter {
     return Ok(entitlements)
   }
 
-  public async isCustomerBlocked(data: {
+  public async getAccessControlList(data: {
     customerId: string
     projectId: string
     now: number
-  }): Promise<boolean> {
-    const durableObject = this.getStub(
-      this.getDurableObjectCustomerId(data.customerId, data.projectId)
-    )
+  }): Promise<{
+    customerUsageLimitReached: boolean | null
+    customerDisabled: boolean | null
+    subscriptionStatus: SubscriptionStatus | null
+  } | null> {
+    return await this.entitlementService.getAccessControlList(data)
+  }
 
-    return await durableObject.isCustomerBlocked(data)
+  public async updateAccessControlList(data: {
+    customerId: string
+    projectId: string
+    updates: Partial<NonNullable<CacheNamespaces["accessControlList"]>>
+  }): Promise<void> {
+    return await this.entitlementService.updateAccessControlList(data)
   }
 
   public async getCurrentUsage(
