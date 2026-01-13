@@ -75,7 +75,7 @@ export interface paths {
          * get subscription
          * @description Get subscription with the active phase for a customer
          */
-        get: operations["customer.getSubscription"];
+        get: operations["customers.getSubscription"];
         put?: never;
         post?: never;
         delete?: never;
@@ -969,6 +969,11 @@ export interface operations {
                     metadata?: {
                         [key: string]: string | undefined;
                     };
+                    /**
+                     * @description The usage to check feature access for
+                     * @example 100
+                     */
+                    usage?: number;
                 };
             };
         };
@@ -1068,7 +1073,7 @@ export interface operations {
             };
         };
     };
-    "customer.getSubscription": {
+    "customers.getSubscription": {
         parameters: {
             query?: never;
             header?: never;
@@ -1371,7 +1376,8 @@ export interface operations {
                                     limitType: "hard" | "soft" | "none";
                                     unit: string;
                                     notifyThreshold?: number;
-                                    allowOverage: boolean;
+                                    /** @enum {string} */
+                                    overageStrategy?: "none" | "last-call" | "always";
                                 };
                             } | {
                                 id: string;
@@ -2527,8 +2533,19 @@ export interface operations {
                                     planType: "recurring" | "onetime";
                                 } | null;
                                 metadata: {
-                                    stripeProductId?: string;
-                                    realtime?: boolean;
+                                    /** @default false */
+                                    realtime: boolean;
+                                    /** @default 95 */
+                                    notifyUsageThreshold: number;
+                                    /**
+                                     * @default none
+                                     * @enum {string}
+                                     */
+                                    overageStrategy: "none" | "last-call" | "always";
+                                    /** @default false */
+                                    blockCustomer: boolean;
+                                    /** @default false */
+                                    hidden: boolean;
                                 } | null;
                                 /**
                                  * @default sum
@@ -2539,9 +2556,6 @@ export interface operations {
                                 /** @default 1 */
                                 defaultQuantity: number | null;
                                 limit?: number | null;
-                                allowOverage: boolean;
-                                notifyUsageThreshold: number | null;
-                                hidden: boolean;
                                 /** @description The text you can use to show the clients */
                                 displayFeatureText: string;
                                 /** @description The feature information */
@@ -3027,8 +3041,19 @@ export interface operations {
                                     planType: "recurring" | "onetime";
                                 } | null;
                                 metadata: {
-                                    stripeProductId?: string;
-                                    realtime?: boolean;
+                                    /** @default false */
+                                    realtime: boolean;
+                                    /** @default 95 */
+                                    notifyUsageThreshold: number;
+                                    /**
+                                     * @default none
+                                     * @enum {string}
+                                     */
+                                    overageStrategy: "none" | "last-call" | "always";
+                                    /** @default false */
+                                    blockCustomer: boolean;
+                                    /** @default false */
+                                    hidden: boolean;
                                 } | null;
                                 /**
                                  * @default sum
@@ -3039,9 +3064,6 @@ export interface operations {
                                 /** @default 1 */
                                 defaultQuantity: number | null;
                                 limit?: number | null;
-                                allowOverage: boolean;
-                                notifyUsageThreshold: number | null;
-                                hidden: boolean;
                                 /** @description The text you can use to show the clients */
                                 displayFeatureText: string;
                                 /** @description The feature information */

@@ -11,6 +11,10 @@
     "deploy:trigger-prod": "npx trigger.dev@3.3.17 deploy",
     "delete": "pnpm tsx src/delete.ts"
   },
+  "exports": {
+    "./tasks": "./src/trigger/tasks/index.ts",
+    "./schedules": "./src/trigger/schedules/index.ts"
+  },
   "dependencies": {
     "@infisical/sdk": "^3.0.4",
     "@t3-oss/env-core": "^0.12.0",

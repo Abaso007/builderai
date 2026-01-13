@@ -62,9 +62,6 @@ export const registerGetPaymentMethodsV1 = (app: App) =>
       customerId,
       provider,
       projectId: key.projectId,
-      opts: {
-        skipCache: false,
-      },
     })
 
     if (result.err) {

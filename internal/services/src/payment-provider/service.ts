@@ -1,4 +1,4 @@
-import type { Customer, PaymentProvider } from "@unprice/db/validators"
+import type { PaymentProvider } from "@unprice/db/validators"
 import { Err, FetchError, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import type { Stripe } from "@unprice/stripe"
@@ -29,7 +29,7 @@ export class PaymentProviderService implements PaymentProviderInterface {
 
   constructor(opts: {
     token: string
-    customer?: Customer
+    providerCustomerId?: string
     logger: Logger
     paymentProvider: PaymentProvider
   }) {
@@ -38,13 +38,13 @@ export class PaymentProviderService implements PaymentProviderInterface {
 
     switch (this.paymentProvider) {
       case "stripe": {
-        const providerCustomerId = opts.customer?.stripeCustomerId
+        this.providerCustomerId = opts.providerCustomerId ?? undefined
 
-        this.providerCustomerId = providerCustomerId ?? undefined
+        console.log("providerCustomerId", this.providerCustomerId)
 
         this.stripe = new StripePaymentProvider({
           token: opts.token,
-          providerCustomerId: providerCustomerId,
+          providerCustomerId: this.providerCustomerId,
           logger: this.logger,
         })
         break

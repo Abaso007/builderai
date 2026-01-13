@@ -430,7 +430,7 @@ export class CustomerService {
     })
 
     const paymentProviderService = new PaymentProviderService({
-      customer: customerData,
+      providerCustomerId: customerData?.stripeCustomerId ?? undefined,
       logger: this.logger,
       paymentProvider: provider,
       token: decryptedKey,

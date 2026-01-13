@@ -3,6 +3,7 @@ import { type Database, and, eq, inArray, sql } from "@unprice/db"
 import {
   billingPeriods,
   creditGrants,
+  grants,
   invoiceCreditApplications,
   invoiceItems,
   invoices,
@@ -1878,7 +1879,8 @@ export class BillingService {
           // 0. Cap any existing pending periods for this phase that exceed the phase end date
           // this is useful for mid-cycle cancellations or plan changes
           if (phase.endAt) {
-            await tx
+            // update billing periods
+            const peiriodsUpdated = await tx
               .update(billingPeriods)
               .set({
                 cycleEndAt: sql`LEAST(${billingPeriods.cycleEndAt}, ${phase.endAt})`,
@@ -1894,6 +1896,19 @@ export class BillingService {
                   sql`${billingPeriods.cycleEndAt} > ${phase.endAt}`
                 )
               )
+              .returning()
+
+            // update grants enddate
+            if (peiriodsUpdated && peiriodsUpdated.length > 0) {
+              for (const period of peiriodsUpdated) {
+                await tx
+                  .update(grants)
+                  .set({
+                    expiresAt: period.cycleEndAt,
+                  })
+                  .where(and(eq(grants.id, period.grantId), eq(grants.projectId, phase.projectId)))
+              }
+            }
 
             // 0.1 Handle credits for already invoiced/paid periods that are now shortened (Prepaid Billing)
             const invoicedPeriods = await tx.query.billingPeriods.findMany({

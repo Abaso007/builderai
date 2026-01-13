@@ -52,7 +52,7 @@ export function PricingCard({
             <Typography variant="h4">Features Included</Typography>
             <ul className="flex w-full flex-col space-y-4 py-4">
               {planVersion.planFeatures
-                .filter((f) => !f.hidden)
+                .filter((f) => !f.metadata?.hidden)
                 .map((feature) => {
                   return (
                     <li key={feature.id} className="flex w-full flex-col justify-start">

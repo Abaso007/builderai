@@ -491,7 +491,6 @@ export class SubscriptionService {
           throw e
         })
 
-      // TODO: can this be inside the subscription machine?
       // update the status of the subscription if the phase is active
       const isActivePhase =
         phase.startAt <= Date.now() && (phase.endAt ?? Number.POSITIVE_INFINITY) >= Date.now()
@@ -774,11 +773,21 @@ export class SubscriptionService {
 
     if (!result.err) {
       this.waitUntil(
-        this.billingService.generateBillingPeriods({
-          subscriptionId,
-          projectId,
-          now: Date.now(),
-        })
+        this.billingService
+          .generateBillingPeriods({
+            subscriptionId,
+            projectId,
+            now: Date.now(),
+          })
+          .then((result) => {
+            if (result.err) {
+              this.logger.error("Failed to generate billing periods", {
+                error: result.err.message,
+                subscriptionId,
+                projectId,
+              })
+            }
+          })
       )
     }
 

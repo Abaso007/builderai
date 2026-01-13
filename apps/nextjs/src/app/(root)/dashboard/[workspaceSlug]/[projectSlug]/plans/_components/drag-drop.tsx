@@ -71,7 +71,17 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
         setPlanFeaturesList((features) =>
           features.map((feature) =>
             feature.featureId === planVersionFeature.featureId
-              ? { ...feature, ...planVersionFeature }
+              ? {
+                  ...feature,
+                  ...planVersionFeature,
+                  metadata: {
+                    realtime: feature.metadata?.realtime ?? false,
+                    notifyUsageThreshold: feature.metadata?.notifyUsageThreshold ?? 0,
+                    overageStrategy: feature.metadata?.overageStrategy ?? "none",
+                    blockCustomer: feature.metadata?.blockCustomer ?? false,
+                    hidden: feature.metadata?.hidden ?? false,
+                  },
+                }
               : feature
           )
         )

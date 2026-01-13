@@ -35,6 +35,7 @@ export default async function BillingPage({ params }: { params: { workspaceSlug:
       </DashboardShell>
     )
   }
+
   return (
     <DashboardShell
       header={
@@ -45,8 +46,6 @@ export default async function BillingPage({ params }: { params: { workspaceSlug:
       }
     >
       <Fragment>
-        {/* <SubscriptionCard customerId={customerId} /> */}
-        {/* <UsageCard customerId={customerId} /> */}
         <UsageCard customerId={customerId} workspaceSlug={workspaceSlug} />
       </Fragment>
     </DashboardShell>

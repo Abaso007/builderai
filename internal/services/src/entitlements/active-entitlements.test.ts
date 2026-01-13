@@ -31,7 +31,7 @@ describe("EntitlementService - Active Entitlements & Cycle Changes", () => {
     featureSlug,
     featureType: "usage",
     limit: 100,
-    allowOverage: false,
+    overageStrategy: "none",
     aggregationMethod: "sum",
     mergingPolicy: "sum",
     grants: [],

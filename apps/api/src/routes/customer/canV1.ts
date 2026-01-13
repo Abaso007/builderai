@@ -41,6 +41,13 @@ export const route = createRoute({
             },
           })
           .optional(),
+        usage: z
+          .number()
+          .openapi({
+            description: "The usage to check feature access for",
+            example: 100,
+          })
+          .optional(),
       }),
       "Body of the request"
     ),
@@ -60,7 +67,7 @@ export type CanResponse = z.infer<
 
 export const registerCanV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId, featureSlug, metadata } = c.req.valid("json")
+    const { customerId, featureSlug, metadata, usage } = c.req.valid("json")
     const { usagelimiter } = c.get("services")
     const stats = c.get("stats")
     const requestId = c.get("requestId")
@@ -84,6 +91,7 @@ export const registerCanV1 = (app: App) =>
       projectId,
       requestId,
       performanceStart,
+      usage,
       // short ttl for dev
       flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
       timestamp: Date.now(), // for now we report the usage at the time of the request
