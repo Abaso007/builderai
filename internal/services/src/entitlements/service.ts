@@ -500,12 +500,20 @@ export class EntitlementService {
 
     // 2. LAZY COMPUTATION: If missing or forcing revalidation, compute from grants
     if (entitlements?.length === 0) {
+      const negativeCacheKey = `negative:${projectId}:${customerId}:all`
+      const { val: isNegative } = opts?.skipCache
+        ? { val: false }
+        : await this.cache.negativeEntitlements.get(negativeCacheKey)
+
+      if (isNegative) {
+        return Ok([])
+      }
+
       this.logger.info("Lazy computing entitlements", {
         customerId,
         projectId,
       })
 
-      // TODO: add negative caching for this operation when not found
       const computeResult = await this.grantsManager.computeGrantsForCustomer({
         customerId,
         projectId,
@@ -520,6 +528,10 @@ export class EntitlementService {
 
       // Update cache with the freshly computed entitlement
       this.waitUntil(this.cache.customerEntitlements.set(cacheKey, entitlements))
+
+      if (entitlements.length === 0) {
+        this.waitUntil(this.cache.negativeEntitlements.set(negativeCacheKey, true))
+      }
     }
 
     if (!entitlements || entitlements.length === 0) {
@@ -1147,6 +1159,7 @@ export class EntitlementService {
     // reset the cache and blocked customer flag
     await Promise.all([
       this.cache.customerEntitlements.remove(cacheKey),
+      this.cache.negativeEntitlements.remove(`negative:${projectId}:${customerId}:all`),
       this.customerService.invalidateAccessControlList(customerId, projectId),
       this.cache.getCurrentUsage.remove(cacheKey),
       this.storage.reset(),
@@ -1397,6 +1410,15 @@ export class EntitlementService {
 
     // 2. LAZY COMPUTATION: If missing or forcing revalidation, compute from grants
     if (!entitlement) {
+      const negativeCacheKey = `negative:${projectId}:${customerId}:${featureSlug}`
+      const { val: isNegative } = opts?.skipCache
+        ? { val: false }
+        : await this.cache.negativeEntitlements.get(negativeCacheKey)
+
+      if (isNegative) {
+        return Ok(null)
+      }
+
       this.logger.info("Lazy computing entitlement", {
         customerId,
         featureSlug,
@@ -1404,7 +1426,6 @@ export class EntitlementService {
         reason: !entitlement ? "missing" : "revalidate",
       })
 
-      // TODO: add negative caching for this operation when not found
       const computeResult = await this.grantsManager.computeGrantsForCustomer({
         customerId,
         projectId,
@@ -1420,6 +1441,8 @@ export class EntitlementService {
       // Update cache with the freshly computed entitlement
       if (entitlement) {
         this.waitUntil(this.cache.customerEntitlement.set(cacheKey, entitlement))
+      } else {
+        this.waitUntil(this.cache.negativeEntitlements.set(negativeCacheKey, true))
       }
     }
 
@@ -1637,11 +1660,8 @@ export class EntitlementService {
       return this.buildEmptyUsageResponse(planVersion?.currency ?? "USD")
     }
 
-    // Compute entitlement states and get usage estimates in parallel
-    const [entitlementsResult, usageEstimatesResult] = await Promise.all([
-      this.computeEntitlementStates(customerId, projectId, grants),
-      this.getUsageEstimates(customerId, projectId, now),
-    ])
+    // Compute entitlement states first (checks DO storage for real-time usage)
+    const entitlementsResult = await this.computeEntitlementStates(customerId, projectId, grants)
 
     if (entitlementsResult.err) {
       this.logger.error(
@@ -1653,6 +1673,23 @@ export class EntitlementService {
       )
       return null
     }
+
+    // Identify which features are "hot" (have real-time usage in DO) to skip analytics
+    const usageOverrides = new Map<string, number>()
+    for (const entitlement of entitlementsResult.val) {
+      // if it has a meter and it's not the first time it's used we use it
+      if (entitlement.meter.lastReconciledId !== "") {
+        usageOverrides.set(entitlement.featureSlug, Number(entitlement.meter.usage))
+      }
+    }
+
+    // Now get usage estimates from analytics only for "idle" features
+    const usageEstimatesResult = await this.getUsageEstimates(
+      customerId,
+      projectId,
+      now,
+      usageOverrides
+    )
 
     if (usageEstimatesResult.err) {
       this.logger.error(`Failed to get usage estimates - ${usageEstimatesResult.err.message}`, {
@@ -1721,12 +1758,25 @@ export class EntitlementService {
     }
 
     // Compute entitlement states for all features in parallel
-    const entitlementPromises = Array.from(grantsByFeature.values()).map((featureGrants) =>
-      this.grantsManager.computeEntitlementState({
-        customerId,
-        projectId,
-        grants: featureGrants,
-      })
+    const entitlementPromises = Array.from(grantsByFeature.entries()).map(
+      async ([featureSlug, featureGrants]) => {
+        // Try to get from storage first (real-time source of truth in DO)
+        const storageResult = await this.storage.get({
+          customerId,
+          projectId,
+          featureSlug,
+        })
+
+        if (storageResult.val) {
+          return Ok(storageResult.val)
+        }
+
+        return this.grantsManager.computeEntitlementState({
+          customerId,
+          projectId,
+          grants: featureGrants,
+        })
+      }
     )
 
     const results = await Promise.all(entitlementPromises)
@@ -1737,16 +1787,22 @@ export class EntitlementService {
       if (result.err) {
         return Err(new UnPriceEntitlementError({ message: result.err.message }))
       }
-      entitlements.push({
-        ...result.val,
-        meter: {
-          usage: "0", // TODO: implement this
-          snapshotUsage: "0", // TODO: implement this
-          lastReconciledId: "", // TODO: implement this
-          lastUpdated: Date.now(),
-          lastCycleStart: undefined,
-        },
-      })
+
+      // if it has a meter (meaning it was loaded from storage) we use it
+      if ("meter" in result.val) {
+        entitlements.push(result.val as Omit<EntitlementState, "id">)
+      } else {
+        entitlements.push({
+          ...result.val,
+          meter: {
+            usage: "0",
+            snapshotUsage: "0",
+            lastReconciledId: "",
+            lastUpdated: Date.now(),
+            lastCycleStart: undefined,
+          },
+        })
+      }
     }
 
     return Ok(entitlements)
@@ -1755,7 +1811,8 @@ export class EntitlementService {
   private async getUsageEstimates(
     customerId: string,
     projectId: string,
-    now: number
+    now: number,
+    usageOverrides?: Map<string, number>
   ): Promise<
     Result<
       Awaited<ReturnType<BillingService["estimatePriceCurrentUsage"]>>["val"],
@@ -1775,6 +1832,7 @@ export class EntitlementService {
       customerId,
       projectId,
       now,
+      usageOverrides,
     })
 
     return result.err
@@ -1807,7 +1865,13 @@ export class EntitlementService {
           )
 
           // Aggregate usage data
-          const usage = usageGrants.reduce((acc, u) => acc + u.usage, 0)
+          // Prioritize real-time usage from DO storage if available (lastReconciledId is present)
+          const meterUsage = Number(entitlement.meter.usage)
+          const usage =
+            entitlement.meter.lastReconciledId !== "" && meterUsage > 0
+              ? meterUsage
+              : usageGrants.reduce((acc, u) => acc + u.usage, 0)
+
           const included = usageGrants.reduce((acc, u) => acc + u.included, 0)
 
           // TODO: sloppy, we should use the currency from the plan version feature

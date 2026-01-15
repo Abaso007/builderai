@@ -248,18 +248,12 @@ export class UsageLimiterService implements UsageLimiter {
   public async getCurrentUsage(
     data: GetUsageRequest
   ): Promise<Result<CurrentUsage, FetchError | BaseError>> {
-    const { val: usage, err } = await this.entitlementService.getCurrentUsage({
-      customerId: data.customerId,
-      projectId: data.projectId,
-      opts: {
-        now: data.now,
-        skipCache: false,
-      },
-    })
-    if (err) {
-      return Err(err)
-    }
+    const durableObject = this.getStub(
+      this.getDurableObjectCustomerId(data.customerId, data.projectId)
+    )
 
-    return Ok(usage)
+    const result = await durableObject.getCurrentUsage(data)
+
+    return result
   }
 }

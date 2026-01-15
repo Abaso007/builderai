@@ -94,6 +94,11 @@ export class CacheService {
         fresh: 1000 * 60 * 60 * 24, // 24 hours
         stale: 1000 * 60 * 60 * 1, // 1 hour
       }),
+      negativeEntitlements: new Namespace<CacheNamespaces["negativeEntitlements"]>(this.context, {
+        ...defaultOpts,
+        fresh: 1000 * 60, // 1 minute
+        stale: 1000 * 60, // 1 minute
+      }),
       customerSubscription: new Namespace<CacheNamespaces["customerSubscription"]>(this.context, {
         ...defaultOpts,
         fresh: 1000 * 60 * 60 * 24, // 24 hours

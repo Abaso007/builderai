@@ -228,7 +228,9 @@ export class DurableObjectUsagelimiter extends Server {
     projectId: string
     now: number
   }): Promise<Result<CurrentUsage, BaseError>> {
-    return await this.entitlementService.getCurrentUsage(data)
+    return await this.entitlementService.getCurrentUsage({
+      ...data,
+    })
   }
 
   public async resetEntitlements(params: {
