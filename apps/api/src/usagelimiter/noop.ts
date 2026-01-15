@@ -2,11 +2,13 @@ import type {
   EntitlementState,
   ReportUsageRequest,
   ReportUsageResult,
+  SubscriptionStatus,
   VerificationResult,
   VerifyRequest,
 } from "@unprice/db/validators"
 import type { CurrentUsage } from "@unprice/db/validators"
 import { type BaseError, Ok, type Result } from "@unprice/error"
+import type { CacheNamespaces } from "@unprice/services/cache"
 import type { GetEntitlementsRequest, GetUsageRequest, UsageLimiter } from "./interface"
 
 export class NoopUsageLimiter implements UsageLimiter {
@@ -15,6 +17,22 @@ export class NoopUsageLimiter implements UsageLimiter {
     projectId: string
   }): Promise<Result<void, BaseError>> {
     return Ok(undefined)
+  }
+
+  public async getAccessControlList(_data: {
+    customerId: string
+    projectId: string
+    now: number
+  }): Promise<{
+    customerUsageLimitReached: boolean | null
+    customerDisabled: boolean | null
+    subscriptionStatus: SubscriptionStatus | null
+  } | null> {
+    return {
+      customerUsageLimitReached: false,
+      customerDisabled: false,
+      subscriptionStatus: "active",
+    }
   }
 
   public async verify(_req: VerifyRequest): Promise<Result<VerificationResult, BaseError>> {
@@ -39,6 +57,14 @@ export class NoopUsageLimiter implements UsageLimiter {
     _req: GetEntitlementsRequest
   ): Promise<Result<EntitlementState[], BaseError>> {
     return Ok([])
+  }
+
+  public async updateAccessControlList(_data: {
+    customerId: string
+    projectId: string
+    updates: Partial<NonNullable<CacheNamespaces["accessControlList"]>>
+  }): Promise<void> {
+    return
   }
 
   public async getCurrentUsage(_req: GetUsageRequest): Promise<Result<CurrentUsage, BaseError>> {

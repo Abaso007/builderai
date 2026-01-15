@@ -13,7 +13,7 @@ const tags = ["project"]
 
 export const route = createRoute({
   path: "/v1/project/getFeatures",
-  operationId: "project.getFeatures",
+  operationId: "projects.getFeatures",
   summary: "get features",
   description: "Get features for a project",
   method: "get",

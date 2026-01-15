@@ -1,0 +1,22 @@
+NODE features_verifications_daily_mv_node
+SQL >
+    SELECT
+        toStartOfDay(date) AS date,
+        projectId,
+        region,
+        customerId,
+        featureSlug,
+        countMergeState(count) AS count,
+        quantileTDigestMergeState(0.50)(p50_latency) AS p50_latency,
+        quantileTDigestMergeState(0.95)(p95_latency) AS p95_latency,
+        quantileTDigestMergeState(0.99)(p99_latency) AS p99_latency
+    FROM unprice_feature_verifications_hourly_mv
+    GROUP BY
+        date,
+        projectId,
+        region,
+        customerId,
+        featureSlug
+
+TYPE MATERIALIZED
+DATASOURCE unprice_feature_verifications_daily_mv

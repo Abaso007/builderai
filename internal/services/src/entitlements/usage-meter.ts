@@ -11,6 +11,11 @@ import {
 } from "@unprice/db/validators"
 import type { DenyReason } from "../customers"
 
+export type OverageStrategy =
+  | "none" // Strict: currentTokens >= cost
+  | "last-call" // Allow if currentTokens > 0
+  | "always" // Record & Penalize: Always allow (if cost is valid)
+
 // ---------------------------------------------------------
 export interface MeterConfig {
   /**
@@ -69,12 +74,14 @@ export interface MeterConfig {
   threshold?: number
 
   /**
-   * Whether to allow usage beyond the capacity limit.
-   * When true, usage can exceed the limit (soft limit).
-   * When false, usage is blocked when limit is reached (hard limit).
-   * Default: false.
+   * Strategy for handling usage that exceeds the remaining capacity.
+   * - "none": Strict hard limit. cost must be <= remaining tokens.
+   * - "last-call": Allow one final report as long as tokens were available (tokens > 0).
+   * - "always": Always allow (soft limit/overage enabled).
+   *
+   * Default: "none"
    */
-  allowOverage?: boolean
+  overageStrategy?: OverageStrategy
 }
 
 // ---------------------------------------------------------
@@ -131,7 +138,10 @@ export class UsageMeter {
   /**
    * verify
    */
-  verify(now: number): {
+  verify(
+    now: number,
+    cost = 0
+  ): {
     allowed: boolean
     remaining: number
     retryAfterMs: number
@@ -166,10 +176,21 @@ export class UsageMeter {
     }
 
     // 4. Verify capacity
-    const allowOverage = this.config.allowOverage ?? false
     const currentTokens = this.tokens
+    const strategy = this.config.overageStrategy ?? "none"
 
-    if (currentTokens <= 0 && !allowOverage) {
+    let isAllowed = false
+
+    if (strategy === "always") {
+      isAllowed = true
+    } else if (strategy === "last-call") {
+      isAllowed = cost <= 0 || currentTokens > 0
+    } else {
+      // strategy === "none" (strict)
+      isAllowed = currentTokens >= cost
+    }
+
+    if (!isAllowed) {
       return {
         allowed: false,
         remaining: this.tokens,
@@ -246,10 +267,23 @@ export class UsageMeter {
 
     // 4. Check Balance
     const currentTokens = this.tokens
-    const allowOverage = this.config.allowOverage ?? false
+    const strategy = this.config.overageStrategy ?? "none"
 
     // 5. handle consumption
-    if (currentTokens >= cost || allowOverage) {
+    let isAllowed = false
+
+    if (cost <= 0) {
+      isAllowed = true // Always allow corrections
+    } else if (strategy === "always") {
+      isAllowed = true
+    } else if (strategy === "last-call") {
+      isAllowed = currentTokens > 0
+    } else {
+      // strategy === "none" (strict)
+      isAllowed = currentTokens >= cost
+    }
+
+    if (isAllowed) {
       // update the usage
       const newUsage = this.applyUsage(cost)
 
@@ -468,8 +502,6 @@ export class UsageMeter {
   // PERSISTENCE
   // -------------------------------------------------------
   toPersist(): MeterState {
-    // Ensure state is up to date before saving
-    this.sync(Date.now())
     return {
       lastUpdated: this.lastUpdated,
       usage: this.usage,

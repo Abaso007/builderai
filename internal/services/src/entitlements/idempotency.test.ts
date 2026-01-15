@@ -1,11 +1,11 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import type { EntitlementState } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
+import { createClock, createMockEntitlementState } from "../test-utils"
 import { MemoryEntitlementStorageProvider } from "./memory-provider"
 import { EntitlementService } from "./service"
 
@@ -19,20 +19,17 @@ describe("EntitlementService - Idempotency & Flush", () => {
   let mockMetrics: Metrics
 
   const now = Date.now()
+  const clock = createClock(now)
   const customerId = "cust_idem_123"
   const projectId = "proj_idem_123"
   const featureSlug = "idem-feature"
 
-  const mockEntitlementState: EntitlementState = {
+  const mockEntitlementState = createMockEntitlementState({
     id: "ent_idem_123",
     customerId,
     projectId,
     featureSlug,
-    featureType: "usage",
     limit: 100,
-    allowOverage: false,
-    aggregationMethod: "sum",
-    mergingPolicy: "sum",
     meter: {
       usage: "0",
       snapshotUsage: "0",
@@ -48,24 +45,19 @@ describe("EntitlementService - Idempotency & Flush", () => {
         expiresAt: now + 10000,
         limit: 100,
         priority: 10,
-        allowOverage: false,
-        featurePlanVersionId: "fpv_1",
-        realtime: false,
       },
     ],
-    version: "v1",
     effectiveAt: now - 10000,
     expiresAt: now + 10000,
     nextRevalidateAt: now + 300000,
     computedAt: now,
-    resetConfig: null,
-    metadata: null,
     createdAtM: now,
     updatedAtM: now,
-  }
+  })
 
   beforeEach(async () => {
     vi.clearAllMocks()
+    clock.set(now)
 
     mockLogger = {
       debug: vi.fn(),
@@ -133,7 +125,6 @@ describe("EntitlementService - Idempotency & Flush", () => {
     // Setup DB mock
     vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue({
       ...mockEntitlementState,
-      metadata: null,
       createdAtM: now,
       updatedAtM: now,
     })
@@ -147,7 +138,7 @@ describe("EntitlementService - Idempotency & Flush", () => {
       projectId,
       featureSlug,
       usage: usageAmount,
-      timestamp: now,
+      timestamp: clock.now(),
       requestId: "req_1",
       idempotenceKey,
       metadata: null,
@@ -155,14 +146,13 @@ describe("EntitlementService - Idempotency & Flush", () => {
     expect(res1.allowed).toBe(true)
     expect(res1.usage).toBe(5)
 
-    // The `sendUsageRecordsToAnalytics` DOES deduplication.
-    // Let's verify flush deduplication
+    // Second call - SAME key
     const res2 = await service.reportUsage({
       customerId,
       projectId,
       featureSlug,
       usage: usageAmount, // Same usage
-      timestamp: now,
+      timestamp: clock.now(),
       requestId: "req_2",
       idempotenceKey, // SAME key
       metadata: null,
@@ -187,7 +177,6 @@ describe("EntitlementService - Idempotency & Flush", () => {
     // Setup DB mock
     vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue({
       ...mockEntitlementState,
-      metadata: null,
       createdAtM: now,
       updatedAtM: now,
     })
@@ -198,7 +187,7 @@ describe("EntitlementService - Idempotency & Flush", () => {
         customerId,
         projectId,
         featureSlug,
-        timestamp: now + i,
+        timestamp: clock.now() + i,
         requestId: `req_ver_${i}`,
         metadata: null,
         performanceStart: performance.now(),
@@ -227,7 +216,6 @@ describe("EntitlementService - Idempotency & Flush", () => {
     // Setup DB mock
     vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue({
       ...mockEntitlementState,
-      metadata: null,
       createdAtM: now,
       updatedAtM: now,
     })
@@ -239,7 +227,7 @@ describe("EntitlementService - Idempotency & Flush", () => {
         projectId,
         featureSlug,
         usage: 1,
-        timestamp: now + i,
+        timestamp: clock.now() + i,
         requestId: `req_usage_flush_${i}`,
         idempotenceKey: `idem_flush_${i}`, // Distinct keys
         metadata: null,

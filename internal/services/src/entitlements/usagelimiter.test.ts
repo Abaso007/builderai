@@ -1,11 +1,11 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import type { EntitlementState } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
+import { createClock, createMockEntitlementState } from "../test-utils"
 import { MemoryEntitlementStorageProvider } from "./memory-provider"
 import { EntitlementService } from "./service"
 
@@ -19,20 +19,17 @@ describe("EntitlementService - verify", () => {
   let mockMetrics: Metrics
 
   const now = Date.now()
+  const clock = createClock(now)
   const customerId = "cust_123"
   const projectId = "proj_123"
   const featureSlug = "test-feature"
 
-  const mockEntitlementState: EntitlementState = {
+  const mockEntitlementState = createMockEntitlementState({
     id: "ent_123",
     customerId,
     projectId,
     featureSlug,
-    featureType: "usage",
     limit: 100,
-    allowOverage: false,
-    aggregationMethod: "sum",
-    mergingPolicy: "sum",
     meter: {
       usage: "10",
       snapshotUsage: "10",
@@ -48,24 +45,19 @@ describe("EntitlementService - verify", () => {
         expiresAt: now + 10000,
         limit: 100,
         priority: 10,
-        allowOverage: false,
-        featurePlanVersionId: "fpv_1",
-        realtime: false,
       },
     ],
-    version: "v1",
     effectiveAt: now - 10000,
     expiresAt: now + 10000,
     nextRevalidateAt: now + 300000,
     computedAt: now,
-    resetConfig: null,
-    metadata: null,
     createdAtM: now,
     updatedAtM: now,
-  }
+  })
 
   beforeEach(async () => {
     vi.clearAllMocks()
+    clock.set(now)
 
     // Mock Logger
     mockLogger = {
@@ -152,16 +144,15 @@ describe("EntitlementService - verify", () => {
     // Setup DB mock to return the entitlement
     vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue({
       ...mockEntitlementState,
-      metadata: null,
-      createdAtM: now,
-      updatedAtM: now,
+      createdAtM: clock.now(),
+      updatedAtM: clock.now(),
     })
 
     const result = await service.verify({
       customerId,
       projectId,
       featureSlug,
-      timestamp: now,
+      timestamp: clock.now(),
       requestId: "req_1",
       metadata: null,
       performanceStart: performance.now(),
@@ -174,11 +165,6 @@ describe("EntitlementService - verify", () => {
 
     // Check if it tried to load from DB
     expect(mockDb.query.entitlements.findFirst).toHaveBeenCalledTimes(1)
-    expect(mockDb.query.entitlements.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.any(Function),
-      })
-    )
 
     // Check if it stored in memory storage
     const stored = await mockStorage.get({ customerId, projectId, featureSlug })
@@ -205,7 +191,7 @@ describe("EntitlementService - verify", () => {
       customerId,
       projectId,
       featureSlug,
-      timestamp: now,
+      timestamp: clock.now(),
       requestId: "req_2",
       metadata: null,
       performanceStart: performance.now(),
@@ -218,17 +204,33 @@ describe("EntitlementService - verify", () => {
   })
 
   it("should deny access when usage exceeds limit", async () => {
-    const exceededState = {
-      ...mockEntitlementState,
-      customerId: "cust_overlimit",
-      meter: {
-        ...mockEntitlementState.meter,
-        usage: "101", // usage > limit
+    const exceededState = createMockEntitlementState(
+      {
+        customerId: "cust_overlimit",
+        projectId,
+        featureSlug,
+        meter: {
+          usage: "101", // usage > limit
+          snapshotUsage: "101",
+          lastReconciledId: "rec_initial",
+          lastUpdated: now,
+          lastCycleStart: now - 10000,
+        },
+        createdAtM: clock.now(),
+        updatedAtM: clock.now(),
+        grants: [
+          {
+            id: "grant_1",
+            type: "subscription",
+            priority: 10,
+            limit: 100,
+            effectiveAt: clock.now() - 10000,
+            expiresAt: clock.now() + 10000,
+          },
+        ],
       },
-      metadata: null,
-      createdAtM: now,
-      updatedAtM: now,
-    }
+      clock.now()
+    )
 
     // Setup DB mock
     vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue(exceededState)
@@ -237,7 +239,7 @@ describe("EntitlementService - verify", () => {
       customerId: "cust_overlimit",
       projectId,
       featureSlug,
-      timestamp: now,
+      timestamp: clock.now(),
       requestId: "req_3",
       metadata: null,
       performanceStart: performance.now(),
@@ -263,7 +265,7 @@ describe("EntitlementService - verify", () => {
       customerId,
       projectId,
       featureSlug: "non-existent",
-      timestamp: now,
+      timestamp: clock.now(),
       requestId: "req_4",
       metadata: null,
       performanceStart: performance.now(),
@@ -293,20 +295,17 @@ describe("EntitlementService - reportUsage", () => {
   let mockMetrics: Metrics
 
   const now = Date.now()
+  const clock = createClock(now)
   const customerId = "cust_usage_123"
   const projectId = "proj_usage_123"
   const featureSlug = "usage-feature"
 
-  const mockEntitlementState: EntitlementState = {
+  const mockEntitlementState = createMockEntitlementState({
     id: "ent_usage_123",
     customerId,
     projectId,
     featureSlug,
-    featureType: "usage",
     limit: 100,
-    allowOverage: false,
-    aggregationMethod: "sum",
-    mergingPolicy: "sum",
     meter: {
       usage: "10",
       snapshotUsage: "10",
@@ -322,24 +321,19 @@ describe("EntitlementService - reportUsage", () => {
         expiresAt: now + 10000,
         limit: 100,
         priority: 10,
-        allowOverage: false,
-        featurePlanVersionId: "fpv_1",
-        realtime: false,
       },
     ],
-    version: "v1",
     effectiveAt: now - 10000,
     expiresAt: now + 10000,
     nextRevalidateAt: now + 300000,
     computedAt: now,
-    resetConfig: null,
-    metadata: null,
     createdAtM: now,
     updatedAtM: now,
-  }
+  })
 
   beforeEach(async () => {
     vi.clearAllMocks()
+    clock.set(now)
 
     mockLogger = {
       debug: vi.fn(),
@@ -424,9 +418,8 @@ describe("EntitlementService - reportUsage", () => {
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     ;(mockDb.query.entitlements.findFirst as any).mockResolvedValue({
       ...mockEntitlementState,
-      metadata: null,
-      createdAtM: now,
-      updatedAtM: now,
+      createdAtM: clock.now(),
+      updatedAtM: clock.now(),
     })
 
     const usageAmount = 5
@@ -435,7 +428,7 @@ describe("EntitlementService - reportUsage", () => {
       projectId,
       featureSlug,
       usage: usageAmount,
-      timestamp: now,
+      timestamp: clock.now(),
       requestId: "req_usage_1",
       idempotenceKey: "idem_1",
       metadata: null,
@@ -466,9 +459,8 @@ describe("EntitlementService - reportUsage", () => {
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     ;(mockDb.query.entitlements.findFirst as any).mockResolvedValue({
       ...mockEntitlementState,
-      metadata: null,
-      createdAtM: now,
-      updatedAtM: now,
+      createdAtM: clock.now(),
+      updatedAtM: clock.now(),
     })
 
     const result = await service.reportUsage({
@@ -476,7 +468,7 @@ describe("EntitlementService - reportUsage", () => {
       projectId,
       featureSlug,
       usage: usageAmount,
-      timestamp: now,
+      timestamp: clock.now(),
       requestId: "req_usage_2",
       idempotenceKey: "idem_2",
       metadata: null,
@@ -498,9 +490,8 @@ describe("EntitlementService - reportUsage", () => {
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     ;(mockDb.query.entitlements.findFirst as any).mockResolvedValue({
       ...mockEntitlementState,
-      metadata: null,
-      createdAtM: now,
-      updatedAtM: now,
+      createdAtM: clock.now(),
+      updatedAtM: clock.now(),
     })
 
     // Pre-populate storage so we can accumulate
@@ -517,7 +508,7 @@ describe("EntitlementService - reportUsage", () => {
         projectId,
         featureSlug,
         usage,
-        timestamp: now,
+        timestamp: clock.now(),
         requestId: `req_rand_${i}`,
         idempotenceKey: `idem_rand_${i}`,
         metadata: null,

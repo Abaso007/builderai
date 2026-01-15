@@ -17,7 +17,7 @@ export interface paths {
      * report usage
      * @description Report usage for a customer
      */
-    post: operations["customer.reportUsage"]
+    post: operations["customers.reportUsage"]
     delete?: never
     options?: never
     head?: never
@@ -35,7 +35,7 @@ export interface paths {
      * get minimal entitlements
      * @description Get minimal entitlements for a customer
      */
-    get: operations["customer.getEntitlements"]
+    get: operations["customers.getEntitlements"]
     put?: never
     post?: never
     delete?: never
@@ -57,7 +57,7 @@ export interface paths {
      * can feature
      * @description Check if a customer can use a feature
      */
-    post: operations["customer.can"]
+    post: operations["customers.can"]
     delete?: never
     options?: never
     head?: never
@@ -75,7 +75,7 @@ export interface paths {
      * get subscription
      * @description Get subscription with the active phase for a customer
      */
-    get: operations["customer.getSubscription"]
+    get: operations["customers.getSubscription"]
     put?: never
     post?: never
     delete?: never
@@ -95,7 +95,7 @@ export interface paths {
      * get usage
      * @description Get usage for a customer
      */
-    get: operations["customer.getUsage"]
+    get: operations["customers.getUsage"]
     put?: never
     post?: never
     delete?: never
@@ -117,7 +117,7 @@ export interface paths {
      * get payment methods
      * @description Get payment methods for a customer
      */
-    post: operations["customer.getPaymentMethods"]
+    post: operations["customers.getPaymentMethods"]
     delete?: never
     options?: never
     head?: never
@@ -137,7 +137,7 @@ export interface paths {
      * sign up
      * @description Sign up a customer for a project
      */
-    post: operations["customer.signUp"]
+    post: operations["customers.signUp"]
     delete?: never
     options?: never
     head?: never
@@ -157,7 +157,7 @@ export interface paths {
      * create payment method
      * @description Create a payment method for a customer
      */
-    post: operations["customer.createPaymentMethod"]
+    post: operations["customers.createPaymentMethod"]
     delete?: never
     options?: never
     head?: never
@@ -177,7 +177,27 @@ export interface paths {
      * reset entitlements
      * @description Reset entitlements for a customer
      */
-    post: operations["customer.resetEntitlements"]
+    post: operations["customers.resetEntitlements"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/v1/customer/updateACL": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * update ACL
+     * @description Update the ACL for a customer
+     */
+    post: operations["customers.updateACL"]
     delete?: never
     options?: never
     head?: never
@@ -195,7 +215,7 @@ export interface paths {
      * get features
      * @description Get features for a project
      */
-    get: operations["project.getFeatures"]
+    get: operations["projects.getFeatures"]
     put?: never
     post?: never
     delete?: never
@@ -701,7 +721,7 @@ export interface components {
 }
 export type $defs = Record<string, never>
 export interface operations {
-  "customer.reportUsage": {
+  "customers.reportUsage": {
     parameters: {
       query?: never
       header?: never
@@ -888,7 +908,7 @@ export interface operations {
       }
     }
   }
-  "customer.getEntitlements": {
+  "customers.getEntitlements": {
     parameters: {
       query?: never
       header?: never
@@ -987,7 +1007,7 @@ export interface operations {
       }
     }
   }
-  "customer.can": {
+  "customers.can": {
     parameters: {
       query?: never
       header?: never
@@ -1018,6 +1038,11 @@ export interface operations {
           metadata?: {
             [key: string]: string | undefined
           }
+          /**
+           * @description The usage to check feature access for
+           * @example 100
+           */
+          usage?: number
         }
       }
     }
@@ -1166,7 +1191,7 @@ export interface operations {
       }
     }
   }
-  "customer.getSubscription": {
+  "customers.getSubscription": {
     parameters: {
       query?: never
       header?: never
@@ -1418,7 +1443,7 @@ export interface operations {
       }
     }
   }
-  "customer.getUsage": {
+  "customers.getUsage": {
     parameters: {
       query?: never
       header?: never
@@ -1512,7 +1537,8 @@ export interface operations {
                       limitType: "hard" | "soft" | "none"
                       unit: string
                       notifyThreshold?: number
-                      allowOverage: boolean
+                      /** @enum {string} */
+                      overageStrategy?: "none" | "last-call" | "always"
                     }
                   }
                 | {
@@ -1615,7 +1641,7 @@ export interface operations {
       }
     }
   }
-  "customer.getPaymentMethods": {
+  "customers.getPaymentMethods": {
     parameters: {
       query?: never
       header?: never
@@ -1731,7 +1757,7 @@ export interface operations {
       }
     }
   }
-  "customer.signUp": {
+  "customers.signUp": {
     parameters: {
       query?: never
       header?: never
@@ -1966,7 +1992,7 @@ export interface operations {
       }
     }
   }
-  "customer.createPaymentMethod": {
+  "customers.createPaymentMethod": {
     parameters: {
       query?: never
       header?: never
@@ -2099,7 +2125,7 @@ export interface operations {
       }
     }
   }
-  "customer.resetEntitlements": {
+  "customers.resetEntitlements": {
     parameters: {
       query?: never
       header?: never
@@ -2209,7 +2235,116 @@ export interface operations {
       }
     }
   }
-  "project.getFeatures": {
+  "customers.updateACL": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The updates to the ACL */
+    requestBody: {
+      content: {
+        "application/json": {
+          /**
+           * @description The customer ID
+           * @example cus_1H7KQFLr7RepUyQBKdnvY
+           */
+          customerId: string
+          updates: {
+            customerUsageLimitReached?: boolean
+            customerDisabled?: boolean
+            /** @enum {string} */
+            subscriptionStatus?: "active" | "trialing" | "canceled" | "expired" | "past_due"
+          }
+        }
+      }
+    }
+    responses: {
+      /** @description The result of the update ACL */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": Record<string, never>
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
+  "projects.getFeatures": {
     parameters: {
       query?: never
       header?: never
@@ -2674,8 +2809,19 @@ export interface operations {
                   planType: "recurring" | "onetime"
                 } | null
                 metadata: {
-                  stripeProductId?: string
-                  realtime?: boolean
+                  /** @default false */
+                  realtime: boolean
+                  /** @default 95 */
+                  notifyUsageThreshold: number
+                  /**
+                   * @default none
+                   * @enum {string}
+                   */
+                  overageStrategy: "none" | "last-call" | "always"
+                  /** @default false */
+                  blockCustomer: boolean
+                  /** @default false */
+                  hidden: boolean
                 } | null
                 /**
                  * @default sum
@@ -2694,9 +2840,6 @@ export interface operations {
                 /** @default 1 */
                 defaultQuantity: number | null
                 limit?: number | null
-                allowOverage: boolean
-                notifyUsageThreshold: number | null
-                hidden: boolean
                 /** @description The text you can use to show the clients */
                 displayFeatureText: string
                 /** @description The feature information */
@@ -3186,8 +3329,19 @@ export interface operations {
                   planType: "recurring" | "onetime"
                 } | null
                 metadata: {
-                  stripeProductId?: string
-                  realtime?: boolean
+                  /** @default false */
+                  realtime: boolean
+                  /** @default 95 */
+                  notifyUsageThreshold: number
+                  /**
+                   * @default none
+                   * @enum {string}
+                   */
+                  overageStrategy: "none" | "last-call" | "always"
+                  /** @default false */
+                  blockCustomer: boolean
+                  /** @default false */
+                  hidden: boolean
                 } | null
                 /**
                  * @default sum
@@ -3206,9 +3360,6 @@ export interface operations {
                 /** @default 1 */
                 defaultQuantity: number | null
                 limit?: number | null
-                allowOverage: boolean
-                notifyUsageThreshold: number | null
-                hidden: boolean
                 /** @description The text you can use to show the clients */
                 displayFeatureText: string
                 /** @description The feature information */

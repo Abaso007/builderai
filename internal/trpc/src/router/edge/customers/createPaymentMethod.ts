@@ -3,10 +3,10 @@ import {
   createPaymentMethodResponseSchema,
   createPaymentMethodSchema,
 } from "@unprice/db/validators"
-import { protectedProjectProcedure } from "#trpc"
+import { protectedWorkspaceProcedure } from "#trpc"
 import { unprice } from "#utils/unprice"
 
-export const createPaymentMethod = protectedProjectProcedure
+export const createPaymentMethod = protectedWorkspaceProcedure
   .input(createPaymentMethodSchema)
   .output(createPaymentMethodResponseSchema)
   .mutation(async (opts) => {

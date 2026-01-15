@@ -111,11 +111,7 @@ export function FeatureConfigForm({
       resetAnchor: planVersion?.billingConfig.billingAnchor,
     },
     type: defaultValues.type ?? "feature",
-    allowOverage: defaultValues.allowOverage ?? false,
-    notifyUsageThreshold: defaultValues.notifyUsageThreshold ?? 95,
-    metadata: {
-      realtime: defaultValues?.metadata?.realtime ?? false,
-    },
+    metadata: defaultValues?.metadata,
   }
 
   const form = useZodForm({
@@ -182,7 +178,7 @@ export function FeatureConfigForm({
 
         <FormField
           control={form.control}
-          name="hidden"
+          name="metadata.hidden"
           render={({ field }) => (
             <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
               <div className="space-y-0.5">

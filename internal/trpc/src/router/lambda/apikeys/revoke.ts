@@ -21,6 +21,7 @@ export const revoke = protectedProjectProcedure
     const result = await featureGuard({
       customerId: project.workspace.unPriceCustomerId,
       featureSlug,
+      usage: -ids.length,
       isMain: project.workspace.isMain,
       metadata: {
         action: "revoke",

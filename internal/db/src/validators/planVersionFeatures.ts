@@ -12,6 +12,7 @@ import {
   aggregationMethodSchema,
   billingConfigSchema,
   featureConfigType,
+  overageStrategySchema,
   resetConfigSchema,
   tierModeSchema,
   typeFeatureSchema,
@@ -91,8 +92,11 @@ export const dineroSchema = z
   })
 
 export const planVersionFeatureMetadataSchema = z.object({
-  stripeProductId: z.string().optional(),
-  realtime: z.boolean().optional(),
+  realtime: z.boolean().optional().default(false),
+  notifyUsageThreshold: z.number().int().optional().default(95),
+  overageStrategy: overageStrategySchema.optional().default("none"),
+  blockCustomer: z.boolean().optional().default(false),
+  hidden: z.boolean().optional().default(false),
 })
 
 export const tiersSchema = z.object({
@@ -363,8 +367,6 @@ export const planVersionFeatureInsertBaseSchema = createInsertSchema(planVersion
   resetConfig: resetConfigSchema.optional(),
   defaultQuantity: z.coerce.number().int(),
   limit: z.coerce.number().int().optional(),
-  allowOverage: z.boolean().optional(),
-  notifyUsageThreshold: z.coerce.number().int().optional().default(95),
   type: featureConfigType.optional(),
 })
   .omit({

@@ -22,6 +22,7 @@ import type {
   Project,
   ReportUsageResult,
   SubscriptionCache,
+  SubscriptionStatus,
   Workspace,
 } from "@unprice/db/validators"
 
@@ -43,6 +44,11 @@ export type CacheNamespaces = {
   customerSubscription: SubscriptionCache | null
   customer: CustomerCache | null
   customerEntitlement: Entitlement | null
+  accessControlList: {
+    customerUsageLimitReached: boolean | null
+    customerDisabled: boolean | null
+    subscriptionStatus: SubscriptionStatus | null
+  } | null
   customerEntitlements: MinimalEntitlement[]
   customerPaymentMethods: CustomerPaymentMethod[] | null
   projectFeatures: ProjectFeatureCache | null

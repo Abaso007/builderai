@@ -8,6 +8,20 @@
       "when": 1767381237334,
       "tag": "0000_yielding_infant_terrible",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1768133391406,
+      "tag": "0001_nice_hydra",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1768336315014,
+      "tag": "0002_colorful_the_watchers",
+      "breakpoints": true
     }
   ]
 }

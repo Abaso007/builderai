@@ -1,5 +1,5 @@
 import type { Analytics } from "@unprice/analytics"
-import type { Database } from "@unprice/db"
+import { type Database, and, eq } from "@unprice/db"
 import {
   AGGREGATION_CONFIG,
   add,
@@ -27,6 +27,7 @@ import type { Logger } from "@unprice/logging"
 import { format, subMinutes } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
 import { BillingService } from "../billing"
+import type { CacheNamespaces } from "../cache/namespaces"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
 import { retry } from "../utils/retry"
@@ -34,7 +35,9 @@ import { UnPriceEntitlementError, type UnPriceEntitlementStorageError } from "./
 import { GrantsManager } from "./grants"
 import type { UnPriceEntitlementStorage } from "./storage-provider"
 
+import { customers, entitlements, subscriptions } from "@unprice/db/schema"
 import { ulid } from "ulid"
+import { CustomerService } from "../customers/service"
 import { UsageMeter } from "./usage-meter"
 
 /**
@@ -57,6 +60,7 @@ export class EntitlementService {
   private readonly waitUntil: (promise: Promise<any>) => void
   private readonly cache: Cache
   private readonly metrics: Metrics
+  private readonly customerService: CustomerService
 
   constructor(opts: {
     db: Database
@@ -84,6 +88,14 @@ export class EntitlementService {
     this.waitUntil = opts.waitUntil
     this.cache = opts.cache
     this.metrics = opts.metrics
+    this.customerService = new CustomerService({
+      db: opts.db,
+      logger: opts.logger,
+      analytics: opts.analytics,
+      waitUntil: opts.waitUntil,
+      cache: opts.cache,
+      metrics: opts.metrics,
+    })
   }
 
   /**
@@ -162,13 +174,13 @@ export class EntitlementService {
         startDate: state.effectiveAt,
         threshold: 0.9, // when close to the limit, send a notification
         endDate: state.expiresAt,
-        allowOverage: validatedState.allowOverage,
+        overageStrategy: validatedState.metadata?.overageStrategy,
       },
       meter // Restore UsageMeter from persisted state
     )
 
     // 5. Verify the usage using the meter
-    const verifyResult = usageMeter.verify(params.timestamp)
+    const verifyResult = usageMeter.verify(params.timestamp, params.usage)
 
     const latency = performance.now() - params.performanceStart
 
@@ -191,8 +203,25 @@ export class EntitlementService {
     // 7. get the meter to persist
     const meterResult = usageMeter.toPersist()
 
+    // should we block the customer right away?
+    const shouldBlockCustomer =
+      verifyResult.deniedReason === "LIMIT_EXCEEDED" &&
+      validatedState.metadata?.blockCustomer === true
+
     // 8. update the entitlement state in the storage in background
-    this.waitUntil(this.storage.set({ state: { ...validatedState, meter: meterResult } }))
+    this.waitUntil(
+      Promise.all([
+        this.storage.set({ state: { ...validatedState, meter: meterResult } }),
+        // if feature is blocked then set the blocked customer flag in cache
+        shouldBlockCustomer
+          ? this.customerService.updateAccessControlList({
+              customerId: params.customerId,
+              projectId: params.projectId,
+              updates: { customerUsageLimitReached: true },
+            })
+          : Promise.resolve(),
+      ])
+    )
 
     // 9. return the verification result
     return {
@@ -278,7 +307,7 @@ export class EntitlementService {
         startDate: state.effectiveAt,
         threshold: 0.9, // when close to the limit, send a notification
         endDate: state.expiresAt,
-        allowOverage: validatedState.allowOverage,
+        overageStrategy: validatedState.metadata?.overageStrategy,
       },
       meter
     )
@@ -319,6 +348,7 @@ export class EntitlementService {
       },
     })
 
+    // if allowed, insert the usage record in the storage
     if (consumeResult.allowed) {
       const usageRecord = {
         id: ulid(),
@@ -337,6 +367,34 @@ export class EntitlementService {
       // insert the usage record in the storage
       this.waitUntil(this.storage.insertUsageRecord(usageRecord))
     }
+
+    // should we block the customer right away?
+    const shouldBlockCustomer =
+      consumeResult.deniedReason === "LIMIT_EXCEEDED" &&
+      validatedState.metadata?.blockCustomer === true
+
+    // this is the way we activaly check if the customer should be blocked.
+    // for now we block right away but later we can support some kind of policy
+    // that blocked the customer only if there is a flag that says so. it's up to the client to decide
+    // if their customers are blocked once the hard limit is reached.
+    // TODO: add the flag here: blockCustomer flag - by default this is false
+    // if (validatedState.blockCustomer) {
+    if (
+      shouldBlockCustomer ||
+      (params.usage < 0 && consumeResult.allowed && consumeResult.remaining > 0)
+    ) {
+      // Update only the customerUsageLimitReached flag in the accessControlList
+      this.waitUntil(
+        this.customerService.updateAccessControlList({
+          customerId: params.customerId,
+          projectId: params.projectId,
+          updates: {
+            customerUsageLimitReached: shouldBlockCustomer,
+          },
+        })
+      )
+    }
+    // }
 
     return {
       allowed: consumeResult.allowed,
@@ -1066,15 +1124,15 @@ export class EntitlementService {
     const cacheKey = `${projectId}:${customerId}`
 
     // reset individual keys
-    const { val: active } = await this.getActiveEntitlements({
+    const { val: entitlementsData } = await this.getActiveEntitlements({
       customerId,
       projectId,
     })
 
     // 2. Clear all individual feature caches
-    if (active && active.length > 0) {
+    if (entitlementsData && entitlementsData.length > 0) {
       await Promise.all(
-        active.map((e) =>
+        entitlementsData.map((e) =>
           this.cache.customerEntitlement.remove(
             this.storage.makeKey({
               customerId,
@@ -1086,11 +1144,112 @@ export class EntitlementService {
       )
     }
 
-    // reset the cache
-    await this.cache.customerEntitlements.remove(cacheKey)
+    // reset the cache and blocked customer flag
+    await Promise.all([
+      this.cache.customerEntitlements.remove(cacheKey),
+      this.customerService.invalidateAccessControlList(customerId, projectId),
+      this.cache.getCurrentUsage.remove(cacheKey),
+      this.storage.reset(),
+      // delete the entitlements from the database
+      this.db
+        .delete(entitlements)
+        .where(and(eq(entitlements.customerId, customerId), eq(entitlements.projectId, projectId))),
+    ])
 
-    // reset the storage provider
-    return await this.storage.reset()
+    return Ok(undefined)
+  }
+
+  public async getAccessControlList(params: {
+    customerId: string
+    projectId: string
+    now?: number
+  }): Promise<CacheNamespaces["accessControlList"]> {
+    const { customerId, projectId, now } = params
+    const cacheKey = `${projectId}:${customerId}`
+    const { val: acl, err: aclErr } = await this.cache.accessControlList.swr(
+      cacheKey,
+      async (_key: string) => {
+        const { val: usage, err: usageErr } = await this.getCurrentUsage({
+          customerId,
+          projectId,
+          opts: {
+            now: now,
+          },
+        })
+
+        if (usageErr) {
+          this.logger.error("Failed to get current usage", {
+            customerId,
+            projectId,
+            error: usageErr.message,
+          })
+          return null
+        }
+
+        // if any of the groups has a usage >= limit then the customer is blocked
+        // only for usage features with hard limits
+        const customerUsageLimitReached = usage.groups.some((group) =>
+          group.features.some(
+            (feature) =>
+              feature &&
+              feature.type === "usage" &&
+              feature.usageBar.limitType === "hard" &&
+              feature.usageBar.limit !== undefined &&
+              feature.usageBar.limit > 0 &&
+              feature.usageBar.current >= feature.usageBar.limit
+          )
+        )
+
+        // check if customer is disabled
+        const [customer] = await this.db
+          .select({ active: customers.active })
+          .from(customers)
+          .where(and(eq(customers.id, customerId), eq(customers.projectId, projectId)))
+          .limit(1)
+
+        const customerDisabled = customer ? !customer.active : false
+
+        // check if customer has due invoices (past due subscription)
+        const [subscription] = await this.db
+          .select({ status: subscriptions.status })
+          .from(subscriptions)
+          .where(
+            and(
+              eq(subscriptions.customerId, customerId),
+              eq(subscriptions.projectId, projectId),
+              eq(subscriptions.active, true)
+            )
+          )
+          .limit(1)
+
+        const subscriptionStatus = subscription ? subscription.status : null
+
+        const result = {
+          customerUsageLimitReached,
+          customerDisabled,
+          subscriptionStatus,
+        }
+
+        this.logger.debug("getAccessControlList check", {
+          customerId,
+          projectId,
+          ...result,
+        })
+
+        return result
+      }
+    )
+
+    if (aclErr) {
+      this.logger.error("Failed to check if customer is blocked", {
+        customerId,
+        projectId,
+        error: aclErr.message,
+      })
+      return null
+    }
+
+    return acl ?? null
   }
 
   /**
@@ -1241,6 +1400,7 @@ export class EntitlementService {
       this.logger.info("Lazy computing entitlement", {
         customerId,
         featureSlug,
+        projectId,
         reason: !entitlement ? "missing" : "revalidate",
       })
 
@@ -1355,7 +1515,6 @@ export class EntitlementService {
       ...state,
       effectiveAt: mergedGrants.effectiveAt,
       expiresAt: mergedGrants.expiresAt,
-      allowOverage: mergedGrants.allowOverage,
       grants: mergedGrants.grants,
     })
   }
@@ -1886,8 +2045,9 @@ export class EntitlementService {
     }
 
     // Usage type
-    const limitType: "hard" | "soft" | "none" =
-      limit === null ? "none" : planVersionFeature.allowOverage ? "soft" : "hard"
+    const isHardLimit =
+      planVersionFeature.metadata?.overageStrategy === "none" ||
+      planVersionFeature.metadata?.overageStrategy === "last-call"
 
     return {
       ...baseFeature,
@@ -1902,10 +2062,10 @@ export class EntitlementService {
         current: usage,
         included,
         limit: limit ?? undefined,
-        limitType,
+        limitType: isHardLimit ? "hard" : "soft",
         unit: planVersionFeature.feature.unit ?? "units",
-        notifyThreshold: planVersionFeature.notifyUsageThreshold ?? 95,
-        allowOverage: planVersionFeature.allowOverage,
+        notifyThreshold: planVersionFeature.metadata?.notifyUsageThreshold ?? 95,
+        overageStrategy: planVersionFeature.metadata?.overageStrategy ?? "none",
       },
     }
   }

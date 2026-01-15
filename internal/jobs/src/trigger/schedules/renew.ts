@@ -37,6 +37,7 @@ export const renewSchedule = schedules.task({
       activeSubscriptions.map((s) => ({
         payload: {
           subscriptionId: s.id,
+          customerId: s.customerId,
           projectId: s.projectId,
           now,
         },

@@ -1,0 +1,18 @@
+DESCRIPTION >
+    Materialized view that stores monthly aggregated feature verifications metrics
+
+SCHEMA >
+    `date` DateTime,
+    `projectId` String,
+    `region` String,
+    `customerId` String,
+    `featureSlug` LowCardinality(String),
+    `count` AggregateFunction(count, Int32),
+    `p50_latency` AggregateFunction(quantileTDigestState(0.50), Float32),
+    `p95_latency` AggregateFunction(quantileTDigestState(0.95), Float32),
+    `p99_latency` AggregateFunction(quantileTDigestState(0.99), Float32)
+
+ENGINE AggregatingMergeTree
+ENGINE_PARTITION_KEY toYear(date)
+ENGINE_SORTING_KEY (projectId, customerId, featureSlug, region, date)
+ENGINE_TTL date + INTERVAL 5 YEAR

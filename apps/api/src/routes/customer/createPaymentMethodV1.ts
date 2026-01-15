@@ -16,7 +16,7 @@ const tags = ["customer"]
 
 export const route = createRoute({
   path: "/v1/customer/createPaymentMethod",
-  operationId: "customer.createPaymentMethod",
+  operationId: "customers.createPaymentMethod",
   summary: "create payment method",
   description: "Create a payment method for a customer",
   method: "post",
@@ -49,16 +49,16 @@ export type CreatePaymentMethodResponse = z.infer<
 export const registerCreatePaymentMethodV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { paymentProvider, customerId, successUrl, cancelUrl } = c.req.valid("json")
-    const { customer, db } = c.get("services")
+    const { customer } = c.get("services")
 
     // validate the request
     const key = await keyAuth(c)
 
-    // get customer data
-    const customerData = await db.query.customers.findFirst({
-      where: (customer, { and, eq }) =>
-        and(eq(customer.id, customerId), eq(customer.projectId, key.projectId)),
-    })
+    const { err: customerDataErr, val: customerData } = await customer.getCustomer(customerId)
+
+    if (customerDataErr) {
+      throw customerDataErr
+    }
 
     if (!customerData) {
       throw new UnpriceApiError({
@@ -70,6 +70,7 @@ export const registerCreatePaymentMethodV1 = (app: App) =>
     // get payment provider for the project
     const { err: paymentProviderErr, val: paymentProviderService } =
       await customer.getPaymentProvider({
+        customerId: customerId,
         projectId: key.projectId,
         provider: paymentProvider,
       })

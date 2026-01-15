@@ -1,4 +1,4 @@
-import type { PlanType } from "../validators/shared"
+import type { OverageStrategy, PlanType } from "../validators/shared"
 
 export const TIER_MODES_MAP = {
   volume: {
@@ -154,6 +154,62 @@ export const BILLING_CONFIG: Record<
   },
 }
 
+export const RESET_CONFIG: Record<
+  string,
+  {
+    label: string
+    description: string
+    resetInterval: (typeof BILLING_INTERVALS)[number]
+    resetIntervalCount: number
+    resetAnchorOptions: (number | "dayOfCreation")[]
+    dev?: boolean
+    planType: PlanType
+  }
+> = {
+  daily: {
+    label: "Daily",
+    description: "Reset daily at the specified reset anchor",
+    resetInterval: "day",
+    resetIntervalCount: 1,
+    resetAnchorOptions: ["dayOfCreation", ...Array.from({ length: 31 }, (_, i) => i + 1)],
+    planType: "recurring",
+  },
+  monthly: {
+    label: "Monthly",
+    description: "Reset monthly at the specified reset anchor",
+    resetInterval: "month",
+    resetIntervalCount: 1,
+    resetAnchorOptions: ["dayOfCreation", ...Array.from({ length: 12 }, (_, i) => i + 1)],
+    planType: "recurring",
+  },
+  yearly: {
+    label: "Yearly",
+    description: "Reset yearly at the specified reset anchor",
+    resetInterval: "year",
+    resetIntervalCount: 1,
+    resetAnchorOptions: ["dayOfCreation", ...Array.from({ length: 12 }, (_, i) => i + 1)],
+    planType: "recurring",
+  },
+  "every-10-minutes": {
+    label: "Every 10 minutes",
+    description: "Reset every 10 minutes at the specified reset anchor",
+    resetInterval: "minute",
+    resetIntervalCount: 10,
+    resetAnchorOptions: ["dayOfCreation"],
+    dev: true,
+    planType: "recurring",
+  },
+  "every-15-minutes": {
+    label: "Every 15 minutes",
+    description: "Reset every 15 minutes at the specified reset anchor",
+    resetInterval: "minute",
+    resetIntervalCount: 15,
+    resetAnchorOptions: ["dayOfCreation"],
+    dev: true,
+    planType: "recurring",
+  },
+}
+
 type AggregationMethod = keyof typeof AGGREGATION_METHODS_MAP
 export type TierMode = keyof typeof TIER_MODES_MAP
 export type UsageMode = keyof typeof USAGE_MODES_MAP
@@ -196,6 +252,7 @@ export const FEATURE_CONFIG_TYPES = ["feature", "addon"] as const
 export const COLLECTION_METHODS = ["charge_automatically", "send_invoice"] as const
 export const BILLING_PERIOD_STATUS = ["pending", "invoiced", "voided"] as const
 export const BILLING_PERIOD_TYPE = ["normal", "trial"] as const
+export const OVERAGE_STRATEGIES = ["none", "last-call", "always"] as const
 
 export const TIER_MODES = Object.keys(TIER_MODES_MAP) as unknown as readonly [
   TierMode,
@@ -235,4 +292,22 @@ export const AGGREGATION_CONFIG: Record<AggregationMethod, MethodConfig> = {
   sum_all: { behavior: "sum", scope: "lifetime", reset: false },
   count_all: { behavior: "sum", scope: "lifetime", reset: false },
   max_all: { behavior: "max", scope: "lifetime", reset: false },
+}
+
+export const OVERAGE_STRATEGIES_MAP: Record<
+  OverageStrategy,
+  { label: string; description: string }
+> = {
+  none: {
+    label: "None",
+    description: "No overage strategy, strict hard limit",
+  },
+  "last-call": {
+    label: "Last call",
+    description: "Allow one final report as long as tokens were available.",
+  },
+  always: {
+    label: "Always",
+    description: "Always allow (soft limit/overage enabled)",
+  },
 }

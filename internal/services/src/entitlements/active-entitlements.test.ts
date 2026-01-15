@@ -31,7 +31,6 @@ describe("EntitlementService - Active Entitlements & Cycle Changes", () => {
     featureSlug,
     featureType: "usage",
     limit: 100,
-    allowOverage: false,
     aggregationMethod: "sum",
     mergingPolicy: "sum",
     grants: [],
@@ -41,7 +40,13 @@ describe("EntitlementService - Active Entitlements & Cycle Changes", () => {
     nextRevalidateAt: now + 3600000,
     computedAt: now,
     resetConfig: null,
-    metadata: null,
+    metadata: {
+      realtime: false,
+      notifyUsageThreshold: 95,
+      overageStrategy: "none",
+      blockCustomer: false,
+      hidden: false,
+    },
     createdAtM: now,
     updatedAtM: now,
     meter: {

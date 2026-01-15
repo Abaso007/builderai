@@ -22,7 +22,7 @@ export const getStats = (c: Context): Stats => {
     c.req.header("X-Forwarded-For") ??
     c.req.header("True-Client-IP") ??
     c.req.header("CF-Connecting-IP")
-  const userAgent = c.req.header("User-Agent")
+  const userAgent = c.req.header("User-Agent") || undefined
   const ua = new UAParser(userAgent).getResult()
   const unpriceRequestSource = c.req.header("Unprice-Request-Source")
 
@@ -47,8 +47,8 @@ export const getStats = (c: Context): Stats => {
     os: ua.os.name || "Unknown",
     os_version: ua.os.version || "Unknown",
     cpu_architecture: ua.cpu?.architecture || "Unknown",
-    ua: ua.ua || "Unknown",
-    bot: isBot(ua.ua),
+    ua: userAgent || "Unknown",
+    bot: userAgent ? isBot(userAgent) : false,
     isEUCountry: isEuCountry,
     source: unpriceRequestSource || "Unknown",
   }

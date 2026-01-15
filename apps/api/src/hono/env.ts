@@ -36,6 +36,8 @@ export type HonoEnv = {
     unPriceCustomerId?: string
     workspaceId?: string
     projectId?: string
+    isInternal?: boolean
+    isMain?: boolean
     services: ServiceContext
     stats: Stats
   }

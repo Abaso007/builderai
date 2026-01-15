@@ -14,7 +14,7 @@ const tags = ["customer"]
 
 export const route = createRoute({
   path: "/v1/customer/resetEntitlements",
-  operationId: "customer.resetEntitlements",
+  operationId: "customers.resetEntitlements",
   summary: "reset entitlements",
   description: "Reset entitlements for a customer",
   method: "post",
@@ -60,10 +60,12 @@ export const registerResetEntitlementsV1 = (app: App) =>
     // validate the request
     const key = await keyAuth(c)
 
-    const finalProjectId = key.project.workspace.isMain ? projectId : key.projectId
+    const isMain = c.get("isMain")
+    // only main projects can assume the main project id
+    const finalProjectId = isMain ? projectId : key.projectId
 
     // only main keys can reset entitlements for other projects other than their own
-    if (key.project.workspace.isMain && projectId !== finalProjectId) {
+    if (isMain && projectId !== finalProjectId) {
       throw new UnpriceApiError({
         code: "FORBIDDEN",
         message: "You are not allowed to reset entitlements for other projects.",

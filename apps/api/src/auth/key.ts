@@ -63,6 +63,8 @@ export async function keyAuth(c: Context<HonoEnv>) {
     })
   }
 
+  c.set("isMain", key.project.isMain ?? false)
+  c.set("isInternal", key.project.isInternal ?? false)
   c.set("workspaceId", key.project.workspaceId)
   c.set("projectId", key.project.id)
   c.set("unPriceCustomerId", key.project.workspace.unPriceCustomerId)

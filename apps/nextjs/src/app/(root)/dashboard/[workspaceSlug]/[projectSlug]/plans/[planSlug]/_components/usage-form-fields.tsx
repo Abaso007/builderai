@@ -9,7 +9,9 @@ import {
   AggregationMethodFormField,
   BillingConfigFeatureFormField,
   LimitFormField,
+  OverageStrategyFormField,
   PriceFormField,
+  ResetConfigFeatureFormField,
   TierFormField,
   UnitsFormField,
 } from "./fields-form"
@@ -28,12 +30,12 @@ export function UsageFormFields({
   return (
     <div className="flex flex-col space-y-6">
       <BillingConfigFeatureFormField form={form} isDisabled={isDisabled} />
+      <ResetConfigFeatureFormField form={form} isDisabled={isDisabled} />
 
       <Separator />
 
-      <div className="flex w-full justify-between">
-        <AggregationMethodFormField form={form} isDisabled={isDisabled} />
-      </div>
+      <AggregationMethodFormField form={form} isDisabled={isDisabled} />
+      <OverageStrategyFormField form={form} isDisabled={isDisabled} />
 
       <Separator />
 

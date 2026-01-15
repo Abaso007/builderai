@@ -9,12 +9,13 @@ import { z } from "zod"
 import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { bouncer } from "~/util/bouncer"
 import { reportUsageEvents } from "~/util/reportUsageEvents"
 const tags = ["customer"]
 
 export const route = createRoute({
   path: "/v1/customer/can",
-  operationId: "customer.can",
+  operationId: "customers.can",
   summary: "can feature",
   description: "Check if a customer can use a feature",
   method: "post",
@@ -40,6 +41,13 @@ export const route = createRoute({
             },
           })
           .optional(),
+        usage: z
+          .number()
+          .openapi({
+            description: "The usage to check feature access for",
+            example: 100,
+          })
+          .optional(),
       }),
       "Body of the request"
     ),
@@ -59,7 +67,7 @@ export type CanResponse = z.infer<
 
 export const registerCanV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId, featureSlug, metadata } = c.req.valid("json")
+    const { customerId, featureSlug, metadata, usage } = c.req.valid("json")
     const { usagelimiter } = c.get("services")
     const stats = c.get("stats")
     const requestId = c.get("requestId")
@@ -69,6 +77,9 @@ export const registerCanV1 = (app: App) =>
     const key = await keyAuth(c)
 
     const projectId = await resolveContextProjectId(c, key.projectId, customerId)
+
+    // check if the customer is blocked
+    await bouncer(c, customerId, projectId)
 
     // start a new timer
     startTime(c, "can")
@@ -80,6 +91,7 @@ export const registerCanV1 = (app: App) =>
       projectId,
       requestId,
       performanceStart,
+      usage,
       // short ttl for dev
       flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
       timestamp: Date.now(), // for now we report the usage at the time of the request

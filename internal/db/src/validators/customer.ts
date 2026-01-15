@@ -23,6 +23,7 @@ export const customerMetadataSchema = z.object({
 export const customerSelectSchema = createSelectSchema(schema.customers, {
   metadata: customerMetadataSchema,
   timezone: z.string().min(1),
+  active: z.boolean(),
 })
 
 export const customerInsertBaseSchema = createInsertSchema(schema.customers, {
@@ -30,6 +31,7 @@ export const customerInsertBaseSchema = createInsertSchema(schema.customers, {
   email: z.string().min(3).email(),
   name: z.string().min(3),
   timezone: z.string().min(1),
+  active: z.boolean().default(true),
 })
   .omit({
     createdAtM: true,

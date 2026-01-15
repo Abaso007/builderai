@@ -14,6 +14,7 @@ import {
   GRANT_TYPES,
   INVOICE_ITEM_KIND,
   INVOICE_STATUS,
+  OVERAGE_STRATEGIES,
   PAYMENT_PROVIDERS,
   PLAN_TYPES,
   ROLES_APP,
@@ -49,3 +50,4 @@ export const planTypeEnum = pgEnum("plan_type", PLAN_TYPES)
 export const whenToBillEnum = pgEnum("when_to_bill", WHEN_TO_BILLING)
 export const collectionMethodEnum = pgEnum("collection_method", COLLECTION_METHODS)
 export const invoiceItemKindEnum = pgEnum("invoice_item_kind", INVOICE_ITEM_KIND)
+export const overageStrategyEnum = pgEnum("overage_strategy", OVERAGE_STRATEGIES)

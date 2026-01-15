@@ -1,0 +1,1 @@
+ALTER TABLE "unprice_entitlements" DROP COLUMN "overage_strategy";

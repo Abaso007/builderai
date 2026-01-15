@@ -8,6 +8,7 @@ import {
   deniedReasonSchema,
   entitlementMergingPolicySchema,
   grantTypeSchema,
+  overageStrategySchema,
   resetConfigSchema,
 } from "./shared"
 import { aggregationMethodSchema, typeFeatureSchema } from "./shared"
@@ -24,17 +25,25 @@ export const customerEntitlementMetadataSchema = z.record(
   z.union([z.string(), z.number(), z.boolean(), z.null()])
 )
 
-export const entitlementMetadataSchema = z.record(
+export const entitlementMetadataSchema = z.object({
+  realtime: z.boolean().optional().default(false),
+  notifyUsageThreshold: z.number().int().optional().default(95),
+  overageStrategy: overageStrategySchema.optional().default("none"),
+  blockCustomer: z.boolean().optional().default(false),
+  hidden: z.boolean().optional().default(false),
+})
+
+export const grantsMetadataSchema = z.record(
   z.string(),
   z.union([z.string(), z.number(), z.boolean(), z.null()])
 )
 
 export const grantSchema = createSelectSchema(schema.grants, {
-  metadata: entitlementMetadataSchema,
+  metadata: grantsMetadataSchema,
 })
 
 export const grantInsertSchema = createInsertSchema(schema.grants, {
-  metadata: entitlementMetadataSchema.nullable(),
+  metadata: grantsMetadataSchema.nullable(),
 })
 
 export const grantSchemaExtended = grantSchema.extend({
@@ -67,6 +76,7 @@ export const verifySchema = z.object({
   timestamp: z.number(),
   customerId: z.string(),
   featureSlug: z.string(),
+  usage: z.number().optional(), // Atomic verify + consume support
   projectId: z.string(),
   requestId: z.string(),
   metadata: z.record(z.string(), z.any()).nullable(),
@@ -120,13 +130,10 @@ export const entitlementGrantsSnapshotSchema = z.object({
   effectiveAt: z.number(),
   expiresAt: z.number().nullable(),
   limit: z.number().nullable(),
-  realtime: z.boolean(),
-  allowOverage: z.boolean(),
-  featurePlanVersionId: z.string(),
 })
 
 export const entitlementSchema = createSelectSchema(schema.entitlements, {
-  metadata: entitlementMetadataSchema,
+  metadata: entitlementMetadataSchema.nullable(),
   grants: entitlementGrantsSnapshotSchema.array(),
   resetConfig: resetConfigSchema.extend({
     resetAnchor: z.number(),
@@ -165,7 +172,7 @@ const usageBarDisplaySchema = z.object({
   limitType: limitTypeSchema,
   unit: z.string(),
   notifyThreshold: z.number().optional(),
-  allowOverage: z.boolean(),
+  overageStrategy: overageStrategySchema.optional(),
 })
 
 const tierDisplaySchema = z.object({

@@ -12,7 +12,7 @@ const tags = ["customer"]
 
 export const route = createRoute({
   path: "/v1/customer/{customerId}/getSubscription",
-  operationId: "customer.getSubscription",
+  operationId: "customers.getSubscription",
   summary: "get subscription",
   description: "Get subscription with the active phase for a customer",
   method: "get",

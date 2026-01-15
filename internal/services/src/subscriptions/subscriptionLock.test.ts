@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Database } from "@unprice/db"
 import { SubscriptionLock } from "./subscriptionLock"
 
-type Row = { ownerToken: string; expiresAt: number }
+type Row = { ownerToken: string; expiresAt: number; updatedAtM: number }
 
 // Ensure unique tokens per acquire in tests
 vi.mock("@unprice/db/utils", async (importOriginal) => {
@@ -19,61 +19,85 @@ vi.mock("@unprice/db/utils", async (importOriginal) => {
 function createFakeDb(projectId: string, subscriptionId: string) {
   const key = `${projectId}:${subscriptionId}`
   const rows = new Map<string, Row>()
-  let lastSet: Record<string, unknown> = {}
+
+  const handleInsert = (v: Record<string, unknown>) => {
+    const existing = rows.get(key)
+    const createdAt = (v.createdAtM as number) ?? 0
+    if (existing && existing.expiresAt > createdAt) {
+      throw new Error("unique constraint violation")
+    }
+    const newRow = {
+      ownerToken: String(v.ownerToken),
+      expiresAt: Number(v.expiresAt),
+      updatedAtM: Number(v.updatedAtM ?? createdAt),
+    }
+    rows.set(key, newRow)
+    return [newRow]
+  }
 
   const db = {
-    insert: (_table: unknown) => ({
-      values: async (v: Record<string, unknown>) => {
-        const existing = rows.get(key)
-        const createdAt = (v.createdAtM as number) ?? 0
-        // if a row exists and has not expired yet at creation time, simulate conflict
-        if (existing && existing.expiresAt > createdAt) throw new Error("conflict")
-        rows.set(key, {
-          ownerToken: String(v.ownerToken),
-          expiresAt: Number(v.expiresAt),
-        })
-      },
+    transaction: vi.fn().mockImplementation(async (callback) => {
+      return await callback(db)
     }),
+    insert: (_table: unknown) => {
+      return {
+        values: (v: Record<string, unknown>) => {
+          const promise = Promise.resolve().then(() => handleInsert(v))
+          return Object.assign(promise, {
+            returning: async () => await promise,
+          })
+        },
+      }
+    },
     update: (_table: unknown) => ({
-      set: (s: Record<string, unknown>) => {
-        lastSet = s
-        return {
-          where: (_w: unknown) => ({
-            returning: async (_sel?: unknown) => {
-              const row = rows.get(key)
-              const now = Number(lastSet.updatedAtM ?? 0)
-              // takeover path: only if row expired
-              if (row && row.expiresAt < now) {
-                rows.set(key, {
-                  ownerToken: String(lastSet.ownerToken ?? row.ownerToken),
-                  expiresAt: Number(lastSet.expiresAt ?? row.expiresAt),
-                })
-                return [{}]
+      set: (s: Record<string, unknown>) => ({
+        where: (_w: unknown) => {
+          const promise = Promise.resolve().then(() => {
+            const row = rows.get(key)
+            if (!row) return []
+
+            const now = Number(s.updatedAtM ?? 0)
+            const isExpired = row.expiresAt < now
+            const staleTakeoverMs = 120000
+            const ownerStaleMs = 1000
+            const isStale =
+              row.expiresAt < now + staleTakeoverMs && row.updatedAtM < now - ownerStaleMs
+
+            if (isExpired || isStale) {
+              const newRow = {
+                ownerToken: String(s.ownerToken ?? row.ownerToken),
+                expiresAt: Number(s.expiresAt ?? row.expiresAt),
+                updatedAtM: now,
               }
-              // extend path: only when still same owner and not expired
-              if (
-                row &&
-                row.expiresAt > now &&
-                String(lastSet.ownerToken ?? row.ownerToken) === row.ownerToken
-              ) {
-                rows.set(key, {
-                  ownerToken: row.ownerToken,
-                  expiresAt: Number(lastSet.expiresAt ?? row.expiresAt),
-                })
-                return [{}]
+              rows.set(key, newRow)
+              return [newRow]
+            }
+
+            if (
+              row.expiresAt > now &&
+              (s.ownerToken === undefined || s.ownerToken === row.ownerToken)
+            ) {
+              const newRow = {
+                ownerToken: row.ownerToken,
+                expiresAt: Number(s.expiresAt ?? row.expiresAt),
+                updatedAtM: now,
               }
-              return []
-            },
-          }),
-        }
-      },
+              rows.set(key, newRow)
+              return [newRow]
+            }
+            return []
+          })
+          return Object.assign(promise, {
+            returning: async () => await promise,
+          })
+        },
+      }),
     }),
     delete: (_table: unknown) => ({
       where: async (_w: unknown) => {
         rows.delete(key)
       },
     }),
-    // helpers
     __debug: { rows },
   }
 
@@ -121,5 +145,17 @@ describe("SubscriptionLock (fake DB)", () => {
 
     await lock1.release()
     expect(await lock2.acquire({ now: 1011, ttlMs: 10 })).toBe(true)
+  })
+
+  it("stress test: handles multiple concurrent acquisition attempts", async () => {
+    const numAttempts = 50
+    const locks = Array.from({ length: numAttempts }).map(
+      () => new SubscriptionLock({ db, projectId, subscriptionId })
+    )
+
+    const results = await Promise.all(locks.map((lock) => lock.acquire({ now: 1000, ttlMs: 1000 })))
+
+    const successCount = results.filter(Boolean).length
+    expect(successCount).toBe(1)
   })
 })

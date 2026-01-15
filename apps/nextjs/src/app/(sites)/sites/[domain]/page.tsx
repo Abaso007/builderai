@@ -70,14 +70,14 @@ export default async function DomainPage({
         // Get features from plan features
         const features =
           version.planFeatures
-            .filter((feature) => !feature.hidden)
+            .filter((feature) => !feature.metadata?.hidden)
             .map((feature) => {
               return feature.displayFeatureText
             }) || []
 
         const detailedFeatures =
           version.planFeatures
-            .filter((feature) => !feature.hidden)
+            .filter((feature) => !feature.metadata?.hidden)
             .map((feature) => {
               return {
                 [feature.feature.title]: {

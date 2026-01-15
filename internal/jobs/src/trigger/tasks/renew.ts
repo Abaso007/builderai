@@ -1,5 +1,7 @@
 import { task } from "@trigger.dev/sdk/v3"
+import { logger } from "@trigger.dev/sdk/v3"
 import { SubscriptionService } from "@unprice/services/subscriptions"
+import { unprice } from "src/unprice"
 import { createContext } from "./context"
 
 export const renewTask = task({
@@ -12,10 +14,12 @@ export const renewTask = task({
       subscriptionId,
       projectId,
       now,
+      customerId,
     }: {
       subscriptionId: string
       projectId: string
       now: number
+      customerId: string
     },
     { ctx }
   ) => {
@@ -26,6 +30,7 @@ export const renewTask = task({
       defaultFields: {
         subscriptionId,
         projectId,
+        customerId,
         api: "jobs.subscription.renew.task",
         now: now.toString(),
       },
@@ -43,10 +48,25 @@ export const renewTask = task({
       throw renewResult.err
     }
 
+    // reset entitlements after the subscription is renewed
+    const { error } = await unprice.customers.resetEntitlements({
+      customerId,
+      projectId,
+    })
+
+    if (error) {
+      logger.error(`error resetting entitlements: ${error.message}`, {
+        error: error,
+        customerId,
+        projectId,
+      })
+    }
+
     return {
       status: renewResult.val.status,
       subscriptionId,
       projectId,
+      customerId,
       now,
     }
   },

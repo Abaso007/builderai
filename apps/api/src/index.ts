@@ -31,14 +31,14 @@ import { ConsoleLogger } from "@unprice/logging"
 import { timing } from "hono/timing"
 import { registerGetAnalyticsUsageV1 } from "./routes/analitycs/getUsageV1"
 import { registerGetAnalyticsVerificationsV1 } from "./routes/analitycs/getVerificationsV1"
+import { registerUpdateACLV1 } from "./routes/customer/updateACLV1"
 
 const app = newApp()
 
 app.use(timing())
 app.use(serveEmojiFavicon("◎"))
-
-app.use("*", init())
 app.use("*", cors())
+app.use("*", init())
 app.use("*", metrics())
 
 // Handle websocket connections for Durable Objects
@@ -95,6 +95,7 @@ registerGetPaymentMethodsV1(app)
 registerSignUpV1(app)
 registerCreatePaymentMethodV1(app)
 registerResetEntitlementsV1(app)
+registerUpdateACLV1(app)
 
 // Project routes
 registerGetFeaturesV1(app)

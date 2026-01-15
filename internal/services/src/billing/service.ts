@@ -3,6 +3,7 @@ import { type Database, and, eq, inArray, sql } from "@unprice/db"
 import {
   billingPeriods,
   creditGrants,
+  grants,
   invoiceCreditApplications,
   invoiceItems,
   invoices,
@@ -126,6 +127,7 @@ export class BillingService {
     lock?: boolean
     ttlMs?: number
     db?: Database
+    dryRun?: boolean
     run: (m: SubscriptionMachine) => Promise<T>
   }): Promise<T> {
     const {
@@ -136,12 +138,14 @@ export class BillingService {
       lock: shouldLock = true,
       ttlMs = 30_000,
       db,
+      dryRun = false,
     } = args
 
     const trx = db ?? this.db
 
     // create the lock if it should be locked
-    const lock = shouldLock ? new SubscriptionLock({ db: trx, projectId, subscriptionId }) : null
+    const lock =
+      shouldLock && !dryRun ? new SubscriptionLock({ db: trx, projectId, subscriptionId }) : null
 
     if (lock) {
       const acquired = await lock.acquire({
@@ -207,6 +211,7 @@ export class BillingService {
       analytics: this.analytics,
       customer: this.customerService,
       db: trx,
+      dryRun,
     })
 
     if (err) {
@@ -229,25 +234,29 @@ export class BillingService {
     projectId,
     now = Date.now(),
     db,
+    dryRun = false,
   }: {
     subscriptionId: string
     projectId: string
     now?: number
     db?: Database
+    dryRun?: boolean
   }): Promise<Result<{ cyclesCreated: number; phasesProcessed: number }, UnPriceBillingError>> {
     try {
       const status = await this.withSubscriptionMachine({
         subscriptionId,
         projectId,
         now,
-        lock: true, // we need to lock the subscription to avoid cross-worker races
+        lock: !dryRun, // Skip lock for dry run
         db,
+        dryRun,
         run: async () => {
           const s1 = await this._generateBillingPeriods({
             subscriptionId,
             projectId,
             now,
             db,
+            dryRun,
           })
 
           if (s1.err) throw s1.err
@@ -1820,11 +1829,13 @@ export class BillingService {
     projectId,
     now,
     db,
+    dryRun = false,
   }: {
     subscriptionId: string
     projectId: string
     now: number
     db?: Database
+    dryRun?: boolean
   }): Promise<
     Result<
       {
@@ -1875,6 +1886,148 @@ export class BillingService {
         })
 
         for (const phase of phases) {
+          // 0. Cap any existing pending periods for this phase that exceed the phase end date
+          // this is useful for mid-cycle cancellations or plan changes
+          if (phase.endAt) {
+            // update billing periods
+            let peiriodsUpdated: (typeof billingPeriods.$inferSelect)[] = []
+            if (!dryRun) {
+              peiriodsUpdated = await tx
+                .update(billingPeriods)
+                .set({
+                  cycleEndAt: sql`LEAST(${billingPeriods.cycleEndAt}, ${phase.endAt})`,
+                  invoiceAt:
+                    phase.planVersion.whenToBill === "pay_in_arrear"
+                      ? sql`LEAST(${billingPeriods.invoiceAt}, ${phase.endAt})`
+                      : billingPeriods.invoiceAt,
+                })
+                .where(
+                  and(
+                    eq(billingPeriods.subscriptionPhaseId, phase.id),
+                    eq(billingPeriods.status, "pending"),
+                    sql`${billingPeriods.cycleEndAt} > ${phase.endAt}`
+                  )
+                )
+                .returning()
+            }
+
+            // update grants enddate
+            if (!dryRun && peiriodsUpdated && peiriodsUpdated.length > 0) {
+              for (const period of peiriodsUpdated) {
+                await tx
+                  .update(grants)
+                  .set({
+                    expiresAt: period.cycleEndAt,
+                  })
+                  .where(and(eq(grants.id, period.grantId), eq(grants.projectId, phase.projectId)))
+              }
+            }
+
+            // 0.1 Handle credits for already invoiced/paid periods that are now shortened (Prepaid Billing)
+            const invoicedPeriods = await tx.query.billingPeriods.findMany({
+              where: (bp, ops) =>
+                ops.and(
+                  ops.eq(bp.subscriptionPhaseId, phase.id),
+                  ops.eq(bp.status, "invoiced"),
+                  ops.gt(bp.cycleEndAt, phase.endAt!)
+                ),
+            })
+
+            for (const period of invoicedPeriods) {
+              // Find the specific invoice item for this billing period to get the actual amount paid
+              const itemLine = await tx.query.invoiceItems.findFirst({
+                with: {
+                  invoice: true,
+                  subscriptionItem: {
+                    with: {
+                      featurePlanVersion: true,
+                    },
+                  },
+                },
+                where: (ii, ops) =>
+                  ops.and(
+                    ops.eq(ii.billingPeriodId, period.id),
+                    ops.eq(ii.projectId, phase.projectId)
+                  ),
+              })
+
+              // do not consider draft or void invoices
+              if (
+                itemLine?.subscriptionItem &&
+                itemLine.amountTotal > 0 &&
+                itemLine.invoice.status === "paid" &&
+                // IMPORTANT: Proration only makes sense for non-usage items (Flat, Tier, Package)
+                // For usage items, the customer pays for what they used up to the end date.
+                itemLine.subscriptionItem.featurePlanVersion.featureType !== "usage"
+              ) {
+                // Check if we've already generated a credit for this specific billing period
+                const existingCredit = await tx.query.creditGrants.findFirst({
+                  where: (cg, ops) =>
+                    ops.and(
+                      ops.eq(cg.projectId, phase.projectId),
+                      ops.eq(cg.customerId, phase.subscription.customerId),
+                      // double check we are not duplicating the credit
+                      sql`${cg.metadata}->>'billingPeriodId' = ${period.id}`
+                    ),
+                })
+
+                if (!existingCredit) {
+                  // Use the item's own billing config for accurate proration
+                  const itemBillingConfig =
+                    itemLine.subscriptionItem.featurePlanVersion.billingConfig
+                  const oldProrationFactor = itemLine.prorationFactor ?? 1
+
+                  const proration = calculateProration({
+                    serviceStart: period.cycleStartAt,
+                    serviceEnd: phase.endAt!,
+                    effectiveStartDate: phase.startAt,
+                    billingConfig: {
+                      ...itemBillingConfig,
+                      // Ensure we use the numeric anchor from the phase
+                      billingAnchor: phase.billingAnchor,
+                    },
+                  })
+
+                  const newProrationFactor = proration.prorationFactor
+
+                  if (newProrationFactor < oldProrationFactor) {
+                    // Calculate credit based on the reduction in the proration factor
+                    const unearnedFraction = 1 - newProrationFactor / oldProrationFactor
+                    const creditAmount = Math.floor(itemLine.amountTotal * unearnedFraction)
+
+                    if (!dryRun && creditAmount > 0) {
+                      await tx.insert(creditGrants).values({
+                        id: newId("customer_credit"),
+                        projectId: phase.projectId,
+                        customerId: phase.subscription.customerId,
+                        currency: phase.planVersion.currency,
+                        paymentProvider: phase.planVersion.paymentProvider,
+                        totalAmount: creditAmount,
+                        amountUsed: 0,
+                        reason: "mid_cycle_change",
+                        active: true,
+                        metadata: {
+                          billingPeriodId: period.id,
+                          originalInvoiceId: itemLine.invoiceId,
+                          originalInvoiceStatus: itemLine.invoice.status,
+                          note: `Prorated refund for shortened cycle ${new Date(period.cycleStartAt).toISOString()} - ${new Date(period.cycleEndAt).toISOString()}`,
+                        },
+                      })
+                    }
+                  }
+                }
+              }
+
+              // Update the invoiced period to reflect the new shortened end date in the database
+              if (!dryRun) {
+                await tx
+                  .update(billingPeriods)
+                  .set({ cycleEndAt: phase.endAt })
+                  .where(eq(billingPeriods.id, period.id))
+              }
+            }
+          }
+
           for (const item of phase.items) {
             // 1. Find the last period for this item to make per-item backfill
             const lastForItem = await tx.query.billingPeriods.findFirst({
@@ -1938,29 +2091,33 @@ export class BillingService {
               if (existingGrant) {
                 grantIds[type] = existingGrant.id
               } else {
-                const createGrantResult = await txGrantsManager.createGrant({
-                  grant: {
-                    id: newId("grant"),
-                    name: "Base Plan",
-                    projectId: phase.projectId,
-                    effectiveAt: phase.startAt,
-                    expiresAt: expiresAt,
-                    type: type,
-                    subjectType: "customer",
-                    subjectId: phase.subscription.customerId,
-                    featurePlanVersionId: item.featurePlanVersion.id,
-                    autoRenew: false,
-                    limit: item.units ?? item.featurePlanVersion.limit ?? null,
-                    allowOverage: item.featurePlanVersion.allowOverage,
-                    units: item.units,
-                    anchor: phase.billingAnchor,
-                    metadata: {
-                      note: "Billing period grant created by billing service",
+                if (!dryRun) {
+                  const createGrantResult = await txGrantsManager.createGrant({
+                    grant: {
+                      id: newId("grant"),
+                      name: "Base Plan",
+                      projectId: phase.projectId,
+                      effectiveAt: phase.startAt,
+                      expiresAt: expiresAt,
+                      type: type,
+                      subjectType: "customer",
+                      subjectId: phase.subscription.customerId,
+                      featurePlanVersionId: item.featurePlanVersion.id,
+                      autoRenew: false,
+                      limit: item.units ?? item.featurePlanVersion.limit ?? null,
+                      overageStrategy: item.featurePlanVersion.metadata?.overageStrategy ?? "none",
+                      units: item.units,
+                      anchor: phase.billingAnchor,
+                      metadata: {
+                        note: "Billing period grant created by billing service",
+                      },
                     },
-                  },
-                })
-                if (createGrantResult.err) throw createGrantResult.err
-                grantIds[type] = createGrantResult.val.id
+                  })
+                  if (createGrantResult.err) throw createGrantResult.err
+                  grantIds[type] = createGrantResult.val.id
+                } else {
+                  grantIds[type] = `mock_grant_${type}`
+                }
               }
             }
 
@@ -2011,19 +2168,21 @@ export class BillingService {
 
             // 4. Batch insert billing periods for this item
             if (billingPeriodValues.length > 0) {
-              await tx
-                .insert(billingPeriods)
-                .values(billingPeriodValues)
-                .onConflictDoNothing({
-                  target: [
-                    billingPeriods.projectId,
-                    billingPeriods.subscriptionId,
-                    billingPeriods.subscriptionPhaseId,
-                    billingPeriods.subscriptionItemId,
-                    billingPeriods.cycleStartAt,
-                    billingPeriods.cycleEndAt,
-                  ],
-                })
+              if (!dryRun) {
+                await tx
+                  .insert(billingPeriods)
+                  .values(billingPeriodValues)
+                  .onConflictDoNothing({
+                    target: [
+                      billingPeriods.projectId,
+                      billingPeriods.subscriptionId,
+                      billingPeriods.subscriptionPhaseId,
+                      billingPeriods.subscriptionItemId,
+                      billingPeriods.cycleStartAt,
+                      billingPeriods.cycleEndAt,
+                    ],
+                  })
+              }
               cyclesCreated += billingPeriodValues.length
             }
           }

@@ -19,6 +19,7 @@ import { cuid, timestamps } from "../utils/fields"
 import type {
   entitlementGrantsSnapshotSchema,
   entitlementMetadataSchema,
+  grantsMetadataSchema,
 } from "../validators/entitlements"
 import type { resetConfigSchema } from "../validators/shared"
 import { customers } from "./customers"
@@ -26,6 +27,7 @@ import {
   aggregationMethodEnum,
   entitlementMergingPolicyEnum,
   grantTypeEnum,
+  overageStrategyEnum,
   subjectTypeEnum,
   typeFeatureEnum,
 } from "./enums"
@@ -66,7 +68,6 @@ export const entitlements = pgTableProject(
 
     // Computed from active grants
     limit: integer("limit"), // null = unlimited
-    allowOverage: boolean("allow_overage").notNull().default(false),
 
     // effective at is the date when the entitlement was created
     effectiveAt: bigint("effective_at", { mode: "number" }).notNull(),
@@ -164,15 +165,14 @@ export const grants = pgTableProject(
     // we have it here so we can override them if needed
     // limit is the limit of the feature that the customer is entitled to
     limit: integer("limit"),
-    // hard limit is true if the limit is hard and cannot be exceeded
-    allowOverage: boolean("allow_overage").notNull().default(false),
+    overageStrategy: overageStrategyEnum("overage_strategy").notNull().default("none"),
     // amount of units the grant gives to the subject
     units: integer("units"),
     // anchor is the anchor of the grant to calculate the cycle boundaries
     anchor: integer("anchor").notNull().default(0),
     // ****************** end overrides from plan version feature ******************
 
-    metadata: json("metadata").$type<z.infer<typeof entitlementMetadataSchema>>(),
+    metadata: json("metadata").$type<z.infer<typeof grantsMetadataSchema>>(),
   },
   (table) => ({
     primary: primaryKey({
