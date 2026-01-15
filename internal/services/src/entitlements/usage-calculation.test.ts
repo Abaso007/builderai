@@ -1,40 +1,40 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { createClock } from "../test-utils"
 import { UsageMeter } from "./usage-meter"
 
 describe("UsageMeter Calculation", () => {
   // Use a fixed timestamp for deterministic cycle calculations
-  const now = new Date("2024-01-01T00:00:00Z").getTime()
-  const _customerId = "cust_usage_test"
-  const _projectId = "proj_usage_test"
-  const _featureSlug = "usage-feature"
+  const initialNow = new Date("2024-01-01T00:00:00Z").getTime()
+  let clock = createClock(initialNow)
 
   // Base state for reuse
   const baseMeterState = {
     usage: "0",
     snapshotUsage: "0",
     lastReconciledId: "rec_initial",
-    lastUpdated: now,
-    lastCycleStart: now - 10000,
+    lastUpdated: initialNow,
+    lastCycleStart: initialNow - 10000,
   }
 
   const baseConfig = {
     featureType: "usage" as const,
     capacity: 100,
     aggregationMethod: "sum" as const,
-    startDate: now - 10000,
-    endDate: now + 30 * 24 * 60 * 60 * 1000, // 30 days in future
+    startDate: initialNow - 10000,
+    endDate: initialNow + 30 * 24 * 60 * 60 * 1000, // 30 days in future
     resetConfig: null,
     overageStrategy: "none" as const,
   }
 
   beforeEach(() => {
     vi.clearAllMocks()
+    clock = createClock(initialNow)
   })
 
   describe("consume - Aggregation Methods", () => {
     it("should correctly sum positive usage", () => {
       const meter = new UsageMeter(baseConfig, { ...baseMeterState, usage: "10" })
-      const result = meter.consume(20, now)
+      const result = meter.consume(20, clock.now())
 
       expect(result.allowed).toBe(true)
       expect(result.remaining).toBe(70) // 100 - (10 + 20)
@@ -43,7 +43,7 @@ describe("UsageMeter Calculation", () => {
 
     it("should correctly sum negative usage (reversal)", () => {
       const meter = new UsageMeter(baseConfig, { ...baseMeterState, usage: "50" })
-      const result = meter.consume(-20, now)
+      const result = meter.consume(-20, clock.now())
 
       expect(result.allowed).toBe(true)
       expect(result.remaining).toBe(70) // 100 - (50 - 20)
@@ -58,12 +58,12 @@ describe("UsageMeter Calculation", () => {
 
       // 1. Report higher usage
       const meter1 = new UsageMeter(maxConfig, { ...baseMeterState, usage: "10" })
-      const _result1 = meter1.consume(20, now)
+      const _result1 = meter1.consume(20, clock.now())
       expect(meter1.toPersist().usage).toBe("20") // max(10, 20)
 
       // 2. Report lower usage
       const meter2 = new UsageMeter(maxConfig, { ...baseMeterState, usage: "50" })
-      const _result2 = meter2.consume(20, now)
+      const _result2 = meter2.consume(20, clock.now())
       expect(meter2.toPersist().usage).toBe("50") // max(50, 20)
     })
 
@@ -74,7 +74,7 @@ describe("UsageMeter Calculation", () => {
       }
 
       const meter = new UsageMeter(maxConfig, { ...baseMeterState, usage: "10" })
-      const result = meter.consume(-5, now)
+      const result = meter.consume(-5, clock.now())
 
       expect(result.allowed).toBe(false)
       expect(result.deniedReason).toBe("INVALID_USAGE")
@@ -88,7 +88,7 @@ describe("UsageMeter Calculation", () => {
       }
 
       const meter = new UsageMeter(lastConfig, { ...baseMeterState, usage: "10" })
-      const result = meter.consume(25, now)
+      const result = meter.consume(25, clock.now())
 
       expect(result.allowed).toBe(true)
       expect(meter.toPersist().usage).toBe("25")
@@ -102,7 +102,7 @@ describe("UsageMeter Calculation", () => {
       }
 
       const meter = new UsageMeter(flatConfig, baseMeterState)
-      const result = meter.consume(100, now)
+      const result = meter.consume(100, clock.now())
 
       expect(result.allowed).toBe(false)
       expect(result.deniedReason).toBe("FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE")
@@ -119,7 +119,7 @@ describe("UsageMeter Calculation", () => {
       }
 
       const meter = new UsageMeter(overageConfig, baseMeterState)
-      const result = meter.consume(70, now)
+      const result = meter.consume(70, clock.now())
 
       expect(result.allowed).toBe(true)
       expect(meter.toPersist().usage).toBe("70")
@@ -134,7 +134,7 @@ describe("UsageMeter Calculation", () => {
       }
 
       const meter = new UsageMeter(strictConfig, baseMeterState)
-      const result = meter.consume(51, now)
+      const result = meter.consume(51, clock.now())
 
       expect(result.allowed).toBe(false)
       expect(result.deniedReason).toBe("LIMIT_EXCEEDED")
@@ -156,18 +156,17 @@ describe("UsageMeter Calculation", () => {
       }
 
       // Day 1
-      const day1 = now
       const meter = new UsageMeter(dailyResetConfig, {
         ...baseMeterState,
-        lastCycleStart: day1 - 1000,
+        lastCycleStart: clock.now() - 1000,
       })
 
-      meter.consume(60, day1)
+      meter.consume(60, clock.now())
       expect(meter.toPersist().usage).toBe("60")
 
       // Day 2 (crossing boundary)
-      const day2 = day1 + 24 * 60 * 60 * 1000 + 1000
-      const result = meter.consume(30, day2)
+      clock.advanceBy(24 * 60 * 60 * 1000 + 1000)
+      const result = meter.consume(30, clock.now())
 
       expect(result.allowed).toBe(true)
       expect(meter.toPersist().usage).toBe("30") // Reset to 0 then +30
@@ -187,18 +186,17 @@ describe("UsageMeter Calculation", () => {
       }
 
       // Day 1
-      const day1 = now
       const meter = new UsageMeter(lifetimeConfig, {
         ...baseMeterState,
-        lastCycleStart: day1 - 1000,
+        lastCycleStart: clock.now() - 1000,
       })
 
-      meter.consume(60, day1)
+      meter.consume(60, clock.now())
       expect(meter.toPersist().usage).toBe("60")
 
       // Day 2
-      const day2 = day1 + 24 * 60 * 60 * 1000 + 1000
-      meter.consume(30, day2)
+      clock.advanceBy(24 * 60 * 60 * 1000 + 1000)
+      meter.consume(30, clock.now())
 
       expect(meter.toPersist().usage).toBe("90") // 60 + 30 (no reset)
     })

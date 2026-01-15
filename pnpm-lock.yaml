@@ -799,6 +799,9 @@ importers:
       '@unprice/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/typescript
+      fast-check:
+        specifier: ^4.5.3
+        version: 4.5.3
       typescript:
         specifier: ^5.3.3
         version: 5.9.2
@@ -12819,6 +12822,13 @@ packages:
       - supports-color
     dev: true
 
+  /fast-check@4.5.3:
+    resolution: {integrity: sha512-IE9csY7lnhxBnA8g/WI5eg/hygA6MGWJMSNfFRrBlXUciADEhS1EDB0SIsMSvzubzIlOBbVITSsypCsW717poA==}
+    engines: {node: '>=12.17.0'}
+    dependencies:
+      pure-rand: 7.0.1
+    dev: true
+
   /fast-deep-equal@2.0.1:
     resolution: {integrity: sha512-bCK/2Z4zLidyB4ReuIsvALH6w31YfAQDmXMqMx6FyfHqvBxtjC0eRumeSu4Bs3XtXwpyIywtSTrVT99BxY1f9w==}
     dev: false
@@ -17934,6 +17944,10 @@ packages:
       - supports-color
       - typescript
       - utf-8-validate
+    dev: true
+
+  /pure-rand@7.0.1:
+    resolution: {integrity: sha512-oTUZM/NAZS8p7ANR3SHh30kXB+zK2r2BPcEn/awJIbOvq82WoMN4p62AWWp3Hhw50G0xMsw1mhIBLqHw64EcNQ==}
     dev: true
 
   /qs@6.13.0:

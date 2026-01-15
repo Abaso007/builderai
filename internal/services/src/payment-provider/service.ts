@@ -40,8 +40,6 @@ export class PaymentProviderService implements PaymentProviderInterface {
       case "stripe": {
         this.providerCustomerId = opts.providerCustomerId ?? undefined
 
-        console.log("providerCustomerId", this.providerCustomerId)
-
         this.stripe = new StripePaymentProvider({
           token: opts.token,
           providerCustomerId: this.providerCustomerId,

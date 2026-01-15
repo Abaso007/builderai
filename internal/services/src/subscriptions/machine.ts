@@ -694,7 +694,9 @@ export class SubscriptionMachine {
     })
   }
 
-  private async initialize(): Promise<Result<SusbriptionMachineStatus, UnPriceMachineError>> {
+  private async initialize(opts?: { dryRun?: boolean }): Promise<
+    Result<SusbriptionMachineStatus, UnPriceMachineError>
+  > {
     this.actor = createActor(this.machine, {
       input: {
         subscriptionId: this.subscriptionId,
@@ -709,7 +711,7 @@ export class SubscriptionMachine {
     this.actor.subscribe({
       next: async (snapshot) => {
         // only persist the subscription status
-        if (!snapshot.hasTag("subscription")) return
+        if (!snapshot.hasTag("subscription") || opts?.dryRun) return
 
         const currentState = snapshot.value as SusbriptionMachineStatus
         if (currentState === lastPersisted) return
@@ -765,11 +767,12 @@ export class SubscriptionMachine {
     customer: CustomerService
     now: number
     db: Database
+    dryRun?: boolean
   }): Promise<Result<SubscriptionMachine, UnPriceMachineError>> {
     const subscription = new SubscriptionMachine(payload)
 
     try {
-      const result = await subscription.initialize()
+      const result = await subscription.initialize({ dryRun: payload.dryRun })
 
       if (result.err) {
         return Err(result.err)

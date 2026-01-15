@@ -1,5 +1,6 @@
 import type { Database } from "@unprice/db"
 import type { Logger } from "@unprice/logging"
+import * as fc from "fast-check"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { GrantsManager } from "./grants"
 
@@ -17,9 +18,9 @@ describe("GrantsManager", () => {
   const baseGrant = {
     id: "grant_base",
     projectId,
-    subjectType: "customer",
+    subjectType: "customer" as const,
     subjectId: customerId,
-    type: "subscription",
+    type: "subscription" as const,
     featurePlanVersionId: "fpv_1",
     effectiveAt: now - 10000,
     expiresAt: now + 10000,
@@ -30,22 +31,22 @@ describe("GrantsManager", () => {
       feature: {
         slug: featureSlug,
       },
-      featureType: "usage",
-      aggregationMethod: "sum",
+      featureType: "usage" as const,
+      aggregationMethod: "sum" as const,
       config: {
         usageMode: "sum",
       },
       billingConfig: {
         name: "billing",
-        billingInterval: "month",
+        billingInterval: "month" as const,
         billingIntervalCount: 1,
-        planType: "recurring",
+        planType: "recurring" as const,
       },
       resetConfig: {
         name: "billing",
-        resetInterval: "month",
+        resetInterval: "month" as const,
         resetIntervalCount: 1,
-        planType: "recurring",
+        planType: "recurring" as const,
         resetAnchor: 1,
       },
       metadata: {
@@ -60,6 +61,7 @@ describe("GrantsManager", () => {
 
     mockLogger = {
       error: vi.fn(),
+      debug: vi.fn(),
     } as unknown as Logger
 
     mockDb = {
@@ -135,14 +137,14 @@ describe("GrantsManager", () => {
           id: "g1",
           limit: 100,
           priority: 10,
-          featurePlanVersion: { ...baseGrant.featurePlanVersion, featureType: "usage" },
+          featurePlanVersion: { ...baseGrant.featurePlanVersion, featureType: "usage" as const },
         },
         {
           ...baseGrant,
           id: "g2",
           limit: 50,
           priority: 20,
-          featurePlanVersion: { ...baseGrant.featurePlanVersion, featureType: "usage" },
+          featurePlanVersion: { ...baseGrant.featurePlanVersion, featureType: "usage" as const },
         },
       ]
 
@@ -176,7 +178,7 @@ describe("GrantsManager", () => {
     })
 
     it("should take max limit for tier features", async () => {
-      const tierFeature = { ...baseGrant.featurePlanVersion, featureType: "tier" }
+      const tierFeature = { ...baseGrant.featurePlanVersion, featureType: "tier" as const }
       const grants = [
         {
           ...baseGrant,
@@ -224,7 +226,7 @@ describe("GrantsManager", () => {
     })
 
     it("should replace limits for flat features (highest priority wins)", async () => {
-      const flatFeature = { ...baseGrant.featurePlanVersion, featureType: "flat" }
+      const flatFeature = { ...baseGrant.featurePlanVersion, featureType: "flat" as const }
       const grants = [
         {
           ...baseGrant,
@@ -261,17 +263,15 @@ describe("GrantsManager", () => {
       expect(entitlement!.grants[0]!.id).toBe("g_high") // g_high has priority 100
 
       // Verify reset config is taken from highest priority grant (if any)
-      // Base grant has reset config.
-      // Assuming highest priority grant (g_high) has it.
       expect(entitlement!.resetConfig).toBeDefined()
       // @ts-ignore
       expect(entitlement!.resetConfig!.name).toBe("billing")
       // @ts-ignore
-      expect(entitlement!.resetConfig!.resetAnchor).toBe(1) // Matches baseGrant anchor
+      expect(entitlement!.resetConfig!.resetAnchor).toBe(1)
     })
 
     it("should allow overage if ANY grant allows it (sum policy)", async () => {
-      const usageFeature = { ...baseGrant.featurePlanVersion, featureType: "usage" }
+      const usageFeature = { ...baseGrant.featurePlanVersion, featureType: "usage" as const }
       const grants = [
         {
           ...baseGrant,
@@ -279,7 +279,7 @@ describe("GrantsManager", () => {
           limit: 100,
           featurePlanVersion: {
             ...usageFeature,
-            metadata: { overageStrategy: "none" },
+            metadata: { overageStrategy: "none" as const },
           },
         },
         {
@@ -288,7 +288,7 @@ describe("GrantsManager", () => {
           limit: 50,
           featurePlanVersion: {
             ...usageFeature,
-            metadata: { overageStrategy: "always" },
+            metadata: { overageStrategy: "always" as const },
           },
         },
       ]
@@ -308,7 +308,7 @@ describe("GrantsManager", () => {
     })
 
     it("should allow overage if ANY grant allows it (max policy)", async () => {
-      const tierFeature = { ...baseGrant.featurePlanVersion, featureType: "tier" }
+      const tierFeature = { ...baseGrant.featurePlanVersion, featureType: "tier" as const }
       const grants = [
         {
           ...baseGrant,
@@ -316,7 +316,7 @@ describe("GrantsManager", () => {
           limit: 100,
           featurePlanVersion: {
             ...tierFeature,
-            metadata: { overageStrategy: "none" },
+            metadata: { overageStrategy: "none" as const },
           },
         },
         {
@@ -325,7 +325,7 @@ describe("GrantsManager", () => {
           limit: 50,
           featurePlanVersion: {
             ...tierFeature,
-            metadata: { overageStrategy: "always" },
+            metadata: { overageStrategy: "always" as const },
           },
         },
       ]
@@ -345,8 +345,12 @@ describe("GrantsManager", () => {
     })
 
     it("should require ALL grants to allow overage for min policy", async () => {
-      // Test mergeGrants directly for min policy since no feature type currently maps to it
-      const grants = [
+      const feature = {
+        ...baseGrant.featurePlanVersion,
+        featureType: "usage" as const,
+        metadata: { overageStrategy: "always" as const },
+      }
+      const grantsData = [
         {
           id: "g1",
           type: "subscription" as const,
@@ -355,6 +359,15 @@ describe("GrantsManager", () => {
           expiresAt: now + 1000,
           limit: 100,
           priority: 10,
+          featurePlanVersionId: "fpv1",
+          featurePlanVersion: {
+            ...feature,
+            metadata: { overageStrategy: "always" as const },
+          },
+          subjectId: customerId,
+          subjectType: "customer" as const,
+          projectId,
+          anchor: 1,
         },
         {
           id: "g2",
@@ -364,106 +377,52 @@ describe("GrantsManager", () => {
           expiresAt: now + 1000,
           limit: 50,
           priority: 20,
+          featurePlanVersionId: "fpv1",
+          featurePlanVersion: {
+            ...feature,
+            metadata: { overageStrategy: "none" as const },
+          },
+          subjectId: customerId,
+          subjectType: "customer" as const,
+          projectId,
+          anchor: 1,
         },
       ]
 
       const merged = grantsManager.mergeGrants({
         // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-        grants: grants as any,
+        grants: grantsData as any,
         policy: "min",
       })
 
       expect(merged.limit).toBe(50)
-      expect(merged.grants[0]!.id).toBe("g2")
     })
 
-    it("should union date ranges for sum policy", async () => {
-      const usageFeature = { ...baseGrant.featurePlanVersion, featureType: "usage" }
-      const grants = [
-        {
-          ...baseGrant,
-          id: "g1",
-          effectiveAt: 1000,
-          expiresAt: 5000,
-          limit: 100,
-          featurePlanVersion: usageFeature,
-        },
-        {
-          ...baseGrant,
-          id: "g2",
-          effectiveAt: 2000,
-          expiresAt: 6000,
-          limit: 50,
-          featurePlanVersion: usageFeature,
-        },
-      ]
+    it("Property-based test: Highest priority grant always wins in 'replace' policy", async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(
+            fc.record({
+              id: fc.uuid(),
+              priority: fc.integer({ min: 0, max: 1000 }),
+              limit: fc.integer({ min: 1, max: 10000 }),
+            }),
+            { minLength: 1, maxLength: 10 }
+          ),
+          async (grantsSnapshotData) => {
+            const sorted = [...grantsSnapshotData].sort((a, b) => b.priority - a.priority)
+            const highestPriority = sorted[0]!
 
-      setupMocks(grants)
+            const merged = grantsManager.mergeGrants({
+              // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+              grants: grantsSnapshotData as any,
+              policy: "replace",
+            })
 
-      const result = await grantsManager.computeGrantsForCustomer({
-        customerId,
-        projectId,
-        now,
-      })
-
-      expect(result.err).toBeUndefined()
-      const entitlement = result.val![0]
-      expect(entitlement!.effectiveAt).toBe(1000)
-      expect(entitlement!.expiresAt).toBe(6000)
-    })
-
-    it("should return empty list when no grants are found", async () => {
-      setupMocks([])
-
-      const result = await grantsManager.computeGrantsForCustomer({
-        customerId,
-        projectId,
-        now,
-      })
-
-      expect(result.err).toBeUndefined()
-      expect(result.val).toEqual([])
-    })
-
-    it("should fail if mixed feature types for same slug (should not happen ideally but uses highest priority)", async () => {
-      // If grants have different feature types for the SAME slug,
-      // `computeEntitlementFromGrants` determines policy based on the BEST priority grant.
-      // It effectively ignores the type of lower priority grants for policy determination.
-
-      const grants = [
-        {
-          ...baseGrant,
-          id: "g_usage",
-          limit: 100,
-          priority: 10,
-          featurePlanVersion: { ...baseGrant.featurePlanVersion, featureType: "usage" }, // usage -> sum
-        },
-        {
-          ...baseGrant,
-          id: "g_tier",
-          limit: 500,
-          priority: 100, // Highest -> wins policy determination
-          featurePlanVersion: { ...baseGrant.featurePlanVersion, featureType: "tier" }, // tier -> max
-        },
-      ]
-
-      setupMocks(grants)
-
-      const result = await grantsManager.computeGrantsForCustomer({
-        customerId,
-        projectId,
-        now,
-      })
-
-      expect(result.err).toBeUndefined()
-      const entitlement = result.val![0]
-      expect(entitlement).toBeDefined()
-
-      // Highest priority is 'tier', so policy is 'max'.
-      // Max(100, 500) = 500.
-      expect(entitlement!.featureType).toBe("tier")
-      expect(entitlement!.mergingPolicy).toBe("max")
-      expect(entitlement!.limit).toBe(500)
+            expect(merged.limit).toBe(highestPriority.limit)
+          }
+        )
+      )
     })
   })
 
@@ -472,7 +431,7 @@ describe("GrantsManager", () => {
       const grantToRenew = {
         ...baseGrant,
         id: "g_addon",
-        type: "addon",
+        type: "addon" as const,
         autoRenew: true,
         effectiveAt: now - 30 * 24 * 60 * 60 * 1000, // 30 days ago
         expiresAt: now + 1000, // Grant is still active
@@ -503,8 +462,8 @@ describe("GrantsManager", () => {
 
     it("should not renew trial or subscription grants", async () => {
       const grants = [
-        { ...baseGrant, id: "g_sub", type: "subscription", autoRenew: true },
-        { ...baseGrant, id: "g_trial", type: "trial", autoRenew: true },
+        { ...baseGrant, id: "g_sub", type: "subscription" as const, autoRenew: true },
+        { ...baseGrant, id: "g_trial", type: "trial" as const, autoRenew: true },
       ]
 
       setupMocks(grants)

@@ -6,6 +6,7 @@ import type { Logger } from "@unprice/logging"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
+import { createClock, createMockEntitlementState } from "../test-utils"
 import { MemoryEntitlementStorageProvider } from "./memory-provider"
 import { EntitlementService } from "./service"
 
@@ -26,21 +27,17 @@ describe("EntitlementService - Reset Cycles", () => {
   const jan1 = new Date("2024-01-01T00:00:00Z").getTime()
   const jan2 = new Date("2024-01-02T00:00:00Z").getTime()
   const jan3 = new Date("2024-01-03T00:00:00Z").getTime()
-  const _jan8 = new Date("2024-01-08T00:00:00Z").getTime() // Start of Week 2
   const jan9 = new Date("2024-01-09T00:00:00Z").getTime()
   const jan10 = new Date("2024-01-10T00:00:00Z").getTime()
-  const _jan15 = new Date("2024-01-15T00:00:00Z").getTime() // Start of Week 3
 
-  const mockEntitlementState: EntitlementState = {
+  let _clock = createClock(jan1)
+
+  const mockEntitlementState = createMockEntitlementState({
     id: "ent_reset_123",
     customerId,
     projectId,
     featureSlug,
-    featureType: "usage",
     limit: 100, // Weekly limit
-    aggregationMethod: "sum",
-    mergingPolicy: "sum",
-    metadata: null,
     createdAtM: jan1,
     updatedAtM: jan1,
     meter: {
@@ -60,7 +57,6 @@ describe("EntitlementService - Reset Cycles", () => {
         priority: 10,
       },
     ],
-    version: "v1",
     effectiveAt: jan1,
     expiresAt: jan1 + 30 * 24 * 60 * 60 * 1000,
     nextRevalidateAt: jan1 + 300000,
@@ -69,13 +65,14 @@ describe("EntitlementService - Reset Cycles", () => {
       name: "weekly-reset",
       resetInterval: "week",
       resetIntervalCount: 1,
-      resetAnchor: 1, // Monday (assuming ISO week or similar, calculateCycleWindow logic dependent)
+      resetAnchor: 1, // Monday
       planType: "recurring",
     },
-  }
+  })
 
   beforeEach(async () => {
     vi.clearAllMocks()
+    _clock = createClock(jan1)
 
     mockLogger = {
       debug: vi.fn(),
@@ -142,7 +139,6 @@ describe("EntitlementService - Reset Cycles", () => {
     // Initial State hit the database on cache miss
     vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue({
       ...mockEntitlementState,
-      metadata: null,
       createdAtM: jan1,
       updatedAtM: jan1,
     })
@@ -229,9 +225,11 @@ describe("EntitlementService - Reset Cycles", () => {
     const monthStart = jan1
     const monthEnd = jan1 + 30 * 24 * 60 * 60 * 1000 // 30 days
 
-    const dailyResetState: EntitlementState = {
-      ...mockEntitlementState,
+    const dailyResetState = createMockEntitlementState({
       id: "ent_daily_reset",
+      customerId,
+      projectId,
+      featureSlug,
       resetConfig: {
         name: "daily-reset",
         resetInterval: "day",
@@ -249,30 +247,30 @@ describe("EntitlementService - Reset Cycles", () => {
         lastUpdated: monthStart,
         lastCycleStart: monthStart,
       },
-    }
+      grants: [
+        {
+          id: "grant_daily",
+          type: "subscription",
+          priority: 10,
+          limit: 10,
+          effectiveAt: monthStart,
+          expiresAt: monthEnd,
+        },
+      ],
+    })
 
     vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue({
       ...dailyResetState,
-      metadata: null,
       createdAtM: monthStart,
       updatedAtM: monthStart,
-      meter: {
-        usage: "0",
-        snapshotUsage: "0",
-        lastReconciledId: "",
-        lastUpdated: monthStart,
-        lastCycleStart: monthStart,
-      },
     } as EntitlementState)
 
     vi.spyOn(mockCache.customerEntitlement, "swr").mockResolvedValue(Ok(dailyResetState))
 
-    let currentTimestamp = monthStart
-
     // Simulate 30 days of usage
     for (let day = 0; day < 30; day++) {
       // Set timestamp to mid-day (12:00)
-      currentTimestamp = monthStart + day * 24 * 60 * 60 * 1000 + 12 * 60 * 60 * 1000
+      const currentTimestamp = monthStart + day * 24 * 60 * 60 * 1000 + 12 * 60 * 60 * 1000
 
       // Report usage within limit
       const res = await service.reportUsage({
@@ -291,13 +289,7 @@ describe("EntitlementService - Reset Cycles", () => {
 
       // Verify storage state
       const stored = await mockStorage.get({ customerId, projectId, featureSlug })
-
       expect(stored.val?.meter.usage).toBe("5")
-
-      // Accumulated usage should increase by 5 from previous day (except first day is 0 accumulated from previous)
-      // Day 0: accum 0
-      // Day 1: accum 5
-      // Day 2: accum 10 ...
     }
 
     // Test expiration

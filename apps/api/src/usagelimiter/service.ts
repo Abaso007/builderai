@@ -242,7 +242,7 @@ export class UsageLimiterService implements UsageLimiter {
     projectId: string
     updates: Partial<NonNullable<CacheNamespaces["accessControlList"]>>
   }): Promise<void> {
-    return await this.entitlementService.updateAccessControlList(data)
+    return await this.customerService.updateAccessControlList(data)
   }
 
   public async getCurrentUsage(

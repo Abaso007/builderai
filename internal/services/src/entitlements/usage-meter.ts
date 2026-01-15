@@ -504,8 +504,6 @@ export class UsageMeter {
   // PERSISTENCE
   // -------------------------------------------------------
   toPersist(): MeterState {
-    // Ensure state is up to date before saving
-    this.sync(Date.now())
     return {
       lastUpdated: this.lastUpdated,
       usage: this.usage,

@@ -493,8 +493,7 @@ export class SubscriptionService {
         })
 
       // update the status of the subscription if the phase is active
-      const isActivePhase =
-        phase.startAt <= Date.now() && (phase.endAt ?? Number.POSITIVE_INFINITY) >= Date.now()
+      const isActivePhase = phase.startAt <= now && (phase.endAt ?? Number.POSITIVE_INFINITY) >= now
 
       if (isActivePhase) {
         const status = trialUnitsToUse > 0 ? "trialing" : "active"

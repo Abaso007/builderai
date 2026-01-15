@@ -110,7 +110,7 @@ export function CustomerForm({
       await updateCustomer.mutateAsync({
         ...data,
         id: defaultValues.id,
-        active: defaultValues.active ?? false,
+        active: data.active ?? false,
       })
     }
   }
