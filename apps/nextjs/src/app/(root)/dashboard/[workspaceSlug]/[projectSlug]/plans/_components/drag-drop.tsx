@@ -75,11 +75,22 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
                   ...feature,
                   ...planVersionFeature,
                   metadata: {
-                    realtime: planVersionFeature.metadata?.realtime ?? feature.metadata?.realtime ?? false,
-                    notifyUsageThreshold: planVersionFeature.metadata?.notifyUsageThreshold ?? feature.metadata?.notifyUsageThreshold ?? 95,
-                    overageStrategy: planVersionFeature.metadata?.overageStrategy ?? feature.metadata?.overageStrategy ?? "none",
-                    blockCustomer: planVersionFeature.metadata?.blockCustomer ?? feature.metadata?.blockCustomer ?? false,
-                    hidden: planVersionFeature.metadata?.hidden ?? feature.metadata?.hidden ?? false,
+                    realtime:
+                      planVersionFeature.metadata?.realtime ?? feature.metadata?.realtime ?? false,
+                    notifyUsageThreshold:
+                      planVersionFeature.metadata?.notifyUsageThreshold ??
+                      feature.metadata?.notifyUsageThreshold ??
+                      95,
+                    overageStrategy:
+                      planVersionFeature.metadata?.overageStrategy ??
+                      feature.metadata?.overageStrategy ??
+                      "none",
+                    blockCustomer:
+                      planVersionFeature.metadata?.blockCustomer ??
+                      feature.metadata?.blockCustomer ??
+                      false,
+                    hidden:
+                      planVersionFeature.metadata?.hidden ?? feature.metadata?.hidden ?? false,
                   },
                 }
               : feature
