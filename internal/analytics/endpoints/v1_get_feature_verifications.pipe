@@ -7,15 +7,33 @@ SQL >
     %
     SELECT
         projectId,
-        {% if defined(customerId) %}
-            customerId,
-        {% end %}
+        {% if defined(customerId) %} customerId, {% end %}
         featureSlug,
         countMerge(count) AS count,
         quantileTDigestMerge(0.50)(p50_latency) AS p50_latency,
         quantileTDigestMerge(0.95)(p95_latency) AS p95_latency,
         quantileTDigestMerge(0.99)(p99_latency) AS p99_latency
-    FROM unprice_feature_verifications_hourly_mv
+    FROM
+    {% if defined(intervalDays) %}
+        {% if Int32(intervalDays) > 180 %}
+            unprice_feature_verifications_monthly_mv
+        {% elif Int32(intervalDays) > 7 %}
+            unprice_feature_verifications_daily_mv
+        {% else %}
+            unprice_feature_verifications_hourly_mv
+        {% end %}
+    {% elif defined(start) and defined(end) %}
+        {% set diff_days = (Int64(end) - Int64(start)) / 86400000 %}
+        {% if diff_days > 180 %}
+            unprice_feature_verifications_monthly_mv
+        {% elif diff_days > 7 %}
+            unprice_feature_verifications_daily_mv
+        {% else %}
+            unprice_feature_verifications_hourly_mv
+        {% end %}
+    {% else %}
+        unprice_feature_verifications_hourly_mv
+    {% end %}
     WHERE
         1 = 1
         {% if defined(customerId) %}
@@ -35,6 +53,6 @@ SQL >
         {% else %}
             AND date >= toStartOfDay(today() - 7)
         {% end %}
-    GROUP BY projectId, customerId, featureSlug
+    {% if defined(customerId) %} GROUP BY projectId, customerId, featureSlug {% else %} GROUP BY projectId, featureSlug {% end %}
 
 TYPE endpoint
