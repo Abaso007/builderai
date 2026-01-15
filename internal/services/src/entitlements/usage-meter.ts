@@ -181,12 +181,10 @@ export class UsageMeter {
 
     let isAllowed = false
 
-    if (cost <= 0) {
-      isAllowed = currentTokens > 0 || strategy === "always" || strategy === "last-call"
-    } else if (strategy === "always") {
+    if (strategy === "always") {
       isAllowed = true
     } else if (strategy === "last-call") {
-      isAllowed = currentTokens > 0
+      isAllowed = cost <= 0 || currentTokens > 0
     } else {
       // strategy === "none" (strict)
       isAllowed = currentTokens >= cost
