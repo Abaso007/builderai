@@ -18,7 +18,7 @@ export const navItems = [
 
 export const siteConfig: SiteConfig = {
   name: "Unprice",
-  description: "Adaptive monetization infrastructure. Better pricing for SaaS.",
+  description: "PriceOps infrastructure for SaaS. Stop hardcoding your revenue.",
   links: {
     twitter: "https://github.com/jhonsfran1165/unprice",
     github: "https://github.com/jhonsfran1165/unprice",

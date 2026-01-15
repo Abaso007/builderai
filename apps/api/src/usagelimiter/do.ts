@@ -300,7 +300,22 @@ export class DurableObjectUsagelimiter extends Server {
         deniedReason: "ENTITLEMENT_ERROR",
       }
     } finally {
-      this.ctx.waitUntil(Promise.all([this.metrics.flush(), this.logger.flush()]))
+      this.ctx.waitUntil(
+        (async () => {
+          try {
+            await Promise.all([
+              this.metrics.flush().catch((err: Error) => {
+                this.logger.error("Failed to flush metrics in DO", { error: err.message })
+              }),
+              this.logger.flush().catch((err: Error) => {
+                console.error("Failed to flush logger in DO", err)
+              }),
+            ])
+          } catch (error) {
+            console.error("Error during background flush in DO", error)
+          }
+        })()
+      )
     }
   }
 
@@ -326,7 +341,22 @@ export class DurableObjectUsagelimiter extends Server {
         allowed: false,
       }
     } finally {
-      this.ctx.waitUntil(Promise.all([this.metrics.flush(), this.logger.flush()]))
+      this.ctx.waitUntil(
+        (async () => {
+          try {
+            await Promise.all([
+              this.metrics.flush().catch((err: Error) => {
+                this.logger.error("Failed to flush metrics in DO", { error: err.message })
+              }),
+              this.logger.flush().catch((err: Error) => {
+                console.error("Failed to flush logger in DO", err)
+              }),
+            ])
+          } catch (error) {
+            console.error("Error during background flush in DO", error)
+          }
+        })()
+      )
     }
   }
 
@@ -359,7 +389,22 @@ export class DurableObjectUsagelimiter extends Server {
   // when a websocket connection is closed
   onClose(): void | Promise<void> {
     // flush the metrics and logs
-    this.ctx.waitUntil(Promise.all([this.metrics.flush(), this.logger.flush()]))
+    this.ctx.waitUntil(
+      (async () => {
+        try {
+          await Promise.all([
+            this.metrics.flush().catch((err: Error) => {
+              this.logger.error("Failed to flush metrics in DO onClose", { error: err.message })
+            }),
+            this.logger.flush().catch((err: Error) => {
+              console.error("Failed to flush logger in DO onClose", err)
+            }),
+          ])
+        } catch (error) {
+          console.error("Error during background flush in DO onClose", error)
+        }
+      })()
+    )
   }
 
   // websocket message handler
@@ -372,6 +417,21 @@ export class DurableObjectUsagelimiter extends Server {
     // flush the usage records
     await this.entitlementService.flush()
     // flush the metrics and logs
-    this.ctx.waitUntil(Promise.all([this.metrics.flush(), this.logger.flush()]))
+    this.ctx.waitUntil(
+      (async () => {
+        try {
+          await Promise.all([
+            this.metrics.flush().catch((err: Error) => {
+              this.logger.error("Failed to flush metrics in DO onAlarm", { error: err.message })
+            }),
+            this.logger.flush().catch((err: Error) => {
+              console.error("Failed to flush logger in DO onAlarm", err)
+            }),
+          ])
+        } catch (error) {
+          console.error("Error during background flush in DO onAlarm", error)
+        }
+      })()
+    )
   }
 }

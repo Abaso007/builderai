@@ -208,19 +208,18 @@ export class EntitlementService {
       verifyResult.deniedReason === "LIMIT_EXCEEDED" &&
       validatedState.metadata?.blockCustomer === true
 
+    // update the entitlement state in the storage
+    await this.storage.set({ state: { ...validatedState, meter: meterResult } })
+
     // 8. update the entitlement state in the storage in background
     this.waitUntil(
-      Promise.all([
-        this.storage.set({ state: { ...validatedState, meter: meterResult } }),
-        // if feature is blocked then set the blocked customer flag in cache
-        shouldBlockCustomer
-          ? this.customerService.updateAccessControlList({
-              customerId: params.customerId,
-              projectId: params.projectId,
-              updates: { customerUsageLimitReached: true },
-            })
-          : Promise.resolve(),
-      ])
+      shouldBlockCustomer
+        ? this.customerService.updateAccessControlList({
+            customerId: params.customerId,
+            projectId: params.projectId,
+            updates: { customerUsageLimitReached: true },
+          })
+        : Promise.resolve()
     )
 
     // 9. return the verification result
@@ -377,8 +376,6 @@ export class EntitlementService {
     // for now we block right away but later we can support some kind of policy
     // that blocked the customer only if there is a flag that says so. it's up to the client to decide
     // if their customers are blocked once the hard limit is reached.
-    // TODO: add the flag here: blockCustomer flag - by default this is false
-    // if (validatedState.blockCustomer) {
     if (
       shouldBlockCustomer ||
       (params.usage < 0 && consumeResult.allowed && consumeResult.remaining > 0)
@@ -394,7 +391,6 @@ export class EntitlementService {
         })
       )
     }
-    // }
 
     return {
       allowed: consumeResult.allowed,

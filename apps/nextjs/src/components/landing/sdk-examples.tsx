@@ -60,7 +60,7 @@ const unprice = new Unprice({
 
 const signUp = await unprice.customers.signUp({
   name: "John Doe",
-  email: "jhonsfran@gmail.com",
+  email: "seb@unprice.dev",
   planVersionId: "plan_version_1",
   successUrl: "http://your-app.com/dashboard",
   cancelUrl: "http://your-app.com/failed",
@@ -176,7 +176,7 @@ const planVersions = await unprice.plans.listPlanVersions({
     signUp:
       'const baseUrl = "http://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
       "${baseUrl}/v1/customer/signUp" +
-      '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    name: "John Doe",\n    email: "jhonsfran@gmail.com",\n    planVersionId: "plan_version_1",\n    successUrl: "http://your-app.com/dashboard",\n    cancelUrl: "http://your-app.com/failed",\n  }),\n})',
+      '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    name: "John Doe",\n    email: "seb@unprice.dev",\n    planVersionId: "plan_version_1",\n    successUrl: "http://your-app.com/dashboard",\n    cancelUrl: "http://your-app.com/failed",\n  }),\n})',
     getEntitlements:
       'const baseUrl = "http://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
       "${baseUrl}/v1/customer/cus_1GTzSGrapiBW1QwCL3Fcn/getEntitlements" +
