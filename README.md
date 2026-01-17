@@ -26,7 +26,7 @@ We believe the infrastructure that handles your money should be **fully transpar
 
 ## Core Features
 
-- **Edge-Native Entitlements**: Check customer permissions at the edge with <30ms latency.
+- **Edge-Native Entitlements**: Check customer permissions at the edge with <100ms latency.
 - **High-Volume Metering**: Process 100k+ events/sec for real-time usage tracking.
 - **Vendor Freedom**: Decouple from Stripe/Paddle. Swap providers without touching your app code.
 - **Atomic Consistency**: Built for mission-critical revenue. Never miss a cent.

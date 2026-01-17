@@ -271,7 +271,7 @@ export function UnpriceManifesto() {
               transition={{ duration: 0.5, delay: 0.6 }}
               className="text-background-text text-sm"
             >
-              better pricing for SaaS
+              the PriceOps Infrastructure
             </motion.div>
           </motion.div>
 
