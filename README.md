@@ -4,6 +4,7 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![License: Commercial](https://img.shields.io/badge/License-Commercial-gold.svg)](LICENSE#L665)
 
+
 > **"Your product is smart, but your pricing is hardcoded."**
 >
 > Unprice is the open-source PriceOps infrastructure that decouples your revenue from your codebase. Built for transparency, performance, and growth.

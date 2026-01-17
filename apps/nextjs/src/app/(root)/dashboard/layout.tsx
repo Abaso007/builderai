@@ -5,6 +5,7 @@ import Script from "next/script"
 import { NuqsAdapter } from "nuqs/adapters/next/app"
 import type { ReactNode } from "react"
 import { ToasterProvider } from "~/components/layout/theme-provider"
+import { env } from "~/env"
 import { TRPCReactProvider } from "~/trpc/client"
 
 export default async function DashboardLayout({
@@ -33,7 +34,7 @@ export default async function DashboardLayout({
       <Script id="userjot-init" strategy="afterInteractive">
         {`
           window.$ujq=window.$ujq||[];window.uj=window.uj||new Proxy({},{get:(_,p)=>(...a)=>window.$ujq.push([p,...a])});document.head.appendChild(Object.assign(document.createElement('script'),{src:'https://cdn.userjot.com/sdk/v2/uj.js',type:'module',async:!0}));
-          window.uj.init('cmkg1bbok041b15ldwolg6j6x', ${JSON.stringify(userJotOptions)});
+          window.uj.init("${env.NEXT_PUBLIC_USERJOT_ID}", ${JSON.stringify(userJotOptions)});
         `}
       </Script>
       <NuqsAdapter>
