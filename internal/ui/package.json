@@ -118,7 +118,8 @@
     "./sheet": "./src/sheet.tsx",
     "./table": "./src/table.tsx",
     "./tabs": "./src/tabs.tsx",
-    "./tabs-navigation": "./src/tabs-navigation.tsx"
+    "./tabs-navigation": "./src/tabs-navigation.tsx",
+    "./unprice": "./src/unprice.tsx"
   },
   "typesVersions": {
     "*": {

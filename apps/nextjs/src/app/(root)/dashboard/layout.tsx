@@ -1,7 +1,7 @@
-import { TooltipProvider } from "@unprice/ui/tooltip"
-
 import { allEndpointsProcedures } from "@unprice/trpc/routes"
+import { TooltipProvider } from "@unprice/ui/tooltip"
 import { Provider } from "jotai"
+import Script from "next/script"
 import { NuqsAdapter } from "nuqs/adapters/next/app"
 import type { ReactNode } from "react"
 import { ToasterProvider } from "~/components/layout/theme-provider"
@@ -18,8 +18,24 @@ export default async function DashboardLayout({
   sidebar: ReactNode
   header: ReactNode
 }) {
+  const userJotOptions = {
+    widget: true,
+    theme: "auto",
+    position: "right",
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    userJotOptions.position = "left"
+  }
+
   return (
     <div className="min-h-screen overflow-hidden ">
+      <Script id="userjot-init" strategy="afterInteractive">
+        {`
+          window.$ujq=window.$ujq||[];window.uj=window.uj||new Proxy({},{get:(_,p)=>(...a)=>window.$ujq.push([p,...a])});document.head.appendChild(Object.assign(document.createElement('script'),{src:'https://cdn.userjot.com/sdk/v2/uj.js',type:'module',async:!0}));
+          window.uj.init('cmkg1bbok041b15ldwolg6j6x', ${JSON.stringify(userJotOptions)});
+        `}
+      </Script>
       <NuqsAdapter>
         <TRPCReactProvider allEndpointsProcedures={allEndpointsProcedures}>
           <TooltipProvider delayDuration={300}>

@@ -5,7 +5,7 @@ import { motion } from "framer-motion"
 const stats = [
   {
     name: "Edge Entitlements",
-    value: "<30ms",
+    value: "<100ms",
   },
   {
     name: "Event Processing",

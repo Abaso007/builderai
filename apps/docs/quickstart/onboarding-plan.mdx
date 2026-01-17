@@ -50,7 +50,8 @@ if (result?.allowed) {
   await unprice.customers.reportUsage({
     customerId: "cust_123",
     featureSlug: "ai-generations",
-    units: 5
+    usage: 5,
+    idempotenceKey: "unique-id-for-this-request"
   });
 }
 ```

@@ -61,7 +61,7 @@ const features = [
     Icon: BellIcon,
     name: "Any pricing model",
     description: "Report usage, metering, usage-based pricing, etc.",
-    href: `${DOCS_DOMAIN}/features/pricing`,
+    href: `${DOCS_DOMAIN}concepts/pricing/overview`,
     cta: "Learn more",
     className: "col-span-3 lg:col-span-2",
     background: (
