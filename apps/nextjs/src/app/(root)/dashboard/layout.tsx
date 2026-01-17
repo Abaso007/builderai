@@ -33,7 +33,18 @@ export default async function DashboardLayout({
     <div className="min-h-screen overflow-hidden ">
       <Script id="userjot-init" strategy="afterInteractive">
         {`
-          window.$ujq=window.$ujq||[];window.uj=window.uj||new Proxy({},{get:(_,p)=>(...a)=>window.$ujq.push([p,...a])});document.head.appendChild(Object.assign(document.createElement('script'),{src:'https://cdn.userjot.com/sdk/v2/uj.js',type:'module',async:!0}));
+          window.$ujq=window.$ujq||[];
+          window.uj=window.uj||new Proxy({},{get:(_,p)=>(...a)=>window.$ujq.push([p,...a])});
+          const s = document.createElement('script');
+          Object.assign(s, {
+            src: 'https://cdn.userjot.com/sdk/v2/uj.js',
+            type: 'module',
+            async: true,
+            onload: () => {
+              window.dispatchEvent(new CustomEvent('uj:ready'));
+            }
+          });
+          document.head.appendChild(s);
           window.uj.init("${env.NEXT_PUBLIC_USERJOT_ID}", ${JSON.stringify(userJotOptions)});
         `}
       </Script>

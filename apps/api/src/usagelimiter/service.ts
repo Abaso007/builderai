@@ -87,6 +87,8 @@ export class UsageLimiterService implements UsageLimiter {
   }
 
   // in memory cache with size and TTL limits
+  // kid of hard to reach the limit as cloudflare can hit others isolates
+  // but just in case we limit it to 1000 entries
   private updateCache(key: string, result: VerificationResult) {
     if (env.VERCEL_ENV === "production" && !result.allowed) {
       // enforce max size - remove oldest entry if at limit
@@ -124,13 +126,14 @@ export class UsageLimiterService implements UsageLimiter {
 
   private getDurableObjectCustomerId(customerId: string, projectId: string): string {
     // later on we can shard this by customer and feature slug if needed
-    return `${projectId}:${customerId}`
+    // preview environments copy production data so we need to differentiate between them
+    return `${env.NODE_ENV}:${projectId}:${customerId}`
   }
 
   public async verify(
     data: VerifyRequest
   ): Promise<Result<VerificationResult, FetchError | UnPriceCustomerError>> {
-    const key = `verify:${data.projectId}:${data.customerId}:${data.featureSlug}:`
+    const key = `verify:${env.NODE_ENV}:${data.projectId}:${data.customerId}:${data.featureSlug}:`
     const cached = this.hashCache.get(key)
 
     const parsedCached = cached ? (JSON.parse(cached) as VerificationResult) : undefined

@@ -106,12 +106,14 @@ export class DurableObjectUsagelimiter extends Server {
     const cloudflareCacheStore =
       env.CLOUDFLARE_ZONE_ID &&
       env.CLOUDFLARE_API_TOKEN &&
+      env.CLOUDFLARE_CACHE_DOMAIN &&
       env.CLOUDFLARE_ZONE_ID !== "" &&
-      env.CLOUDFLARE_API_TOKEN !== ""
+      env.CLOUDFLARE_API_TOKEN !== "" &&
+      env.CLOUDFLARE_CACHE_DOMAIN !== ""
         ? new CloudflareStore({
             cloudflareApiKey: env.CLOUDFLARE_API_TOKEN,
             zoneId: env.CLOUDFLARE_ZONE_ID,
-            domain: "cache.unprice.dev",
+            domain: env.CLOUDFLARE_CACHE_DOMAIN,
             cacheBuster: "v2",
           })
         : undefined

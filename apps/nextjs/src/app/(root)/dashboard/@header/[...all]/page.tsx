@@ -6,7 +6,7 @@ import { Fragment, Suspense } from "react"
 import Flags from "~/components/layout/flags"
 import Header from "~/components/layout/header"
 import { Logo } from "~/components/layout/logo"
-import { UserJotButton } from "~/components/userjot"
+import { UserJotWrapper } from "~/components/userjot"
 import { unprice } from "~/lib/unprice"
 import { HydrateClient, prefetch, trpc } from "~/trpc/server"
 import { ProjectSwitcher } from "../../_components/project-switcher"
@@ -87,7 +87,7 @@ export default async function Page(props: {
   if ((!workspaceSlug || isNonWorkspaceRoute) && (!projectSlug || !isSlug(projectSlug))) {
     return (
       <Header className="px-4">
-        <UserJotButton
+        <UserJotWrapper
           user={
             user
               ? {
@@ -107,7 +107,7 @@ export default async function Page(props: {
 
   return (
     <Header>
-      <UserJotButton
+      <UserJotWrapper
         user={
           user
             ? {

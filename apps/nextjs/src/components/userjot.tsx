@@ -1,13 +1,16 @@
 "use client"
 
+import { useTheme } from "next-themes"
 import { useEffect } from "react"
 import { type UserJotUser, useUserJot } from "~/hooks/use-userjot"
 
-export function UserJotButton({ user }: { user: UserJotUser | null }) {
-  const { identify } = useUserJot()
+export function UserJotWrapper({ user }: { user: UserJotUser | null }) {
+  const { setTheme, identify, isReady } = useUserJot()
+
+  const { theme } = useTheme()
 
   useEffect(() => {
-    if (user) {
+    if (isReady && user) {
       identify({
         id: user.id,
         email: user.email,
@@ -15,10 +18,14 @@ export function UserJotButton({ user }: { user: UserJotUser | null }) {
         lastName: user.lastName,
         avatar: user.avatar,
       })
-    } else {
-      identify(null) // Logs them out of UserJot too
     }
-  }, [user])
+  }, [user, identify, isReady])
+
+  useEffect(() => {
+    if (isReady) {
+      setTheme(theme ?? "light")
+    }
+  }, [theme, setTheme, isReady])
 
   return null
 }

@@ -137,12 +137,14 @@ export function init(): MiddlewareHandler<HonoEnv> {
     const cloudflareCacheStore =
       c.env.CLOUDFLARE_ZONE_ID &&
       c.env.CLOUDFLARE_API_TOKEN &&
+      c.env.CLOUDFLARE_CACHE_DOMAIN &&
       c.env.CLOUDFLARE_ZONE_ID !== "" &&
-      c.env.CLOUDFLARE_API_TOKEN !== ""
+      c.env.CLOUDFLARE_API_TOKEN !== "" &&
+      c.env.CLOUDFLARE_CACHE_DOMAIN !== ""
         ? new CloudflareStore({
             cloudflareApiKey: c.env.CLOUDFLARE_API_TOKEN,
             zoneId: c.env.CLOUDFLARE_ZONE_ID,
-            domain: "cache.unprice.dev",
+            domain: c.env.CLOUDFLARE_CACHE_DOMAIN,
             cacheBuster: "v2",
           })
         : undefined
