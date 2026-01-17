@@ -46,7 +46,7 @@ const unprice = new Unprice({
 const { result, error } = await unprice.customers.reportUsage({
   customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
   featureSlug: "feature-1",
-  usage: 1,
+  usage: 30,
   idempotenceKey: "123e4567-e89b-12d3-a456-426614174000",
 })
 `,
@@ -152,7 +152,7 @@ const { result, error } = await unprice.plans.listPlanVersions({
     reportUsage:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
       "${baseUrl}/v1/customer/reportUsage" +
-      '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    featureSlug: "feature-1",\n    usage: 1,\n    idempotenceKey: "123e4567-e89b-12d3-a456-426614174000",\n  }),\n})',
+      '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    featureSlug: "feature-1",\n    usage: 30,\n    idempotenceKey: "123e4567-e89b-12d3-a456-426614174000",\n  }),\n})',
     signUp:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
       "${baseUrl}/v1/customer/signUp" +

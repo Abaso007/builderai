@@ -2687,11 +2687,6 @@ export class BillingService {
     // Waterfall attribution per priority from highest to lowest
     const sortedGrants = [...grants].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
     for (const grant of sortedGrants) {
-      // For usage features, break early if all usage is attributed
-      if (isUsageFeature && remainingUsage <= 0) {
-        break
-      }
-
       // Process grant and calculate price
       const grantResult = this.processGrant({
         grant,

@@ -1864,7 +1864,7 @@ export class EntitlementService {
           // Prioritize real-time usage from DO storage if available (lastReconciledId is present)
           const meterUsage = Number(entitlement.meter.usage)
           const usage =
-            entitlement.meter.lastReconciledId !== "" && meterUsage > 0
+            entitlement.meter.lastReconciledId !== ""
               ? meterUsage
               : usageGrants.reduce((acc, u) => acc + u.usage, 0)
 

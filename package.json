@@ -24,6 +24,7 @@
     "manypkg:fix": "pnpm manypkg fix",
     "commit": "cz",
     "bump-versions": "pnpm changeset version && pnpm install",
+    "release": "pnpm build && pnpm changeset publish",
     "prepare": "husky",
     "preinstall": "npx only-allow pnpm"
   },

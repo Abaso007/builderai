@@ -32,7 +32,7 @@ Checking usage *before* performing an action (and before reporting it) allows yo
 ```typescript
 const { result, error } = await unprice.customers.can({
   customerId: "cust_123",
-  feature: "ai-generations",
+  featureSlug: "ai-generations",
   usage: 5 // Check if customer can consume 5 units
 });
 
@@ -48,8 +48,9 @@ Report usage and verify access in a single atomic call. This is the most common 
 ```typescript
 const { result, error } = await unprice.customers.reportUsage({
   customerId: "cust_123",
-  feature: "api-requests",
-  units: 1
+  featureSlug: "api-requests",
+  usage: 30,
+  idempotenceKey: "unique-uuid-here"
 });
 
 if (result?.allowed) {
