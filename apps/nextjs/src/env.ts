@@ -18,6 +18,11 @@ export const env = createEnv({
     ENCRYPTION_KEY: z.string(),
     AXIOM_API_TOKEN: z.string(),
     AXIOM_DATASET: z.string(),
+    USERJOT_ID: z.string().describe("The UserJot ID"),
+    USERJOT_SECRET: z
+      .string()
+      .optional()
+      .describe("The UserJot Secret Key for Identity Verification"),
     FLAGS_SECRET: z
       .string()
       .describe(
@@ -26,9 +31,7 @@ export const env = createEnv({
   },
   runtimeEnv: process.env,
   clientPrefix: "NEXT_PUBLIC_",
-  client: {
-    NEXT_PUBLIC_USERJOT_ID: z.string().describe("The UserJot ID"),
-  },
+  client: {},
   skipValidation: !!process.env.SKIP_ENV_VALIDATION || process.env.npm_lifecycle_event === "lint",
   extends: [authEnv, stripeEnv, trpcEnv, dbEnv],
   onValidationError: (issues: readonly StandardSchemaV1.Issue[]) => {

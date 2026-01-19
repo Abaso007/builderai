@@ -32,19 +32,6 @@ export const metadata = {
     images: [{ url: "/og" }],
     creator: "@jhosef90",
   },
-  // TODO: add more icons
-  icons: {
-    icon: [
-      {
-        url: "/icon.svg",
-        type: "image/svg+xml",
-      },
-      {
-        url: "/favicon.ico",
-      },
-    ],
-    apple: "/apple-touch-icon.png",
-  },
   metadataBase: new URL("https://unprice.dev"),
   alternates: {
     canonical: "https://unprice.dev",

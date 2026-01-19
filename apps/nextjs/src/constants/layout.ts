@@ -26,7 +26,7 @@ export const navItems = [
 ] satisfies { href: string; title: string; target?: string; isMarketing?: boolean }[]
 
 export const siteConfig: SiteConfig = {
-  name: "Unprice",
+  name: "unprice",
   description: "PriceOps infrastructure for SaaS. Stop hardcoding your revenue.",
   links: {
     twitter: "https://github.com/jhonsfran1165/unprice",

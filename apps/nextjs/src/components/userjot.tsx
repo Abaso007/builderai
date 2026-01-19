@@ -10,14 +10,8 @@ export function UserJotWrapper({ user }: { user: UserJotUser | null }) {
   const { theme } = useTheme()
 
   useEffect(() => {
-    if (isReady && user) {
-      identify({
-        id: user.id,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        avatar: user.avatar,
-      })
+    if (isReady) {
+      identify(user)
     }
   }, [user, identify, isReady])
 

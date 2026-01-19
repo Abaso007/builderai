@@ -8,6 +8,7 @@ import Header from "~/components/layout/header"
 import { Logo } from "~/components/layout/logo"
 import { UserJotWrapper } from "~/components/userjot"
 import { unprice } from "~/lib/unprice"
+import { getUserJotToken } from "~/lib/userjot"
 import { HydrateClient, prefetch, trpc } from "~/trpc/server"
 import { ProjectSwitcher } from "../../_components/project-switcher"
 import { ProjectSwitcherSkeleton } from "../../_components/project-switcher-skeleton"
@@ -95,6 +96,7 @@ export default async function Page(props: {
                   email: user.email,
                   firstName: user.name ?? "",
                   avatar: user.image ?? "",
+                  token: getUserJotToken(user.id),
                 }
               : null
           }
@@ -115,6 +117,7 @@ export default async function Page(props: {
                 email: user.email,
                 firstName: user.name ?? "",
                 avatar: user.image ?? "",
+                token: getUserJotToken(user.id),
               }
             : null
         }

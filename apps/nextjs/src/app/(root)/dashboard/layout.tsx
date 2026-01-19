@@ -45,7 +45,7 @@ export default async function DashboardLayout({
             }
           });
           document.head.appendChild(s);
-          window.uj.init("${env.NEXT_PUBLIC_USERJOT_ID}", ${JSON.stringify(userJotOptions)});
+          window.uj.init("${env.USERJOT_ID}", ${JSON.stringify(userJotOptions)});
         `}
       </Script>
       <NuqsAdapter>

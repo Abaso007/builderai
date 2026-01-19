@@ -6,6 +6,7 @@ export interface UserJotUser {
   firstName?: string
   lastName?: string
   avatar?: string
+  token?: string
 }
 
 export function useUserJot() {
@@ -43,7 +44,7 @@ export function useUserJot() {
   useEffect(() => {
     const interval = setInterval(() => {
       // @ts-ignore - window.uj is global from the script
-      setIsOpen(window.uj?.getWidgetState()?.isOpen ?? false)
+      setIsOpen(window.uj?.getWidgetState?.()?.isOpen ?? false)
     }, 500)
     return () => clearInterval(interval)
   }, [])
