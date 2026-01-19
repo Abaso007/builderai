@@ -12,6 +12,26 @@ async function getHmacKey(secret: string) {
   )
 }
 
+function fromHex(hex: string) {
+  if (hex.length % 2 !== 0) return null
+  const bytes = new Uint8Array(hex.length / 2)
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16)
+  }
+  return bytes
+}
+
+function fromBase64Url(value: string) {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/")
+  const padded = normalized + "===".slice((normalized.length + 3) % 4)
+  const binary = atob(padded)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes
+}
+
 /**
  * Encodes a preview token using Web Crypto API (Edge-friendly)
  * expires in 10 minutes by default
@@ -30,7 +50,7 @@ export async function generatePreviewToken(pageId: string, expiresInMs = 10 * 60
  */
 export async function verifyPreviewToken(token: string, pageId: string) {
   try {
-    const decoded = Buffer.from(token, "base64url").toString()
+    const decoded = new TextDecoder().decode(fromBase64Url(token))
     const [id, expires, signature] = decoded.split(":")
     if (!id || !expires || !signature) return false
     if (id !== pageId) return false
@@ -38,7 +58,8 @@ export async function verifyPreviewToken(token: string, pageId: string) {
 
     const payload = `${id}:${expires}`
     const key = await getHmacKey(env.ENCRYPTION_KEY)
-    const signatureBuffer = new Uint8Array(Buffer.from(signature, "hex"))
+    const signatureBuffer = fromHex(signature)
+    if (!signatureBuffer) return false
 
     return await crypto.subtle.verify("HMAC", key, signatureBuffer, encoder.encode(payload))
   } catch {
