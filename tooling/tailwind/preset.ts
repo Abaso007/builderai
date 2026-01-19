@@ -35,8 +35,8 @@ export const unPriceTailwindPreset: Config = {
       },
       fontFamily: {
         primary: ["var(--font-primary)"],
-        secondary: ["var(--font-geist-sans)"],
-        mono: ["var(--font-geist-mono)"],
+        secondary: ["var(--font-secondary)"],
+        mono: ["var(--font-mono)"],
       },
       typography: {
         DEFAULT: {

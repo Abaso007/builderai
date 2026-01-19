@@ -1,63 +1,27 @@
-import { verifyAccess } from "flags"
-import { type NextRequest, NextResponse } from "next/server"
-import { env } from "../../../../env"
+import { createFlagsDiscoveryEndpoint } from "flags/next"
 import { unprice } from "../../../../lib/unprice"
+
 export const runtime = "edge"
-export const dynamic = "force-dynamic" // defaults to auto
+export const dynamic = "force-dynamic"
 
-// Helper to determine if we're in development
-const isDevelopment = env.NODE_ENV === "development"
+export const GET = createFlagsDiscoveryEndpoint(async () => {
+  const { result, error } = await unprice.projects.getFeatures()
 
-export async function GET(request: NextRequest) {
-  const access = await verifyAccess(request.headers.get("Authorization"))
-  if (!access) return NextResponse.json(null, { status: 401 })
-
-  try {
-    const { result } = await unprice.projects.getFeatures()
-
-    // Transform features into definitions for flags/next
-    const definitions = result.features.reduce(
-      (acc, feature) => {
-        acc[feature.slug] = {
-          description: feature.description,
-          defaultValue: false,
-          type: "boolean",
-        }
-        return acc
-      },
-      {} as Record<string, { description: string; defaultValue: boolean; type: "boolean" }>
-    )
-
-    const response = NextResponse.json({ definitions })
-
-    // Make cache vary by Cookie header so different workspaces (via workspace cookie) get different cached responses
-    response.headers.set("Vary", "Cookie")
-
-    // Add cache control headers only in production
-    if (!isDevelopment) {
-      response.headers.set("Cache-Control", "s-maxage=60")
-    } else {
-      // Prevent caching in development
-      response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate")
-    }
-
-    return response
-  } catch (error) {
-    console.error("error", error)
-    const response = NextResponse.json({
-      definitions: {}, // Empty definitions object when there's an error
-    })
-
-    // Make cache vary by Cookie header even for error responses
-    response.headers.set("Vary", "Cookie")
-
-    // Add cache headers even for error responses in production
-    if (!isDevelopment) {
-      response.headers.set("Cache-Control", "s-maxage=60")
-    } else {
-      response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate")
-    }
-
-    return response
+  if (error) {
+    throw (error instanceof Error ? error : new Error(String(error)))
   }
-}
+
+  const definitions = result.features.reduce(
+    (acc, feature) => {
+      acc[feature.slug] = {
+        description: feature.description,
+        defaultValue: false,
+        type: "boolean",
+      }
+      return acc
+    },
+    {} as Record<string, { description: string; defaultValue: boolean; type: "boolean" }>
+  )
+
+  return { definitions }
+})

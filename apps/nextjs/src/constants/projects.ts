@@ -4,12 +4,12 @@ import type { DashboardRoute } from "~/types"
 
 export const PROJECT_NAV: DashboardRoute[] = [
   {
-    name: "Dashboard",
+    name: "Overview",
     icon: Dashboard,
     href: "/dashboard",
   },
   {
-    name: "Plans",
+    name: "Revenue Models",
     icon: Calculator,
     href: "/plans",
     disabled: false,
@@ -30,13 +30,13 @@ export const PROJECT_NAV: DashboardRoute[] = [
   //   slug: "ingestions",
   // },
   {
-    name: "Api Keys",
+    name: "API Keys",
     href: "/apikeys",
     icon: Key,
     slug: "apikeys",
   },
   {
-    name: "Customers & Subs",
+    name: "Customers",
     href: "/customers",
     icon: Users,
     slug: "customers",
@@ -51,7 +51,7 @@ export const PROJECT_NAV: DashboardRoute[] = [
         href: "/settings/danger",
       },
       {
-        name: "Payment Provider",
+        name: "Infrastructure",
         href: "/settings/payment",
       },
     ],
@@ -60,12 +60,12 @@ export const PROJECT_NAV: DashboardRoute[] = [
 
 export const PROJECT_SHORTCUTS = [
   {
-    name: "See Plans",
+    name: "View Models",
     href: "plans",
     icon: Link,
   },
   {
-    name: "Create Subscription",
+    name: "Provision Customer",
     href: "customers/subscriptions/new",
     icon: Link,
   },

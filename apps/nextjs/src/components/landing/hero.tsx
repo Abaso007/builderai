@@ -8,7 +8,6 @@ import { useTheme } from "next-themes"
 import Link from "next/link"
 import Balancer from "react-wrap-balancer"
 import { useMounted } from "~/hooks/use-mounted"
-import { HeroVideoDialog } from "./hero-video"
 import { WordRotate } from "./text-effects"
 
 const containerVariants = {
@@ -35,20 +34,6 @@ const itemVariants = {
   },
 }
 
-const heroImageVariants = {
-  hidden: { opacity: 0, scale: 0.95 },
-  visible: {
-    opacity: 1,
-    scale: 1,
-    transition: {
-      type: "spring",
-      stiffness: 100,
-      damping: 20,
-      delay: 0.6,
-    },
-  },
-}
-
 export default function Hero() {
   const { theme } = useTheme()
   const isMounted = useMounted()
@@ -56,7 +41,7 @@ export default function Hero() {
   return (
     <motion.section
       aria-labelledby="hero-title"
-      className="mt-32 flex flex-col items-center justify-center text-center sm:mt-40"
+      className="flex min-h-screen flex-col items-center justify-center text-center sm:mt-20"
       variants={containerVariants}
       initial="hidden"
       animate="visible"
@@ -67,11 +52,12 @@ export default function Hero() {
         variants={itemVariants}
       >
         <Balancer>
-          Your product is smart, but your pricing is{" "}
+          Your product is smart,
+          <br /> but your pricing is{" "}
           {isMounted && (
             <WordRotate
               className="italic"
-              words={["dumb", "slow", "static", "rigid"]}
+              words={["hardcoded", "brittle", "static", "manual"]}
               shadowColor={theme === "dark" ? "white" : "black"}
             />
           )}
@@ -83,15 +69,21 @@ export default function Hero() {
       >
         <br />
         <br />
-        The open-source adaptive monetization infrastructure. Built for SaaS founders who refuse to
-        let static plans strangle their growth. From flat rates to smart revenue — unlock adaptive
-        pricing without the headaches.
+        <b>The PriceOps Infrastructure for SaaS.</b> You can finally release the engineering backlog
+        from the weight of legacy billing. As you discover the freedom of PriceOps, you’ll realize
+        that your pricing is no longer a constraint — it’s an evolution.
         <br />
         <br />
-        Implement and iterate any pricing model you want, without the fear of losing customers.
+        Ship usage-based, tiered, or hybrid models with a single integration, and watch the friction
+        dissolve. No more "billing JIRAs."
+        <br />
+        <br />
+        <span className="text-sm italic opacity-70">
+          P.S. We aren't a Stripe wrapper—we're the architecture that makes every provider optional.
+        </span>
       </motion.p>
       <motion.div
-        className="mt-8 flex w-full flex-col justify-center gap-3 px-3 align-middle sm:flex-row"
+        className="my-14 flex w-full flex-col justify-center gap-3 px-3 align-middle sm:flex-row"
         variants={itemVariants}
       >
         <Link href={`${APP_DOMAIN}`} className={buttonVariants({ variant: "primary" })}>
@@ -110,32 +102,6 @@ export default function Hero() {
             <span>Star on GitHub</span>
           </Link>
         </Button>
-      </motion.div>
-      <motion.div
-        className="relative mx-auto my-20 h-fit w-full max-w-6xl px-4"
-        variants={heroImageVariants}
-      >
-        <div className="relative">
-          <HeroVideoDialog
-            className="block dark:hidden"
-            animationStyle="from-center"
-            videoSrc="https://www.youtube.com/embed/vAirXo6FJDs"
-            thumbnailSrc="/unprice-light.png"
-            thumbnailAlt="Hero Video"
-          />
-          <HeroVideoDialog
-            className="hidden dark:block"
-            animationStyle="from-center"
-            videoSrc="https://www.youtube.com/embed/vAirXo6FJDs"
-            thumbnailSrc="/unprice-dark.png"
-            thumbnailAlt="Hero Video"
-          />
-        </div>
-
-        <div
-          className="-bottom-20 -mx-10 absolute inset-x-0 h-2/4 bg-gradient-to-t from-background-base via-background-base to-transparent lg:h-1/4"
-          aria-hidden="true"
-        />
       </motion.div>
     </motion.section>
   )

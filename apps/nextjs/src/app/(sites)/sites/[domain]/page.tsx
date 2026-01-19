@@ -21,6 +21,59 @@ import { PricingTable } from "../_components/pricing-table"
 
 // TODO: generate metadata https://github.com/vercel/platforms/blob/main/app/s/%5Bsubdomain%5D/page.tsx
 // check shadcn landing page for inspiration
+export const runtime = "edge"
+
+// TODO: improve metadata generation
+export async function generateMetadata({
+  params: { domain },
+}: {
+  params: { domain: string }
+}) {
+  const page = await getPageData(domain)
+
+  if (!page) {
+    return {}
+  }
+
+  const { title, copy, description, logo } = page
+  const siteTitle = title || "Pricing Page"
+  const siteDescription = description || copy || "Dynamic pricing page powered by Unprice"
+
+  const ogUrl = new URL("https://unprice.dev/og")
+  ogUrl.searchParams.set("title", siteTitle)
+  ogUrl.searchParams.set("description", siteDescription)
+  // If logo is a URL, we can pass it, otherwise skip it for OG to avoid large URLs
+  if (logo?.startsWith("http")) {
+    ogUrl.searchParams.set("logo", logo)
+  }
+
+  return {
+    title: siteTitle,
+    description: siteDescription,
+    openGraph: {
+      title: siteTitle,
+      description: siteDescription,
+      images: [
+        {
+          url: ogUrl.toString(),
+          width: 1200,
+          height: 630,
+          alt: siteTitle,
+        },
+      ],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: siteTitle,
+      description: siteDescription,
+      images: [ogUrl.toString()],
+    },
+    alternates: {
+      canonical: `https://${domain}`,
+    },
+  }
+}
+
 export default async function DomainPage({
   params: { domain },
   searchParams: { revalidate },
@@ -42,7 +95,7 @@ export default async function DomainPage({
   }
 
   // activate preview mode
-  const isPreview = !!(revalidate && verifyPreviewToken(revalidate, page.id))
+  const isPreview = !!(revalidate && (await verifyPreviewToken(revalidate, page.id)))
 
   // if it's not publish and is not preview, show a 404 page
   if (!page.published && !isPreview) {
@@ -84,6 +137,8 @@ export default async function DomainPage({
                   value: feature.displayFeatureText,
                   title: feature.feature.title,
                   type: feature.featureType,
+                  description: feature.feature.description,
+                  config: feature.config,
                 },
               }
             }) || []

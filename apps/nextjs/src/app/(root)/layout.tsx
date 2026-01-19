@@ -18,10 +18,11 @@ export const metadata = {
     template: `%s - ${siteConfig.name}`,
   },
   description: siteConfig.description,
-  icons: {
-    icon: "/favicon.ico",
-  },
   openGraph: {
+    type: "website",
+    locale: "en_US",
+    url: "https://unprice.dev",
+    siteName: siteConfig.name,
     images: [{ url: "/og" }],
   },
   twitter: {
@@ -29,9 +30,23 @@ export const metadata = {
     title: siteConfig.name,
     description: siteConfig.description,
     images: [{ url: "/og" }],
-    creator: "@jhonsfran",
+    creator: "@jhosef90",
   },
   metadataBase: new URL("https://unprice.dev"),
+  alternates: {
+    canonical: "https://unprice.dev",
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-video-preview": -1,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+    },
+  },
 } satisfies Metadata
 
 export const viewport: Viewport = {

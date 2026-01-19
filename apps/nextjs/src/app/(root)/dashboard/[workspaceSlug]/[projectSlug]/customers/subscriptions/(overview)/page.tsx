@@ -37,7 +37,7 @@ export default async function PlanSubscriptionsPage({
       header={
         <HeaderTab
           title="Subscriptions"
-          description="Manage your subscriptions, add new subscriptions, update plans and more."
+          description="Observe active value flows and manage how your customers engage with your product."
           action={
             <div className="flex items-center gap-2">
               <CodeApiSheet defaultMethod="getSubscription">
@@ -49,7 +49,7 @@ export default async function PlanSubscriptionsPage({
               <SuperLink href={`/${workspaceSlug}/${projectSlug}/customers/subscriptions/new`}>
                 <Button variant={"primary"}>
                   <Plus className="mr-2 h-4 w-4" />
-                  Subscription
+                  Establish Subscription
                 </Button>
               </SuperLink>
             </div>
@@ -70,7 +70,7 @@ export default async function PlanSubscriptionsPage({
       <div className="mt-4">
         <div className="flex flex-col px-1 py-4">
           <Typography variant="p" affects="removePaddingMargin">
-            All subscriptions
+            All active subscriptions
           </Typography>
         </div>
         <Suspense

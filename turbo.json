@@ -48,7 +48,9 @@
         "AXIOM_DATASET",
         "EMIT_ANALYTICS",
         "UPSTASH_REDIS_REST_URL",
-        "UPSTASH_REDIS_REST_TOKEN"
+        "UPSTASH_REDIS_REST_TOKEN",
+        "USERJOT_ID",
+        "USERJOT_SECRET"
       ]
     },
     "fmt": {
@@ -81,6 +83,7 @@
         "ENCRYPTION_KEY",
         "CLOUDFLARE_API_TOKEN",
         "CLOUDFLARE_ZONE_ID",
+        "CLOUDFLARE_CACHE_DOMAIN",
         "TRIGGER_SECRET_KEY",
         "VERCEL_PROJECT_UNPRICE_ID",
         "VERCEL_TEAM_ID",
@@ -95,7 +98,9 @@
         "AXIOM_DATASET",
         "EMIT_ANALYTICS",
         "UPSTASH_REDIS_REST_URL",
-        "UPSTASH_REDIS_REST_TOKEN"
+        "UPSTASH_REDIS_REST_TOKEN",
+        "USERJOT_ID",
+        "USERJOT_SECRET"
       ]
     },
     "test": {

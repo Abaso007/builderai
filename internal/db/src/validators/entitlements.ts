@@ -3,7 +3,7 @@ import { z } from "zod"
 import { extendZodWithOpenApi } from "zod-openapi"
 import * as schema from "../schema"
 import { featureSelectBaseSchema } from "./features"
-import { planVersionFeatureSelectBaseSchema } from "./planVersionFeatures"
+import { configFeatureSchema, planVersionFeatureSelectBaseSchema } from "./planVersionFeatures"
 import {
   deniedReasonSchema,
   entitlementMergingPolicySchema,
@@ -96,6 +96,8 @@ export const verificationResultSchema = z.object({
   remaining: z.number().optional(),
   limit: z.number().optional(),
   usage: z.number().optional(),
+  cost: z.number().optional(),
+  rate: z.string().optional(),
   latency: z.number().optional(),
 })
 export type VerificationResult = z.infer<typeof verificationResultSchema>
@@ -117,6 +119,8 @@ export const reportUsageResultSchema = z.object({
   message: z.string().optional(),
   limit: z.number().optional(),
   usage: z.number().optional(),
+  cost: z.number().optional(),
+  rate: z.string().optional(),
   notifiedOverLimit: z.boolean().optional(),
   remaining: z.number().optional(),
   deniedReason: deniedReasonSchema.optional(),
@@ -130,6 +134,7 @@ export const entitlementGrantsSnapshotSchema = z.object({
   effectiveAt: z.number(),
   expiresAt: z.number().nullable(),
   limit: z.number().nullable(),
+  config: configFeatureSchema.optional(), // Added for pricing calculations
 })
 
 export const entitlementSchema = createSelectSchema(schema.entitlements, {

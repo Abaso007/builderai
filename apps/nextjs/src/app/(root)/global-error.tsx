@@ -1,10 +1,12 @@
 "use client"
 
 import { Button } from "@unprice/ui/button"
+import { cn } from "@unprice/ui/utils"
 import { useRouter } from "next/navigation"
 import { BlurImage } from "~/components/blur-image"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
+import { fontMapper } from "~/styles/fonts"
 
 export default function GlobalError({
   reset,
@@ -17,7 +19,14 @@ export default function GlobalError({
 
   return (
     <html lang="en">
-      <body>
+      <body
+        className={cn(
+          "antialiased",
+          fontMapper["font-primary"],
+          fontMapper["font-secondary"],
+          fontMapper["font-mono"]
+        )}
+      >
         <DashboardShell>
           <div className="flex flex-col items-center justify-center">
             <EmptyPlaceholder className="min-h-[800px] w-full space-y-10">

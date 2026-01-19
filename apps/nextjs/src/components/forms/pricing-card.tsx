@@ -2,6 +2,7 @@ import { calculateFlatPricePlan } from "@unprice/db/validators"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader } from "@unprice/ui/card"
+import { Separator } from "@unprice/ui/separator"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { Typography } from "@unprice/ui/typography"
 import { PricingItem } from "~/components/forms/pricing-item"
@@ -37,10 +38,7 @@ export function PricingCard({
       </CardHeader>
 
       <CardContent className="flex flex-col gap-4">
-        <CardDescription className="line-clamp-2">{planVersion.description}</CardDescription>
-        <Typography variant="p" affects="removePaddingMargin" className="text-end text-xs italic">
-          {"* plus usage if applicable"}
-        </Typography>
+        <CardDescription className="line-clamp-2">{planVersion.description}*</CardDescription>
         <Button className="w-full">
           {planVersion.plan.enterprisePlan ? "Contact Us" : "Get Started"}
         </Button>
@@ -62,6 +60,15 @@ export function PricingCard({
                 })}
             </ul>
           </div>
+          <Separator />
+          <Typography
+            variant="p"
+            affects="removePaddingMargin"
+            className="text-start text-xs italic"
+          >
+            {"* plus usage if applicable"} <br />
+            {"* plus payment processing fees"}
+          </Typography>
         </div>
       </CardFooter>
     </Card>

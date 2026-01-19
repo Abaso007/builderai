@@ -60,6 +60,10 @@ export const route = createRoute({
   responses: {
     [HttpStatusCodes.OK]: jsonContent(reportUsageResultSchema, "The result of the report usage"),
     ...openApiErrorResponses,
+    [HttpStatusCodes.TOO_MANY_REQUESTS]: jsonContent(
+      reportUsageResultSchema,
+      "The limit has been exceeded"
+    ),
   },
 })
 
@@ -67,7 +71,8 @@ export type ReportUsageRequest = z.infer<
   (typeof route.request.body)["content"]["application/json"]["schema"]
 >
 export type ReportUsageResponse = z.infer<
-  (typeof route.responses)[200]["content"]["application/json"]["schema"]
+  | (typeof route.responses)[200]["content"]["application/json"]["schema"]
+  | (typeof route.responses)[429]["content"]["application/json"]["schema"]
 >
 
 export const registerReportUsageV1 = (app: App) =>
@@ -126,6 +131,10 @@ export const registerReportUsageV1 = (app: App) =>
 
     if (err) {
       throw err
+    }
+
+    if (result.deniedReason === "LIMIT_EXCEEDED") {
+      return c.json(result, HttpStatusCodes.TOO_MANY_REQUESTS)
     }
 
     return c.json(result, HttpStatusCodes.OK)

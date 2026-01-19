@@ -12,15 +12,15 @@ import { Marquee } from "./marquee"
 const files = [
   {
     name: "FREE",
-    body: "Unprice is free to use. You can get started with Unprice in minutes.",
+    body: "Unprice is free to use. You can begin to experience the power of PriceOps in minutes.",
   },
   {
     name: "PRO",
-    body: "Unprice Pro is a paid plan that gives you access to more features and support.",
+    body: "Unprice Pro unlocks advanced capabilities, allowing your business to scale with confidence.",
   },
   {
     name: "ENTERPRISE",
-    body: "Unprice Enterprise is a custom plan that is tailored to your business needs.",
+    body: "Unprice Enterprise is a tailored foundation, architected specifically for your unique business needs.",
   },
 ]
 
@@ -28,7 +28,7 @@ const features = [
   {
     Icon: FileTextIcon,
     name: "Plan iteration",
-    description: "Version plans, migrate customers, packaging features and more.",
+    description: "Version plans, migrate customers, and packaging features with PriceOps.",
     href: `${DOCS_DOMAIN}/features/plans`,
     cta: "Learn more",
     className: "col-span-3 lg:col-span-1",
@@ -61,7 +61,7 @@ const features = [
     Icon: BellIcon,
     name: "Any pricing model",
     description: "Report usage, metering, usage-based pricing, etc.",
-    href: `${DOCS_DOMAIN}/features/pricing`,
+    href: `${DOCS_DOMAIN}concepts/pricing/overview`,
     cta: "Learn more",
     className: "col-span-3 lg:col-span-2",
     background: (

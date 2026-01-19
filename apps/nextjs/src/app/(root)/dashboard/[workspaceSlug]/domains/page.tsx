@@ -31,10 +31,10 @@ export default async function PageDomains() {
       header={
         <HeaderTab
           title="Domains"
-          description="Domains for this workspace"
+          description="Establish your workspace territory and digital presence."
           action={
             <DomainDialog>
-              <Button>Create Domain</Button>
+              <Button>Provision Domain</Button>
             </DomainDialog>
           }
         />

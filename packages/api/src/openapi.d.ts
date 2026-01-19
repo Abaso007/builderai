@@ -668,28 +668,6 @@ export interface components {
         requestId: string
       }
     }
-    ErrTooManyRequests: {
-      error: {
-        /**
-         * @description A machine readable error code.
-         * @example TOO_MANY_REQUESTS
-         * @enum {string}
-         */
-        code: "TOO_MANY_REQUESTS"
-        /**
-         * @description A link to our documentation with more details about this error code
-         * @example https://docs.unprice.dev/api-reference/errors/code/TOO_MANY_REQUESTS
-         */
-        docs: string
-        /** @description A human readable explanation of what went wrong */
-        message: string
-        /**
-         * @description Please always include the requestId in your error report
-         * @example req_1234
-         */
-        requestId: string
-      }
-    }
     ErrInternalServerError: {
       error: {
         /**
@@ -701,6 +679,28 @@ export interface components {
         /**
          * @description A link to our documentation with more details about this error code
          * @example https://docs.unprice.dev/api-reference/errors/code/INTERNAL_SERVER_ERROR
+         */
+        docs: string
+        /** @description A human readable explanation of what went wrong */
+        message: string
+        /**
+         * @description Please always include the requestId in your error report
+         * @example req_1234
+         */
+        requestId: string
+      }
+    }
+    ErrTooManyRequests: {
+      error: {
+        /**
+         * @description A machine readable error code.
+         * @example TOO_MANY_REQUESTS
+         * @enum {string}
+         */
+        code: "TOO_MANY_REQUESTS"
+        /**
+         * @description A link to our documentation with more details about this error code
+         * @example https://docs.unprice.dev/api-reference/errors/code/TOO_MANY_REQUESTS
          */
         docs: string
         /** @description A human readable explanation of what went wrong */
@@ -778,6 +778,8 @@ export interface operations {
             message?: string
             limit?: number
             usage?: number
+            cost?: number
+            rate?: string
             notifiedOverLimit?: boolean
             remaining?: number
             /** @enum {string} */
@@ -888,13 +890,73 @@ export interface operations {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
         }
       }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      /** @description The limit has been exceeded */
       429: {
         headers: {
           [name: string]: unknown
         }
         content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
+          "application/json": {
+            allowed: boolean
+            message?: string
+            limit?: number
+            usage?: number
+            cost?: number
+            rate?: string
+            notifiedOverLimit?: boolean
+            remaining?: number
+            /** @enum {string} */
+            deniedReason?:
+              | "INVALID_USAGE"
+              | "ERROR_SYNCING_ENTITLEMENTS_LAST_USAGE"
+              | "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE"
+              | "ENTITLEMENT_OUTSIDE_OF_CURRENT_BILLING_WINDOW"
+              | "ERROR_RESETTING_DO"
+              | "RATE_LIMITED"
+              | "ENTITLEMENT_NOT_FOUND"
+              | "LIMIT_EXCEEDED"
+              | "ENTITLEMENT_EXPIRED"
+              | "ENTITLEMENT_NOT_ACTIVE"
+              | "DO_NOT_INITIALIZED"
+              | "INCORRECT_USAGE_REPORTING"
+              | "ERROR_INSERTING_USAGE_DO"
+              | "ERROR_INSERTING_VERIFICATION_DO"
+              | "PROJECT_DISABLED"
+              | "CUSTOMER_DISABLED"
+              | "SUBSCRIPTION_DISABLED"
+              | "FETCH_ERROR"
+              | "SUBSCRIPTION_ERROR"
+              | "ENTITLEMENT_ERROR"
+              | "SUBSCRIPTION_EXPIRED"
+              | "NO_DEFAULT_PLAN_FOUND"
+              | "SUBSCRIPTION_NOT_ACTIVE"
+              | "PHASE_NOT_CREATED"
+              | "FEATURE_NOT_FOUND_IN_SUBSCRIPTION"
+              | "CUSTOMER_NOT_FOUND"
+              | "CUSTOMER_ENTITLEMENTS_NOT_FOUND"
+              | "FEATURE_TYPE_NOT_SUPPORTED"
+              | "PROJECT_DISABLED"
+              | "CUSTOMER_DISABLED"
+              | "PLAN_VERSION_NOT_PUBLISHED"
+              | "PLAN_VERSION_NOT_ACTIVE"
+              | "PAYMENT_PROVIDER_CONFIG_NOT_FOUND"
+              | "ENTITLEMENT_EXPIRED"
+              | "ENTITLEMENT_NOT_ACTIVE"
+              | "CUSTOMER_SESSION_NOT_CREATED"
+              | "CUSTOMER_SESSION_NOT_FOUND"
+              | "PLAN_VERSION_NOT_FOUND"
+              | "PAYMENT_PROVIDER_ERROR"
+              | "SUBSCRIPTION_NOT_CREATED"
+              | "CUSTOMER_NOT_CREATED"
+              | "SUBSCRIPTION_NOT_CANCELED"
+              | "CUSTOMER_PHASE_NOT_FOUND"
+              | "CURRENCY_MISMATCH"
+              | "BILLING_INTERVAL_MISMATCH"
+              | "ENTITLEMENT_NOT_FOUND"
+              | "SUBSCRIPTION_NOT_FOUND"
+              | "INVALID_ENTITLEMENT_TYPE"
+              | "NO_ACTIVE_PHASE_FOUND"
+          }
         }
       }
       /** @description The server has encountered a situation it does not know how to handle. */
@@ -1113,6 +1175,8 @@ export interface operations {
             remaining?: number
             limit?: number
             usage?: number
+            cost?: number
+            rate?: string
             latency?: number
           }
         }

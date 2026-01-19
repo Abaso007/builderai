@@ -11,6 +11,7 @@ import {
 } from "@unprice/ui/chart"
 import { BarChart4, Code } from "lucide-react"
 import { Bar, BarChart, LabelList, XAxis, YAxis } from "recharts"
+import { CodeApiSheet } from "~/components/code-api-sheet"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { useIntervalFilter } from "~/hooks/use-filter"
 import { useQueryInvalidation } from "~/hooks/use-query-invalidation"
@@ -44,10 +45,12 @@ export const UsageChartSkeleton = ({
         </EmptyPlaceholder.Description>
         {!error && (
           <EmptyPlaceholder.Action>
-            <Button size={"sm"} disabled={isLoading}>
-              <Code className="mr-2 h-4 w-4" />
-              Start usage
-            </Button>
+            <CodeApiSheet defaultMethod="reportUsage">
+              <Button size={"sm"} disabled={isLoading}>
+                <Code className="mr-2 h-4 w-4" />
+                Start usage
+              </Button>
+            </CodeApiSheet>
           </EmptyPlaceholder.Action>
         )}
       </EmptyPlaceholder>

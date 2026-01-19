@@ -1,7 +1,13 @@
+import type { Metadata } from "next"
 import Belief from "~/components/landing/belief"
 import HeroManifest from "~/components/landing/hero-manifest"
 import MainfestoCopy from "~/components/landing/mainfesto-copy"
-import PillarsAMI from "~/components/landing/pillarsAMI"
+import PillarsPriceOps from "~/components/landing/pillarsAMI"
+
+export const metadata: Metadata = {
+  title: "Manifesto",
+  description: "Our vision for the future of pricing and revenue infrastructure.",
+}
 
 export default function Manifesto() {
   return (
@@ -10,7 +16,7 @@ export default function Manifesto() {
 
       <div className="mx-auto flex w-full max-w-4xl flex-col overflow-hidden px-3">
         <MainfestoCopy />
-        <PillarsAMI />
+        <PillarsPriceOps />
         <Belief />
       </div>
     </main>

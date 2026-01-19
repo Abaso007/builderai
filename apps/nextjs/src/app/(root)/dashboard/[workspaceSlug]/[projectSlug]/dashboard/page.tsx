@@ -82,20 +82,20 @@ export default async function DashboardOverview(props: {
         </Suspense>
         <AnalyticsCard
           className="w-full"
-          title="Feature Verifications & Usage"
-          description="Feature verifications and usage recorded for the selected interval."
+          title="Value Realization"
+          description="Real-time insights into how users are experiencing your product value."
           defaultTab="verifications"
           tabs={[
             {
               id: "verifications",
               label: "Verifications",
-              description: `Feature verifications for the ${interval.label}.`,
+              description: `Value verification events for the ${interval.label}.`,
               chart: () => <VerificationsChart />,
             },
             {
               id: "usage",
               label: "Usage",
-              description: `Feature usage for the ${interval.label}.`,
+              description: `Metering and usage flow for the ${interval.label}.`,
               chart: () => <UsageChart />,
             },
           ]}
