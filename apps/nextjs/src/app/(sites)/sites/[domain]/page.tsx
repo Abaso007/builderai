@@ -137,6 +137,8 @@ export default async function DomainPage({
                   value: feature.displayFeatureText,
                   title: feature.feature.title,
                   type: feature.featureType,
+                  description: feature.feature.description,
+                  config: feature.config,
                 },
               }
             }) || []

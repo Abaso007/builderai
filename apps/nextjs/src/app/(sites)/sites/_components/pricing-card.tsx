@@ -1,6 +1,6 @@
 "use client"
 
-import { Check } from "lucide-react"
+import { Check, HelpCircle } from "lucide-react"
 import type * as React from "react"
 
 import { Button } from "@unprice/ui/button"
@@ -12,6 +12,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@unprice/ui/card"
+import { Separator } from "@unprice/ui/separator"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
+import { Typography } from "@unprice/ui/typography"
 import { cn } from "@unprice/ui/utils"
 import Cookies from "js-cookie"
 
@@ -29,6 +32,8 @@ export interface PricingPlan {
       value: string | number | boolean
       title: string
       type: "flat" | "usage" | "tier" | "package"
+      description?: string
+      config?: Record<string, unknown>
     }
   >[]
   cta: string
@@ -85,15 +90,113 @@ export function PricingCard({ plan, isPopular, className, isOnly, ...props }: Pr
       </CardHeader>
       <CardContent className="flex-grow">
         <ul className="space-y-2">
-          {plan.features.map((feature) => (
-            <li key={feature} className="flex items-center">
-              <Check className="mr-2 h-4 w-4 flex-shrink-0 text-primary" />
-              <span>{feature}</span>
-            </li>
-          ))}
+          {plan.detailedFeatures.map((detailedFeatureObj) => {
+            const featureTitle = Object.keys(detailedFeatureObj)[0]
+            const feature = detailedFeatureObj[featureTitle!]
+
+            if (!feature) return null
+
+            const config = feature.config as {
+              tiers?: {
+                firstUnit: number
+                lastUnit: number | null
+                unitPrice: { displayAmount: string }
+                flatPrice: { displayAmount: string }
+              }[]
+              usageMode?: string
+              price?: { displayAmount: string }
+            } | null
+
+            return (
+              <li key={featureTitle} className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center">
+                  <Check className="mr-2 h-4 w-4 flex-shrink-0 text-primary" />
+                  <span className="truncate">{feature.value}</span>
+                </div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button type="button" className="focus:outline-none">
+                      <HelpCircle className="size-3.5 flex-shrink-0 cursor-help text-muted-foreground transition-colors hover:text-primary" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent align="end" side="right" className="max-w-[280px]">
+                    <div className="space-y-2 p-1">
+                      <Typography variant="h6" className="font-semibold text-sm">
+                        {feature.title}
+                      </Typography>
+                      {feature.description && (
+                        <Typography variant="p" className="text-muted-foreground text-xs">
+                          {feature.description}
+                        </Typography>
+                      )}
+
+                      <Separator className="my-2" />
+
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-[10px] text-muted-foreground uppercase tracking-wider">
+                          <span>Billing Detail</span>
+                          <span className="font-medium">{feature.type}</span>
+                        </div>
+
+                        {config?.tiers && config.tiers.length > 0 && (
+                          <div className="mt-2 overflow-hidden rounded border text-[10px]">
+                            <table className="w-full border-collapse">
+                              <thead className="bg-muted">
+                                <tr>
+                                  <th className="px-2 py-1 text-left">Units</th>
+                                  <th className="px-2 py-1 text-right">Price</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {config.tiers.map((tier) => (
+                                  <tr key={tier.firstUnit} className="border-t">
+                                    <td className="px-2 py-1">
+                                      {tier.firstUnit} - {tier.lastUnit ?? "∞"}
+                                    </td>
+                                    <td className="px-2 py-1 text-right">
+                                      {tier.unitPrice.displayAmount}/unit
+                                      {Number.parseFloat(tier.flatPrice.displayAmount) > 0 && (
+                                        <div className="text-[8px] text-muted-foreground">
+                                          +{tier.flatPrice.displayAmount} flat
+                                        </div>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+
+                        {feature.type === "usage" &&
+                          config?.usageMode === "unit" &&
+                          config?.price && (
+                            <div className="flex justify-between text-[10px]">
+                              <span>Price per unit</span>
+                              <span className="font-medium">{config.price.displayAmount}</span>
+                            </div>
+                          )}
+                      </div>
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              </li>
+            )
+          })}
         </ul>
       </CardContent>
-      <CardFooter>
+      <CardFooter className="flex flex-col gap-4">
+        <div className="w-full space-y-2">
+          <Typography
+            variant="p"
+            affects="removePaddingMargin"
+            className="text-start text-xs italic"
+          >
+            {"* plus usage if applicable"} <br />
+            {"* plus payment processing fees"}
+          </Typography>
+          <Separator />
+        </div>
         <Button
           className={cn("w-full", {
             "bg-primary text-primary-foreground": isPopular || isOnly,

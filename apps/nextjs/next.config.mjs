@@ -33,7 +33,7 @@ const nextConfig = {
     domains: ["images.unsplash.com"],
   },
   swcMinify: true,
-  allowedDevOrigins: ["localhost", "app.localhost"],
+  allowedDevOrigins: ["localhost", "app.localhost", "*.localhost"],
   experimental: {
     turbo: {},
     // ppr: true, // TODO: activate later
