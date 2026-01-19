@@ -8,7 +8,7 @@ export const GET = createFlagsDiscoveryEndpoint(async () => {
   const { result, error } = await unprice.projects.getFeatures()
 
   if (error) {
-    throw (error instanceof Error ? error : new Error(String(error)))
+    throw error instanceof Error ? error : new Error(String(error))
   }
 
   const definitions = result.features.reduce(
