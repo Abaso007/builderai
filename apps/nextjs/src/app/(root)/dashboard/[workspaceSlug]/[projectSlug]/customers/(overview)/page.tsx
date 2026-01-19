@@ -39,7 +39,7 @@ export default async function ProjectUsersPage(props: {
       header={
         <HeaderTab
           title="Customers"
-          description="Manage your customers, add new customers, update plans and more."
+          description="Observe and cultivate your user base. Notice how value flows to each segment."
           action={
             <div className="flex items-center gap-2">
               <CodeApiSheet defaultMethod="signUp">
@@ -51,7 +51,7 @@ export default async function ProjectUsersPage(props: {
               <CustomerDialog>
                 <Button>
                   <Plus className="mr-2 h-4 w-4" />
-                  Customer
+                  Provision Customer
                 </Button>
               </CustomerDialog>
             </div>

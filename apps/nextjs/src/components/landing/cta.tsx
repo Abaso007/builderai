@@ -31,8 +31,8 @@ export default function Cta() {
               </h3>
               <p className="mx-auto mt-4 max-w-2xl text-background-text text-lg">
                 <Balancer>
-                  We are on early stage, but we are working hard to make it better. Let us know if
-                  you have any feedback.
+                  As we build the future of PriceOps, you can be part of the foundation. Notice the
+                  difference today, and help us shape the evolution of SaaS revenue.
                 </Balancer>
               </p>
             </motion.div>

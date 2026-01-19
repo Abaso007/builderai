@@ -10,28 +10,28 @@ const PillarsOfPriceOps = [
     title: "Adaptive Revenue Engine",
     icon: <BarChart className="h-5 w-5" />,
     description:
-      "Launch any model—usage-based, seat-based, or hybrid—in real-time. Stop guessing and start reacting to market signals instantly.",
+      "Experience the fluidity of launching any model—usage-based, seat-based, or hybrid—in real-time. Stop guessing and start reacting.",
     practice: "Pricing is a product surface. Treat it like one.",
   },
   {
     title: "Engineering Independence",
     icon: <TrendingUp className="h-5 w-5" />,
     description:
-      "Pricing belongs to Growth, not JIRA. Run experiments and change plans with a click, without wasting a single dev hour.",
+      "Release the burden from your backlog. Run experiments and change plans with a click, while your developers focus on the core product.",
     practice: "Pricing logic belongs to business teams. Not backlogs.",
   },
   {
     title: "Vendor Freedom",
     icon: <DollarSign className="h-5 w-5" />,
     description:
-      "Don't be held hostage by Stripe or Paddle. Swap providers or run multiple gateways without touching your app code.",
+      "I don't know how quickly you will realize that you don't have to be held hostage by Stripe. Swap providers with complete transparency.",
     practice: "Payments are infrastructure, not dependencies.",
   },
   {
     title: "Transparent Standard",
     icon: <Code className="h-5 w-5" />,
     description:
-      "Monetization is too critical to be a black box. Our AGPL-core ensures your revenue logic is always transparent, auditable, and yours to keep.",
+      "Monetization is too critical to be a black box. Experience the integrity of AGPL-core: transparent, auditable, and yours to keep.",
     practice: "Your revenue engine should be auditable and programmable.",
   },
 ]
@@ -109,7 +109,7 @@ export default function PillarsPriceOps() {
           </li>
         </ul>
         <br />
-        Stop treating pricing as an afterthought.
+        Stop treating pricing as a Secondary Artifact.
         <br />
         <br />
         <b>The future of SaaS is Adaptive.</b>

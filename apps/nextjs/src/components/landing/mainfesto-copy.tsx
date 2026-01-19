@@ -44,26 +44,26 @@ export default function MainfestoCopy() {
         id="features-title"
         className="mt-2 inline-block bg-clip-text py-2 font-bold text-4xl text-background-textContrast tracking-tighter sm:text-6xl md:text-6xl"
       >
-        Static Pricing is a Revenue Leak
+        Static Pricing is a Choice to Leak Revenue
       </motion.h2>
       <motion.div variants={itemVariants} className="mt-6 text-justify text-lg">
-        Most SaaS companies are accidentally leaving 30-50% of their revenue on the table.
+        Most SaaS companies are unaware that they are leaving 30-50% of their revenue on the table.
         <br />
         <br />
-        Why? Because they treat pricing like a backend config file instead of a growth lever.
+        Why? Because they treat pricing like a backend config file instead of a dynamic growth
+        lever.
         <br />
         <br />
-        <b>The Old Way:</b> You have a "Pro" plan. It’s been $49/mo for two years. Your product is
-        10x better than it was, but your price is the same. You want to test a usage-based tier, but
-        the engineering team says it’ll take 6 weeks to rebuild the billing logic. So you do
-        nothing. You lose.
+        <b>The Old Way:</b> You might recall the "Pro" plan. It’s been $49/mo for two years. Your
+        product is 10x better, but your price remains static. You might feel the urge to test a new
+        tier, but engineering tells you it's a "six-week rebuild." So you wait. You lose.
         <br />
         <br />
         <b>The New Way: PriceOps.</b>
         <br />
         <br />
-        Pricing should be as agile as your code. When your customers demand more value, you should
-        be able to capture that value instantly—without opening a single JIRA ticket.
+        Pricing should be as fluid as your code. When your customers demand more value, you should
+        be able to capture that value instantly—without ever opening a single JIRA ticket.
         <br />
         <br />
         The market has shifted. Customers no longer want to pay for "seats" they don't use. They
@@ -73,20 +73,20 @@ export default function MainfestoCopy() {
         Think about it: Why do users churn?
         <br />
         <br />
-        Usually, it’s a mismatch between what they pay and the value they get. In the "Static
-        World," you have to guess the right price for everyone. In the "Adaptive World," the price
-        fits the user like a glove.
+        Usually, it’s a mismatch between what they pay and the value they perceive. In the "Static
+        World," you have to guess. In the "Adaptive World," the price fits the user like a glove.
         <br />
         <br />
-        Companies using hybrid models (subscription + usage) see <b>21% higher growth rates</b> than
-        those stuck in the past.
+        Companies using hybrid models see <b>21% higher growth rates</b> than those who remain stuck
+        in the past.
         <br />
         <br />
         Price is the direct mirror of your innovation. If your product is evolving daily, but your
-        pricing reviews happen once a year, you aren't running a business—you're running a charity.
+        pricing remains frozen, you aren't running a business — you're experiencing the weight of an
+        engineering bottleneck.
         <br />
         <br />
-        Are you ready to stop leaking revenue?
+        Are you ready to stop the leak?
       </motion.div>
       <motion.div variants={itemVariants} className="mt-6 text-justify text-lg">
         Are you ready for the shift?
@@ -103,7 +103,8 @@ export default function MainfestoCopy() {
         </ul>
       </motion.div>
       <motion.div variants={itemVariants} className="mt-6 text-justify text-lg">
-        The companies winning today are those who treat pricing as a product, not an afterthought.
+        The companies winning today are those who treat pricing as a product, not as a Secondary
+        Artifact.
         <br />
         <br />
         Are you ready to join them?

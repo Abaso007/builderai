@@ -19,8 +19,8 @@ export default async function BillingPage({ params }: { params: { workspaceSlug:
       <DashboardShell
         header={
           <HeaderTab
-            title="Billing Settings"
-            description="Manage your payments for this workspace."
+            title="Scale & Usage"
+            description="Observe the growth and value metrics of this workspace."
           />
         }
       >
@@ -28,8 +28,8 @@ export default async function BillingPage({ params }: { params: { workspaceSlug:
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>Main Workspace</AlertTitle>
           <AlertDescription>
-            This is the main workspace, there is no need to manage payments or subscriptions for
-            this workspace.
+            This is the main workspace, where your foundation is established. No further billing
+            management is required here.
           </AlertDescription>
         </Alert>
       </DashboardShell>
@@ -40,8 +40,8 @@ export default async function BillingPage({ params }: { params: { workspaceSlug:
     <DashboardShell
       header={
         <HeaderTab
-          title="Billing Settings"
-          description="Manage your payments for this workspace."
+          title="Scale & Usage"
+          description="Observe and manage your workspace value flows."
         />
       }
     >

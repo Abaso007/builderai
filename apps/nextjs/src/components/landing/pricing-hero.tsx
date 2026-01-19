@@ -1243,7 +1243,7 @@ export function PricingHero({
       variants={heroImageVariants}
       initial="hidden"
       animate="visible"
-      className={cn("my-28 flex items-center justify-center", className)}
+      className={cn("my-20 flex items-center justify-center", className)}
       style={accentStyle}
       aria-labelledby="hero-headline"
     >

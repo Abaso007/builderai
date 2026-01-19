@@ -95,7 +95,7 @@ export default async function DomainPage({
   }
 
   // activate preview mode
-  const isPreview = !!(revalidate && verifyPreviewToken(revalidate, page.id))
+  const isPreview = !!(revalidate && (await verifyPreviewToken(revalidate, page.id)))
 
   // if it's not publish and is not preview, show a 404 page
   if (!page.published && !isPreview) {

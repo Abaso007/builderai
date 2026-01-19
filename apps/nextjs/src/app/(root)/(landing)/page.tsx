@@ -13,8 +13,8 @@ export default function Home() {
     <main className="flex flex-col overflow-hidden pb-28">
       <Hero />{" "}
       <PricingHero
-        headline="Click to bill."
-        description="See how 1,000,000 events turns into one perfect invoice. Try the metering engine below."
+        headline="Click to bill. Experience the precision."
+        description="Notice how 1,000,000 events transform into one perfect invoice. Experience the clarity of the metering engine below."
         docsLinkText="Read the Docs"
       />
       <PriceOpsSection />

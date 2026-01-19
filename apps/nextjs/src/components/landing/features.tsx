@@ -12,15 +12,15 @@ import { Marquee } from "./marquee"
 const files = [
   {
     name: "FREE",
-    body: "Unprice is free to use. You can get started with Unprice in minutes.",
+    body: "Unprice is free to use. You can begin to experience the power of PriceOps in minutes.",
   },
   {
     name: "PRO",
-    body: "Unprice Pro is a paid plan that gives you access to more features and support.",
+    body: "Unprice Pro unlocks advanced capabilities, allowing your business to scale with confidence.",
   },
   {
     name: "ENTERPRISE",
-    body: "Unprice Enterprise is a custom plan that is tailored to your business needs.",
+    body: "Unprice Enterprise is a tailored foundation, architected specifically for your unique business needs.",
   },
 ]
 

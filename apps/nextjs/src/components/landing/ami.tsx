@@ -49,19 +49,18 @@ export default function PriceOpsSection() {
         PriceOps Infrastructure
       </motion.h2>
       <motion.div variants={itemVariants} className="mt-6 text-justify text-lg">
-        SaaS pricing was built for a world that no longer exists. Three tiers, feature gating,
-        quarterly pricing reviews.
+        SaaS pricing was built for a world that no longer exists. You might remember the three
+        tiers, the feature gating, and the quarterly reviews... but you already know that world is
+        over.
         <br />
         <br />
-        That world is over.
-        <br />
-        <br />
-        Today, your users expect personalized value. Your product ships changes daily. But you're
-        still pricing like it's 2010 — Static plans, gut feelings, and hardcoded logic.
+        Today, your users expect personalized value. As your product ships daily, you might notice
+        the gap between your innovation and your pricing infrastructure. Still pricing like it's
+        2010?
         <br />
         <br />
         We believe pricing is the most neglected growth lever in SaaS. It's time to stop waiting on
-        engineering and start iterating on revenue.
+        engineering and start experiencing the fluidity of iterating on revenue.
         <div className="mt-10 flex justify-end">
           <Link href={`${BASE_URL}/manifesto`}>
             <Button variant="outline">Read the Manifesto</Button>

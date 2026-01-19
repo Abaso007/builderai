@@ -51,27 +51,27 @@ export default function Belief() {
       </motion.h2>
       <motion.div variants={itemVariants} className="mt-6 max-w-prose space-y-4">
         <p className="text-justify text-lg leading-8">
-          We believe SaaS founders and AI builders deserve full control over how they capture the
-          value they create.
+          We believe SaaS founders and AI builders deserve to command the value they create.
           <br />
           <br />
-          Static plans, vendor lock-in, and engineering bottlenecks are relics of a world that no
-          longer exists. PriceOps is your weapon. Transparency is your armor.
+          Static plans, vendor lock-in, and engineering bottlenecks are relics you can finally
+          release. PriceOps is your weapon. Transparency is your armor.
           <br />
           <br />
           We’re not here to tweak pricing around the edges.
           <br />
-          We’re here to reinvent the entire monetization stack from the ground up.
+          We’re here to architect the entire monetization stack from the ground up.
           <br />
           <br />
-          You don’t need Stripe’s permission to innovate.
+          You don’t need permission to innovate.
           <br />
-          You don’t need a pricing consultant to guess your tiers.
+          You don’t need to guess your tiers.
           <br />
           You don’t need to wait for a developer to change a number.
           <br />
           <br />
-          You need PriceOps — built on your terms, with fully transparent code and at any scale.
+          You can finally experience PriceOps — built on your terms, with fully transparent code and
+          at any scale.
           <br />
           <br />
           <span className="font-bold italic">

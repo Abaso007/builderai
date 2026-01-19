@@ -69,16 +69,21 @@ export default function Hero() {
       >
         <br />
         <br />
-        <b>The PriceOps Infrastructure for SaaS.</b> Stop letting your engineering backlog dictate
-        your pricing strategy. Decouple your revenue from your codebase and launch new plans in
-        minutes, not months.
+        <b>The PriceOps Infrastructure for SaaS.</b> You can finally release the engineering backlog
+        from the weight of legacy billing. As you discover the freedom of PriceOps, you’ll realize
+        that your pricing is no longer a constraint — it’s an evolution.
         <br />
         <br />
-        Ship usage-based, tiered, or hybrid pricing with a single integration. No more "billing
-        JIRAs."
+        Ship usage-based, tiered, or hybrid models with a single integration, and watch the friction
+        dissolve. No more "billing JIRAs."
+        <br />
+        <br />
+        <span className="text-sm italic opacity-70">
+          P.S. We aren't a Stripe wrapper—we're the architecture that makes every provider optional.
+        </span>
       </motion.p>
       <motion.div
-        className="my-20 flex w-full flex-col justify-center gap-3 px-3 align-middle sm:flex-row"
+        className="my-14 flex w-full flex-col justify-center gap-3 px-3 align-middle sm:flex-row"
         variants={itemVariants}
       >
         <Link href={`${APP_DOMAIN}`} className={buttonVariants({ variant: "primary" })}>
