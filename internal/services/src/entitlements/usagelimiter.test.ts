@@ -130,6 +130,11 @@ describe("EntitlementService - verify", () => {
         set: vi.fn(),
         remove: vi.fn(),
       },
+      accessControlList: {
+        get: vi.fn().mockResolvedValue({ val: null }),
+        set: vi.fn(),
+        remove: vi.fn(),
+      },
     } as unknown as Cache
 
     // Mock Metrics

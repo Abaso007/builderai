@@ -1,7 +1,13 @@
+import type { Metadata } from "next"
 import Belief from "~/components/landing/belief"
 import HeroManifest from "~/components/landing/hero-manifest"
 import MainfestoCopy from "~/components/landing/mainfesto-copy"
 import PillarsPriceOps from "~/components/landing/pillarsAMI"
+
+export const metadata: Metadata = {
+  title: "Manifesto",
+  description: "Our vision for the future of pricing and revenue infrastructure.",
+}
 
 export default function Manifesto() {
   return (

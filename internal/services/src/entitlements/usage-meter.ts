@@ -401,7 +401,7 @@ export class UsageMeter {
    * Checks if current usage exceeds the configured threshold.
    */
   private isOverThreshold(): boolean {
-    if (this.isUnlimited() || !this.config.threshold) {
+    if (this.isUnlimited() || this.config.threshold === undefined) {
       return false
     }
 

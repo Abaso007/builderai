@@ -24,17 +24,16 @@ export const Global: FunctionComponent = () => {
         aria-labelledby="global-database-title"
         className="relative mx-auto flex w-full flex-col items-center justify-center overflow-hidden rounded-3xl pt-24"
       >
-        <div className="absolute top-[17rem] size-[40rem] rounded-full bg-primary-bgHover blur-3xl md:top-[20rem]" />
-        <div className="z-10 inline-block rounded-lg border border-primary-border bg-primary-bg px-3 py-1.5 font-semibold text-primary-text uppercase leading-4 tracking-tight sm:text-sm">
+        <div className="z-30 inline-block rounded-lg border border-primary-border bg-primary-bg px-3 py-1.5 font-semibold text-primary-text uppercase leading-4 tracking-tight sm:text-sm">
           <span>Made for the cloud</span>
         </div>
         <h2
           id="global-database-title"
-          className="z-10 mt-6 inline-block px-2 text-center font-bold text-5xl text-background-textContrast tracking-tighter md:text-8xl"
+          className="z-30 mt-6 inline-block px-2 text-center font-bold text-5xl text-background-textContrast tracking-tighter md:text-8xl"
         >
           Works <br /> anywhere
         </h2>
-        <Globe className="absolute top-[200px] z-20 aspect-square size-full max-w-fit sm:top-[200px] md:top-[250px]" />
+        <Globe className="-translate-x-1/2 absolute top-[180px] left-1/2 z-10 aspect-square w-full max-w-[900px] sm:top-[220px] md:top-[260px]" />
         <div className="-mt-32 md:-mt-36 z-20 h-[36rem] w-full overflow-hidden">
           <div className="absolute bottom-0 h-3/5 w-full bg-gradient-to-b from-transparent via-background-base to-background-base" />
           <div className="absolute inset-x-6 bottom-12 m-auto max-w-4xl md:top-2/3">

@@ -21,6 +21,7 @@ import {
   type VerificationResult,
   type VerifyRequest,
   calculateCycleWindow,
+  calculatePricePerFeature,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
@@ -98,12 +99,27 @@ export class EntitlementService {
     })
   }
 
+  private getUsageMeter(validatedState: EntitlementState): UsageMeter {
+    return new UsageMeter(
+      {
+        capacity: validatedState.limit ?? Number.POSITIVE_INFINITY,
+        aggregationMethod: validatedState.aggregationMethod,
+        featureType: validatedState.featureType,
+        resetConfig: validatedState.resetConfig,
+        startDate: validatedState.effectiveAt,
+        threshold: (validatedState.metadata?.notifyUsageThreshold ?? 95) / 100, // when close to the limit, send a notification
+        endDate: validatedState.expiresAt,
+        overageStrategy: validatedState.metadata?.overageStrategy,
+      },
+      validatedState.meter // Restore UsageMeter from persisted state
+    )
+  }
+
   /**
    * Check if usage is allowed (low latency)
    * Handles cache miss and revalidation internally (single network call)
    */
   async verify(params: VerifyRequest): Promise<VerificationResult> {
-    // 1. Get the entitlement state with revalidation
     const { err: stateErr, val: state } = await this.getStateWithRevalidation({
       customerId: params.customerId,
       projectId: params.projectId,
@@ -120,7 +136,7 @@ export class EntitlementService {
     }
 
     if (!state) {
-      // if no state is found, we still log the verification
+      const latency = performance.now() - params.performanceStart
       this.waitUntil(
         this.storage.insertVerification({
           customerId: params.customerId,
@@ -130,7 +146,7 @@ export class EntitlementService {
           allowed: 0,
           deniedReason: "ENTITLEMENT_NOT_FOUND",
           metadata: params.metadata,
-          latency: performance.now() - params.performanceStart,
+          latency,
           requestId: params.requestId,
           createdAt: Date.now(),
         })
@@ -145,46 +161,26 @@ export class EntitlementService {
       }
     }
 
-    // 2. Validate entitlement state
     const { err, val: validatedState } = this.validateEntitlementState({
       state: state,
       now: params.timestamp,
     })
 
     if (err) {
+      const latency = performance.now() - params.performanceStart
       return {
         allowed: false,
         message: err.message,
         deniedReason: "ENTITLEMENT_ERROR",
-        latency: performance.now() - params.performanceStart,
+        latency,
         featureType: state.featureType,
       }
     }
 
-    // 3. Get the meter for the feature
-    const meter = validatedState.meter
-
-    // 4. Verify the usage using the meter
-    const usageMeter = new UsageMeter(
-      {
-        capacity: validatedState.limit ?? Number.POSITIVE_INFINITY,
-        aggregationMethod: state.aggregationMethod,
-        featureType: state.featureType,
-        resetConfig: state.resetConfig,
-        startDate: state.effectiveAt,
-        threshold: 0.9, // when close to the limit, send a notification
-        endDate: state.expiresAt,
-        overageStrategy: validatedState.metadata?.overageStrategy,
-      },
-      meter // Restore UsageMeter from persisted state
-    )
-
-    // 5. Verify the usage using the meter
+    const usageMeter = this.getUsageMeter(validatedState)
     const verifyResult = usageMeter.verify(params.timestamp, params.usage)
-
     const latency = performance.now() - params.performanceStart
 
-    // 6. Persist the verification record
     this.waitUntil(
       this.storage.insertVerification({
         customerId: params.customerId,
@@ -200,29 +196,38 @@ export class EntitlementService {
       })
     )
 
-    // 7. get the meter to persist
     const meterResult = usageMeter.toPersist()
 
-    // should we block the customer right away?
     const shouldBlockCustomer =
       verifyResult.deniedReason === "LIMIT_EXCEEDED" &&
       validatedState.metadata?.blockCustomer === true
 
-    // update the entitlement state in the storage
     await this.storage.set({ state: { ...validatedState, meter: meterResult } })
 
-    // 8. update the entitlement state in the storage in background
     this.waitUntil(
-      shouldBlockCustomer
-        ? this.customerService.updateAccessControlList({
-            customerId: params.customerId,
-            projectId: params.projectId,
-            updates: { customerUsageLimitReached: true },
-          })
-        : Promise.resolve()
+      this.customerService.updateAccessControlList({
+        customerId: params.customerId,
+        projectId: params.projectId,
+        updates: { customerUsageLimitReached: shouldBlockCustomer },
+      })
     )
 
-    // 9. return the verification result
+    return this.buildVerificationResponse({
+      verifyResult,
+      validatedState,
+      latency,
+      meterResult,
+    })
+  }
+
+  private buildVerificationResponse(params: {
+    verifyResult: ReturnType<UsageMeter["verify"]>
+    validatedState: EntitlementState
+    latency: number
+    meterResult: MeterState
+  }): VerificationResult {
+    const { verifyResult, validatedState, latency, meterResult } = params
+
     return {
       allowed: verifyResult.allowed,
       message: verifyResult.allowed ? "Allowed" : (verifyResult.message ?? "Limit exceeded"),
@@ -233,7 +238,62 @@ export class EntitlementService {
       limit: validatedState.limit ?? undefined,
       remaining: verifyResult.remaining,
       latency,
-      featureType: state.featureType,
+      featureType: validatedState.featureType,
+    }
+  }
+
+  private calculateCostAndRate(params: {
+    state: EntitlementState
+    usage: number
+  }): { cost?: number; rate?: string } {
+    const { state, usage } = params
+
+    // Only calculate for usage-based features
+    if (state.featureType === "flat") {
+      return {}
+    }
+
+    // Since we don't want to add latency, we use a lightweight calculation
+    // based on the merged grants.
+    // We'll use the winning grant's config for the rate.
+
+    // Sort by priority (higher first)
+    const sortedGrants = [...state.grants].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
+
+    let totalCost = 0
+    let primaryRate = ""
+    let remainingUsage = usage
+
+    for (const grant of sortedGrants) {
+      if (!grant.config) continue
+
+      // For graduated/volume tiers, we need to know the quantity attributed to this grant.
+      // Entitlement merging logic for "sum" or "max" determines how much each grant contributes.
+      // For simplicity and zero latency, we'll do a waterfall attribution.
+      const grantLimit = grant.limit ?? Number.POSITIVE_INFINITY
+      const quantity = Math.min(remainingUsage, grantLimit)
+
+      const priceResult = calculatePricePerFeature({
+        config: grant.config,
+        featureType: state.featureType,
+        quantity,
+        // we don't prorate in verify/report
+      })
+
+      if (priceResult.val) {
+        totalCost += Number(toDecimal(priceResult.val.totalPrice.dinero))
+        if (!primaryRate) {
+          primaryRate = priceResult.val.unitPrice.displayAmount
+        }
+      }
+
+      remainingUsage -= quantity
+      if (remainingUsage <= 0) break
+    }
+
+    return {
+      cost: totalCost,
+      rate: primaryRate,
     }
   }
 
@@ -242,7 +302,6 @@ export class EntitlementService {
    * Handles revalidation internally (single network call)
    */
   async reportUsage(params: ReportUsageRequest): Promise<ReportUsageResult> {
-    // 1. get the entitlement state with revalidation
     const { err: stateErr, val: state } = await this.getStateWithRevalidation({
       customerId: params.customerId,
       projectId: params.projectId,
@@ -268,21 +327,10 @@ export class EntitlementService {
       }
     }
 
-    // 2. validate entitlement state
     const { err, val: validatedState } = this.validateEntitlementState({
       state: state,
       now: params.timestamp,
     })
-
-    // flat features are always allowed
-    if (state.featureType === "flat") {
-      return {
-        allowed: false,
-        message: "Flat feature not allowed to be reported",
-        deniedReason: "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE",
-        usage: 0,
-      }
-    }
 
     if (err) {
       return {
@@ -293,25 +341,8 @@ export class EntitlementService {
       }
     }
 
-    // 3. get the meter for the feature
-    const meter = validatedState.meter
+    const usageMeter = this.getUsageMeter(validatedState)
 
-    // 4. create a new usage meter
-    const usageMeter = new UsageMeter(
-      {
-        capacity: validatedState.limit ?? Number.POSITIVE_INFINITY,
-        aggregationMethod: state.aggregationMethod,
-        featureType: state.featureType,
-        resetConfig: state.resetConfig,
-        startDate: state.effectiveAt,
-        threshold: 0.9, // when close to the limit, send a notification
-        endDate: state.expiresAt,
-        overageStrategy: validatedState.metadata?.overageStrategy,
-      },
-      meter
-    )
-
-    // 5. Check idempotence key before consuming to prevent double counting
     const { val: keyExists, err: keyCheckErr } = await this.storage.hasIdempotenceKey(
       params.idempotenceKey
     )
@@ -324,7 +355,6 @@ export class EntitlementService {
     }
 
     if (keyExists) {
-      // Already processed, return current usage without consuming
       const meterResult = usageMeter.toPersist()
       return {
         allowed: true,
@@ -339,15 +369,13 @@ export class EntitlementService {
     const consumeResult = usageMeter.consume(params.usage, params.timestamp)
     const meterResult = usageMeter.toPersist()
 
-    // 6. update the entitlement state in the storage
     await this.storage.set({
       state: {
-        ...state,
+        ...validatedState,
         meter: meterResult,
       },
     })
 
-    // if allowed, insert the usage record in the storage
     if (consumeResult.allowed) {
       const usageRecord = {
         id: ulid(),
@@ -363,24 +391,17 @@ export class EntitlementService {
         deleted: 0,
       }
 
-      // insert the usage record in the storage
       this.waitUntil(this.storage.insertUsageRecord(usageRecord))
     }
 
-    // should we block the customer right away?
     const shouldBlockCustomer =
       consumeResult.deniedReason === "LIMIT_EXCEEDED" &&
       validatedState.metadata?.blockCustomer === true
 
-    // this is the way we activaly check if the customer should be blocked.
-    // for now we block right away but later we can support some kind of policy
-    // that blocked the customer only if there is a flag that says so. it's up to the client to decide
-    // if their customers are blocked once the hard limit is reached.
     if (
       shouldBlockCustomer ||
       (params.usage < 0 && consumeResult.allowed && consumeResult.remaining > 0)
     ) {
-      // Update only the customerUsageLimitReached flag in the accessControlList
       this.waitUntil(
         this.customerService.updateAccessControlList({
           customerId: params.customerId,
@@ -392,6 +413,26 @@ export class EntitlementService {
       )
     }
 
+    return this.buildReportUsageResponse({
+      consumeResult,
+      validatedState,
+      meterResult,
+    })
+  }
+
+  private buildReportUsageResponse(params: {
+    consumeResult: ReturnType<UsageMeter["consume"]>
+    validatedState: EntitlementState
+    meterResult: MeterState
+  }): ReportUsageResult {
+    const { consumeResult, validatedState, meterResult } = params
+
+    // Calculate cost and rate
+    const { cost, rate } = this.calculateCostAndRate({
+      state: validatedState,
+      usage: Number(meterResult.usage),
+    })
+
     return {
       allowed: consumeResult.allowed,
       remaining: consumeResult.remaining,
@@ -399,6 +440,8 @@ export class EntitlementService {
       deniedReason: consumeResult.deniedReason,
       usage: Number(meterResult.usage),
       limit: validatedState.limit ?? undefined,
+      cost,
+      rate,
       notifiedOverLimit: consumeResult.overThreshold,
     }
   }

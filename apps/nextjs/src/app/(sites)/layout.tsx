@@ -1,6 +1,8 @@
 import { TooltipProvider } from "@unprice/ui/tooltip"
+import { cn } from "@unprice/ui/utils"
 import { ThemeProvider, ToasterProvider } from "~/components/layout/theme-provider"
 import { siteConfig } from "~/constants/layout"
+import { fontMapper } from "~/styles/fonts"
 
 import "~/styles/sites.css"
 import { UpdateMarketingCookie } from "../(root)/auth/_components/update-marketing-cookie"
@@ -16,6 +18,8 @@ export const metadata = {
     icon: "/favicon.ico",
   },
   openGraph: {
+    type: "website",
+    locale: "en_US",
     images: [{ url: "/og" }],
   },
   twitter: {
@@ -26,6 +30,10 @@ export const metadata = {
     creator: "jhonsfran",
   },
   metadataBase: new URL("https://sites.unprice.dev"),
+  robots: {
+    index: true,
+    follow: true,
+  },
 }
 
 export default function SitesLayout(props: { children: React.ReactNode }) {
@@ -37,7 +45,14 @@ export default function SitesLayout(props: { children: React.ReactNode }) {
           content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"
         />
       </head>
-      <body className={"min-h-screen antialiased"}>
+      <body
+        className={cn(
+          "min-h-screen antialiased",
+          fontMapper["font-primary"],
+          fontMapper["font-secondary"],
+          fontMapper["font-mono"]
+        )}
+      >
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <TooltipProvider delayDuration={300}>{props.children}</TooltipProvider>
         </ThemeProvider>

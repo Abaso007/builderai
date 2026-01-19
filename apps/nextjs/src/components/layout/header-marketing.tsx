@@ -18,7 +18,7 @@ export default function HeaderMarketing() {
         <div className="flex items-center justify-start">
           <Logo size="md" />{" "}
           <Badge variant="outline" className="mt-1 ml-2">
-            alpha
+            beta
           </Badge>
         </div>
 

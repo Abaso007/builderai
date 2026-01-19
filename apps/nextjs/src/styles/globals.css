@@ -64,6 +64,10 @@
   }
 
   body {
+    --font-primary: var(--font-geist-sans);
+    --font-secondary: var(--font-geist-sans);
+    --font-mono: var(--font-geist-mono);
+
     @apply bg-background-base font-secondary text-background-text font-normal;
 
     text-rendering: optimizeLegibility;
@@ -201,7 +205,7 @@ pre {
   background: #0d0d0d;
   border-radius: 0.5rem;
   color: #fff;
-  font-family: "JetBrainsMono", monospace;
+  font-family: var(--font-mono);
   padding: 0.75rem 1rem;
 
   code {

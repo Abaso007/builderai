@@ -18,8 +18,15 @@ async function loadGoogleFont(font: string, text: string) {
   throw new Error("Failed to load font data")
 }
 
-export async function GET() {
-  const font = await loadGoogleFont("Geist", "Unprice")
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url)
+  const title = searchParams.get("title") || siteConfig.name
+  const description =
+    searchParams.get("description") ||
+    "Unprice, PriceOps infrastructure for SaaS. Stop hardcoding your revenue."
+  const logoUrl = searchParams.get("logo")
+
+  const font = await loadGoogleFont("Geist", title + description + siteConfig.name)
 
   // Default Pluto landing page OG image
   return new ImageResponse(
@@ -51,7 +58,15 @@ export async function GET() {
           gap: "24px",
         }}
       >
-        <Logo style={{ width: "80px", height: "80px", color: "#ffca16" }} />
+        {logoUrl ? (
+          // biome-ignore lint/a11y/useAltText: <explanation>
+          <img
+            src={logoUrl}
+            style={{ width: "80px", height: "80px", borderRadius: "12px", objectFit: "contain" }}
+          />
+        ) : (
+          <Logo style={{ width: "80px", height: "80px", color: "#ffca16" }} />
+        )}
         <span
           style={{
             fontSize: "72px",
@@ -61,7 +76,7 @@ export async function GET() {
             color: "transparent",
           }}
         >
-          {siteConfig.name}
+          {title}
         </span>
       </div>
 
@@ -76,62 +91,63 @@ export async function GET() {
           marginBottom: "40px",
         }}
       >
-        Unprice lets you track usage and iterate prices in real-time. Focus on your product, not
-        your pricing.
+        {description}
       </div>
 
-      {/* Feature highlights */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: "40px",
-          flexWrap: "wrap",
-        }}
-      >
+      {/* Feature highlights - only show for Unprice main site */}
+      {!logoUrl && (
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            backgroundColor: "#222221",
-            padding: "16px 24px",
-            borderRadius: "12px",
-            border: "1px solid #374151",
+            justifyContent: "center",
+            gap: "40px",
+            flexWrap: "wrap",
           }}
         >
-          <span style={{ fontSize: "24px", marginRight: "12px" }}>📊</span>
-          <span style={{ fontSize: "20px", color: "#e5e7eb" }}>Track usage</span>
-        </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              backgroundColor: "#222221",
+              padding: "16px 24px",
+              borderRadius: "12px",
+              border: "1px solid #374151",
+            }}
+          >
+            <span style={{ fontSize: "24px", marginRight: "12px" }}>📊</span>
+            <span style={{ fontSize: "20px", color: "#e5e7eb" }}>Track usage</span>
+          </div>
 
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            backgroundColor: "#222221",
-            padding: "16px 24px",
-            borderRadius: "12px",
-            border: "1px solid #374151",
-          }}
-        >
-          <span style={{ fontSize: "24px", marginRight: "12px" }}>💸</span>
-          <span style={{ fontSize: "20px", color: "#e5e7eb" }}>Iterate prices</span>
-        </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              backgroundColor: "#222221",
+              padding: "16px 24px",
+              borderRadius: "12px",
+              border: "1px solid #374151",
+            }}
+          >
+            <span style={{ fontSize: "24px", marginRight: "12px" }}>💸</span>
+            <span style={{ fontSize: "20px", color: "#e5e7eb" }}>Iterate prices</span>
+          </div>
 
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            backgroundColor: "#222221",
-            padding: "16px 24px",
-            borderRadius: "12px",
-            border: "1px solid #374151",
-          }}
-        >
-          <span style={{ fontSize: "24px", marginRight: "12px" }}>⚡</span>
-          <span style={{ fontSize: "20px", color: "#e5e7eb" }}>Real-time insights</span>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              backgroundColor: "#222221",
+              padding: "16px 24px",
+              borderRadius: "12px",
+              border: "1px solid #374151",
+            }}
+          >
+            <span style={{ fontSize: "24px", marginRight: "12px" }}>⚡</span>
+            <span style={{ fontSize: "20px", color: "#e5e7eb" }}>Real-time insights</span>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Footer with subtle branding */}
       <div

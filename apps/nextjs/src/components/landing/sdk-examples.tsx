@@ -1,13 +1,9 @@
 "use client"
-
-import { DOCS_DOMAIN } from "@unprice/config"
 import { BorderBeam } from "@unprice/ui/border-beam"
 import { Button } from "@unprice/ui/button"
 import { ScrollArea } from "@unprice/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@unprice/ui/tabs"
 import { cn } from "@unprice/ui/utils"
-import { ExternalLinkIcon } from "lucide-react"
-import Link from "next/link"
 import { useState } from "react"
 import { CodeEditor } from "./code-editor"
 import CopyToClipboard from "./copy-to-clipboard"
@@ -80,7 +76,15 @@ const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
 })
 
-const { result, error } = await unprice.customers.getEntitlements("cus_1GTzSGrapiBW1QwCL3Fcn")
+const {
+  result,
+  error,
+} = await unprice.customers.getEntitlements("cus_1GTzSGrapiBW1QwCL3Fcn")
+
+if (error) {
+  console.error(error.message)
+  return
+}
 `,
     resetEntitlements: `import { Unprice } from "@unprice/api"
 
@@ -88,7 +92,10 @@ const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
 })
 
-const { result, error } = await unprice.customers.resetEntitlements({
+const {
+  result,
+  error,
+} = await unprice.customers.resetEntitlements({
   customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
 })
 `,
@@ -98,7 +105,17 @@ const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
 })
 
-const { result, error } = await unprice.customers.getSubscription("cus_1GTzSGrapiBW1QwCL3Fcn")
+const {
+  result,
+  error,
+} = await unprice.customers.getSubscription("cus_1GTzSGrapiBW1QwCL3Fcn")
+
+if (error) {
+  console.error(error.message)
+  return
+}
+
+console.log(result)
 `,
     getUsage: `import { Unprice } from "@unprice/api"
 
@@ -106,7 +123,15 @@ const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
 })
 
-const { result, error } = await unprice.customers.getUsage("cus_1GTzSGrapiBW1QwCL3Fcn")
+const {
+  result,
+  error,
+} = await unprice.customers.getUsage("cus_1GTzSGrapiBW1QwCL3Fcn")
+
+if (error) {
+  console.error(error.message)
+  return
+}
 `,
     getPaymentMethods: `import { Unprice } from "@unprice/api"
 
@@ -193,7 +218,8 @@ export type method = keyof typeof codeExamples.sdk
 export function SDKDemo({
   className,
   defaultMethod,
-}: { className?: string; defaultMethod?: method }) {
+  showBorderBeam = true,
+}: { className?: string; defaultMethod?: method; showBorderBeam?: boolean }) {
   const [activeFramework, setActiveFramework] = useState("sdk")
   const [activeMethod, setActiveMethod] = useState(defaultMethod ?? "verifyFeature")
 
@@ -228,13 +254,6 @@ export function SDKDemo({
             <TabsTrigger value="fetch" className="px-5">
               Fetch API
             </TabsTrigger>
-            <div className="absolute top-2.5 right-2.5 flex justify-end">
-              <Link href={`${DOCS_DOMAIN}/api-reference/introduction`} target="_blank">
-                <Button variant="default" size="sm" className="text-xs shadow-sm">
-                  API docs <ExternalLinkIcon className="ml-1 size-3" />
-                </Button>
-              </Link>
-            </div>
           </TabsList>
         </div>
         <TabsContent value={activeFramework}>
@@ -291,7 +310,7 @@ export function SDKDemo({
         </TabsContent>
       </Tabs>
 
-      <BorderBeam duration={5} size={300} />
+      {showBorderBeam && <BorderBeam duration={5} size={300} />}
     </div>
   )
 }

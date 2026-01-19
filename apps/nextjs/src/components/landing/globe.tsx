@@ -2,7 +2,7 @@
 
 import createGlobe, { type COBEOptions } from "cobe"
 import { motion, useAnimation, useMotionValue, useSpring } from "framer-motion"
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { cn } from "@unprice/ui/utils"
 import { useTheme } from "next-themes"
@@ -45,18 +45,20 @@ export function Globe({
   className?: string
   config?: COBEOptions
 }) {
-  let phi = 0
-  let width = 0
-  let scale = 1
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const pointerInteracting = useRef<number | null>(null)
   const pointerInteractionMovement = useRef(0)
   const globeInstance = useRef<ReturnType<typeof createGlobe> | null>(null)
-  const { theme } = useTheme()
+  const { resolvedTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   const entry = useIntersectionObserver(containerRef, {
-    threshold: 0.2,
+    threshold: 0.1,
     rootMargin: "50px",
   })
   const isVisible = !!entry?.isIntersecting
@@ -85,16 +87,14 @@ export function Globe({
   }
 
   useEffect(() => {
-    if (!isVisible || !canvasRef.current) return
+    if (!mounted || !isVisible || !canvasRef.current) return
+
+    let phi = 0
+    let width = 0
 
     const onResize = () => {
       if (canvasRef.current) {
-        if (canvasRef.current.offsetWidth > 450) {
-          width = canvasRef.current.offsetWidth
-        } else {
-          width = 450
-          scale = 2.3
-        }
+        width = canvasRef.current.offsetWidth
       }
     }
 
@@ -105,18 +105,20 @@ export function Globe({
       globeInstance.current.destroy()
     }
 
+    const theme = resolvedTheme || "dark"
+
     globeInstance.current = createGlobe(canvasRef.current, {
       ...config,
       width: width * 2,
       height: width * 2,
-      scale: scale,
-      baseColor: theme === "dark" ? [0.15, 0.15, 0.15] : [1, 1, 1],
+      scale: width < 480 ? 1.5 : 1.1,
+      baseColor: theme === "dark" ? [0.1, 0.1, 0.1] : [1, 1, 1],
       markerColor:
-        theme === "dark" ? [200 / 255, 155 / 255, 48 / 255] : [255 / 255, 197 / 255, 61 / 255],
-      glowColor: theme === "dark" ? [0.3, 0.3, 0.3] : [0.5, 0.5, 0.5],
+        theme === "dark" ? [255 / 255, 200 / 255, 100 / 255] : [255 / 255, 197 / 255, 61 / 255],
+      glowColor: theme === "dark" ? [0.1, 0.1, 0.1] : [0.5, 0.5, 0.5],
       dark: theme === "dark" ? 1 : 0,
-      mapBrightness: theme === "dark" ? 12 : 5,
-      diffuse: theme === "dark" ? 0.5 : 0.4,
+      mapBrightness: theme === "dark" ? 10 : 6,
+      diffuse: theme === "dark" ? 1.2 : 0.4,
       onRender: (state) => {
         if (!pointerInteracting.current) phi += 0.005
         state.phi = phi + rs.get()
@@ -137,17 +139,24 @@ export function Globe({
       }
       window.removeEventListener("resize", onResize)
     }
-  }, [isVisible, rs, config, controls, theme])
+  }, [mounted, isVisible, rs, config, controls, resolvedTheme])
 
   return (
     <motion.div
       ref={containerRef}
-      className={cn("absolute inset-0 mx-auto aspect-[1/1] w-full max-w-[600px]", className)}
+      className={cn("relative aspect-square w-full", className)}
       initial={{ opacity: 0, scale: 0.9 }}
       animate={controls}
     >
       <canvas
-        className={cn("size-full [contain:layout_paint_size]")}
+        className={cn(
+          "size-full touch-none transition-opacity duration-500 [contain:layout_paint_size]",
+          !isVisible ? "opacity-0" : "opacity-100"
+        )}
+        style={{
+          maskImage: "radial-gradient(circle at center, white 50%, transparent 100%)",
+          WebkitMaskImage: "radial-gradient(circle at center, white 50%, transparent 100%)",
+        }}
         ref={canvasRef}
         onPointerDown={(e) => {
           pointerInteracting.current = e.clientX
@@ -155,8 +164,7 @@ export function Globe({
         }}
         onPointerUp={() => updatePointerInteraction(null)}
         onPointerOut={() => updatePointerInteraction(null)}
-        onMouseMove={(e) => updateMovement(e.clientX)}
-        onTouchMove={(e) => e.touches[0] && updateMovement(e.touches[0].clientX)}
+        onPointerMove={(e) => updateMovement(e.clientX)}
       />
     </motion.div>
   )

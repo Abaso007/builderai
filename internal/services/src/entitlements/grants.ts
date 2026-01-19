@@ -504,7 +504,6 @@ export class GrantsManager {
     const ordered = [...grants].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
     const bestPriorityGrant = ordered[0]!
 
-    // Prepare grants snapshot (preserve priority order)
     const grantsSnapshot = ordered.map((g) => ({
       id: g.id,
       type: g.type,
@@ -513,6 +512,7 @@ export class GrantsManager {
       expiresAt: g.expiresAt,
       limit: g.limit,
       priority: g.priority,
+      config: g.featurePlanVersion.config, // Keep config for pricing calculations
     }))
 
     // Merge grants according to merging policy derived from feature type

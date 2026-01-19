@@ -213,7 +213,8 @@ export class Unprice {
         req: paths["/v1/customer/reportUsage"]["post"]["requestBody"]["content"]["application/json"]
       ): Promise<
         Result<
-          paths["/v1/customer/reportUsage"]["post"]["responses"]["200"]["content"]["application/json"]
+          | paths["/v1/customer/reportUsage"]["post"]["responses"]["200"]["content"]["application/json"]
+          | paths["/v1/customer/reportUsage"]["post"]["responses"]["429"]["content"]["application/json"]
         >
       > => {
         return await this.fetch({

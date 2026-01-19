@@ -39,7 +39,11 @@ export function CodeApiSheet({
           <SheetTitle className="text-2xl">Code API</SheetTitle>
           <SheetDescription>Use the code API to get the price of a product</SheetDescription>
         </SheetHeader>
-        <SDKDemo className="mt-2 bg-background-base" defaultMethod={defaultMethod} />
+        <SDKDemo
+          className="mt-2 bg-background-base"
+          defaultMethod={defaultMethod}
+          showBorderBeam={false}
+        />
         <SheetFooter className="mt-6">
           <Link href={`${DOCS_DOMAIN}/api-reference`} target="_blank">
             <Button variant="outline">
