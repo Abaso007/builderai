@@ -158,8 +158,17 @@ export const unPriceTailwindPreset: Config = {
           "0%": { "background-position": "0 0" },
           "100%": { "background-position": "100% -100%" },
         },
+        aurora: {
+          from: {
+            backgroundPosition: "0% 50%",
+          },
+          to: {
+            backgroundPosition: "100% 50%",
+          },
+        },
       },
       animation: {
+        aurora: "aurora 60s linear infinite",
         "line-shadow": "line-shadow 15s linear infinite",
         marquee: "marquee var(--duration) linear infinite",
         "marquee-vertical": "marquee-vertical var(--duration) linear infinite",

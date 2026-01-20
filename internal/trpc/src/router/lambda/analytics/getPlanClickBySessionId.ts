@@ -1,9 +1,9 @@
 import type { Analytics } from "@unprice/analytics"
 import { z } from "zod"
-import { protectedProjectProcedure } from "#trpc"
+import { protectedProcedure } from "#trpc"
 import { TIMEOUTS, withTimeout } from "#utils/timeout"
 
-export const getPlanClickBySessionId = protectedProjectProcedure
+export const getPlanClickBySessionId = protectedProcedure
   .input(z.custom<Parameters<Analytics["getPlanClickBySessionId"]>[0]>())
   .output(
     z.object({
@@ -11,7 +11,6 @@ export const getPlanClickBySessionId = protectedProjectProcedure
     })
   )
   .query(async (opts) => {
-    const projectId = opts.ctx.project.id
     const input = opts.input
 
     try {
@@ -30,7 +29,6 @@ export const getPlanClickBySessionId = protectedProjectProcedure
 
       opts.ctx.logger.error("getPlanClickBySessionId failed", {
         error: errorMessage,
-        projectId,
         isTimeout: errorMessage.includes("timeout"),
       })
 

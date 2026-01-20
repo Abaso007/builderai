@@ -2,7 +2,6 @@ import { newId } from "@unprice/db/utils"
 import { signUpResponseSchema, workspaceSignupSchema } from "@unprice/db/validators"
 
 import { TRPCError } from "@trpc/server"
-import { WelcomeEmail, sendEmail } from "@unprice/email"
 import { protectedProcedure } from "#trpc"
 import { unprice } from "#utils/unprice"
 
@@ -13,6 +12,9 @@ export const signUp = protectedProcedure
     const { name, planVersionId, config, successUrl, cancelUrl, sessionId } = opts.input
     const user = opts.ctx.session?.user
     const workspaceId = newId("workspace")
+
+    // TODO: need to validate if the user has access to PRO feature in order to validate
+    // if he can create a workspace
 
     // sign up the customer
     const { error, result } = await unprice.customers.signUp({
@@ -39,13 +41,14 @@ export const signUp = protectedProcedure
       })
     }
 
-    opts.ctx.waitUntil(
-      sendEmail({
-        subject: "Welcome to Unprice 👋",
-        to: [user.email],
-        react: WelcomeEmail({ firstName: user.name ?? user.email }),
-      })
-    )
+    // TODO: send welcome email
+    // opts.ctx.waitUntil(
+    //   sendEmail({
+    //     subject: "Welcome to Unprice 👋",
+    //     to: [user.email],
+    //     react: WelcomeEmail({ firstName: user.name ?? user.email }),
+    //   })
+    // )
 
     return result
   })

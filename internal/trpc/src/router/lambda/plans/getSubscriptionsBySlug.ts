@@ -47,7 +47,7 @@ export const getSubscriptionsBySlug = protectedProjectProcedure
     if (!result.success) {
       throw new TRPCError({
         code: "UNAUTHORIZED",
-        message: `You don't have access to this feature ${result.deniedReason}`,
+        message: `This feature is not available on your current plan ${result.deniedReason}`,
       })
     }
 

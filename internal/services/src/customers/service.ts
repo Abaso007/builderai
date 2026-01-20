@@ -780,26 +780,42 @@ export class CustomerService {
       const session = data.data.at(0)
 
       if (!session) {
-        return Err(
-          new UnPriceCustomerError({
-            code: "PLAN_VERSION_NOT_FOUND",
-            message: "Session not found",
+        if (!planVersionId) {
+          return Err(
+            new UnPriceCustomerError({
+              code: "PLAN_VERSION_NOT_FOUND",
+              message: "Session not found",
+            })
+          )
+        }
+
+        planVersion = await this.db.query.versions
+          .findFirst({
+            with: {
+              project: true,
+              plan: true,
+            },
+            where: (version, { eq, and }) =>
+              and(eq(version.id, planVersionId), eq(version.projectId, projectId)),
           })
-        )
+          .then((data) => data ?? null)
+      } else {
+        pageId = session.payload.page_id
+
+        planVersion = await this.db.query.versions
+          .findFirst({
+            with: {
+              project: true,
+              plan: true,
+            },
+            where: (version, { eq, and }) =>
+              and(
+                eq(version.id, session.payload.plan_version_id),
+                eq(version.projectId, projectId)
+              ),
+          })
+          .then((data) => data ?? null)
       }
-
-      pageId = session.payload.page_id
-
-      planVersion = await this.db.query.versions
-        .findFirst({
-          with: {
-            project: true,
-            plan: true,
-          },
-          where: (version, { eq, and }) =>
-            and(eq(version.id, session.payload.plan_version_id), eq(version.projectId, projectId)),
-        })
-        .then((data) => data ?? null)
     } else if (planVersionId) {
       planVersion = await this.db.query.versions
         .findFirst({

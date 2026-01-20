@@ -1,5 +1,6 @@
 import { TooltipProvider } from "@unprice/ui/tooltip"
 import { cn } from "@unprice/ui/utils"
+import { ViewTransitions } from "next-view-transitions"
 import { ThemeProvider, ToasterProvider } from "~/components/layout/theme-provider"
 import { siteConfig } from "~/constants/layout"
 import { fontMapper } from "~/styles/fonts"
@@ -35,28 +36,30 @@ export const metadata = {
 
 export default function SitesLayout(props: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head>
-        <meta
-          name="viewport"
-          content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"
-        />
-      </head>
-      <body
-        className={cn(
-          "min-h-screen antialiased",
-          fontMapper["font-primary"],
-          fontMapper["font-secondary"],
-          fontMapper["font-mono"]
-        )}
-      >
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          <TooltipProvider delayDuration={300}>{props.children}</TooltipProvider>
-        </ThemeProvider>
+    <ViewTransitions>
+      <html lang="en" suppressHydrationWarning>
+        <head>
+          <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"
+          />
+        </head>
+        <body
+          className={cn(
+            "min-h-screen antialiased",
+            fontMapper["font-primary"],
+            fontMapper["font-secondary"],
+            fontMapper["font-mono"]
+          )}
+        >
+          <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+            <TooltipProvider delayDuration={300}>{props.children}</TooltipProvider>
+          </ThemeProvider>
 
-        <UpdateMarketingCookie />
-        <ToasterProvider />
-      </body>
-    </html>
+          <UpdateMarketingCookie />
+          <ToasterProvider />
+        </body>
+      </html>
+    </ViewTransitions>
   )
 }

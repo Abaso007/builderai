@@ -66,7 +66,7 @@ export const DOCS_DOMAIN =
     ? `https://docs.${MAIN_DOMAIN}/`
     : VERCEL_ENV === "preview"
       ? `https://docs.${MAIN_DOMAIN}/`
-      : "http://localhost:3333/"
+      : "http://localhost:3333/docs"
 
 export const PRICING_DOMAIN =
   VERCEL_ENV === "production"

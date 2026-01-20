@@ -300,6 +300,7 @@ export class PlanService {
       currency?: Currency
       billingInterval?: BillingInterval
       enterprise?: boolean
+      limit?: number
     }
     opts?: {
       skipCache?: boolean // skip cache to force revalidation

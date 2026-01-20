@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server"
+import type { NextFetchEvent, NextRequest } from "next/server"
+import { type NextMiddleware, NextResponse } from "next/server"
 
 import { auth } from "@unprice/auth/server"
 
@@ -7,14 +8,9 @@ import { getValidSubdomain, parse } from "~/lib/domains"
 import AppMiddleware from "~/middleware/app"
 import SitesMiddleware from "~/middleware/sites"
 
-export default auth((req) => {
+const authMiddleware = auth((req) => {
   const { domain, path } = parse(req)
   const subdomain = getValidSubdomain(domain) ?? ""
-
-  // Bypass Vercel's required endpoint
-  if (path.startsWith("/.well-known/vercel/flags")) {
-    return NextResponse.next()
-  }
 
   // // 1. we validate api routes
   // if (API_HOSTNAMES.has(domain)) {
@@ -47,6 +43,24 @@ export default auth((req) => {
   // rest of the routes are site routes
   return SitesMiddleware(req)
 })
+
+export default async function middleware(req: NextRequest, ctx: NextFetchEvent) {
+  const { domain, path } = parse(req)
+  const subdomain = getValidSubdomain(domain) ?? ""
+
+  // 1. Skip auth for the landing page to improve TTFB
+  // Redirection for logged-in users is handled client-side in the Home component
+  if (!APP_HOSTNAMES.has(domain) && (subdomain === "" || subdomain === "www") && path === "/") {
+    return NextResponse.next()
+  }
+
+  // Bypass Vercel's required endpoint
+  if (path.startsWith("/.well-known/vercel/flags")) {
+    return NextResponse.next()
+  }
+
+  return (authMiddleware as unknown as NextMiddleware)(req, ctx)
+}
 
 export const config = {
   // TODO: ignore public routes from here

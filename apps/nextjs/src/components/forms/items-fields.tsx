@@ -1,6 +1,7 @@
 "use client"
 import * as currencies from "@dinero.js/currencies"
-import { LayoutGrid, Settings, Trash2, X } from "lucide-react"
+import { AnimatePresence, motion } from "framer-motion"
+import { ChevronDown, LayoutGrid, Settings, Trash2, X } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import {
   type ArrayPath,
@@ -136,6 +137,8 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
     return { versionFeatures: features, versionAddons: addons }
   }, [selectedPlanVersion?.id])
 
+  const [isExpanded, setIsExpanded] = useState(false)
+
   const [isDelete, setConfirmDelete] = useState<Map<string, boolean>>(
     new Map<string, boolean>(fields.map((item) => [item.id, false] as [string, boolean]))
   )
@@ -202,234 +205,277 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
   return (
     <div className="flex w-full flex-col gap-4">
       {withSeparator && <Separator className="my-2" />}
-      <div className="mb-4 flex flex-col gap-2">
-        <FormLabel
-          className={cn({
-            "text-destructive": errors.config,
+
+      <div className="flex flex-col items-center justify-center gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className={cn("gap-2 text-muted-foreground hover:text-foreground", {
+            "border-destructive text-destructive hover:bg-destructive/10 hover:text-destructive":
+              errors.config,
           })}
+          type="button"
+          onClick={() => setIsExpanded(!isExpanded)}
         >
-          <Typography variant="h5">Features configuration</Typography>
-        </FormLabel>
-
-        <FormDescription>
-          Configure the quantity for each feature, for usage based feature, the price will be
-          calculated with the reported usage. You can't change the quantity for flat features"
-        </FormDescription>
-        {errors.config && <FormMessage>{getErrorMessage(errors, "config")}</FormMessage>}
-      </div>
-
-      <div className="flex items-center justify-center px-1 py-2">
-        {fields.length > 0 ? (
-          <Table>
-            <TableHeader className="border-t border-b bg-transparent">
-              <TableRow className="pointer-events-none">
-                <TableHead className="h-10 pl-1">Features</TableHead>
-                <TableHead className="h-10 px-0 text-center">Quantity Units</TableHead>
-                <TableHead
-                  className={cn("h-10 text-end", {
-                    "pr-1": !isSubscriptionTypeAddons,
-                    "pr-8": isSubscriptionTypeAddons,
-                  })}
-                >
-                  Estimated Total
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {fields.map((item, index) => {
-                const itemConfig = item as unknown as SubscriptionItemConfig & { id: string }
-
-                const feature =
-                  versionFeatures.get(itemConfig.featurePlanId) ??
-                  versionAddons.get(itemConfig.featurePlanId)
-
-                // if the feature is hidden, don't show it
-                if (!feature) return null
-
-                // if the units are not set, use the minimum units
-                const units =
-                  form.watch(`config.${index}.units` as FieldPath<TFieldValues>) ||
-                  itemConfig.min ||
-                  0
-
-                const { val: freeUnits, err: freeUnitsErr } = calculateFreeUnits({
-                  config: feature.config!,
-                  featureType: feature.featureType,
-                })
-
-                if (freeUnitsErr) {
-                  console.error(freeUnitsErr)
-                  return "error calculating free units"
-                }
-
-                const showUnits =
-                  feature.featureType === "usage" &&
-                  !feature.feature.slug.includes(feature.feature.unit)
-
-                const freeUnitsText =
-                  freeUnits === Number.POSITIVE_INFINITY
-                    ? feature.limit
-                      ? `Up to ${nFormatter(feature.limit)} ${showUnits ? feature.feature.unit : ""}`
-                      : "Unlimited"
-                    : freeUnits === 0
-                      ? feature.limit
-                        ? `Up to ${nFormatter(feature.limit)} ${showUnits ? feature.feature.unit : ""}`
-                        : "Starts at 0"
-                      : `${nFormatter(freeUnits)} ${showUnits ? feature.feature.unit : ""}`
-
-                return (
-                  <TableRow key={item.id} className="border-b bg-transparent">
-                    <TableCell className="table-cell h-16 flex-row items-center gap-1 pl-1">
-                      <div className="flex items-center justify-start gap-1">
-                        {withFeatureDetails && (
-                          <PropagationStopper className="flex items-center justify-start">
-                            <Dialog>
-                              <DialogTrigger asChild>
-                                <Button className="mr-1 size-4" variant="link" size="icon">
-                                  <Settings className="size-4" />
-                                  <span className="sr-only">View feature</span>
-                                </Button>
-                              </DialogTrigger>
-
-                              <DialogContent className="flex max-h-[800px] w-full flex-col justify-between overflow-y-scroll md:w-1/2 lg:w-[600px]">
-                                <DialogHeader>
-                                  <DialogTitle>Feature: {feature.feature.title}</DialogTitle>
-                                </DialogHeader>
-                                <DialogDescription>
-                                  {feature.feature.description ?? ""}
-                                </DialogDescription>
-                                <FeatureConfigForm
-                                  defaultValues={feature}
-                                  planVersion={selectedPlanVersion!}
-                                  className="my-6"
-                                />
-                              </DialogContent>
-                            </Dialog>
-                          </PropagationStopper>
-                        )}
-                        <PricingItem
-                          feature={feature}
-                          withCalculator
-                          noCheckIcon
-                          withQuantity={false}
-                        />
-                      </div>
-                    </TableCell>
-                    <TableCell className="table-cell">
-                      {feature.featureType === "usage" ? (
-                        <div className="text-center text-xs">{freeUnitsText}</div>
-                      ) : feature.featureType === "flat" ? (
-                        <div className="text-center text-xs">{itemConfig.units}</div>
-                      ) : (
-                        <FormField
-                          control={form.control}
-                          name={`config.${index}.units` as FieldPath<TFieldValues>}
-                          render={({ field }) => (
-                            <FormItem className="justify-center text-center">
-                              <FormMessage className="font-light text-xs" />
-                              <FormControl>
-                                <div className="flex flex-col">
-                                  <Input
-                                    {...field}
-                                    type="number"
-                                    min={1}
-                                    className="mx-auto h-8 w-20 text-center text-xs"
-                                    disabled={
-                                      feature.featureType === "flat" ||
-                                      feature.featureType === "usage" ||
-                                      isDisabled
-                                    }
-                                    value={field.value ?? ""}
-                                  />
-                                </div>
-                              </FormControl>
-                            </FormItem>
-                          )}
-                        />
-                      )}
-                    </TableCell>
-                    <TableCell className="flex h-16 items-center justify-end gap-1 pr-1">
-                      <PriceFeature quantity={units || 0} feature={feature} type="total" />
-                      {isSubscriptionTypeAddons && isDelete.get(itemConfig.featurePlanId) && (
-                        <div className="flex flex-row items-center">
-                          <Button
-                            className="px-0"
-                            variant="link"
-                            size="icon"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              e.preventDefault()
-                              items.remove(index)
-
-                              setConfirmDelete(
-                                (prev) => new Map(prev.set(itemConfig.featurePlanId, false))
-                              )
-                            }}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      )}
-                      {isSubscriptionTypeAddons && !isDelete.get(itemConfig.featurePlanId) && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              className="px-0"
-                              variant="link"
-                              size="icon"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                e.preventDefault()
-                                setConfirmDelete(
-                                  (prev) => new Map(prev.set(itemConfig.featurePlanId, true))
-                                )
-
-                                setTimeout(() => {
-                                  setConfirmDelete(
-                                    (prev) => new Map(prev.set(itemConfig.featurePlanId, false))
-                                  )
-                                }, 2000)
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <div className="max-w-[200px] text-sm">
-                              remove this addon from the subscription
-                            </div>
-                          </TooltipContent>
-                        </Tooltip>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-
-              <TableRow className="border-t border-b text-muted-foreground">
-                <TableCell colSpan={2} className="h-10 gap-1 pl-1 text-left font-semibold">
-                  {capitalize(getBillingCycleMessage(selectedPlanVersion?.billingConfig!).message)}
-                </TableCell>
-                <TableCell colSpan={1} className="h-10 text-right text-xs">
-                  {displayTotalPrice}
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        ) : (
-          <div className="flex w-full items-center justify-center px-1 py-2">
-            <EmptyPlaceholder isLoading={isLoading} className="min-h-[200px]">
-              <EmptyPlaceholder.Icon>
-                <LayoutGrid className="h-8 w-8" />
-              </EmptyPlaceholder.Icon>
-              <EmptyPlaceholder.Title>No plan selected</EmptyPlaceholder.Title>
-              <EmptyPlaceholder.Description>
-                Select a plan to configure the items
-              </EmptyPlaceholder.Description>
-            </EmptyPlaceholder>
-          </div>
+          {isExpanded ? "Hide features configuration" : "Configure features"}
+          <ChevronDown
+            className={cn("h-4 w-4 transition-transform duration-200", {
+              "rotate-180": isExpanded,
+            })}
+          />
+        </Button>
+        {errors.config && !isExpanded && (
+          <span className="text-destructive text-xs">
+            {getErrorMessage(errors, "config") ?? "Invalid configuration"}
+          </span>
         )}
       </div>
+
+      <AnimatePresence initial={false}>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="mb-4 flex flex-col gap-2 pt-2">
+              <FormLabel
+                className={cn({
+                  "text-destructive": errors.config,
+                })}
+              >
+                <Typography variant="h5">Features configuration</Typography>
+              </FormLabel>
+
+              <FormDescription>
+                Configure the quantity for each feature, for usage based feature, the price will be
+                calculated with the reported usage. You can't change the quantity for flat features"
+              </FormDescription>
+              {errors.config && <FormMessage>{getErrorMessage(errors, "config")}</FormMessage>}
+            </div>
+
+            <div className="flex items-center justify-center px-1 py-2">
+              {fields.length > 0 ? (
+                <Table>
+                  <TableHeader className="border-t border-b bg-transparent">
+                    <TableRow className="pointer-events-none">
+                      <TableHead className="h-10 pl-1">Features</TableHead>
+                      <TableHead className="h-10 px-0 text-center">Quantity Units</TableHead>
+                      <TableHead
+                        className={cn("h-10 text-end", {
+                          "pr-1": !isSubscriptionTypeAddons,
+                          "pr-8": isSubscriptionTypeAddons,
+                        })}
+                      >
+                        Estimated Total
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {fields.map((item, index) => {
+                      const itemConfig = item as unknown as SubscriptionItemConfig & { id: string }
+
+                      const feature =
+                        versionFeatures.get(itemConfig.featurePlanId) ??
+                        versionAddons.get(itemConfig.featurePlanId)
+
+                      // if the feature is hidden, don't show it
+                      if (!feature) return null
+
+                      // if the units are not set, use the minimum units
+                      const units =
+                        form.watch(`config.${index}.units` as FieldPath<TFieldValues>) ||
+                        itemConfig.min ||
+                        0
+
+                      const { val: freeUnits, err: freeUnitsErr } = calculateFreeUnits({
+                        config: feature.config!,
+                        featureType: feature.featureType,
+                      })
+
+                      if (freeUnitsErr) {
+                        console.error(freeUnitsErr)
+                        return "error calculating free units"
+                      }
+
+                      const showUnits =
+                        feature.featureType === "usage" &&
+                        !feature.feature.slug.includes(feature.feature.unit)
+
+                      const freeUnitsText =
+                        freeUnits === Number.POSITIVE_INFINITY
+                          ? feature.limit
+                            ? `Up to ${nFormatter(feature.limit)} ${showUnits ? feature.feature.unit : ""}`
+                            : "Unlimited"
+                          : freeUnits === 0
+                            ? feature.limit
+                              ? `Up to ${nFormatter(feature.limit)} ${showUnits ? feature.feature.unit : ""}`
+                              : "Starts at 0"
+                            : `${nFormatter(freeUnits)} ${showUnits ? feature.feature.unit : ""}`
+
+                      return (
+                        <TableRow key={item.id} className="border-b bg-transparent">
+                          <TableCell className="table-cell h-16 flex-row items-center gap-1 pl-1">
+                            <div className="flex items-center justify-start gap-1">
+                              {withFeatureDetails && (
+                                <PropagationStopper className="flex items-center justify-start">
+                                  <Dialog>
+                                    <DialogTrigger asChild>
+                                      <Button className="mr-1 size-4" variant="link" size="icon">
+                                        <Settings className="size-4" />
+                                        <span className="sr-only">View feature</span>
+                                      </Button>
+                                    </DialogTrigger>
+
+                                    <DialogContent className="flex max-h-[800px] w-full flex-col justify-between overflow-y-scroll md:w-1/2 lg:w-[600px]">
+                                      <DialogHeader>
+                                        <DialogTitle>Feature: {feature.feature.title}</DialogTitle>
+                                      </DialogHeader>
+                                      <DialogDescription>
+                                        {feature.feature.description ?? ""}
+                                      </DialogDescription>
+                                      <FeatureConfigForm
+                                        defaultValues={feature}
+                                        planVersion={selectedPlanVersion!}
+                                        className="my-6"
+                                      />
+                                    </DialogContent>
+                                  </Dialog>
+                                </PropagationStopper>
+                              )}
+                              <PricingItem
+                                feature={feature}
+                                withCalculator
+                                noCheckIcon
+                                withQuantity={false}
+                              />
+                            </div>
+                          </TableCell>
+                          <TableCell className="table-cell">
+                            {feature.featureType === "usage" ? (
+                              <div className="text-center text-xs">{freeUnitsText}</div>
+                            ) : feature.featureType === "flat" ? (
+                              <div className="text-center text-xs">{itemConfig.units}</div>
+                            ) : (
+                              <FormField
+                                control={form.control}
+                                name={`config.${index}.units` as FieldPath<TFieldValues>}
+                                render={({ field }) => (
+                                  <FormItem className="justify-center text-center">
+                                    <FormMessage className="font-light text-xs" />
+                                    <FormControl>
+                                      <div className="flex flex-col">
+                                        <Input
+                                          {...field}
+                                          type="number"
+                                          min={1}
+                                          className="mx-auto h-8 w-20 text-center text-xs"
+                                          disabled={
+                                            feature.featureType === "flat" ||
+                                            feature.featureType === "usage" ||
+                                            isDisabled
+                                          }
+                                          value={field.value ?? ""}
+                                        />
+                                      </div>
+                                    </FormControl>
+                                  </FormItem>
+                                )}
+                              />
+                            )}
+                          </TableCell>
+                          <TableCell className="flex h-16 items-center justify-end gap-1 pr-1">
+                            <PriceFeature quantity={units || 0} feature={feature} type="total" />
+                            {isSubscriptionTypeAddons && isDelete.get(itemConfig.featurePlanId) && (
+                              <div className="flex flex-row items-center">
+                                <Button
+                                  className="px-0"
+                                  variant="link"
+                                  size="icon"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    e.preventDefault()
+                                    items.remove(index)
+
+                                    setConfirmDelete(
+                                      (prev) => new Map(prev.set(itemConfig.featurePlanId, false))
+                                    )
+                                  }}
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            )}
+                            {isSubscriptionTypeAddons &&
+                              !isDelete.get(itemConfig.featurePlanId) && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      className="px-0"
+                                      variant="link"
+                                      size="icon"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        e.preventDefault()
+                                        setConfirmDelete(
+                                          (prev) =>
+                                            new Map(prev.set(itemConfig.featurePlanId, true))
+                                        )
+
+                                        setTimeout(() => {
+                                          setConfirmDelete(
+                                            (prev) =>
+                                              new Map(prev.set(itemConfig.featurePlanId, false))
+                                          )
+                                        }, 2000)
+                                      }}
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <div className="max-w-[200px] text-sm">
+                                      remove this addon from the subscription
+                                    </div>
+                                  </TooltipContent>
+                                </Tooltip>
+                              )}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+
+                    <TableRow className="border-t border-b text-muted-foreground">
+                      <TableCell colSpan={2} className="h-10 gap-1 pl-1 text-left font-semibold">
+                        {capitalize(
+                          getBillingCycleMessage(selectedPlanVersion?.billingConfig!).message
+                        )}
+                      </TableCell>
+                      <TableCell colSpan={1} className="h-10 text-right text-xs">
+                        {displayTotalPrice}
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              ) : (
+                <div className="flex w-full items-center justify-center px-1 py-2">
+                  <EmptyPlaceholder isLoading={isLoading} className="min-h-[200px]">
+                    <EmptyPlaceholder.Icon>
+                      <LayoutGrid className="h-8 w-8" />
+                    </EmptyPlaceholder.Icon>
+                    <EmptyPlaceholder.Title>No plan selected</EmptyPlaceholder.Title>
+                    <EmptyPlaceholder.Description>
+                      Select a plan to configure the items
+                    </EmptyPlaceholder.Description>
+                  </EmptyPlaceholder>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

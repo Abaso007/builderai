@@ -14,7 +14,7 @@ export default function UpgradePlanError() {
       <div className="flex flex-col items-center justify-center">
         <EmptyPlaceholder className="min-h-[800px] w-full space-y-10">
           <EmptyPlaceholder.Title className="mt-0 p-10" variant="h3">
-            You don't have access to this feature
+            This feature is not available on your current plan
           </EmptyPlaceholder.Title>
           <EmptyPlaceholder.Icon>
             <BlurImage
@@ -26,7 +26,7 @@ export default function UpgradePlanError() {
             />
           </EmptyPlaceholder.Icon>
           <EmptyPlaceholder.Description className="mx-auto w-1/3 text-center">
-            You don't have access to this feature
+            This feature is not available on your current plan
           </EmptyPlaceholder.Description>
           <EmptyPlaceholder.Action>
             <div className="mt-6 flex flex-row items-center justify-center gap-10">

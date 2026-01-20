@@ -14,7 +14,7 @@ export const navItems = [
     isMarketing: false,
   },
   {
-    href: `${DOCS_DOMAIN}/docs`,
+    href: `${DOCS_DOMAIN}`,
     title: "Docs",
     isMarketing: true,
   },
