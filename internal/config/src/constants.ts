@@ -90,7 +90,7 @@ export const STRIPE_SETUP_CALLBACK_PREFIX_URL = `${API_DOMAIN}v1/paymentProvider
 
 export const RESTRICTED_SUBDOMAINS = new Set(["www", "app", "api", "sites", "builderai", "unprice"])
 
-// export const APP_PUBLIC_ROUTES = new Set(["/opengraph-image.png", "/terms", "/pricing", "/privacy"])
+export const APP_PUBLIC_ROUTES = new Set(["/", "/manifesto"])
 export const APP_AUTH_ROUTES = new Set(Object.values(AUTH_ROUTES))
 export const API_AUTH_ROUTE_PREFIX = "/api/auth"
 export const DEFAULT_LOGIN_REDIRECT = "/"

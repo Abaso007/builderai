@@ -3,7 +3,7 @@ import { type NextMiddleware, NextResponse } from "next/server"
 
 import { auth } from "@unprice/auth/server"
 
-import { APP_DOMAIN, APP_HOSTNAMES } from "@unprice/config"
+import { APP_DOMAIN, APP_HOSTNAMES, APP_PUBLIC_ROUTES } from "@unprice/config"
 import { getValidSubdomain, parse } from "~/lib/domains"
 import AppMiddleware from "~/middleware/app"
 import SitesMiddleware from "~/middleware/sites"
@@ -50,7 +50,11 @@ export default async function middleware(req: NextRequest, ctx: NextFetchEvent) 
 
   // 1. Skip auth for the landing page to improve TTFB
   // Redirection for logged-in users is handled client-side in the Home component
-  if (!APP_HOSTNAMES.has(domain) && (subdomain === "" || subdomain === "www") && path === "/") {
+  if (
+    !APP_HOSTNAMES.has(domain) &&
+    (subdomain === "" || subdomain === "www") &&
+    APP_PUBLIC_ROUTES.has(path)
+  ) {
     return NextResponse.next()
   }
 
@@ -69,11 +73,12 @@ export const config = {
      * Match all paths except for:
      * 1. /api/ routes
      * 2. /_next/ (Next.js internals)
-     * 3. /_proxy/ (special page for OG tags proxying)
+     * 3. /manifesto/ (manifesto page)
+     * 4. /_proxy/ (special page for OG tags proxying)
      * 4. /_static (inside /public)
      * 5. /_vercel (Vercel internals)
      * 6. Static files (e.g. /favicon.ico, /sitemap.xml, /robots.txt, etc.)
      */
-    "/((?!api/|_next/|_proxy/|_static|_vercel|[\\w-]+\\.\\w+).*)",
+    "/((?!api/|_next/|manifesto|_proxy/|_static|_vercel|[\\w-]+\\.\\w+).*)",
   ],
 }
