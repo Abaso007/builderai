@@ -22,6 +22,15 @@ export const changeRoleMember = protectedWorkspaceProcedure
       .returning()
       .then((wk) => wk[0] ?? undefined)
 
+    if (member) {
+      opts.ctx.waitUntil(
+        Promise.all([
+          opts.ctx.cache.workspaceGuard.remove(`workspace-guard:${workspace.id}:${userId}`),
+          opts.ctx.cache.workspaceGuard.remove(`workspace-guard:${workspace.slug}:${userId}`),
+        ])
+      )
+    }
+
     if (!member) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",

@@ -69,13 +69,13 @@ export default function Hero() {
       >
         <br />
         <br />
-        <b>The PriceOps Infrastructure for SaaS.</b> You can finally release the engineering backlog
-        from the weight of legacy billing. As you discover the freedom of PriceOps, you’ll realize
-        that your pricing is no longer a constraint — it’s an evolution.
+        <b>The PriceOps Infrastructure for SaaS.</b> Decouple your pricing logic from your codebase.
+        By treating pricing as infrastructure, you eliminate the engineering bottleneck preventing
+        revenue growth.
         <br />
         <br />
-        Ship usage-based, tiered, or hybrid models with a single integration, and watch the friction
-        dissolve. No more "billing JIRAs."
+        Ship usage-based, tiered, or hybrid models with a single integration. As you deploy Unprice,
+        you’ll notice how quickly "billing tickets" disappear from your backlog.
         <br />
         <br />
         <span className="text-sm italic opacity-70">

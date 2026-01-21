@@ -51,11 +51,11 @@ export default function Belief() {
       </motion.h2>
       <motion.div variants={itemVariants} className="mt-6 max-w-prose space-y-4">
         <p className="text-justify text-lg leading-8">
-          We believe SaaS founders and AI builders deserve to command the value they create.
+          We believe SaaS founders and AI builders deserve full control over the value they create.
           <br />
           <br />
-          Static plans, vendor lock-in, and engineering bottlenecks are relics you can finally
-          release. PriceOps is your weapon. Transparency is your armor.
+          Static plans, vendor lock-in, and engineering bottlenecks are relics of a previous era.
+          PriceOps is your strategic advantage. Transparency is your security.
           <br />
           <br />
           We’re not here to tweak pricing around the edges.
@@ -67,11 +67,10 @@ export default function Belief() {
           <br />
           You don’t need to guess your tiers.
           <br />
-          You don’t need to wait for a developer to change a number.
+          You don’t need to wait for a deployment to change a price.
           <br />
           <br />
-          You can finally experience PriceOps — built on your terms, with fully transparent code and
-          at any scale.
+          Experience PriceOps — built on your terms, with fully transparent code and at any scale.
           <br />
           <br />
           <span className="font-bold italic">

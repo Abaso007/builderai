@@ -76,6 +76,15 @@ export const inviteMember = protectedWorkspaceProcedure
         })
         .returning()
 
+      opts.ctx.waitUntil(
+        Promise.all([
+          opts.ctx.cache.workspaceGuard.remove(`workspace-guard:${workspace.id}:${userByEmail.id}`),
+          opts.ctx.cache.workspaceGuard.remove(
+            `workspace-guard:${workspace.slug}:${userByEmail.id}`
+          ),
+        ])
+      )
+
       return {
         invite: undefined,
       }

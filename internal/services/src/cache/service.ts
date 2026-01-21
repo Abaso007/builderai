@@ -112,6 +112,11 @@ export class CacheService {
       planVersionList: new Namespace<CacheNamespaces["planVersionList"]>(this.context, defaultOpts),
       planVersion: new Namespace<CacheNamespaces["planVersion"]>(this.context, defaultOpts),
       projectFeatures: new Namespace<CacheNamespaces["projectFeatures"]>(this.context, defaultOpts),
+      workspaceGuard: new Namespace<CacheNamespaces["workspaceGuard"]>(this.context, {
+        ...defaultOpts,
+        fresh: 1000 * 60, // 1 minute
+        stale: 1000 * 60 * 5, // 5 minutes
+      }),
       idempotentRequestUsageByHash: new Namespace<CacheNamespaces["idempotentRequestUsageByHash"]>(
         this.context,
         {

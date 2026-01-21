@@ -3026,6 +3026,11 @@ export interface operations {
            */
           onlyLatest?: boolean
           /**
+           * @description Filter by plan version IDs
+           * @example ["pv_123"]
+           */
+          planVersionIds?: string[]
+          /**
            * @description The billing interval to filter the plan versions
            * @example month
            * @enum {string}

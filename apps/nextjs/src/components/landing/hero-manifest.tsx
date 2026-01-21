@@ -49,24 +49,23 @@ export default function HeroManifest() {
           className="mt-20 max-w-2xl px-4 text-center text-background-text text-lg md:px-0"
           variants={itemVariants}
         >
-          SaaS pricing was built for a world that no longer exists. You might remember the three
-          tiers, the feature gating, and the quarterly reviews... and you already know that world is
-          over.
+          SaaS pricing was built for a static era. Hardcoded tiers, manual feature gating, and
+          quarterly pricing reviews are relics. You know that world is ending.
           <br />
           <br />
-          <span className="font-bold italic">As you read this, notice how much has changed.</span>
+          <span className="font-bold italic">The market has already shifted.</span>
           <br />
           <br />
-          Today, your users expect personalized value. While your product ships daily, you might
-          begin to realize the gap between your innovation and your static infrastructure. Still
-          pricing like it's 2010?
+          Today, users demand personalized value. While your product ships daily, your pricing
+          infrastructure often remains frozen. The gap between your innovation and your monetization
+          is where revenue is lost.
           <br />
           <br />
-          Static pricing isn’t just outdated. It’s a choice to let revenue leak away.
+          Static pricing isn’t just outdated. It’s technical debt that bleeds value.
           <br />
           <br />
-          In a world where AI shifts the horizon overnight, pricing is your{" "}
-          <span className="font-bold italic">sharpest weapon.</span>
+          In a world where AI shifts the horizon overnight, pricing must be an{" "}
+          <span className="font-bold italic">adaptive engine</span>, not a static config.
         </motion.p>
       </motion.section>
       <UnpriceManifesto />

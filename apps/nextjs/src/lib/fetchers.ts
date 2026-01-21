@@ -1,7 +1,10 @@
 "use server"
 
+import type { PlanVersionApi } from "@unprice/db/validators"
 import { unstable_cache } from "next/cache"
+import { cache } from "react"
 import { db } from "./db"
+import { unprice } from "./unprice"
 
 async function fetchPageData(domain: string) {
   const page = await db.query.pages.findFirst({
@@ -16,7 +19,7 @@ async function fetchPageData(domain: string) {
   return page
 }
 
-export async function getPageData(domain: string, skipCache = false) {
+export const getPageData = cache(async (domain: string, skipCache = false) => {
   if (skipCache) {
     // Skip cache and fetch directly from DB (useful for preview mode)
     return fetchPageData(domain)
@@ -27,4 +30,42 @@ export async function getPageData(domain: string, skipCache = false) {
   })
 
   return getCachedPage()
+})
+
+async function fetchPlansData(planVersionIds: string[]) {
+  if (planVersionIds.length === 0) return []
+
+  const plansUnpriceResponse = await unprice.plans.listPlanVersions({
+    // @ts-ignore: Local package update might not be reflected in dist yet
+    planVersionIds,
+  })
+
+  if (plansUnpriceResponse.result) {
+    // cast because of potential type mismatch in local dev vs dist
+    const result = plansUnpriceResponse.result as unknown as {
+      planVersions: PlanVersionApi[]
+    }
+    return result.planVersions
+  }
+
+  return []
 }
+
+export const getPlansData = cache(
+  async (domain: string, planVersionIds: string[], skipCache = false) => {
+    if (skipCache) {
+      return fetchPlansData(planVersionIds)
+    }
+
+    const idsHash = planVersionIds.sort().join(",")
+    const getCachedPlans = unstable_cache(
+      async () => fetchPlansData(planVersionIds),
+      [`${domain}:plans`, idsHash],
+      {
+        tags: [`${domain}:page-data`],
+      }
+    )
+
+    return getCachedPlans()
+  }
+)

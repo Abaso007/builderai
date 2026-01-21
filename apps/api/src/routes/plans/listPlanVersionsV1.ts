@@ -44,8 +44,14 @@ export type GetPlanVersionsRequest = z.infer<
 export const registerListPlanVersionsV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { db, cache, analytics, logger, metrics } = c.get("services")
-    const { onlyPublished, onlyEnterprisePlan, onlyLatest, billingInterval, currency } =
-      c.req.valid("json")
+    const {
+      onlyPublished,
+      onlyEnterprisePlan,
+      onlyLatest,
+      billingInterval,
+      currency,
+      planVersionIds,
+    } = c.req.valid("json")
 
     // validate the request
     const key = await keyAuth(c)
@@ -67,6 +73,7 @@ export const registerListPlanVersionsV1 = (app: App) =>
         latest: onlyLatest,
         currency: currency,
         billingInterval,
+        planVersionIds,
       },
     })
 

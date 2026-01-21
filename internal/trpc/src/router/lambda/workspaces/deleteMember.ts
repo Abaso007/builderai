@@ -69,6 +69,15 @@ export const deleteMember = protectedWorkspaceProcedure
       .returning()
       .then((members) => members[0] ?? undefined)
 
+    if (deletedMember) {
+      opts.ctx.waitUntil(
+        Promise.all([
+          opts.ctx.cache.workspaceGuard.remove(`workspace-guard:${workspace.id}:${userId}`),
+          opts.ctx.cache.workspaceGuard.remove(`workspace-guard:${workspace.slug}:${userId}`),
+        ])
+      )
+    }
+
     if (!deletedMember) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",

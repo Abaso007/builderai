@@ -219,9 +219,10 @@ export class PlanService {
       currency?: Currency
       billingInterval?: BillingInterval
       enterprise?: boolean
+      planVersionIds?: string[]
     }
   }): Promise<PlanVersionApi[] | null> {
-    const { published, latest, currency, enterprise, billingInterval } = query
+    const { published, latest, currency, enterprise, billingInterval, planVersionIds } = query
     const start = performance.now()
 
     const planVersionsData = await this.db.query.versions
@@ -237,7 +238,7 @@ export class PlanService {
             },
           },
         },
-        where: (version, { and, eq }) =>
+        where: (version, { and, eq, inArray }) =>
           and(
             eq(version.projectId, projectId),
             eq(version.active, true),
@@ -246,7 +247,11 @@ export class PlanService {
             // latest versions by default, only get non latest versions if the user wants it
             (latest && eq(version.latest, true)) || undefined,
             // filter by currency if provided
-            currency ? eq(version.currency, currency) : undefined
+            currency ? eq(version.currency, currency) : undefined,
+            // filter by plan version ids if provided
+            planVersionIds && planVersionIds.length > 0
+              ? inArray(version.id, planVersionIds)
+              : undefined
           ),
       })
       .then((data) => {
@@ -301,6 +306,7 @@ export class PlanService {
       billingInterval?: BillingInterval
       enterprise?: boolean
       limit?: number
+      planVersionIds?: string[]
     }
     opts?: {
       skipCache?: boolean // skip cache to force revalidation

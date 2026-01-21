@@ -23,7 +23,9 @@ import type {
   ReportUsageResult,
   SubscriptionCache,
   SubscriptionStatus,
+  User,
   Workspace,
+  WorkspaceRole,
 } from "@unprice/db/validators"
 
 export type ProjectFeatureCache = {
@@ -37,6 +39,11 @@ export type CustomerCache = Customer & {
   project: Project & {
     workspace: Workspace
   }
+}
+
+export type WorkspaceGuardCache = {
+  workspace: Workspace
+  member: User & { role: WorkspaceRole }
 }
 
 export type CacheNamespaces = {
@@ -53,6 +60,7 @@ export type CacheNamespaces = {
   negativeEntitlements: boolean
   customerPaymentMethods: CustomerPaymentMethod[] | null
   projectFeatures: ProjectFeatureCache | null
+  workspaceGuard: WorkspaceGuardCache | null
   idempotentRequestUsageByHash: ReportUsageResult | null
   planVersionList: PlanVersionApi[] | null
   planVersion: PlanVersionApi | null

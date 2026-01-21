@@ -10,28 +10,28 @@ const PillarsOfPriceOps = [
     title: "Adaptive Revenue Engine",
     icon: <BarChart className="h-5 w-5" />,
     description:
-      "Experience the fluidity of launching any model—usage-based, seat-based, or hybrid—in real-time. Stop guessing and start reacting.",
+      "Launch any model—usage-based, seat-based, or hybrid—in real-time. Stop guessing and start iterating.",
     practice: "Pricing is a product surface. Treat it like one.",
   },
   {
     title: "Engineering Independence",
     icon: <TrendingUp className="h-5 w-5" />,
     description:
-      "Release the burden from your backlog. Run experiments and change plans with a click, while your developers focus on the core product.",
+      "Release the billing burden from your backlog. Run pricing experiments and change plans instantly, allowing developers to focus on core product value.",
     practice: "Pricing logic belongs to business teams. Not backlogs.",
   },
   {
     title: "Vendor Freedom",
     icon: <DollarSign className="h-5 w-5" />,
     description:
-      "I don't know how quickly you will realize that you don't have to be held hostage by Stripe. Swap providers with complete transparency.",
+      "Realize that vendor lock-in is a choice, not a necessity. Swap providers (Stripe, Paddle) with complete transparency and zero code changes.",
     practice: "Payments are infrastructure, not dependencies.",
   },
   {
     title: "Transparent Standard",
     icon: <Code className="h-5 w-5" />,
     description:
-      "Monetization is too critical to be a black box. Experience the integrity of AGPL-core: transparent, auditable, and yours to keep.",
+      "Monetization is too critical to be a black box. Build on an open AGPL-core: transparent, auditable, and owned by you.",
     practice: "Your revenue engine should be auditable and programmable.",
   },
 ]

@@ -47,59 +47,50 @@ export default function MainfestoCopy() {
         Static Pricing is a Choice to Leak Revenue
       </motion.h2>
       <motion.div variants={itemVariants} className="mt-6 text-justify text-lg">
-        Most SaaS companies are unaware that they are leaving 30-50% of their revenue on the table.
+        Most SaaS companies leave 30-50% of their revenue on the table because they treat pricing as
+        a static configuration rather than a dynamic product surface.
         <br />
         <br />
-        Why? Because they treat pricing like a backend config file instead of a dynamic growth
-        lever.
+        <b>The Static Trap:</b> Your "Pro" plan has been $49/mo for two years. Your product is 10x
+        better, but your price hasn't moved. Testing a new tier requires a six-week engineering
+        sprint, involving database migrations and billing integration updates. So you wait. And you
+        lose revenue daily.
         <br />
         <br />
-        <b>The Old Way:</b> You might recall the "Pro" plan. It’s been $49/mo for two years. Your
-        product is 10x better, but your price remains static. You might feel the urge to test a new
-        tier, but engineering tells you it's a "six-week rebuild." So you wait. You lose.
+        <b>The PriceOps Way:</b>
         <br />
         <br />
-        <b>The New Way: PriceOps.</b>
+        Pricing becomes as agile as your codebase. When you ship value, you should be able to
+        capture it instantly—without blocking engineering resources.
         <br />
         <br />
-        Pricing should be as fluid as your code. When your customers demand more value, you should
-        be able to capture that value instantly—without ever opening a single JIRA ticket.
+        The market demands this shift. Users refuse to pay for unused "seats"; they pay for{" "}
+        <b>value.</b>
         <br />
         <br />
-        The market has shifted. Customers no longer want to pay for "seats" they don't use. They
-        want to pay for <b>value.</b>
+        Why do users churn? Often, it’s a misalignment between price and perceived value. In a
+        static system, you guess. In an adaptive system, pricing aligns with usage and value
+        delivery.
         <br />
         <br />
-        Think about it: Why do users churn?
+        Companies using hybrid models see <b>21% higher growth rates</b>.
         <br />
         <br />
-        Usually, it’s a mismatch between what they pay and the value they perceive. In the "Static
-        World," you have to guess. In the "Adaptive World," the price fits the user like a glove.
+        Price is the reflection of your innovation. If your product evolves daily but your pricing
+        is frozen, you are carrying a hidden engineering tax.
         <br />
         <br />
-        Companies using hybrid models see <b>21% higher growth rates</b> than those who remain stuck
-        in the past.
-        <br />
-        <br />
-        Price is the direct mirror of your innovation. If your product is evolving daily, but your
-        pricing remains frozen, you aren't running a business — you're experiencing the weight of an
-        engineering bottleneck.
-        <br />
-        <br />
-        Are you ready to stop the leak?
+        Stop the leak.
       </motion.div>
       <motion.div variants={itemVariants} className="mt-6 text-justify text-lg">
-        Are you ready for the shift?
-        <br />
-        <br />
-        Let’s be honest—most SaaS companies aren’t:
+        Recognize the signs of static pricing debt:
         <br />
         <br />
         <ul className="list-disc pl-10">
-          <li>You’re unsure what your users are truly willing to pay.</li>
-          <li>You lack the tools to adapt pricing as quickly as your product evolves.</li>
-          <li>You treat pricing as a backend config, not a growth engine.</li>
-          <li>You don’t know how to price for different customer segments.</li>
+          <li>Uncertainty about willingness to pay due to lack of experimentation.</li>
+          <li>Inability to adapt pricing without engineering intervention.</li>
+          <li>Treating pricing as a backend config, not a strategic lever.</li>
+          <li>One-size-fits-all pricing that fails to capture value from different segments.</li>
         </ul>
       </motion.div>
       <motion.div variants={itemVariants} className="mt-6 text-justify text-lg">

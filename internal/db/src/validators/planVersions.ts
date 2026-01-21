@@ -115,6 +115,13 @@ export const getPlanVersionListSchema = z.object({
     description: "Whether to include the latest plan version",
     example: true,
   }),
+  planVersionIds: z
+    .array(z.string())
+    .optional()
+    .openapi({
+      description: "Filter by plan version IDs",
+      example: ["pv_123"],
+    }),
   billingInterval: billingIntervalSchema.optional().openapi({
     description: "The billing interval to filter the plan versions",
     example: "month",

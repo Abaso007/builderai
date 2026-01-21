@@ -37,16 +37,29 @@ export const workspaceGuard = async ({
     })
   }
 
-  const data = await createWorkspaceGuardQuery(db)
-    .execute({
-      workspaceId,
-      workspaceSlug,
-      userId,
-    })
-    .then((response) => response[0] ?? null)
+  const key = `workspace-guard:${workspaceId ?? workspaceSlug}:${userId}`
+
+  const { val: data } = await ctx.cache.workspaceGuard.swr(key, async () => {
+    const result = await createWorkspaceGuardQuery(db)
+      .execute({
+        workspaceId,
+        workspaceSlug,
+        userId,
+      })
+      .then((response) => response[0] ?? null)
+
+    if (!result) {
+      return null
+    }
+
+    return {
+      workspace: result.workspace,
+      member: result.member as User & { role: WorkspaceRole },
+    }
+  })
 
   const workspace = data?.workspace
-  const member = data?.member as User & { role: WorkspaceRole }
+  const member = data?.member
 
   if (!member || !workspace) {
     throw new TRPCError({

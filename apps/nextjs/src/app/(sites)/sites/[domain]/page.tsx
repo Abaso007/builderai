@@ -1,3 +1,4 @@
+import type { PlanVersionApi } from "@unprice/db/validators"
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import Script from "next/script"
@@ -6,10 +7,9 @@ import Header from "~/components/layout/header"
 import HeaderMarketing from "~/components/layout/header-marketing"
 import { env } from "~/env"
 import { generateColorsFromBackground } from "~/lib/colors"
-import { getPageData } from "~/lib/fetchers"
+import { getPageData, getPlansData } from "~/lib/fetchers"
 import { getImageSrc, isSvgLogo } from "~/lib/image"
 import { verifyPreviewToken } from "~/lib/preview"
-import { unprice } from "~/lib/unprice"
 import { ApplyTheme } from "../_components/apply-theme"
 import { ErrorMessage } from "../_components/error-message"
 import { Faqs } from "../_components/faqs"
@@ -19,11 +19,10 @@ import type { PricingPlan } from "../_components/pricing-card"
 import { FeatureComparison } from "../_components/pricing-comparision"
 import { PricingTable } from "../_components/pricing-table"
 
-// TODO: generate metadata https://github.com/vercel/platforms/blob/main/app/s/%5Bsubdomain%5D/page.tsx
 // check shadcn landing page for inspiration
 export const runtime = "edge"
 
-// TODO: improve metadata generation
+// Metadata generation improved to include page/project name fallback
 export async function generateMetadata({
   params: { domain },
 }: {
@@ -36,8 +35,8 @@ export async function generateMetadata({
   }
 
   const { title, copy, description, logo } = page
-  const siteTitle = title || "Pricing Page"
-  const siteDescription = description || copy || "Dynamic pricing page powered by Unprice"
+  const siteTitle = title || page.name || page.project.name || "Pricing Page"
+  const siteDescription = description || copy || `Pricing for ${siteTitle} powered by Unprice`
 
   const ogUrl = new URL("https://unprice.dev/og")
   ogUrl.searchParams.set("title", siteTitle)
@@ -105,12 +104,14 @@ export default async function DomainPage({
   const selectedPlans = page?.selectedPlans ?? []
 
   // unprice api handles the cache
-  const plansUnprice = await Promise.all(
-    selectedPlans.map(async (plan) => {
-      const planVersion = await unprice.plans.getPlanVersion(plan.id)
-      return planVersion.result?.planVersion ?? null
-    })
-  )
+  let plansUnprice: (PlanVersionApi | null)[] = []
+  if (selectedPlans.length > 0) {
+    const planVersionIds = selectedPlans.map((plan) => plan.id)
+    const fetchedPlans = await getPlansData(domain, planVersionIds, skipCache)
+
+    const map = new Map(fetchedPlans.map((p) => [p.id, p]))
+    plansUnprice = selectedPlans.map((p) => map.get(p.id) ?? null)
+  }
 
   // Transform Unprice plans to match our PricingPlan interface
   const plans =
