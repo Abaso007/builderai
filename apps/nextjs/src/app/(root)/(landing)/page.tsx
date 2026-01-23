@@ -1,30 +1,36 @@
-import PriceOpsSection from "~/components/landing/ami"
-import CodeExample from "~/components/landing/code-example"
-import Cta from "~/components/landing/cta"
-import { Features } from "~/components/landing/features"
-import { FeaturesApp } from "~/components/landing/features-app"
-import { Global } from "~/components/landing/global"
+import dynamic from "next/dynamic"
 import Hero from "~/components/landing/hero"
-import LogoCloud from "~/components/landing/logo-cloud"
 import { PricingHero } from "~/components/landing/pricing-hero"
+import { LazyMotionWrapper } from "~/components/landing/lazy-motion-wrapper"
+
+const PriceOpsSection = dynamic(() => import("~/components/landing/ami"))
+const CodeExample = dynamic(() => import("~/components/landing/code-example"))
+const Cta = dynamic(() => import("~/components/landing/cta"))
+const Features = dynamic(() => import("~/components/landing/features").then((mod) => mod.Features))
+const FeaturesApp = dynamic(() => import("~/components/landing/features-app").then((mod) => mod.FeaturesApp))
+const Global = dynamic(() => import("~/components/landing/global").then((mod) => mod.Global))
+const LogoCloud = dynamic(() => import("~/components/landing/logo-cloud"))
+
 
 export default function Home() {
   return (
-    <main className="flex flex-col overflow-hidden pb-28">
-      <Hero />{" "}
-      <PricingHero
-        headline="Click to bill. Experience the precision."
-        description="Notice how 1,000,000 events transform into one perfect invoice. Experience the clarity of the metering engine below."
-        docsLinkText="Read the Docs"
-      />
-      <PriceOpsSection />
-      <Features />
-      <CodeExample />
-      {/* <Testimonials /> */}
-      <FeaturesApp />
-      <Global />
-      <LogoCloud />
-      <Cta />
-    </main>
+    <LazyMotionWrapper>
+      <main className="flex flex-col overflow-hidden">
+        <Hero />{" "}
+        <PricingHero
+          headline="Test out unprice now."
+          description="Notice how 1,000,000 events transform into one perfect invoice. Experience the clarity of the metering engine below."
+          docsLinkText="Read the Docs"
+        />
+        <PriceOpsSection />
+        <Features />
+        <CodeExample />
+        {/* <Testimonials /> */}
+        <FeaturesApp />
+        <Global />
+        <LogoCloud />
+        <Cta />
+      </main>
+    </LazyMotionWrapper>
   )
 }

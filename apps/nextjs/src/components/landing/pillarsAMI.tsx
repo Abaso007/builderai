@@ -1,6 +1,6 @@
 "use client"
 
-import { motion, useInView } from "framer-motion"
+import { m, useInView } from "framer-motion"
 import { BarChart, Code, DollarSign, TrendingUp } from "lucide-react"
 import { useRef } from "react"
 import { AnimatedBeamDemo } from "./animated-beam-demo"
@@ -45,8 +45,8 @@ export default function PillarsPriceOps() {
     visible: {
       opacity: 1,
       transition: {
-        staggerChildren: 0.2,
-        delayChildren: 0.3,
+        staggerChildren: 0.15,
+        delayChildren: 0.1,
       },
     },
   }
@@ -57,14 +57,14 @@ export default function PillarsPriceOps() {
       opacity: 1,
       y: 0,
       transition: {
-        duration: 2,
+        duration: 0.3,
         ease: "easeOut",
       },
     },
   }
 
   return (
-    <motion.section
+    <m.section
       ref={sectionRef}
       initial="hidden"
       animate={isInView ? "visible" : "hidden"}
@@ -72,14 +72,14 @@ export default function PillarsPriceOps() {
       aria-labelledby="benefits-title"
       className="mx-auto mt-28 px-4"
     >
-      <motion.h2
+      <m.h2
         variants={itemVariants}
         id="benefits-title"
         className="inline-block py-2 font-bold text-4xl text-background-textContrast tracking-tighter md:text-5xl"
       >
         The Solution: PriceOps
-      </motion.h2>
-      <motion.div variants={itemVariants} className="mt-6 text-justify text-lg">
+      </m.h2>
+      <m.div variants={itemVariants} className="mt-6 text-justify text-lg">
         Unprice is the foundation of a new category: <b>PriceOps Infrastructure</b>. It’s the
         abstraction layer that transforms pricing from a "hardcoded nightmare" into your sharpest
         growth engine.
@@ -113,13 +113,13 @@ export default function PillarsPriceOps() {
         <br />
         <br />
         <b>The future of SaaS is Adaptive.</b>
-      </motion.div>
+      </m.div>
 
-      <motion.div variants={itemVariants} className="my-28 flex justify-center">
+      <m.div variants={itemVariants} className="my-28 flex justify-center">
         <AnimatedBeamDemo />
-      </motion.div>
+      </m.div>
 
-      <motion.dl
+      <m.dl
         variants={itemVariants}
         className="mt-8 grid grid-cols-4 gap-x-10 gap-y-8 sm:mt-12 sm:gap-y-10"
       >
@@ -135,7 +135,7 @@ export default function PillarsPriceOps() {
             </dd>
           </div>
         ))}
-      </motion.dl>
-    </motion.section>
+      </m.dl>
+    </m.section>
   )
 }

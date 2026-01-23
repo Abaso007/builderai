@@ -1,7 +1,7 @@
 "use client"
 
 import { cn } from "@unprice/ui/utils"
-import { motion } from "framer-motion"
+import { m } from "framer-motion"
 import {
   ArrowRight,
   Check,
@@ -1239,15 +1239,15 @@ export function PricingHero({
   const showSidePanel = !!activePanel
 
   return (
-    <motion.section
+    <m.section
       variants={heroImageVariants}
       initial="hidden"
       animate="visible"
-      className={cn("my-20 flex items-center justify-center", className)}
+      className={cn("mx-auto my-24 flex w-full max-w-6xl items-center justify-center px-6", className)}
       style={accentStyle}
       aria-labelledby="hero-headline"
     >
-      <div className="container mx-auto px-4">
+      <div className="w-full">
         {/* Header */}
         <header className="mx-auto mb-8 max-w-2xl text-center">
           <h1
@@ -1547,6 +1547,6 @@ export function PricingHero({
           background: var(--background-text);
         }
       `}</style>
-    </motion.section>
+    </m.section>
   )
 }

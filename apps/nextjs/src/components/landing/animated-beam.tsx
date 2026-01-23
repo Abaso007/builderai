@@ -1,6 +1,6 @@
 "use client"
 
-import { motion } from "framer-motion"
+import { m } from "framer-motion"
 import { type RefObject, useEffect, useId, useState } from "react"
 
 import { cn } from "@unprice/ui/utils"
@@ -131,7 +131,7 @@ export const AnimatedBeam: React.FC<AnimatedBeamProps> = ({
         strokeLinecap="round"
       />
       <defs>
-        <motion.linearGradient
+        <m.linearGradient
           className="transform-gpu"
           id={id}
           gradientUnits={"userSpaceOnUse"}
@@ -159,7 +159,7 @@ export const AnimatedBeam: React.FC<AnimatedBeamProps> = ({
           <stop stopColor={gradientStartColor} />
           <stop offset="32.5%" stopColor={gradientStopColor} />
           <stop offset="100%" stopColor={gradientStopColor} stopOpacity="0" />
-        </motion.linearGradient>
+        </m.linearGradient>
       </defs>
     </svg>
   )

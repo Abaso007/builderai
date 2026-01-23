@@ -1,6 +1,6 @@
 "use client"
 
-import { AnimatePresence, type MotionProps, motion } from "framer-motion"
+import { AnimatePresence, type MotionProps, m } from "framer-motion"
 import { useEffect, useState } from "react"
 
 import { cn } from "@unprice/ui/utils"
@@ -55,7 +55,7 @@ AuroraText.displayName = "AuroraText"
 
 export function WordRotate({
   words,
-  duration = 2500,
+  duration = 1500,
   motionProps = {
     initial: { opacity: 0, y: -50 },
     animate: { opacity: 1, y: 0 },
@@ -106,7 +106,7 @@ export function LineShadowText({
   as: Component = "span",
   ...props
 }: LineShadowTextProps) {
-  const MotionComponent = motion.create(Component)
+  const MotionComponent = m.create(Component)
   const content = typeof children === "string" ? children : null
 
   if (!content) {

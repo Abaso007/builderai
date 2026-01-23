@@ -1,7 +1,7 @@
 "use client"
 
 import { cn } from "@unprice/ui/utils"
-import { AnimatePresence, motion } from "framer-motion"
+import { AnimatePresence, m } from "framer-motion"
 import React, { type ComponentPropsWithoutRef, useEffect, useMemo, useState } from "react"
 
 export function AnimatedListItem({ children }: { children: React.ReactNode }) {
@@ -13,9 +13,9 @@ export function AnimatedListItem({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <motion.div {...animations} layout className="mx-auto w-full">
+    <m.div {...animations} layout className="mx-auto w-full">
       {children}
-    </motion.div>
+    </m.div>
   )
 }
 

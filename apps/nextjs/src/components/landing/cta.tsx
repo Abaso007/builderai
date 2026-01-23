@@ -3,22 +3,22 @@
 import { APP_DOMAIN } from "@unprice/config"
 import { buttonVariants } from "@unprice/ui/button"
 import { ChevronRight } from "@unprice/ui/icons"
-import { motion } from "framer-motion"
+import { m } from "framer-motion"
 import { Link } from "next-view-transitions"
 import Balancer from "react-wrap-balancer"
 
 export default function Cta() {
   return (
-    <section aria-labelledby="cta-title" className="mx-auto mt-32 max-w-6xl p-1 px-2">
+    <section aria-labelledby="cta-title" className="mx-auto mt-24 w-full max-w-6xl px-6 py-16">
       <div className="relative flex items-center justify-center">
-        <motion.div
+        <m.div
           className="max-w-4xl"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
         >
           <div className="flex flex-col items-center justify-center text-center">
-            <motion.div
+            <m.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2, duration: 0.6 }}
@@ -36,8 +36,8 @@ export default function Cta() {
                   evolution of SaaS monetization.
                 </Balancer>
               </p>
-            </motion.div>
-            <motion.div
+            </m.div>
+            <m.div
               className="mt-10 w-full p-1.5"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -47,8 +47,8 @@ export default function Cta() {
                 Start pricing
                 <ChevronRight className="ml-1 h-4 w-4" />
               </Link>
-            </motion.div>
-            <motion.p
+            </m.div>
+            <m.p
               className="mt-4 text-background-text text-xs sm:text-sm"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -61,9 +61,9 @@ export default function Cta() {
               >
                 Talk to me
               </a>
-            </motion.p>
+            </m.p>
           </div>
-        </motion.div>
+        </m.div>
       </div>
     </section>
   )

@@ -1,6 +1,6 @@
 "use client"
 
-import { motion, useInView } from "framer-motion"
+import { m, useInView } from "framer-motion"
 import { useRef } from "react"
 
 export default function MainfestoCopy() {
@@ -12,8 +12,8 @@ export default function MainfestoCopy() {
     visible: {
       opacity: 1,
       transition: {
-        staggerChildren: 0.2,
-        delayChildren: 0.3,
+        staggerChildren: 0.15,
+        delayChildren: 0.1,
       },
     },
   }
@@ -24,14 +24,14 @@ export default function MainfestoCopy() {
       opacity: 1,
       y: 0,
       transition: {
-        duration: 0.5,
+        duration: 0.3,
         ease: "easeOut",
       },
     },
   }
 
   return (
-    <motion.section
+    <m.section
       ref={sectionRef}
       initial="hidden"
       animate={isInView ? "visible" : "hidden"}
@@ -39,14 +39,14 @@ export default function MainfestoCopy() {
       aria-labelledby="code-example-title"
       className="mx-auto w-full max-w-4xl px-4 py-10"
     >
-      <motion.h2
+      <m.h2
         variants={itemVariants}
         id="features-title"
         className="mt-2 inline-block bg-clip-text py-2 font-bold text-4xl text-background-textContrast tracking-tighter sm:text-6xl md:text-6xl"
       >
         Static Pricing is a Choice to Leak Revenue
-      </motion.h2>
-      <motion.div variants={itemVariants} className="mt-6 text-justify text-lg">
+      </m.h2>
+      <m.div variants={itemVariants} className="mt-6 text-justify text-lg">
         Most SaaS companies leave 30-50% of their revenue on the table because they treat pricing as
         a static configuration rather than a dynamic product surface.
         <br />
@@ -81,8 +81,8 @@ export default function MainfestoCopy() {
         <br />
         <br />
         Stop the leak.
-      </motion.div>
-      <motion.div variants={itemVariants} className="mt-6 text-justify text-lg">
+      </m.div>
+      <m.div variants={itemVariants} className="mt-6 text-justify text-lg">
         Recognize the signs of static pricing debt:
         <br />
         <br />
@@ -92,14 +92,14 @@ export default function MainfestoCopy() {
           <li>Treating pricing as a backend config, not a strategic lever.</li>
           <li>One-size-fits-all pricing that fails to capture value from different segments.</li>
         </ul>
-      </motion.div>
-      <motion.div variants={itemVariants} className="mt-6 text-justify text-lg">
+      </m.div>
+      <m.div variants={itemVariants} className="mt-6 text-justify text-lg">
         The companies winning today are those who treat pricing as a product, not as a Secondary
         Artifact.
         <br />
         <br />
         Are you ready to join them?
-      </motion.div>
-    </motion.section>
+      </m.div>
+    </m.section>
   )
 }

@@ -5,7 +5,7 @@ export default function LogoCloud() {
     <section
       id="logo cloud"
       aria-label="Company logos"
-      className="flex animate-slide-up-fade flex-col items-center justify-center gap-y-6 px-4 py-10 text-center"
+      className="mx-auto flex w-full max-w-6xl animate-slide-up-fade flex-col items-center justify-center gap-y-6 px-6 py-16 text-center"
       style={{ animationDuration: "1500ms" }}
     >
       <p className="font-semibold text-xl tracking-tighter">Made with ❤️</p>

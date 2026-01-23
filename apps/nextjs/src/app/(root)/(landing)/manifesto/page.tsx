@@ -1,8 +1,11 @@
 import type { Metadata } from "next"
-import Belief from "~/components/landing/belief"
+import dynamic from "next/dynamic"
 import HeroManifest from "~/components/landing/hero-manifest"
-import MainfestoCopy from "~/components/landing/mainfesto-copy"
-import PillarsPriceOps from "~/components/landing/pillarsAMI"
+import { LazyMotionWrapper } from "~/components/landing/lazy-motion-wrapper"
+
+const Belief = dynamic(() => import("~/components/landing/belief"))
+const MainfestoCopy = dynamic(() => import("~/components/landing/mainfesto-copy"))
+const PillarsPriceOps = dynamic(() => import("~/components/landing/pillarsAMI"))
 
 export const metadata: Metadata = {
   title: "Manifesto",
@@ -11,14 +14,16 @@ export const metadata: Metadata = {
 
 export default function Manifesto() {
   return (
-    <main className="flex flex-col overflow-hidden pb-28">
-      <HeroManifest />
+    <LazyMotionWrapper>
+      <main className="flex flex-col overflow-hidden pb-28">
+        <HeroManifest />
 
-      <div className="mx-auto flex w-full max-w-4xl flex-col overflow-hidden px-3">
-        <MainfestoCopy />
-        <PillarsPriceOps />
-        <Belief />
-      </div>
-    </main>
+        <div className="mx-auto flex w-full max-w-4xl flex-col overflow-hidden px-3">
+          <MainfestoCopy />
+          <PillarsPriceOps />
+          <Belief />
+        </div>
+      </main>
+    </LazyMotionWrapper>
   )
 }

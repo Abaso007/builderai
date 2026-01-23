@@ -38,7 +38,14 @@ const nextConfig = {
     turbo: {},
     // ppr: true, // TODO: activate later
     mdxRs: true,
-    optimizePackageImports: ["@unprice/ui", "@unprice/trpc", "@unprice/auth", "@unprice/db"],
+    optimizePackageImports: [
+      "@unprice/ui",
+      "@unprice/trpc",
+      "@unprice/auth",
+      "@unprice/db",
+      "framer-motion",
+      "lucide-react",
+    ],
     instrumentationHook: process.env.NODE_ENV === "production",
   },
   /**

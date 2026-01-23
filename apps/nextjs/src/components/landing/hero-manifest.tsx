@@ -1,6 +1,6 @@
 "use client"
 
-import { motion } from "framer-motion"
+import { m } from "framer-motion"
 import Balancer from "react-wrap-balancer"
 import { UnpriceManifesto } from "./unprice-manifesto"
 
@@ -8,10 +8,10 @@ const containerVariants = {
   hidden: { opacity: 0 },
   visible: {
     opacity: 1,
-    transition: {
-      staggerChildren: 0.2,
-      delayChildren: 0.3,
-    },
+      transition: {
+        staggerChildren: 0.15,
+        delayChildren: 0.1,
+      },
   },
 }
 
@@ -31,21 +31,21 @@ const itemVariants = {
 export default function HeroManifest() {
   return (
     <div>
-      <motion.section
+      <m.section
         aria-labelledby="hero-title"
         className="mt-32 flex flex-col items-center justify-center text-center sm:mt-40"
         variants={containerVariants}
         initial="hidden"
         animate="visible"
       >
-        <motion.h1
+        <m.h1
           id="hero-title"
           className="inline-block p-2 font-bold text-2xl text-background-textContrast tracking-tighter sm:text-6xl md:text-7xl"
           variants={itemVariants}
         >
           <Balancer>PriceOps Infrastructure</Balancer>
-        </motion.h1>
-        <motion.p
+        </m.h1>
+        <m.p
           className="mt-20 max-w-2xl px-4 text-center text-background-text text-lg md:px-0"
           variants={itemVariants}
         >
@@ -66,8 +66,8 @@ export default function HeroManifest() {
           <br />
           In a world where AI shifts the horizon overnight, pricing must be an{" "}
           <span className="font-bold italic">adaptive engine</span>, not a static config.
-        </motion.p>
-      </motion.section>
+        </m.p>
+      </m.section>
       <UnpriceManifesto />
     </div>
   )

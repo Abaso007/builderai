@@ -1,7 +1,7 @@
 "use client"
 
 import createGlobe, { type COBEOptions } from "cobe"
-import { motion, useAnimation, useMotionValue, useSpring } from "framer-motion"
+import { m, useAnimation, useMotionValue, useSpring } from "framer-motion"
 import { useEffect, useRef, useState } from "react"
 
 import { cn } from "@unprice/ui/utils"
@@ -111,7 +111,7 @@ export function Globe({
       ...config,
       width: width * 2,
       height: width * 2,
-      scale: width < 480 ? 1.5 : 1.1,
+      scale: width < 480 ? 0.8 : width < 768 ? 1.0 : 1.1,
       baseColor: theme === "dark" ? [0.1, 0.1, 0.1] : [1, 1, 1],
       markerColor:
         theme === "dark" ? [255 / 255, 200 / 255, 100 / 255] : [255 / 255, 197 / 255, 61 / 255],
@@ -142,9 +142,9 @@ export function Globe({
   }, [mounted, isVisible, rs, config, controls, resolvedTheme])
 
   return (
-    <motion.div
+    <m.div
       ref={containerRef}
-      className={cn("relative aspect-square w-full", className)}
+      className={cn("relative aspect-square w-full max-w-full", className)}
       initial={{ opacity: 0, scale: 0.9 }}
       animate={controls}
     >
@@ -166,6 +166,6 @@ export function Globe({
         onPointerOut={() => updatePointerInteraction(null)}
         onPointerMove={(e) => updateMovement(e.clientX)}
       />
-    </motion.div>
+    </m.div>
   )
 }

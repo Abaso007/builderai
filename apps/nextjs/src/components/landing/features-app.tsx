@@ -1,6 +1,6 @@
 "use client"
 
-import { motion } from "framer-motion"
+import { m } from "framer-motion"
 
 const stats = [
   {
@@ -33,7 +33,7 @@ const itemVariants = {
     opacity: 1,
     y: 0,
     transition: {
-      duration: 0.5,
+      duration: 0.3,
       ease: "easeOut",
     },
   },
@@ -52,50 +52,50 @@ const statsContainerVariants = {
 
 export function FeaturesApp() {
   return (
-    <motion.section
+    <m.section
       initial="hidden"
       whileInView="visible"
       viewport={{ once: true, margin: "-100px" }}
       variants={containerVariants}
       aria-labelledby="features-title"
-      className="mx-auto w-full max-w-4xl px-4 py-10"
+      className="mx-auto w-full max-w-6xl px-6 py-16"
     >
-      <motion.h2
+      <m.h2
         variants={itemVariants}
         id="features-title"
         className="mt-2 inline-block bg-clip-text py-2 font-bold text-4xl text-background-textContrast tracking-tighter sm:text-6xl md:text-6xl"
       >
         Built for Mission-Critical Revenue
-      </motion.h2>
+      </m.h2>
 
-      <motion.p
+      <m.p
         variants={itemVariants}
         className="mt-6 max-w-3xl text-justify text-background-text text-lg leading-7"
       >
         PriceOps isn't just about strategy—it's about performance. Your monetization layer shouldn't
         be a bottleneck. Unprice is architected to handle high-volume event metering and low latency
         entitlement checks at the edge.
-      </motion.p>
+      </m.p>
 
-      <motion.dl
+      <m.dl
         variants={statsContainerVariants}
         className="mt-12 grid grid-cols-1 gap-y-8 md:grid-cols-3 md:border-y md:py-14"
       >
         {stats.map((stat, index) => (
-          <motion.div
+          <m.div
             key={index.toString()}
             variants={itemVariants}
             className="border-l-2 pl-6 md:border-l md:text-center lg:border-background-border lg:first:border-none"
           >
-            <motion.dd className="inline-block bg-clip-text font-bold text-4xl text-primary-text tracking-tight lg:text-5xl">
+            <m.dd className="inline-block bg-clip-text font-bold text-4xl text-primary-text tracking-tight lg:text-5xl">
               {stat.value}
-            </motion.dd>
-            <motion.dt className="mt-1 font-medium text-background-textContrast">
+            </m.dd>
+            <m.dt className="mt-1 font-medium text-background-textContrast">
               {stat.name}
-            </motion.dt>
-          </motion.div>
+            </m.dt>
+          </m.div>
         ))}
-      </motion.dl>
-    </motion.section>
+      </m.dl>
+    </m.section>
   )
 }

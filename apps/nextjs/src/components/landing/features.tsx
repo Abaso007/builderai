@@ -98,7 +98,7 @@ const features = [
 
 export const Features = () => {
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-10 md:max-w-4xl">
+    <div className="mx-auto w-full max-w-6xl px-6 py-16">
       <BentoGrid>
         {features.map((feature, idx) => (
           <BentoCard key={idx.toString()} {...feature} />

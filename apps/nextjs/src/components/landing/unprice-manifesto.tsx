@@ -4,7 +4,7 @@ import type React from "react"
 
 import { Button } from "@unprice/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@unprice/ui/tooltip"
-import { motion, useInView } from "framer-motion"
+import { m, useInView } from "framer-motion"
 import { BarChart, Code, DollarSign, TrendingUp } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
@@ -92,9 +92,9 @@ export function UnpriceManifesto() {
   // Control animation phases
   useEffect(() => {
     if (isInView) {
-      const timer1 = setTimeout(() => setAnimationPhase(1), 1000)
-      const timer2 = setTimeout(() => setAnimationPhase(2), 2000)
-      const timer3 = setTimeout(() => setAnimationPhase(3), 3000)
+      const timer1 = setTimeout(() => setAnimationPhase(1), 200)
+      const timer2 = setTimeout(() => setAnimationPhase(2), 400)
+      const timer3 = setTimeout(() => setAnimationPhase(3), 600)
 
       return () => {
         clearTimeout(timer1)
@@ -152,16 +152,16 @@ export function UnpriceManifesto() {
 
   return (
     <TooltipProvider>
-      <div ref={containerRef} className="relative mx-auto w-full max-w-3xl px-4 py-40">
+      <div ref={containerRef} className="relative mx-auto w-full max-w-6xl px-6 py-16">
         <div className="relative mx-auto aspect-square w-full max-w-2xl">
           {/* Main circle */}
-          <motion.div
+          <m.div
             className="absolute inset-0 rounded-full border-[5px] border-background-border"
             initial={{ scale: 0 }}
             animate={{ scale: isInView ? 1 : 0 }}
             transition={{
-              duration: 1,
-              delay: 0.3,
+              duration: 0.3,
+              delay: 0.1,
               type: "spring",
               stiffness: 100,
             }}
@@ -169,12 +169,12 @@ export function UnpriceManifesto() {
 
           {/* Vitruvian Man-inspired guidelines (only visible when toggled) */}
           {showGoldenRatio && (
-            <motion.svg
+            <m.svg
               className="absolute inset-0 h-full w-full"
               viewBox="0 0 100 100"
               initial={{ opacity: 0 }}
               animate={{ opacity: 0.2 }}
-              transition={{ duration: 0.3 }}
+              transition={{ duration: 0.2 }}
             >
               {/* Golden ratio spiral */}
               <path
@@ -242,11 +242,11 @@ export function UnpriceManifesto() {
                 strokeWidth="0.3"
                 fill="none"
               />
-            </motion.svg>
+            </m.svg>
           )}
 
           {/* Center text */}
-          <motion.div
+          <m.div
             className="absolute z-10 text-center"
             style={{
               left: `${triangleCentroid.x}%`,
@@ -255,37 +255,37 @@ export function UnpriceManifesto() {
             }}
             initial={{ opacity: 0 }}
             animate={{ opacity: animationPhase >= 1 ? 1 : 0 }}
-            transition={{ duration: 0.8 }}
+            transition={{ duration: 0.2 }}
           >
-            <motion.div
+            <m.div
               initial={{ scale: 0 }}
               animate={{ scale: animationPhase >= 1 ? 1 : 0 }}
-              transition={{ duration: 0.5, delay: 0.3 }}
+              transition={{ duration: 0.3, delay: 0.1 }}
               className="-mb-5 font-bold text-2xl text-background-textContrast md:text-3xl"
             >
               UNPRICE
-            </motion.div>
-            <motion.div
+            </m.div>
+            <m.div
               initial={{ opacity: 0, y: 5 }}
               animate={{ opacity: animationPhase >= 1 ? 1 : 0, y: 15 }}
-              transition={{ duration: 0.5, delay: 0.6 }}
+              transition={{ duration: 0.3, delay: 0.1 }}
               className="text-background-text text-sm"
             >
               the PriceOps Infrastructure
-            </motion.div>
-          </motion.div>
+            </m.div>
+          </m.div>
 
           {/* Triangle with perfect geometric alignment */}
           {animationPhase >= 2 && (
-            <motion.svg
+            <m.svg
               className="absolute inset-0 h-ful w-full"
               viewBox="0 0 100 100"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              transition={{ duration: 0.8 }}
+              transition={{ duration: 0.2 }}
             >
               {/* Triangle path */}
-              <motion.path
+              <m.path
                 d={trianglePath}
                 className="stroke-background-line"
                 strokeWidth="0.7"
@@ -303,7 +303,7 @@ export function UnpriceManifesto() {
                 const iconY = iconCenter.y
 
                 return (
-                  <motion.line
+                  <m.line
                     key={key}
                     x1={centerPoint.x}
                     y1={centerPoint.y}
@@ -314,11 +314,11 @@ export function UnpriceManifesto() {
                     strokeDasharray="1,1"
                     initial={{ pathLength: 0 }}
                     animate={{ pathLength: showGoldenRatio ? 1 : 0 }}
-                    transition={{ duration: 0.8, delay: 0.2 * index }}
+                    transition={{ duration: 0.2, delay: 0.1 * index }}
                   />
                 )
               })}
-            </motion.svg>
+            </m.svg>
           )}
 
           {/* Section icons */}
@@ -395,7 +395,7 @@ export function UnpriceManifesto() {
                   </TooltipContent>
                 </Tooltip>
                 {/* Section title */}
-                <motion.div
+                <m.div
                   className="-translate-x-1/2 pointer-events-auto absolute hidden w-20 max-w-[150px] transform cursor-pointer text-left md:block"
                   style={{
                     left:
@@ -417,8 +417,8 @@ export function UnpriceManifesto() {
                     y: 0,
                   }}
                   transition={{
-                    duration: 0.5,
-                    delay: 0.2 + 0.2 * index,
+                    duration: 0.2,
+                    delay: 0.05 * index,
                   }}
                   onClick={() => setActiveSection(sectionKey === activeSection ? null : sectionKey)}
                   onMouseEnter={() => setHoveredSection(sectionKey)}
@@ -429,13 +429,13 @@ export function UnpriceManifesto() {
                   >
                     {section.title}
                   </h3>
-                </motion.div>
+                </m.div>
               </div>
             )
           })}
 
           {/* Center "Open Source" section */}
-          <motion.div
+          <m.div
             className="pointer-events-auto flex cursor-pointer items-center gap-1"
             style={{
               position: "absolute",
@@ -450,7 +450,7 @@ export function UnpriceManifesto() {
             }}
             initial={{ opacity: 0 }}
             animate={{ opacity: animationPhase >= 3 ? 1 : 0 }}
-            transition={{ duration: 0.5, delay: 0.8 }}
+            transition={{ duration: 0.3, delay: 0.2 }}
           >
             <Tooltip open={activeSection === "opensource" || hoveredSection === "opensource"}>
               <TooltipTrigger asChild>
@@ -508,18 +508,18 @@ export function UnpriceManifesto() {
                 </div>
               </TooltipContent>
             </Tooltip>
-          </motion.div>
+          </m.div>
         </div>
 
         {/* Instructions */}
-        <motion.div
+        <m.div
           className="mt-6 text-center text-background-text"
           initial={{ opacity: 0 }}
           animate={{ opacity: animationPhase >= 3 ? 1 : 0 }}
-          transition={{ duration: 0.5, delay: 1 }}
+          transition={{ duration: 0.2, delay: 0.2 }}
         >
           <p className="text-sm">PriceOps infrastructure principles</p>
-        </motion.div>
+        </m.div>
       </div>
     </TooltipProvider>
   )

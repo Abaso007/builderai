@@ -1,7 +1,7 @@
 "use client"
 import { APP_DOMAIN } from "@unprice/config"
 import { buttonVariants } from "@unprice/ui/button"
-import { motion, useInView } from "framer-motion"
+import { m, useInView } from "framer-motion"
 import { ChevronRight } from "lucide-react"
 import Link from "next/link"
 import { useRef } from "react"
@@ -15,8 +15,8 @@ export default function Belief() {
     visible: {
       opacity: 1,
       transition: {
-        staggerChildren: 0.2,
-        delayChildren: 0.3,
+        staggerChildren: 0.15,
+        delayChildren: 0.1,
       },
     },
   }
@@ -27,14 +27,14 @@ export default function Belief() {
       opacity: 1,
       y: 0,
       transition: {
-        duration: 0.5,
+        duration: 0.3,
         ease: "easeOut",
       },
     },
   }
 
   return (
-    <motion.section
+    <m.section
       ref={sectionRef}
       initial="hidden"
       animate={isInView ? "visible" : "hidden"}
@@ -42,14 +42,14 @@ export default function Belief() {
       aria-labelledby="vision-title"
       className="mx-auto mt-40 px-4"
     >
-      <motion.h2
+      <m.h2
         variants={itemVariants}
         id="features-title"
         className="inline-block py-2 font-bold text-4xl text-background-textContrast tracking-tighter md:text-5xl"
       >
         Our Belief
-      </motion.h2>
-      <motion.div variants={itemVariants} className="mt-6 max-w-prose space-y-4">
+      </m.h2>
+      <m.div variants={itemVariants} className="mt-6 max-w-prose space-y-4">
         <p className="text-justify text-lg leading-8">
           We believe SaaS founders and AI builders deserve full control over the value they create.
           <br />
@@ -80,8 +80,8 @@ export default function Belief() {
           <br />
           <span className="font-bold italic">Unprice, the PriceOps Infrastructure.</span>
         </p>
-      </motion.div>
-      <motion.div
+      </m.div>
+      <m.div
         className="mx-auto mt-20 flex w-fit justify-center p-1.5"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -91,7 +91,7 @@ export default function Belief() {
           Start pricing
           <ChevronRight className="ml-1 h-4 w-4" />
         </Link>
-      </motion.div>
-    </motion.section>
+      </m.div>
+    </m.section>
   )
 }
