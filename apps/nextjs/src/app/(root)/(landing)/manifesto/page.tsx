@@ -4,8 +4,8 @@ import HeroManifest from "~/components/landing/hero-manifest"
 import { LazyMotionWrapper } from "~/components/landing/lazy-motion-wrapper"
 
 const Belief = dynamic(() => import("~/components/landing/belief"))
-const MainfestoCopy = dynamic(() => import("~/components/landing/mainfesto-copy"))
 const PillarsPriceOps = dynamic(() => import("~/components/landing/pillarsAMI"))
+const MainfestoCopy = dynamic(() => import("~/components/landing/mainfesto-copy"))
 
 export const metadata: Metadata = {
   title: "Manifesto",

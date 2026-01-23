@@ -1243,7 +1243,10 @@ export function PricingHero({
       variants={heroImageVariants}
       initial="hidden"
       animate="visible"
-      className={cn("mx-auto my-24 flex w-full max-w-6xl items-center justify-center px-6", className)}
+      className={cn(
+        "mx-auto my-24 flex w-full max-w-6xl items-center justify-center px-6",
+        className
+      )}
       style={accentStyle}
       aria-labelledby="hero-headline"
     >

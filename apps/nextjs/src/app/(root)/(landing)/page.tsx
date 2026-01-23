@@ -1,16 +1,17 @@
 import dynamic from "next/dynamic"
 import Hero from "~/components/landing/hero"
-import { PricingHero } from "~/components/landing/pricing-hero"
 import { LazyMotionWrapper } from "~/components/landing/lazy-motion-wrapper"
+import { PricingHero } from "~/components/landing/pricing-hero"
 
+const Features = dynamic(() => import("~/components/landing/features").then((mod) => mod.Features))
+const FeaturesApp = dynamic(() =>
+  import("~/components/landing/features-app").then((mod) => mod.FeaturesApp)
+)
+const Global = dynamic(() => import("~/components/landing/global").then((mod) => mod.Global))
+const LogoCloud = dynamic(() => import("~/components/landing/logo-cloud"))
 const PriceOpsSection = dynamic(() => import("~/components/landing/ami"))
 const CodeExample = dynamic(() => import("~/components/landing/code-example"))
 const Cta = dynamic(() => import("~/components/landing/cta"))
-const Features = dynamic(() => import("~/components/landing/features").then((mod) => mod.Features))
-const FeaturesApp = dynamic(() => import("~/components/landing/features-app").then((mod) => mod.FeaturesApp))
-const Global = dynamic(() => import("~/components/landing/global").then((mod) => mod.Global))
-const LogoCloud = dynamic(() => import("~/components/landing/logo-cloud"))
-
 
 export default function Home() {
   return (
