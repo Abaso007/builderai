@@ -36,7 +36,7 @@ const sections: Record<SectionKey, SectionData> = {
     title: "Sovereign Revenue",
     icon: <DollarSign className="h-full w-full p-3" />,
     description:
-      "Decouple billing providers from your app code. Swap Stripe for Paddle or run multiple gateways without a single deployment.",
+      "We use billing engines like Stripe and Paddle — we don't replace them. Unprice makes them swappable. Decouple billing providers from your app code. Swap Stripe for Paddle or run multiple gateways without a single deployment.",
     color: "bg-background-background",
     position: {
       angle: 30, // Bottom left (30 degrees from right horizontal)
@@ -152,7 +152,7 @@ export function UnpriceManifesto() {
 
   return (
     <TooltipProvider>
-      <div ref={containerRef} className="relative mx-auto w-full max-w-6xl px-6 py-16">
+      <div ref={containerRef} className="relative mx-auto w-full max-w-6xl px-6 py-32">
         <div className="relative mx-auto aspect-square w-full max-w-2xl">
           {/* Main circle */}
           <m.div

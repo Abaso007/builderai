@@ -89,12 +89,14 @@ export default function Hero() {
         revenue growth.
         <br />
         <br />
-        Ship usage-based, tiered, or hybrid models with a single integration. As you deploy Unprice,
-        you’ll notice how quickly "billing tickets" disappear from your backlog.
+        Test pricing models in minutes, not months. Ship usage-based, tiered, or hybrid models with
+        a single integration. As you deploy Unprice, you’ll notice how quickly "billing tickets"
+        disappear from your backlog.
         <br />
         <br />
         <span className="text-sm italic opacity-70">
-          P.S. We aren't a Stripe wrapper—we're the architecture that makes every provider optional.
+          We integrate with billing engines like Stripe and Paddle. Unprice makes them
+          swappable—change providers without touching code.
         </span>
       </m.p>
       <m.div

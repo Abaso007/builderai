@@ -74,6 +74,10 @@ export default function CodeExample() {
         The biggest constraint to iterate on pricing is the engineering effort and the risk of
         losing customers. Unprice solves those two issues and gives you the developer experience to
         implement once and forget about it. Pricing logic belongs to business teams, not backlogs.
+        <br />
+        <br />
+        When pricing changes don't require deployments, revenue experiments become as routine as
+        feature flags. Your code stays clean. Your business moves fast.
       </m.div>
       <m.div variants={itemVariants}>
         <SDKDemo />

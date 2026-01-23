@@ -12,8 +12,8 @@ const stats = [
     value: "100k+/s",
   },
   {
-    name: "Uptime Target",
-    value: "99.9%",
+    name: "Global Regions",
+    value: "Multi-region",
   },
 ]
 
@@ -90,9 +90,7 @@ export function FeaturesApp() {
             <m.dd className="inline-block bg-clip-text font-bold text-4xl text-primary-text tracking-tight lg:text-5xl">
               {stat.value}
             </m.dd>
-            <m.dt className="mt-1 font-medium text-background-textContrast">
-              {stat.name}
-            </m.dt>
+            <m.dt className="mt-1 font-medium text-background-textContrast">{stat.name}</m.dt>
           </m.div>
         ))}
       </m.dl>

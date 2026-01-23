@@ -49,13 +49,16 @@ export default function PriceOpsSection() {
         PriceOps Infrastructure
       </m.h2>
       <m.div variants={itemVariants} className="mt-6 text-justify text-lg">
-        SaaS pricing was built for a static world. You know the friction: hardcoded plans, complex
-        feature gating logic, and the "quarterly review" that turns into a sprint-draining
-        migration. That era is ending.
+        Most SaaS companies leave 30-50% of revenue on the table because pricing is hardcoded into
+        their codebase.
+        <br />
+        <br />
+        You know the friction: complex feature gating logic, and the "quarterly review" that turns
+        into a sprint-draining migration. That era is ending.
         <br />
         <br />
         Today, value is dynamic. As your product ships daily, the gap between your innovation and
-        your billing infrastructure widens.
+        your billing infrastructure widens. Every day you wait is revenue left behind.
         <br />
         <br />
         We believe pricing is the most underutilized growth lever in SaaS. It's time to stop

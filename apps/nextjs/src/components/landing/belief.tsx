@@ -49,7 +49,7 @@ export default function Belief() {
       >
         Our Belief
       </m.h2>
-      <m.div variants={itemVariants} className="mt-6 max-w-prose space-y-4">
+      <m.div variants={itemVariants} className="mt-6 space-y-4">
         <p className="text-justify text-lg leading-8">
           We believe SaaS founders and AI builders deserve full control over the value they create.
           <br />
@@ -68,6 +68,11 @@ export default function Belief() {
           You don’t need to guess your tiers.
           <br />
           You don’t need to wait for a deployment to change a price.
+          <br />
+          <br />
+          Some companies discover they've been leaving money on the table for years. Others find
+          they can test new models in days instead of quarters. What would change if pricing moved
+          as fast as your product?
           <br />
           <br />
           Experience PriceOps — built on your terms, with fully transparent code and at any scale.

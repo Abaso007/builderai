@@ -33,8 +33,8 @@ export const Global: FunctionComponent = () => {
         >
           Works <br /> anywhere
         </h2>
-        <Globe className="-translate-x-1/2 absolute top-[120px] left-1/2 z-10 aspect-square w-[90vw] max-w-[400px] sm:top-[180px] sm:w-full sm:max-w-[600px] md:top-[220px] md:max-w-[800px] lg:max-w-[900px]" />
-        <div className="-mt-24 sm:-mt-28 md:-mt-32 lg:-mt-36 z-20 h-[28rem] w-full overflow-hidden sm:h-[32rem] md:h-[36rem]">
+        <Globe className="absolute top-[120px] z-10 aspect-square w-[90vw] max-w-[400px] translate-x-1/2 sm:top-[180px] sm:w-full sm:max-w-[600px] md:top-[220px] md:max-w-[800px] lg:max-w-[900px]" />
+        <div className="sm:-mt-28 md:-mt-32 lg:-mt-36 z-20 h-[28rem] w-full overflow-hidden sm:h-[32rem] md:h-[36rem]">
           <div className="absolute bottom-0 h-3/5 w-full bg-gradient-to-b from-transparent via-background-base to-background-base" />
           <div className="absolute inset-x-6 bottom-12 m-auto max-w-4xl md:top-2/3">
             <div className="grid grid-cols-1 gap-x-10 gap-y-6 rounded-lg border border-white/[3%] bg-white/[1%] px-6 py-6 shadow-xl backdrop-blur md:grid-cols-3 md:p-8">
