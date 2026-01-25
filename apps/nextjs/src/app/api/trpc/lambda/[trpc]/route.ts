@@ -2,6 +2,7 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch"
 
 import { auth } from "@unprice/auth/server"
 import { createTRPCContext } from "@unprice/trpc"
+import { initObservability } from "@unprice/trpc"
 import { lambdaRouter } from "@unprice/trpc/router/lambda"
 import { geolocation } from "@vercel/functions"
 
@@ -11,6 +12,8 @@ export const preferredRegion = ["fra1"]
 export const runtime = "nodejs"
 export const maxDuration = 10 // 10 seconds
 
+initObservability()
+
 const handler = auth(async (req) => {
   // when we use the middleware to rewrite the request, the path doesn't include the /api prefix
   // trpc under the hood uses the path to determine the procedure
@@ -18,6 +21,8 @@ const handler = auth(async (req) => {
   const endpoint = pathName.startsWith("/api") ? "/api/trpc/lambda" : "/trpc/lambda"
 
   const geo = geolocation(req)
+
+  const ip = req.headers.get("x-real-ip") || req.headers.get("x-forwarded-for") || "Unknown"
 
   const response = await fetchRequestHandler({
     endpoint: endpoint,
@@ -28,14 +33,17 @@ const handler = auth(async (req) => {
         headers: req.headers,
         session: req.auth,
         req,
-        geo: geo
-          ? {
-              continent: geo.countryRegion || "Unknown",
-              country: geo.country || "Unknown",
-              region: geo.region || "Unknown",
-              city: geo.city || "Unknown",
-            }
-          : undefined,
+        opts: {
+          continent: geo.countryRegion || "Unknown",
+          country: geo.country || "Unknown",
+          region: geo.region || "Unknown",
+          ip: ip || "Unknown",
+          city: geo.city || "Unknown",
+          userAgent: req.headers.get("user-agent") || "Unknown",
+          source: req.headers.get("unprice-request-source") || "Unknown",
+          pathname: pathName || "Unknown",
+          method: req.method || "Unknown",
+        },
       }),
     onError: ({ error, path }) => {
       if (error.code === "INTERNAL_SERVER_ERROR") {

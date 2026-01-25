@@ -2,6 +2,7 @@ import { getSession } from "@unprice/auth/server-rsc"
 import { APP_NON_WORKSPACE_ROUTES } from "@unprice/config"
 import { isSlug } from "@unprice/db/utils"
 import { Separator } from "@unprice/ui/separator"
+import { cache } from "react"
 import { Fragment, Suspense } from "react"
 import Flags from "~/components/layout/flags"
 import Header from "~/components/layout/header"
@@ -15,6 +16,23 @@ import { ProjectSwitcherSkeleton } from "../../_components/project-switcher-skel
 import { UpdateClientCookie } from "../../_components/update-client-cookie"
 import { WorkspaceSwitcher } from "../../_components/workspace-switcher"
 import { WorkspaceSwitcherSkeleton } from "../../_components/workspace-switcher-skeleton"
+
+// Cache prefetch calls to prevent duplicate requests on re-renders
+const prefetchProjects = cache(() => {
+  prefetch(
+    trpc.projects.listByActiveWorkspace.queryOptions(undefined, {
+      staleTime: 1000 * 60 * 60, // 1 hour
+    })
+  )
+})
+
+const prefetchWorkspaces = cache(() => {
+  prefetch(
+    trpc.workspaces.listWorkspacesByActiveUser.queryOptions(undefined, {
+      staleTime: 1000 * 60 * 60, // 1 hour
+    })
+  )
+})
 
 export default async function Page(props: {
   params: {
@@ -50,11 +68,7 @@ export default async function Page(props: {
 
   if (isSlug(workspaceSlug)) {
     // prefetch data for the workspace and project
-    prefetch(
-      trpc.workspaces.listWorkspacesByActiveUser.queryOptions(undefined, {
-        staleTime: 1000 * 60 * 60, // 1 hour
-      })
-    )
+    prefetchWorkspaces()
 
     const atw = session?.user.workspaces.find((w) => w.slug === workspaceSlug)
 
@@ -76,11 +90,7 @@ export default async function Page(props: {
   }
 
   if (isSlug(projectSlug)) {
-    prefetch(
-      trpc.projects.listByActiveWorkspace.queryOptions(undefined, {
-        staleTime: 1000 * 60 * 60, // 1 hour
-      })
-    )
+    prefetchProjects()
   }
 
   const isNonWorkspaceRoute = APP_NON_WORKSPACE_ROUTES.has(`/${workspaceSlug}`)
@@ -96,7 +106,7 @@ export default async function Page(props: {
                   email: user.email,
                   firstName: user.name ?? "",
                   avatar: user.image ?? "",
-                  token: getUserJotToken(user.id),
+                  signature: getUserJotToken(user.id),
                 }
               : null
           }
@@ -117,7 +127,7 @@ export default async function Page(props: {
                 email: user.email,
                 firstName: user.name ?? "",
                 avatar: user.image ?? "",
-                token: getUserJotToken(user.id),
+                signature: getUserJotToken(user.id),
               }
             : null
         }

@@ -100,7 +100,7 @@ export const update = protectedProjectProcedure
     // if the customer is disabled, update the ACL
     if (updatedCustomer.active === false) {
       await unprice.customers.updateACL({
-        customerId: unPriceCustomerId,
+        customerId: id,
         updates: { customerDisabled: true },
       })
     }
@@ -108,7 +108,7 @@ export const update = protectedProjectProcedure
     // if the customer is enabled, update the ACL
     if (updatedCustomer.active === true) {
       await unprice.customers.updateACL({
-        customerId: unPriceCustomerId,
+        customerId: id,
         updates: { customerDisabled: false },
       })
     }

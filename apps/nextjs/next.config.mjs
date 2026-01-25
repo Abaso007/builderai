@@ -34,6 +34,10 @@ const nextConfig = {
   },
   swcMinify: true,
   allowedDevOrigins: ["localhost", "app.localhost", "*.localhost"],
+  // Optimize CSS loading
+  compiler: {
+    removeConsole: process.env.NODE_ENV === "production" ? { exclude: ["error", "warn"] } : false,
+  },
   experimental: {
     turbo: {},
     // ppr: true, // TODO: activate later

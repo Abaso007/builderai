@@ -1,4 +1,5 @@
 import { SchemaError } from "@unprice/error"
+import { obs } from "@unprice/logging"
 import type { Context } from "hono"
 import { endTime, startTime } from "hono/timing"
 import { UnpriceApiError } from "~/errors"
@@ -37,6 +38,7 @@ export async function keyAuth(c: Context<HonoEnv>) {
   endTime(c, "verifyApiKey")
 
   if (!rateLimited) {
+    obs.add("rateLimited", true)
     throw new UnpriceApiError({ code: "RATE_LIMITED", message: "apikey rate limit exceeded" })
   }
 
@@ -69,6 +71,14 @@ export async function keyAuth(c: Context<HonoEnv>) {
   c.set("projectId", key.project.id)
   c.set("unPriceCustomerId", key.project.workspace.unPriceCustomerId)
 
+  obs.add("business", {
+    projectId: key.project.id,
+    workspaceId: key.project.workspaceId,
+    isMain: key.project.isMain ?? false,
+    isInternal: key.project.isInternal ?? false,
+    unPriceCustomerId: key.project.workspace.unPriceCustomerId,
+  })
+
   return key
 }
 
@@ -91,6 +101,9 @@ export async function resolveContextProjectId(
     // If we have the main project ID configured, use it directly (Zero Latency)
     if (c.env.MAIN_PROJECT_ID) {
       endTime(c, "resolveContextProjectId")
+      obs.add("business", {
+        projectId: c.env.MAIN_PROJECT_ID,
+      })
       return c.env.MAIN_PROJECT_ID
     }
 
@@ -100,10 +113,16 @@ export async function resolveContextProjectId(
 
     if (val) {
       endTime(c, "resolveContextProjectId")
+      obs.add("business", {
+        projectId: val.projectId,
+      })
       return val.projectId
     }
   }
 
+  obs.add("business", {
+    projectId: defaultProjectId,
+  })
   endTime(c, "resolveContextProjectId")
 
   return defaultProjectId

@@ -29,7 +29,6 @@
     "with-env": "infisical run --env=preview --path=/app --"
   },
   "dependencies": {
-    "@baselime/trpc-opentelemetry-middleware": "^0.1.2",
     "@dinero.js/currencies": "2.0.0-alpha.14",
     "@potatohd/trpc-openapi": "^1.2.3",
     "@t3-oss/env-core": "^0.12.0",

@@ -6,6 +6,11 @@ export type Fields = {
 
 export interface Logger {
   x(value: string): void
+  log(
+    level: "debug" | "info" | "warn" | "error" | "fatal" | "off",
+    message: string,
+    fields?: Fields
+  ): void
   debug(message: string, fields?: Fields): void
   emit(message: string, fields?: Fields): void
   info(message: string, fields?: Fields): void

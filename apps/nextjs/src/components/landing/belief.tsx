@@ -45,7 +45,7 @@ export default function Belief() {
       <m.h2
         variants={itemVariants}
         id="features-title"
-        className="inline-block py-2 font-bold text-4xl text-background-textContrast tracking-tighter md:text-5xl"
+        className="inline-block py-2 font-bold text-4xl text-background-textContrast tracking-tighter md:text-6xl"
       >
         Our Belief
       </m.h2>

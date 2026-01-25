@@ -6,7 +6,7 @@ export interface UserJotUser {
   firstName?: string
   lastName?: string
   avatar?: string
-  token?: string
+  signature?: string
 }
 
 export function useUserJot() {

@@ -2,6 +2,7 @@ import { projectSelectBaseSchema, workspaceSelectBase } from "@unprice/db/valida
 import { z } from "zod"
 import { protectedWorkspaceProcedure } from "#trpc"
 import { getRandomPatternStyle } from "#utils/generate-pattern"
+
 export const listByActiveWorkspace = protectedWorkspaceProcedure
   .input(z.void())
   .output(

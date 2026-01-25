@@ -51,7 +51,7 @@ export default async function ProjectUsersPage(props: {
               <CustomerDialog>
                 <Button>
                   <Plus className="mr-2 h-4 w-4" />
-                  Provision Customer
+                  Customer
                 </Button>
               </CustomerDialog>
             </div>

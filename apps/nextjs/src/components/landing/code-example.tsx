@@ -1,6 +1,9 @@
 "use client"
+import { APP_DOMAIN } from "@unprice/config"
+import { buttonVariants } from "@unprice/ui/button"
 import { m, useInView } from "framer-motion"
-import { BarChart, Check, Code, Settings } from "lucide-react"
+import { BarChart, Check, ChevronRight, Code, Settings } from "lucide-react"
+import { Link } from "next-view-transitions"
 import { useRef } from "react"
 import { SDKDemo } from "./sdk-examples"
 
@@ -78,7 +81,17 @@ export default function CodeExample() {
         <br />
         When pricing changes don't require deployments, revenue experiments become as routine as
         feature flags. Your code stays clean. Your business moves fast.
+        <br />
+        <br />
+        <div className="flex justify-end">
+          <Link href={`${APP_DOMAIN}`} className={buttonVariants({ variant: "primary" })}>
+            {" "}
+            Start pricing
+            <ChevronRight className="ml-1 h-4 w-4" />
+          </Link>
+        </div>
       </m.div>
+
       <m.div variants={itemVariants}>
         <SDKDemo />
       </m.div>

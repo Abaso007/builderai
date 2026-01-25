@@ -5,6 +5,7 @@ import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { Button } from "@unprice/ui/button"
 import { ShieldAlert } from "lucide-react"
 import { useEffect } from "react"
+import { logError } from "~/actions/log-error"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import { SuperLink } from "~/components/super-link"
 
@@ -17,7 +18,7 @@ export default function ErrorOnboarding({
 }) {
   useEffect(() => {
     // Log the error to an error reporting service
-    console.error(error)
+    void logError(error)
   }, [error])
 
   return (

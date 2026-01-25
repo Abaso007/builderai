@@ -6,6 +6,7 @@ import { createWorkspacesByUserQuery } from "@unprice/db/queries"
 import * as schema from "@unprice/db/schema"
 import bcrypt from "bcryptjs"
 import type { NextAuthConfig } from "next-auth"
+import { cookies } from "next/headers"
 import { db } from "./db"
 import { env } from "./env"
 import { createUser } from "./utils"
@@ -127,6 +128,17 @@ export const authConfig: NextAuthConfig = {
     }),
   ],
   callbacks: {
+    signIn: async ({ account }) => {
+      if (account?.provider) {
+        cookies().set("last-login-method", account.provider, {
+          path: "/",
+          maxAge: 31536000, // 1 year
+          sameSite: "lax",
+          secure: process.env.NODE_ENV === "production",
+        })
+      }
+      return true
+    },
     // authorized({ auth }) {
     //   return !!auth?.user // this ensures there is a logged in user for -every- request
     // },

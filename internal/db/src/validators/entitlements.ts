@@ -70,6 +70,7 @@ export const reportUsageSchema = z.object({
   sync: z.boolean().optional(),
   requestId: z.string(),
   metadata: z.record(z.string(), z.any()).nullable(),
+  performanceStart: z.number().optional(),
 })
 
 export const verifySchema = z.object({
@@ -97,7 +98,6 @@ export const verificationResultSchema = z.object({
   limit: z.number().optional(),
   usage: z.number().optional(),
   cost: z.number().optional(),
-  rate: z.string().optional(),
   latency: z.number().optional(),
 })
 export type VerificationResult = z.infer<typeof verificationResultSchema>
@@ -120,7 +120,6 @@ export const reportUsageResultSchema = z.object({
   limit: z.number().optional(),
   usage: z.number().optional(),
   cost: z.number().optional(),
-  rate: z.string().optional(),
   notifiedOverLimit: z.boolean().optional(),
   remaining: z.number().optional(),
   deniedReason: deniedReasonSchema.optional(),

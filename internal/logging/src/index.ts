@@ -1,3 +1,5 @@
 export * from "./interface"
 export * from "./console"
 export * from "./axiom"
+export * from "./wide-event"
+export * from "./observability"

@@ -55,16 +55,47 @@ export class ConsoleLogger implements Logger {
     )
   }
 
+  private getColor(level: "debug" | "info" | "warn" | "error" | "fatal"): string {
+    return level === "debug"
+      ? "\x1b[32m"
+      : level === "info"
+        ? "\x1b[36m"
+        : level === "warn"
+          ? "\x1b[33m"
+          : level === "error"
+            ? "\x1b[31m"
+            : "\x1b[35m"
+  }
+
+  public log(
+    level: "debug" | "info" | "warn" | "error" | "fatal",
+    message: string,
+    fields?: Fields
+  ): void {
+    if (this.logLevel === "off") return
+    // don't show colored output in production mode because it's not readable
+    const coloredOutput = this.environment !== "production"
+    const color = this.getColor(level)
+
+    this.console(
+      coloredOutput ? `${color}%s\x1b[0m` : "",
+      level,
+      "-",
+      this.marshal(level, message, fields)
+    )
+  }
+
   public emit(message: string, fields?: Fields): void {
-    this.console(this.marshal("debug", message, fields))
+    this.console(this.marshal("info", message, fields))
   }
 
   public info(message: string, fields?: Fields): void {
     if (!["debug", "info"].includes(this.logLevel)) return
     // don't show colored output in production mode because it's not readable
     const coloredOutput = this.environment !== "production"
+    const color = this.getColor("info")
     this.console(
-      coloredOutput ? "\x1b[36m%s\x1b[0m" : "",
+      coloredOutput ? `${color}%s\x1b[0m` : "",
       "info",
       "-",
       this.marshal("info", message, fields)
@@ -75,8 +106,9 @@ export class ConsoleLogger implements Logger {
     if (!["debug", "info", "warn"].includes(this.logLevel)) return
     // don't show colored output in production mode because it's not readable
     const coloredOutput = this.environment !== "production"
+    const color = this.getColor("warn")
     this.console(
-      coloredOutput ? "\x1b[33m%s\x1b[0m" : "",
+      coloredOutput ? `${color}%s\x1b[0m` : "",
       "warn",
       "-",
       this.marshal("warn", message, fields)
@@ -88,8 +120,9 @@ export class ConsoleLogger implements Logger {
     if (this.logLevel === "off") return
     // don't show colored output in production mode because it's not readable
     const coloredOutput = this.environment !== "production"
+    const color = this.getColor("error")
     this.console(
-      coloredOutput ? "\x1b[31m%s\x1b[0m" : "",
+      coloredOutput ? `${color}%s\x1b[0m` : "",
       "error",
       "-",
       this.marshal("error", message, fields)
@@ -101,8 +134,9 @@ export class ConsoleLogger implements Logger {
     if (this.logLevel === "off") return
     // don't show colored output in production mode because it's not readable
     const coloredOutput = this.environment !== "production"
+    const color = this.getColor("fatal")
     this.console(
-      coloredOutput ? "\x1b[31m%s\x1b[0m" : "",
+      coloredOutput ? `${color}%s\x1b[0m` : "",
       "fatal",
       "-",
       this.marshal("fatal", message, fields)

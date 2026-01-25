@@ -24,12 +24,12 @@ export default function Home() {
           docsLinkText="Read the Docs"
         />
         <PriceOpsSection />
-        <Features />
-        <CodeExample />
         {/* <Testimonials /> */}
+        <Features />
         <FeaturesApp />
         <Global />
         <LogoCloud />
+        <CodeExample />
         <Cta />
       </main>
     </LazyMotionWrapper>

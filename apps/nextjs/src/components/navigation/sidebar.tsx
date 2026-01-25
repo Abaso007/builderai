@@ -20,16 +20,16 @@ export async function Sidebar({
   // evaluate flags
   const activeRoutes = await Promise.all(
     routes.map(async (route) => {
-      if (!route.slug || isMain) {
+      if (!route.featureSlug || isMain) {
         if (route.sidebar && route.sidebar.length > 0) {
           // check if the sidebar is active
           const sidebar = await Promise.all(
             route.sidebar.map(async (subItem) => {
-              if (!subItem.slug) {
+              if (!subItem.featureSlug) {
                 return subItem
               }
 
-              const isActive = await entitlementFlag(subItem.slug)
+              const isActive = await entitlementFlag(subItem.featureSlug)
               return isActive ? subItem : null
             })
           )
@@ -44,14 +44,26 @@ export async function Sidebar({
         return route
       }
 
-      const isActive = await entitlementFlag(route.slug)
+      const isActive = await entitlementFlag(route.featureSlug)
 
       return isActive ? route : null // Return the route if active, otherwise null
     })
   )
 
+  const activeShortcuts = await Promise.all(
+    shortcuts.map(async (shortcut) => {
+      if (!shortcut.featureSlug || isMain) {
+        return shortcut
+      }
+
+      const isActive = await entitlementFlag(shortcut.featureSlug)
+      return isActive ? shortcut : null
+    })
+  )
+
   // Filter out null values
   const filteredActiveRoutes = activeRoutes.filter((route) => route !== null)
+  const filteredShortcuts = activeShortcuts.filter((shortcut) => shortcut !== null)
 
   return (
     <Fragment>
@@ -94,7 +106,7 @@ export async function Sidebar({
             <div>
               <span className="font-medium text-background-solid text-xs leading-6">Shortcuts</span>
               <ul aria-label="shortcuts" className="space-y-0.5">
-                {shortcuts.map((item) => (
+                {filteredShortcuts.map((item) => (
                   <li key={`${baseUrl}/${item.href}`}>
                     <ShortLink href={`${baseUrl}/${item.href}`}>
                       <item.icon className="size-3 shrink-0" aria-hidden="true" />
@@ -156,7 +168,7 @@ export async function Sidebar({
                   Shortcuts
                 </span>
                 <ul aria-label="shortcuts" className="space-y-0.5">
-                  {shortcuts.map((item) => (
+                  {filteredShortcuts.map((item) => (
                     <li key={`${baseUrl}/${item.href}`}>
                       <ShortLink href={`${baseUrl}/${item.href}`}>
                         <item.icon className="size-3 shrink-0" aria-hidden="true" />

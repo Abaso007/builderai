@@ -8,14 +8,7 @@ import {
   invoiceItems,
   invoices,
 } from "@unprice/db/schema"
-import {
-  currencies,
-  dinero,
-  formatAmountDinero,
-  formatMoney,
-  hashStringSHA256,
-  newId,
-} from "@unprice/db/utils"
+import { formatAmountDinero, hashStringSHA256, newId } from "@unprice/db/utils"
 import {
   type AggregationMethod,
   type CalculatedPrice,
@@ -34,6 +27,8 @@ import {
   calculateNextNCycles,
   calculatePricePerFeature,
   calculateProration,
+  calculateWaterfallPrice,
+  type configFeatureSchema,
   type grantSchemaExtended,
 } from "@unprice/db/validators"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
@@ -2441,119 +2436,6 @@ export class BillingService {
   }
 
   /**
-   * Calculates quantity for a grant based on feature type and remaining usage.
-   */
-  private calculateGrantQuantity({
-    grant,
-    remainingUsage,
-  }: {
-    grant: z.infer<typeof grantSchemaExtended>
-    remainingUsage: number
-  }): number {
-    if (["tier", "usage", "package"].includes(grant.featurePlanVersion.featureType)) {
-      const grantLimit = grant.limit ?? Number.POSITIVE_INFINITY
-      return Math.min(remainingUsage, grantLimit)
-    }
-
-    // For non-usage grants, quantity is based on grant units
-    if (grant.featurePlanVersion.featureType === "flat") {
-      return grant.units ?? 1
-    }
-
-    return grant.units ?? 0
-  }
-
-  /**
-   * Processes a single grant and calculates its price contribution.
-   */
-  private processGrant({
-    grant,
-    billingStartAt,
-    billingEndAt,
-    resetConfig,
-    remainingUsage,
-    featureSlug,
-  }: {
-    grant: z.infer<typeof grantSchemaExtended>
-    billingStartAt: number
-    billingEndAt: number
-    resetConfig: Omit<EntitlementState, "id">["resetConfig"]
-    remainingUsage: number
-    featureSlug: string
-  }): Result<ComputeCurrentUsageResult, UnPriceBillingError> {
-    // Calculate grant service window
-    const grantServiceStart = Math.max(billingStartAt, grant.effectiveAt)
-    const grantServiceEnd = Math.min(billingEndAt, grant.expiresAt ?? Number.POSITIVE_INFINITY)
-
-    // Validate grant service window
-    if (grantServiceStart >= grantServiceEnd) {
-      return Err(new UnPriceBillingError({ message: "Invalid grant service window" }))
-    }
-
-    // Calculate quantity
-    const quantity = this.calculateGrantQuantity({
-      grant,
-      remainingUsage,
-    })
-
-    // Calculate free units
-    const freeUnitsResult = calculateFreeUnits({
-      config: grant.featurePlanVersion.config,
-      featureType: grant.featurePlanVersion.featureType,
-    })
-
-    if (freeUnitsResult.err) {
-      this.logger.warn("Failed to calculate free units for grant", {
-        grantId: grant.id,
-        featureSlug,
-        error: freeUnitsResult.err.message,
-      })
-    }
-
-    const freeUnits = freeUnitsResult.val ?? 0
-    const grantLimit = grant.limit ?? Number.POSITIVE_INFINITY
-
-    // Calculate proration
-    const proration = this.calculateGrantProration({
-      grant,
-      billingStartAt,
-      billingEndAt,
-      resetConfig,
-    })
-
-    // Calculate price
-    const { val: priceCalculation, err: priceCalculationErr } = calculatePricePerFeature({
-      config: grant.featurePlanVersion.config,
-      featureType: grant.featurePlanVersion.featureType,
-      quantity,
-      prorate: proration.prorationFactor,
-    })
-
-    if (priceCalculationErr) {
-      this.logger.error("Error calculating price for grant", {
-        grantId: grant.id,
-        featureSlug,
-        quantity,
-        prorationFactor: proration.prorationFactor,
-        error: priceCalculationErr.message,
-      })
-      return Err(new UnPriceBillingError({ message: priceCalculationErr.message }))
-    }
-
-    return Ok({
-      grantId: grant.id,
-      price: priceCalculation,
-      prorate: proration.prorationFactor,
-      cycleStartAt: grant.effectiveAt,
-      cycleEndAt: grant.expiresAt ?? Number.POSITIVE_INFINITY,
-      usage: quantity,
-      included: freeUnits,
-      limit: grantLimit,
-      isTrial: grant.type === "trial",
-    })
-  }
-
-  /**
    * Calculates the price for a feature based on grants, usage, and billing period.
    * Handles waterfall attribution of usage across multiple grants and calculates proration.
    */
@@ -2678,83 +2560,124 @@ export class BillingService {
       return Err(usageResult.err)
     }
 
-    const { usage, isUsageFeature } = usageResult.val
+    const { usage } = usageResult.val
 
     // Track remaining usage for waterfall attribution
-    let remainingUsage = usage
-    const result: ComputeCurrentUsageResult[] = []
+    const pricingGrants: Array<{
+      id: string
+      limit?: number | null
+      priority?: number | null
+      config: z.infer<typeof configFeatureSchema>
+      prorate?: number
+    }> = []
 
-    // Waterfall attribution per priority from highest to lowest
-    const sortedGrants = [...grants].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
-    for (const grant of sortedGrants) {
-      // Process grant and calculate price
-      const grantResult = this.processGrant({
+    const grantMetadata = new Map<
+      string,
+      {
+        cycleStartAt: number
+        cycleEndAt: number
+        included: number
+        isTrial: boolean
+        limit: number
+      }
+    >()
+
+    // Prepare grants for waterfall calculation
+    for (const grant of grants) {
+      const grantServiceStart = Math.max(billingStartAt, grant.effectiveAt)
+      const grantServiceEnd = Math.min(billingEndAt, grant.expiresAt ?? Number.POSITIVE_INFINITY)
+
+      // Validate grant service window
+      if (grantServiceStart >= grantServiceEnd) {
+        continue
+      }
+
+      const grantLimit = grant.limit ?? Number.POSITIVE_INFINITY
+
+      // Calculate proration
+      const proration = this.calculateGrantProration({
         grant,
         billingStartAt,
         billingEndAt,
         resetConfig: entitlement.resetConfig,
-        remainingUsage,
-        featureSlug,
       })
 
-      if (grantResult.err) {
-        // Log error but continue processing other grants
-        this.logger.error("Failed to process grant", {
+      // Calculate free units
+      const freeUnitsResult = calculateFreeUnits({
+        config: grant.featurePlanVersion.config,
+        featureType: grant.featurePlanVersion.featureType,
+      })
+
+      if (freeUnitsResult.err) {
+        this.logger.warn("Failed to calculate free units for grant", {
           grantId: grant.id,
           featureSlug,
-          error: grantResult.err.message,
+          error: freeUnitsResult.err.message,
         })
-        continue
       }
 
-      const grantPrice = grantResult.val
-      if (!grantPrice) {
-        // Grant was skipped (invalid service window)
-        continue
-      }
+      const freeUnits = freeUnitsResult.val ?? 0
 
-      result.push(grantPrice)
+      pricingGrants.push({
+        id: grant.id,
+        limit: grant.limit,
+        priority: grant.priority,
+        config: grant.featurePlanVersion.config,
+        prorate: proration.prorationFactor,
+      })
 
-      // Decrement remaining usage if it's usage feature
-      if (isUsageFeature) {
-        remainingUsage -= grantPrice.usage
-      }
+      grantMetadata.set(grant.id, {
+        cycleStartAt: grant.effectiveAt,
+        cycleEndAt: grant.expiresAt ?? Number.POSITIVE_INFINITY,
+        included: freeUnits,
+        isTrial: grant.type === "trial",
+        limit: grantLimit,
+      })
     }
 
-    // Unattributed Overage (Only for usage features)
-    // This represents usage that exceeds all grant limits
-    // this shouldn't happen, but just in case
-    if (isUsageFeature && remainingUsage > 0) {
-      // grants have the currency code in the feature plan version
-      const currencyCode =
-        grants[0]?.featurePlanVersion.config?.price?.dinero?.currency.code ?? "USD"
-      const currencyDinero = currencies[currencyCode as keyof typeof currencies]
-      const zeroDinero = dinero({ amount: 0, currency: currencyDinero })
+    // Call waterfall calculation
+    const waterfallResult = calculateWaterfallPrice({
+      grants: pricingGrants,
+      usage,
+      featureType: entitlement.featureType,
+    })
 
-      result.push({
-        grantId: null,
-        price: {
-          unitPrice: {
-            dinero: zeroDinero,
-            displayAmount: `${formatMoney("0", currencyCode)}`,
-          },
-          subtotalPrice: {
-            dinero: zeroDinero,
-            displayAmount: `${formatMoney("0", currencyCode)}`,
-          },
-          totalPrice: {
-            dinero: zeroDinero,
-            displayAmount: `${formatMoney("0", currencyCode)}`,
-          },
-        },
-        prorate: 1,
-        cycleStartAt: billingStartAt,
-        cycleEndAt: billingEndAt,
-        usage: remainingUsage,
-        included: 0,
-        limit: 0,
-        isTrial: false,
-      })
+    if (waterfallResult.err) {
+      return Err(new UnPriceBillingError({ message: waterfallResult.err.message }))
+    }
+
+    const result: ComputeCurrentUsageResult[] = []
+
+    for (const item of waterfallResult.val.items) {
+      if (item.grantId) {
+        const metadata = grantMetadata.get(item.grantId)
+        if (metadata) {
+          result.push({
+            grantId: item.grantId,
+            price: item.price,
+            prorate: pricingGrants.find((g) => g.id === item.grantId)?.prorate ?? 1,
+            cycleStartAt: metadata.cycleStartAt,
+            cycleEndAt: metadata.cycleEndAt,
+            usage: item.usage,
+            included: metadata.included,
+            limit: metadata.limit,
+            isTrial: metadata.isTrial,
+          })
+        }
+      } else {
+        // Unattributed usage
+        result.push({
+          grantId: null,
+          price: item.price,
+          prorate: 1,
+          cycleStartAt: billingStartAt,
+          cycleEndAt: billingEndAt,
+          usage: item.usage,
+          included: 0,
+          limit: 0,
+          isTrial: false,
+        })
+      }
     }
 
     return Ok(result)

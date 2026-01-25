@@ -31,10 +31,6 @@ export const route = createRoute({
           description: "The feature slug",
           example: "tokens",
         }),
-        // timestamp: z.number().optional().openapi({
-        //   description: "The timestamp of the request",
-        //   example: 1717852800,
-        // }),
         usage: z.number().openapi({
           description: "The usage",
           example: 30,

@@ -391,11 +391,22 @@ export class CustomerService {
 
     const newAcl = {
       customerUsageLimitReached:
-        params.updates.customerUsageLimitReached ?? currentAcl.customerUsageLimitReached,
-      customerDisabled: params.updates.customerDisabled ?? currentAcl.customerDisabled,
-      subscriptionStatus: params.updates.subscriptionStatus ?? currentAcl.subscriptionStatus,
+        params.updates.customerUsageLimitReached !== undefined
+          ? params.updates.customerUsageLimitReached
+          : currentAcl.customerUsageLimitReached,
+      customerDisabled:
+        params.updates.customerDisabled !== undefined
+          ? params.updates.customerDisabled
+          : currentAcl.customerDisabled,
+      subscriptionStatus:
+        params.updates.subscriptionStatus !== undefined
+          ? params.updates.subscriptionStatus
+          : currentAcl.subscriptionStatus,
     }
 
+    // Remove the cache entry first to ensure immediate invalidation,
+    // then set the new value. This prevents SWR from serving stale data.
+    await this.cache.accessControlList.remove(cacheKey)
     await this.cache.accessControlList.set(cacheKey, newAcl)
   }
 

@@ -1,6 +1,5 @@
 import "server-only"
 
-import { tracing } from "@baselime/trpc-opentelemetry-middleware"
 import { TRPCError, initTRPC } from "@trpc/server"
 import type { Cache as C } from "@unkey/cache"
 import { UpstashRedisStore } from "@unkey/cache/stores"
@@ -11,7 +10,7 @@ import { auth } from "@unprice/auth/server"
 import { COOKIES_APP } from "@unprice/config"
 import type { Database } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
-import { AxiomLogger, ConsoleLogger, type Logger } from "@unprice/logging"
+import { AxiomLogger, ConsoleLogger, type Logger, WideEvent } from "@unprice/logging"
 import type { CacheNamespaces } from "@unprice/services/cache"
 import { CacheService, createRedis } from "@unprice/services/cache"
 import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/metrics"
@@ -19,9 +18,10 @@ import { waitUntil } from "@vercel/functions"
 import { ZodError } from "zod"
 import { fromZodError } from "zod-validation-error"
 import { env } from "./env"
+import { getHttpStatus, runInContext } from "./observability"
 import { transformer } from "./transformer"
-import { projectWorkspaceGuard } from "./utils"
 import { db } from "./utils/db"
+import { projectWorkspaceGuard } from "./utils/project-workspace-guard"
 import { workspaceGuard } from "./utils/workspace-guard"
 
 // this is a cache between request executions
@@ -55,6 +55,7 @@ export interface CreateContextOptions {
     city: string
     ip: string
   }
+  wideEvent: WideEvent
 }
 
 /**
@@ -89,25 +90,38 @@ export const createTRPCContext = async (opts: {
   headers: Headers
   session: Session | null
   req?: NextAuthRequest
-  geo?: {
+  opts?: {
     continent: string
     country: string
     region: string
     city: string
+    userAgent: string
+    source: string
+    pathname: string
+    method: string
+    ip: string
   }
 }) => {
   const session = opts.session ?? (await auth())
   const userId = session?.user?.id || "unknown"
-
-  const source = opts.headers.get("unprice-request-source") || "unknown"
-  const pathname = opts.req?.nextUrl.pathname || "unknown"
-  const requestId = opts.headers.get("unprice-request-id") || newId("request")
-  const region = opts.geo?.region || opts.headers.get("x-vercel-id") || "unknown"
-  const country = opts.geo?.country || opts.headers.get("x-vercel-ip-country") || "unknown"
-  const continent = opts.geo?.continent || opts.headers.get("x-vercel-ip-continent") || "unknown"
-  const city = opts.geo?.city || opts.headers.get("x-vercel-ip-city") || "unknown"
+  const requestId =
+    opts.headers.get("unprice-request-id") ||
+    opts.headers.get("x-request-id") ||
+    opts.headers.get("x-vercel-id") ||
+    newId("request")
+  const region = opts.opts?.region || opts.headers.get("x-vercel-id") || "unknown"
+  const country = opts.opts?.country || opts.headers.get("x-vercel-ip-country") || "unknown"
+  const continent = opts.opts?.continent || opts.headers.get("x-vercel-ip-continent") || "unknown"
+  const city = opts.opts?.city || opts.headers.get("x-vercel-ip-city") || "unknown"
   const userAgent = opts.headers.get("user-agent") || "unknown"
-  const ip = opts.headers.get("x-real-ip") || opts.headers.get("x-forwarded-for") || "unknown"
+  const ip =
+    opts.opts?.ip ||
+    opts.headers.get("x-real-ip") ||
+    opts.headers.get("x-forwarded-for") ||
+    "unknown"
+  const source = opts.headers.get("unprice-request-source") || opts.opts?.source || "unknown"
+  const pathname = opts.req?.nextUrl.pathname ?? opts.opts?.pathname ?? "unknown"
+  const method = opts.req?.method ?? opts.opts?.method ?? "unknown"
 
   const logger = env.EMIT_METRICS_LOGS
     ? new AxiomLogger({
@@ -121,6 +135,7 @@ export const createTRPCContext = async (opts: {
           ip: ip === "::1" ? "127.0.0.1" : ip,
           pathname,
           userAgent,
+          method,
         },
         dataset: env.AXIOM_DATASET,
         environment: env.NODE_ENV,
@@ -139,6 +154,11 @@ export const createTRPCContext = async (opts: {
           source,
           ip: ip === "::1" ? "127.0.0.1" : ip,
           pathname,
+          userAgent,
+          colo: region,
+          continent,
+          city,
+          method,
         },
       })
 
@@ -187,6 +207,22 @@ export const createTRPCContext = async (opts: {
   const activeProjectSlug =
     opts.req?.cookies.get(COOKIES_APP.PROJECT)?.value ?? opts.headers.get(COOKIES_APP.PROJECT) ?? ""
 
+  const wideEvent = new WideEvent(
+    logger,
+    {
+      // version: env.VERSION, // Version not available in tRPC env yet
+      timestamp: new Date().toISOString(),
+      infra: {
+        platform: "vercel",
+      },
+      business: {
+        activeWorkspaceSlug,
+        activeProjectSlug,
+      },
+    },
+    env.NODE_ENV === "production" ? 0.1 : 1
+  )
+
   return createInnerTRPCContext({
     session,
     headers: opts.headers,
@@ -197,6 +233,7 @@ export const createTRPCContext = async (opts: {
     logger,
     metrics,
     cache,
+    wideEvent,
     waitUntil, // abstracted to allow migration to other providers
     hashCache,
     geolocation: {
@@ -218,6 +255,15 @@ export const createTRPCContext = async (opts: {
 export const t = initTRPC.context<typeof createTRPCContext>().create({
   transformer,
   errorFormatter({ shape, error, ctx }) {
+    ctx?.wideEvent.add("error", {
+      errorType: error.name,
+      errorMessage: error.message,
+      errorCode: error.code,
+      errorStack: error.stack,
+    })
+
+    ctx?.wideEvent.add("outcome", "error")
+
     // don't show stack trace in production
     if (env.NODE_ENV === "production") {
       delete error.stack
@@ -241,9 +287,7 @@ export const t = initTRPC.context<typeof createTRPCContext>().create({
 
     // log the error if it's an internal server error
     if (error.code === "INTERNAL_SERVER_ERROR") {
-      ctx?.logger.error("Error 500 in trpc api", {
-        error: JSON.stringify(errorResponse),
-      })
+      ctx?.logger.error("Error 500 in trpc api", errorResponse)
     }
 
     return errorResponse
@@ -277,7 +321,44 @@ export const mergeRouters = t.mergeRouters
  * tRPC API. It does not guarantee that a user querying is authorized, but you
  * can still access user session data if they are logged in
  */
-export const publicProcedure = t.procedure.use(tracing({ collectInput: true }))
+export const publicProcedure = t.procedure.use(async ({ ctx, next, path }) => {
+  return await runInContext(ctx.wideEvent, async () => {
+    const start = performance.now()
+
+    // Enrich with procedure name
+    ctx.wideEvent.add("operation", path)
+
+    try {
+      const result = await next()
+      // 4. Capture Success
+      if (result.ok) {
+        ctx.wideEvent.add("status", 200)
+      } else {
+        // This handles errors thrown by other middlewares down the chain
+        ctx.wideEvent.add("status", 500)
+        ctx.wideEvent.add("error", "Internal Middleware Error")
+      }
+
+      return result
+    } catch (err) {
+      // 5. Capture Error Details (TRPC Errors or standard Errors)
+      if (err instanceof TRPCError) {
+        ctx.wideEvent.add("status", getHttpStatus(err.code))
+        ctx.wideEvent.add("error_code", err.code)
+        ctx.wideEvent.add("error", err.message)
+      } else {
+        ctx.wideEvent.add("status", 500)
+        ctx.wideEvent.add("error", err instanceof Error ? err.message : String(err))
+      }
+      throw err
+    } finally {
+      ctx.wideEvent.add("duration", performance.now() - start)
+
+      // flush the wide event
+      ctx.waitUntil(Promise.all([ctx.wideEvent.log(), ctx.metrics.flush(), ctx.logger.flush()]))
+    }
+  })
+})
 
 /**
  * Reusable procedure that enforces users are logged in before running the
@@ -291,6 +372,9 @@ export const protectedProcedure = publicProcedure.use(({ ctx, next }) => {
   if (!ctx.session?.user?.email) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "User email not found in session" })
   }
+
+  // Enrich wide event
+  ctx.wideEvent.add("userId", ctx.session.user.id)
 
   return next({
     ctx: {
@@ -316,6 +400,9 @@ export const protectedWorkspaceProcedure = protectedProcedure.use(
       ctx,
     })
 
+    // Enrich wide event
+    ctx.wideEvent.add("workspaceId", data.workspace.id)
+
     return next({
       ctx: {
         ...data,
@@ -337,6 +424,10 @@ export const protectedProjectProcedure = protectedProcedure.use(
       projectSlug: activeProjectSlug,
       ctx,
     })
+
+    // Enrich wide event
+    ctx.wideEvent.add("projectId", data.project.id)
+    ctx.wideEvent.add("workspaceId", data.project.workspaceId)
 
     return next({
       ctx: {

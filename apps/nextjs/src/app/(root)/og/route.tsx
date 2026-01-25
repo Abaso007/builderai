@@ -80,7 +80,7 @@ export async function GET(req: Request) {
           alignItems: "center",
           justifyContent: "center",
           marginBottom: "40px",
-          gap: "16px",
+          gap: "12px",
         }}
       >
         {logoUrl ? (
@@ -94,10 +94,11 @@ export async function GET(req: Request) {
         )}
         <span
           style={{
-            fontSize: "72px",
+            fontSize: "60px",
             fontWeight: 600,
             color: "#ffc53d",
             letterSpacing: "-0.03em",
+            lineHeight: 1,
             textTransform:
               title.toLowerCase() === siteConfig.name.toLowerCase() ? "lowercase" : "none",
           }}

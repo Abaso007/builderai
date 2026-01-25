@@ -12,12 +12,13 @@ import type {
   VerifyRequest,
 } from "@unprice/db/validators"
 import type { BaseError, Result } from "@unprice/error"
-import { AxiomLogger, ConsoleLogger, type Logger } from "@unprice/logging"
+import { AxiomLogger, ConsoleLogger, type Logger, WideEvent } from "@unprice/logging"
 import { CacheService } from "@unprice/services/cache"
 import type { DenyReason } from "@unprice/services/customers"
 import { EntitlementService } from "@unprice/services/entitlements"
 import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/metrics"
 import type { Env } from "~/env"
+import { getCurrentEvent, initObservability, runInContext } from "~/util/observability"
 import { SqliteDOStorageProvider } from "./sqlite-do-provider"
 
 // colo never change after the object is created
@@ -41,6 +42,8 @@ export class DurableObjectUsagelimiter extends Server {
   private LAST_BROADCAST_MSG = Date.now()
   // debounce delay for the broadcast events
   private readonly DEBOUNCE_DELAY = 1000 * 1 // 1 second (1 per second)
+  // sample rate for the wide event
+  private SAMPLE_RATE = 0.1
 
   // hibernate the do when no websocket nor connections are active
   static options = {
@@ -50,14 +53,18 @@ export class DurableObjectUsagelimiter extends Server {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
 
+    initObservability()
+
     // set a revalidation period of 5 secs for development
     if (env.VERCEL_ENV === "development") {
       this.TTL_ANALYTICS = 1000 * 10 // 10 seconds
+      this.SAMPLE_RATE = 1
     }
 
     // set a revalidation period of 5 mins for preview
     if (env.VERCEL_ENV === "preview") {
       this.TTL_ANALYTICS = 1000 * 60 // 1 minute
+      this.SAMPLE_RATE = 0.1
     }
 
     const emitMetrics = env.EMIT_METRICS_LOGS.toString() === "true"
@@ -67,9 +74,10 @@ export class DurableObjectUsagelimiter extends Server {
           apiKey: env.AXIOM_API_TOKEN,
           dataset: env.AXIOM_DATASET,
           requestId: this.ctx.id.toString(),
-          logLevel: env.VERCEL_ENV === "production" ? "error" : "debug",
+          logLevel: env.VERCEL_ENV === "production" ? "error" : "info",
           environment: env.NODE_ENV,
           service: "usagelimiter",
+          // TODO: add version
           defaultFields: {
             durableObjectId: this.ctx.id.toString(),
           },
@@ -281,85 +289,138 @@ export class DurableObjectUsagelimiter extends Server {
   }
 
   public async verify(data: VerifyRequest): Promise<VerificationResult> {
-    try {
-      // set the request id for the metrics and logs
-      this.logger.x(data.requestId)
-      this.metrics.x(data.requestId)
+    const wideEvent = new WideEvent(
+      this.logger,
+      {
+        requestId: data.requestId,
+        timestamp: new Date().toISOString(),
+        infra: {
+          platform: "cloudflare",
+          durableObjectId: this.ctx.id.toString() as string,
+        },
+        geo: {
+          colo: (await this.getConfig()).colo,
+        },
+        business: {
+          operation: "verify",
+          ...data,
+        },
+      },
+      this.SAMPLE_RATE
+    )
 
-      // All logic handled internally!
-      const result = await this.entitlementService.verify(data)
+    return await runInContext(wideEvent, async () => {
+      try {
+        // set the request id for the metrics and logs
+        this.logger.x(data.requestId)
+        this.metrics.x(data.requestId)
+        // All logic handled internally!
+        const result = await this.entitlementService.verify(data)
+        wideEvent.add("result", result)
+        // Set alarm to flush buffers
+        await this.ensureAlarmIsSet(data.flushTime)
 
-      // Set alarm to flush buffers
-      await this.ensureAlarmIsSet(data.flushTime)
-
-      return result
-    } catch (error) {
-      const err = error as Error
-      this.logger.error("error can from do", { error: err.message })
-      return {
-        allowed: false,
-        message: err.message,
-        deniedReason: "ENTITLEMENT_ERROR",
+        return result
+      } catch (error) {
+        const err = error as Error
+        wideEvent.add("error", err.message)
+        wideEvent.add("outcome", "error")
+        return {
+          allowed: false,
+          message: err.message,
+          deniedReason: "ENTITLEMENT_ERROR",
+        }
+      } finally {
+        wideEvent.add("duration", performance.now() - data.performanceStart)
+        this.ctx.waitUntil(
+          (async () => {
+            try {
+              await Promise.all([
+                // only log if the event should be sampled
+                wideEvent.log(),
+                this.metrics.flush().catch((err: Error) => {
+                  console.error("Failed to flush metrics in DO", err)
+                }),
+                this.logger.flush().catch((err: Error) => {
+                  console.error("Failed to flush logger in DO", err)
+                }),
+              ])
+            } catch (error) {
+              console.error("Error during background flush in DO", error)
+            }
+          })()
+        )
       }
-    } finally {
-      this.ctx.waitUntil(
-        (async () => {
-          try {
-            await Promise.all([
-              this.metrics.flush().catch((err: Error) => {
-                this.logger.error("Failed to flush metrics in DO", { error: err.message })
-              }),
-              this.logger.flush().catch((err: Error) => {
-                console.error("Failed to flush logger in DO", err)
-              }),
-            ])
-          } catch (error) {
-            console.error("Error during background flush in DO", error)
-          }
-        })()
-      )
-    }
+    })
   }
 
   public async reportUsage(data: ReportUsageRequest): Promise<ReportUsageResult> {
-    try {
-      // set the request id for the metrics and logs
-      this.logger.x(data.requestId)
-      this.metrics.x(data.requestId)
+    const wideEvent = new WideEvent(
+      this.logger,
+      {
+        service: "durable-object",
+        requestId: data.requestId,
+        timestamp: new Date().toISOString(),
+        infra: {
+          platform: "cloudflare",
+          durableObjectId: this.ctx.id.toString() as string,
+        },
+        geo: {
+          colo: (await this.getConfig()).colo,
+        },
+        business: {
+          operation: "reportUsage",
+          ...data,
+        },
+      },
+      this.SAMPLE_RATE
+    )
 
-      const result = await this.entitlementService.reportUsage(data)
+    return await runInContext(wideEvent, async () => {
+      try {
+        // set the request id for the metrics and logs
+        this.logger.x(data.requestId)
+        this.metrics.x(data.requestId)
 
-      // Set alarm to flush buffers
-      await this.ensureAlarmIsSet(data.flushTime)
+        const result = await this.entitlementService.reportUsage(data)
+        wideEvent.add("result", result)
+        // Set alarm to flush buffers
+        await this.ensureAlarmIsSet(data.flushTime)
 
-      return result
-    } catch (error) {
-      this.logger.error("error reporting usage from do", {
-        error: error instanceof Error ? error.message : "unknown error",
-      })
+        return result
+      } catch (error) {
+        const err = error as Error
+        wideEvent.add("error", err.message)
+        wideEvent.add("outcome", "error")
 
-      return {
-        message: error instanceof Error ? error.message : "unknown error",
-        allowed: false,
+        return {
+          message: error instanceof Error ? error.message : "unknown error",
+          allowed: false,
+        }
+      } finally {
+        data.performanceStart &&
+          wideEvent.add("duration", performance.now() - data.performanceStart)
+
+        this.ctx.waitUntil(
+          (async () => {
+            try {
+              await Promise.all([
+                // only log if the event should be sampled
+                wideEvent.log(),
+                this.metrics.flush().catch((err: Error) => {
+                  console.error("Failed to flush metrics in DO", err)
+                }),
+                this.logger.flush().catch((err: Error) => {
+                  console.error("Failed to flush logger in DO", err)
+                }),
+              ])
+            } catch (error) {
+              console.error("Error during background flush in DO", error)
+            }
+          })()
+        )
       }
-    } finally {
-      this.ctx.waitUntil(
-        (async () => {
-          try {
-            await Promise.all([
-              this.metrics.flush().catch((err: Error) => {
-                this.logger.error("Failed to flush metrics in DO", { error: err.message })
-              }),
-              this.logger.flush().catch((err: Error) => {
-                console.error("Failed to flush logger in DO", err)
-              }),
-            ])
-          } catch (error) {
-            console.error("Error during background flush in DO", error)
-          }
-        })()
-      )
-    }
+    })
   }
 
   // ensure the alarm is set to flush the usage records and verifications
@@ -370,6 +431,11 @@ export class DurableObjectUsagelimiter extends Server {
     // min 5s, max 30m
     const flushSec = Math.min(Math.max(flushTime ?? this.TTL_ANALYTICS / 1000, 5), 30 * 60)
     const nextAlarm = now + flushSec * 1000
+
+    const wideEvent = getCurrentEvent()
+    wideEvent?.add("durableObject", {
+      nextAlarm,
+    })
 
     if (!alarm) this.ctx.storage.setAlarm(nextAlarm)
     else if (alarm < now) {
@@ -396,7 +462,7 @@ export class DurableObjectUsagelimiter extends Server {
         try {
           await Promise.all([
             this.metrics.flush().catch((err: Error) => {
-              this.logger.error("Failed to flush metrics in DO onClose", { error: err.message })
+              console.error("Failed to flush metrics in DO onClose", err)
             }),
             this.logger.flush().catch((err: Error) => {
               console.error("Failed to flush logger in DO onClose", err)
@@ -424,7 +490,7 @@ export class DurableObjectUsagelimiter extends Server {
         try {
           await Promise.all([
             this.metrics.flush().catch((err: Error) => {
-              this.logger.error("Failed to flush metrics in DO onAlarm", { error: err.message })
+              console.error("Failed to flush metrics in DO onAlarm", err)
             }),
             this.logger.flush().catch((err: Error) => {
               console.error("Failed to flush logger in DO onAlarm", err)

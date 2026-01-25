@@ -1,6 +1,6 @@
 import { Dashboard } from "@unprice/ui/icons"
 import { Calculator, Key, Link, Settings, Sticker, Users } from "lucide-react"
-import type { DashboardRoute } from "~/types"
+import type { DashboardRoute, Shortcut } from "~/types"
 
 export const PROJECT_NAV: DashboardRoute[] = [
   {
@@ -9,18 +9,18 @@ export const PROJECT_NAV: DashboardRoute[] = [
     href: "/dashboard",
   },
   {
-    name: "Revenue Models",
+    name: "Plans",
     icon: Calculator,
     href: "/plans",
     disabled: false,
     isNew: true,
-    slug: "plans",
+    featureSlug: "plans",
   },
   {
     name: "Pages",
     icon: Sticker,
     href: "/pages",
-    slug: "pages",
+    featureSlug: "pages",
   },
   // {
   //   name: "Events",
@@ -33,13 +33,13 @@ export const PROJECT_NAV: DashboardRoute[] = [
     name: "API Keys",
     href: "/apikeys",
     icon: Key,
-    slug: "apikeys",
+    featureSlug: "apikeys",
   },
   {
     name: "Customers",
     href: "/customers",
     icon: Users,
-    slug: "customers",
+    featureSlug: "customers",
   },
   {
     name: "Settings",
@@ -58,20 +58,23 @@ export const PROJECT_NAV: DashboardRoute[] = [
   },
 ]
 
-export const PROJECT_SHORTCUTS = [
+export const PROJECT_SHORTCUTS: Shortcut[] = [
   {
     name: "View Models",
     href: "plans",
     icon: Link,
+    featureSlug: "plans",
   },
   {
-    name: "Provision Customer",
+    name: "Customer",
     href: "customers/subscriptions/new",
     icon: Link,
+    featureSlug: "customers",
   },
   {
     name: "All Customers",
     href: "customers",
     icon: Link,
+    featureSlug: "customers",
   },
 ]

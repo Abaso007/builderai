@@ -11,7 +11,7 @@ export const WORKSPACE_NAV: DashboardRoute[] = [
     icon: Globe,
     name: "Domains",
     href: "/domains",
-    slug: "domains",
+    featureSlug: "domains",
   },
   {
     icon: Settings,
@@ -22,7 +22,7 @@ export const WORKSPACE_NAV: DashboardRoute[] = [
       {
         name: "Members",
         href: "/settings/members",
-        slug: "pro",
+        featureSlug: "access-pro",
       },
       {
         name: "Billing & Usage",
@@ -37,15 +37,17 @@ export const WORKSPACE_SHORTCUTS: Shortcut[] = [
     name: "Add member",
     href: "settings/members",
     icon: Link,
+    featureSlug: "access-pro",
   },
   {
     name: "Workspace usage",
     href: "settings/billing",
     icon: Link,
   },
-  // {
-  //   name: "Add domain",
-  //   href: "domains",
-  //   icon: Link,
-  // },
+  {
+    name: "Add domain",
+    href: "domains",
+    icon: Link,
+    featureSlug: "domains",
+  },
 ]

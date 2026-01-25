@@ -23,13 +23,20 @@ export const metadata = {
     locale: "en_US",
     url: "https://unprice.dev",
     siteName: siteConfig.name,
-    images: [{ url: "/og" }],
+    images: [
+      {
+        url: "/og",
+        width: 1200,
+        height: 630,
+        alt: siteConfig.name,
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: siteConfig.name,
     description: siteConfig.description,
-    images: [{ url: "/og" }],
+    images: [{ url: "/og", width: 1200, height: 630, alt: siteConfig.name }],
     creator: "@jhosef90",
   },
   metadataBase: new URL("https://unprice.dev"),
@@ -68,6 +75,13 @@ export default function RootLayout(props: { children: React.ReactNode }) {
             name="viewport"
             content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"
           />
+          {/* Resource hints for external domains */}
+          <link rel="preconnect" href="https://vercel.live" />
+          <link rel="dns-prefetch" href="https://vercel.live" />
+          <link rel="preconnect" href="https://vitals.vercel-insights.com" />
+          <link rel="dns-prefetch" href="https://vitals.vercel-insights.com" />
+          <link rel="preconnect" href="https://cdn.userjot.com" />
+          <link rel="dns-prefetch" href="https://cdn.userjot.com" />
           {/* <script src="https://unpkg.com/react-scan/dist/auto.global.js" /> */}
         </head>
         <body

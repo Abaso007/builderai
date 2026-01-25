@@ -70,7 +70,7 @@ export function FeaturesApp() {
 
       <m.p
         variants={itemVariants}
-        className="mt-6 max-w-3xl text-justify text-background-text text-lg leading-7"
+        className="mt-6 text-justify text-background-text text-lg leading-7"
       >
         PriceOps isn't just about strategy—it's about performance. Your monetization layer shouldn't
         be a bottleneck. Unprice is architected to handle high-volume event metering and low latency

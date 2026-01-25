@@ -3,7 +3,6 @@ import { cors } from "hono/cors"
 import { type Env, createRuntimeEnv } from "~/env"
 import { newApp } from "~/hono/app"
 import { init } from "~/middleware/init"
-import { metrics } from "~/middleware/metrics"
 
 import serveEmojiFavicon from "stoker/middlewares/serve-emoji-favicon"
 
@@ -29,9 +28,14 @@ import { env } from "cloudflare:workers"
 import { getToken } from "@auth/core/jwt"
 import { ConsoleLogger } from "@unprice/logging"
 import { timing } from "hono/timing"
+import { obs } from "~/middleware/obs"
+import { initObservability } from "~/util/observability"
 import { registerGetAnalyticsUsageV1 } from "./routes/analitycs/getUsageV1"
 import { registerGetAnalyticsVerificationsV1 } from "./routes/analitycs/getVerificationsV1"
 import { registerUpdateACLV1 } from "./routes/customer/updateACLV1"
+
+// initialize the observability provider
+initObservability()
 
 const app = newApp()
 
@@ -39,7 +43,7 @@ app.use(timing())
 app.use(serveEmojiFavicon("◎"))
 app.use("*", cors())
 app.use("*", init())
-app.use("*", metrics())
+app.use("*", obs())
 
 // Handle websocket connections for Durable Objects
 app.use(

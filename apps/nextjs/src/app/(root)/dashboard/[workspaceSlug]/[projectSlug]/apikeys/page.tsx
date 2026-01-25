@@ -31,8 +31,8 @@ export default async function ApiKeysPage(props: {
     <DashboardShell
       header={
         <HeaderTab
-          title="Connectivity"
-          description="Bridge your product to your revenue engine."
+          title="API Keys"
+          description="All the apis of the system"
           action={<NewApiKeyDialog />}
         />
       }

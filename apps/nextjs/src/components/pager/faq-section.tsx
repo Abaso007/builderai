@@ -6,9 +6,11 @@ import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
 import { Input } from "@unprice/ui/input"
+import { ScrollArea } from "@unprice/ui/scroll-area"
 import { Separator } from "@unprice/ui/separator"
 import { Textarea } from "@unprice/ui/text-area"
-import { HelpCircle, Plus, Trash2 } from "lucide-react"
+import { HelpCircle, Pencil, Plus, Trash2, X } from "lucide-react"
+import { useState } from "react"
 import { type UseFormGetValues, type UseFormSetValue, useForm } from "react-hook-form"
 import { FormProvider } from "react-hook-form"
 import type { z } from "zod"
@@ -19,7 +21,8 @@ interface FAQSectionProps {
 }
 
 export function FAQSection({ setValue, getValues }: FAQSectionProps) {
-  const faqs = getValues("faqs")
+  const faqs = getValues("faqs") || []
+  const [editingId, setEditingId] = useState<string | null>(null)
 
   const faqForm = useForm<z.infer<typeof faqSchema>>({
     resolver: zodResolver(faqSchema),
@@ -30,17 +33,40 @@ export function FAQSection({ setValue, getValues }: FAQSectionProps) {
     },
   })
 
-  const addFaq = (data: z.infer<typeof faqSchema>) => {
-    const faq: z.infer<typeof faqSchema> = {
-      id: Date.now().toString(),
-      question: data.question,
-      answer: data.answer,
+  const handleSaveFaq = (data: z.infer<typeof faqSchema>) => {
+    if (editingId) {
+      const updatedFaqs = faqs.map((f) =>
+        f.id === editingId ? { ...f, question: data.question, answer: data.answer } : f
+      )
+      setValue("faqs", updatedFaqs)
+      setEditingId(null)
+    } else {
+      const faq: z.infer<typeof faqSchema> = {
+        id: Date.now().toString(),
+        question: data.question,
+        answer: data.answer,
+      }
+      setValue("faqs", [...faqs, faq])
     }
-    setValue("faqs", [...faqs, faq])
-    faqForm.reset()
+    faqForm.reset({ id: "", question: "", answer: "" })
+  }
+
+  const handleEditFaq = (faq: z.infer<typeof faqSchema>) => {
+    setEditingId(faq.id)
+    faqForm.setValue("question", faq.question)
+    faqForm.setValue("answer", faq.answer)
+    faqForm.setValue("id", faq.id)
+  }
+
+  const handleCancelEdit = () => {
+    setEditingId(null)
+    faqForm.reset({ id: "", question: "", answer: "" })
   }
 
   const removeFaq = (faqId: string) => {
+    if (editingId === faqId) {
+      handleCancelEdit()
+    }
     setValue(
       "faqs",
       faqs.filter((faq) => faq.id !== faqId)
@@ -88,16 +114,33 @@ export function FAQSection({ setValue, getValues }: FAQSectionProps) {
               )}
             />
 
-            <Button
-              type="button"
-              variant="default"
-              size="sm"
-              onClick={faqForm.handleSubmit(addFaq)}
-              className="w-full"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Add FAQ
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="default"
+                size="sm"
+                onClick={faqForm.handleSubmit(handleSaveFaq)}
+                className="flex-1"
+              >
+                {editingId ? (
+                  <>
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Update FAQ
+                  </>
+                ) : (
+                  <>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add FAQ
+                  </>
+                )}
+              </Button>
+              {editingId && (
+                <Button type="button" variant="outline" size="sm" onClick={handleCancelEdit}>
+                  <X className="mr-2 h-4 w-4" />
+                  Cancel
+                </Button>
+              )}
+            </div>
           </div>
         </FormProvider>
 
@@ -106,25 +149,41 @@ export function FAQSection({ setValue, getValues }: FAQSectionProps) {
           <div className="space-y-3">
             <Separator />
             <div className="font-medium text-sm">Current FAQs ({faqs.length})</div>
-            {faqs.map((faq) => (
-              <div key={faq.id} className="space-y-2 rounded-lg border p-3">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1 space-y-1">
-                    <p className="font-medium text-sm">{faq.question}</p>
-                    <p className="line-clamp-2 text-muted-foreground text-sm">{faq.answer}</p>
+            <ScrollArea className="max-h-[500px]">
+              <div className="space-y-3 pr-4">
+                {faqs.map((faq) => (
+                  <div key={faq.id} className="space-y-2 rounded-lg border p-3">
+                    <div className="flex items-start justify-between">
+                      <div className="flex min-w-0 flex-1 items-center space-y-0">
+                        <p className="truncate font-medium text-sm">{faq.question}</p>
+                      </div>
+                      <div className="ml-2 flex shrink-0 items-start gap-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleEditFaq(faq)}
+                          className="h-8 w-8 p-0"
+                        >
+                          <Pencil className="h-4 w-4" />
+                          <span className="sr-only">Edit</span>
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeFaq(faq.id)}
+                          className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          <span className="sr-only">Remove</span>
+                        </Button>
+                      </div>
+                    </div>
                   </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeFaq(faq.id)}
-                    className="text-destructive hover:text-destructive"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
+                ))}
               </div>
-            ))}
+            </ScrollArea>
           </div>
         )}
       </CardContent>

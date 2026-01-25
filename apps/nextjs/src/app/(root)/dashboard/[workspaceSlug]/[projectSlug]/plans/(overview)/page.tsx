@@ -30,13 +30,13 @@ export default async function PlansPage(props: {
     <DashboardShell
       header={
         <HeaderTab
-          title="Revenue Models"
+          title="Plans"
           description="Design and iterate on your revenue architecture."
           action={
             <PlanDialog>
               <Button>
                 <Plus className="mr-2 h-4 w-4" />
-                Design New Plan
+                Create Plan
               </Button>
             </PlanDialog>
           }

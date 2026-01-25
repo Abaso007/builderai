@@ -7,7 +7,7 @@ import Header from "~/components/layout/header"
 import HeaderMarketing from "~/components/layout/header-marketing"
 import { env } from "~/env"
 import { generateColorsFromBackground } from "~/lib/colors"
-import { getPageData, getPlansData } from "~/lib/fetchers"
+import { getAllPublishedDomains, getPageData, getPlansData } from "~/lib/fetchers"
 import { getImageSrc, isSvgLogo } from "~/lib/image"
 import { verifyPreviewToken } from "~/lib/preview"
 import { ApplyTheme } from "../_components/apply-theme"
@@ -21,6 +21,12 @@ import { PricingTable } from "../_components/pricing-table"
 
 // check shadcn landing page for inspiration
 export const runtime = "edge"
+export const revalidate = 3600 // 1 hour
+
+export async function generateStaticParams() {
+  const domains = await getAllPublishedDomains()
+  return domains.map((domain) => ({ domain }))
+}
 
 // Metadata generation improved to include page/project name fallback
 export async function generateMetadata({

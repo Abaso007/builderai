@@ -1,24 +1,22 @@
-@import "@radix-ui/colors/gray.css";
-@import "@radix-ui/colors/blue.css";
-@import "@radix-ui/colors/green.css";
+/* Optimized imports for sunset theme - only importing required colors */
+/* Grayscale: sand (not gray) - used for background/base colors */
 @import "@radix-ui/colors/sand.css";
+@import "@radix-ui/colors/sand-dark.css";
 
+/* Theme colors */
+@import "@radix-ui/colors/amber.css";
+@import "@radix-ui/colors/amber-dark.css";
+@import "@radix-ui/colors/bronze.css";
+@import "@radix-ui/colors/bronze-dark.css";
+@import "@radix-ui/colors/blue.css";
+@import "@radix-ui/colors/blue-dark.css";
+@import "@radix-ui/colors/green.css";
+@import "@radix-ui/colors/green-dark.css";
 @import "@radix-ui/colors/tomato.css";
 @import "@radix-ui/colors/tomato-dark.css";
-
 @import "@radix-ui/colors/orange.css";
 @import "@radix-ui/colors/orange-dark.css";
 
-@import "@radix-ui/colors/bronze.css";
-@import "@radix-ui/colors/amber.css";
-@import "@radix-ui/colors/amber-dark.css";
-@import "@radix-ui/colors/sand-dark.css";
-
-@import "@radix-ui/colors/gray-dark.css";
-@import "@radix-ui/colors/bronze-dark.css";
-
-@import "@radix-ui/colors/blue-dark.css";
-@import "@radix-ui/colors/green-dark.css";
-
+/* Foreground colors */
 @import "@radix-ui/colors/white-alpha.css";
 @import "@radix-ui/colors/black-alpha.css";

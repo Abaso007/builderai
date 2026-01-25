@@ -5,6 +5,7 @@ import localFont from "next/font/local"
 export const cal = localFont({
   src: "CalSans-SemiBold.woff2",
   variable: "--font-cal",
+  display: "swap",
 })
 
 export const fontMapper = {

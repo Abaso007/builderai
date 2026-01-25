@@ -220,6 +220,9 @@ importers:
       '@unprice/error':
         specifier: workspace:^
         version: link:../../internal/error
+      '@unprice/logging':
+        specifier: workspace:^
+        version: link:../../internal/logging
       '@unprice/stripe':
         specifier: workspace:^
         version: link:../../internal/stripe

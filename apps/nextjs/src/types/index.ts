@@ -4,18 +4,19 @@ export interface Shortcut {
   name: string
   href: string
   icon: LucideIcon
+  featureSlug?: string
 }
 
 export interface SidebarRoute {
   name: string
   icon?: LucideIcon
   href: string
-  slug?: string
+  featureSlug?: string
 }
 
 export interface DashboardRoute {
   name: string
-  slug?: string
+  featureSlug?: string
   isNew?: boolean
   href: string
   disabled?: boolean

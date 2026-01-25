@@ -2,6 +2,8 @@
 
 import { Button } from "@unprice/ui/button"
 import { useRouter } from "next/navigation"
+import { useEffect } from "react"
+import { logError } from "~/actions/log-error"
 import { BlurImage } from "~/components/blur-image"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
@@ -14,6 +16,10 @@ export default function ErrorPage({
   reset: () => void
 }) {
   const router = useRouter()
+
+  useEffect(() => {
+    void logError(error)
+  }, [error])
 
   return (
     <DashboardShell>

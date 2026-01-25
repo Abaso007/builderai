@@ -177,7 +177,6 @@ describe("EntitlementService - Pricing", () => {
     expect(result.allowed).toBe(true)
     expect(result.usage).toBe(5)
     expect(result.cost).toBe(5) // 5 units * $1.00
-    expect(result.rate).toBe("starts at $1 per unit")
   })
 
   it("should calculate correct cost and rate for tiered usage (Tier 2 cross-over)", async () => {
@@ -196,7 +195,6 @@ describe("EntitlementService - Pricing", () => {
     expect(result.usage).toBe(15)
     // 10 units * $1.00 + 5 units * $0.50 = $10 + $2.5 = $12.5
     expect(result.cost).toBe(12.5)
-    expect(result.rate).toBe("starts at $0.5 per unit") // Tier 2 rate should be shown as primary
   })
 
   it("should calculate correct cost and rate for tiered usage (Tier 3 cross-over)", async () => {
@@ -215,7 +213,6 @@ describe("EntitlementService - Pricing", () => {
     expect(result.usage).toBe(25)
     // 10 * $1.00 + 10 * $0.50 + 5 * $0.20 = $10 + $5 + $1 = $16
     expect(result.cost).toBe(16)
-    expect(result.rate).toBe("starts at $0.2 per unit")
   })
 
   it("should calculate correct cost and rate for simple unit usage", async () => {
@@ -263,6 +260,5 @@ describe("EntitlementService - Pricing", () => {
     expect(result.allowed).toBe(true)
     expect(result.usage).toBe(4)
     expect(result.cost).toBe(10) // 4 * $2.50 = $10
-    expect(result.rate).toBe("starts at $2.5 per unit")
   })
 })

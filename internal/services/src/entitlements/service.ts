@@ -21,7 +21,7 @@ import {
   type VerificationResult,
   type VerifyRequest,
   calculateCycleWindow,
-  calculatePricePerFeature,
+  calculateWaterfallPrice,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
@@ -37,6 +37,7 @@ import { GrantsManager } from "./grants"
 import type { UnPriceEntitlementStorage } from "./storage-provider"
 
 import { customers, entitlements, subscriptions } from "@unprice/db/schema"
+import { obs } from "@unprice/logging"
 import { ulid } from "ulid"
 import { CustomerService } from "../customers/service"
 import { UsageMeter } from "./usage-meter"
@@ -99,6 +100,20 @@ export class EntitlementService {
     })
   }
 
+  /**
+   * Safely rounds a number to 2 decimal places
+   * Handles edge cases like NaN, Infinity, null, and undefined
+   */
+  private roundToTwoDecimals(value: number | null | undefined): number | undefined {
+    if (value === null || value === undefined) {
+      return undefined
+    }
+    if (!Number.isFinite(value)) {
+      return undefined
+    }
+    return Math.round(value * 100) / 100
+  }
+
   private getUsageMeter(validatedState: EntitlementState): UsageMeter {
     return new UsageMeter(
       {
@@ -120,6 +135,14 @@ export class EntitlementService {
    * Handles cache miss and revalidation internally (single network call)
    */
   async verify(params: VerifyRequest): Promise<VerificationResult> {
+    // Add business context once at the start
+    obs.add("business", {
+      operation: "verify",
+      customerId: params.customerId,
+      projectId: params.projectId,
+      featureSlug: params.featureSlug,
+    })
+
     const { err: stateErr, val: state } = await this.getStateWithRevalidation({
       customerId: params.customerId,
       projectId: params.projectId,
@@ -135,6 +158,11 @@ export class EntitlementService {
       }
     }
 
+    obs.add("entitlement", {
+      state: state,
+      stateErr: stateErr,
+    })
+
     if (!state) {
       const latency = performance.now() - params.performanceStart
       this.waitUntil(
@@ -145,7 +173,11 @@ export class EntitlementService {
           timestamp: params.timestamp,
           allowed: 0,
           deniedReason: "ENTITLEMENT_NOT_FOUND",
-          metadata: params.metadata,
+          metadata: {
+            ...params.metadata,
+            usage: (params.usage ?? 0).toString(),
+            remaining: "0",
+          },
           latency,
           requestId: params.requestId,
           createdAt: Date.now(),
@@ -189,7 +221,11 @@ export class EntitlementService {
         timestamp: params.timestamp,
         allowed: verifyResult.allowed ? 1 : 0,
         deniedReason: verifyResult.deniedReason ?? undefined,
-        metadata: params.metadata,
+        metadata: {
+          ...params.metadata,
+          usage: (params.usage ?? 0).toString(),
+          remaining: verifyResult.remaining.toString(),
+        },
         latency,
         requestId: params.requestId,
         createdAt: Date.now(),
@@ -201,6 +237,12 @@ export class EntitlementService {
     const shouldBlockCustomer =
       verifyResult.deniedReason === "LIMIT_EXCEEDED" &&
       validatedState.metadata?.blockCustomer === true
+
+    obs.add("entitlement", {
+      shouldBlockCustomer,
+      meterResult,
+      verifyResult,
+    })
 
     await this.storage.set({ state: { ...validatedState, meter: meterResult } })
 
@@ -245,7 +287,7 @@ export class EntitlementService {
   private calculateCostAndRate(params: {
     state: EntitlementState
     usage: number
-  }): { cost?: number; rate?: string } {
+  }): { cost?: number; rate?: string; rateAmount?: number; rateCurrency?: string } {
     const { state, usage } = params
 
     // Only calculate for usage-based features
@@ -253,47 +295,49 @@ export class EntitlementService {
       return {}
     }
 
-    // Since we don't want to add latency, we use a lightweight calculation
-    // based on the merged grants.
-    // We'll use the winning grant's config for the rate.
+    const { val: result, err } = calculateWaterfallPrice({
+      grants: state.grants
+        .filter((g) => !!g.config)
+        .map((g) => ({
+          id: g.id,
+          limit: g.limit,
+          priority: g.priority,
+          config: g.config!,
+          prorate: 1,
+        })),
+      usage,
+      featureType: state.featureType,
+    })
 
-    // Sort by priority (higher first)
-    const sortedGrants = [...state.grants].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
-
-    let totalCost = 0
-    let primaryRate = ""
-    let remainingUsage = usage
-
-    for (const grant of sortedGrants) {
-      if (!grant.config) continue
-
-      // For graduated/volume tiers, we need to know the quantity attributed to this grant.
-      // Entitlement merging logic for "sum" or "max" determines how much each grant contributes.
-      // For simplicity and zero latency, we'll do a waterfall attribution.
-      const grantLimit = grant.limit ?? Number.POSITIVE_INFINITY
-      const quantity = Math.min(remainingUsage, grantLimit)
-
-      const priceResult = calculatePricePerFeature({
-        config: grant.config,
-        featureType: state.featureType,
-        quantity,
-        // we don't prorate in verify/report
+    if (err) {
+      this.logger.error("Failed to calculate cost and rate", {
+        error: err.message,
+        customerId: state.customerId,
+        projectId: state.projectId,
+        featureSlug: state.featureSlug,
       })
-
-      if (priceResult.val) {
-        totalCost += Number(toDecimal(priceResult.val.totalPrice.dinero))
-        if (!primaryRate) {
-          primaryRate = priceResult.val.unitPrice.displayAmount
-        }
-      }
-
-      remainingUsage -= quantity
-      if (remainingUsage <= 0) break
+      return {}
     }
+
+    const totalCost = this.roundToTwoDecimals(
+      Number(toDecimal(result.totalPrice.totalPrice.dinero))
+    )
+
+    // Rate is the unit price of the last item (marginal rate)
+    const lastItem = result.items[result.items.length - 1]
+    const primaryRate = lastItem ? lastItem.price.unitPrice.displayAmount : ""
+    const rateAmount = lastItem
+      ? this.roundToTwoDecimals(Number(toDecimal(lastItem.price.unitPrice.dinero)))
+      : undefined
+    const rateCurrency = lastItem
+      ? lastItem.price.unitPrice.dinero.toJSON().currency.code
+      : undefined
 
     return {
       cost: totalCost,
       rate: primaryRate,
+      rateAmount,
+      rateCurrency,
     }
   }
 
@@ -302,11 +346,24 @@ export class EntitlementService {
    * Handles revalidation internally (single network call)
    */
   async reportUsage(params: ReportUsageRequest): Promise<ReportUsageResult> {
+    // Add business context once at the start
+    obs.add("business", {
+      operation: "reportUsage",
+      customerId: params.customerId,
+      projectId: params.projectId,
+      featureSlug: params.featureSlug,
+    })
+
     const { err: stateErr, val: state } = await this.getStateWithRevalidation({
       customerId: params.customerId,
       projectId: params.projectId,
       featureSlug: params.featureSlug,
       now: params.timestamp,
+    })
+
+    obs.add("entitlement", {
+      state: state,
+      stateErr: stateErr,
     })
 
     if (stateErr) {
@@ -347,6 +404,12 @@ export class EntitlementService {
       params.idempotenceKey
     )
 
+    obs.add("entitlement", {
+      keyExists,
+      keyCheckErr,
+      idempotenceKey: params.idempotenceKey,
+    })
+
     if (keyCheckErr) {
       this.logger.error("Failed to check idempotence key", {
         error: keyCheckErr.message,
@@ -356,6 +419,18 @@ export class EntitlementService {
 
     if (keyExists) {
       const meterResult = usageMeter.toPersist()
+
+      const { cost } = this.calculateCostAndRate({
+        state: validatedState,
+        usage: Number(meterResult.usage),
+      })
+
+      obs.add("entitlement", {
+        cost,
+        meterResult,
+        alreadyRecorded: true,
+      })
+
       return {
         allowed: true,
         message: "Usage already recorded (idempotent)",
@@ -363,11 +438,17 @@ export class EntitlementService {
         usage: Number(meterResult.usage),
         limit: validatedState.limit ?? undefined,
         notifiedOverLimit: false,
+        cost,
       }
     }
 
     const consumeResult = usageMeter.consume(params.usage, params.timestamp)
     const meterResult = usageMeter.toPersist()
+
+    obs.add("entitlement", {
+      consumeResult,
+      meterResult,
+    })
 
     await this.storage.set({
       state: {
@@ -377,6 +458,27 @@ export class EntitlementService {
     })
 
     if (consumeResult.allowed) {
+      // Calculate incremental cost
+      const totalUsageAfter = Number(meterResult.usage)
+      const totalUsageBefore = totalUsageAfter - params.usage
+
+      const {
+        cost: costAfter,
+        rate,
+        rateAmount,
+        rateCurrency,
+      } = this.calculateCostAndRate({
+        state: validatedState,
+        usage: totalUsageAfter,
+      })
+
+      const { cost: costBefore } = this.calculateCostAndRate({
+        state: validatedState,
+        usage: totalUsageBefore,
+      })
+
+      const incrementalCost = this.roundToTwoDecimals((costAfter ?? 0) - (costBefore ?? 0)) ?? 0
+
       const usageRecord = {
         id: ulid(),
         customerId: params.customerId,
@@ -387,7 +489,13 @@ export class EntitlementService {
         idempotenceKey: params.idempotenceKey,
         requestId: params.requestId,
         createdAt: Date.now(),
-        metadata: params.metadata,
+        metadata: {
+          ...params.metadata,
+          cost: incrementalCost.toString(),
+          rate: rate ?? "",
+          rateAmount: (this.roundToTwoDecimals(rateAmount) ?? 0).toString(),
+          rateCurrency: rateCurrency ?? "",
+        },
         deleted: 0,
       }
 
@@ -397,6 +505,12 @@ export class EntitlementService {
     const shouldBlockCustomer =
       consumeResult.deniedReason === "LIMIT_EXCEEDED" &&
       validatedState.metadata?.blockCustomer === true
+
+    obs.add("entitlement", {
+      shouldBlockCustomer,
+      consumeResult,
+      meterResult,
+    })
 
     if (
       shouldBlockCustomer ||
@@ -428,7 +542,7 @@ export class EntitlementService {
     const { consumeResult, validatedState, meterResult } = params
 
     // Calculate cost and rate
-    const { cost, rate } = this.calculateCostAndRate({
+    const { cost } = this.calculateCostAndRate({
       state: validatedState,
       usage: Number(meterResult.usage),
     })
@@ -441,7 +555,6 @@ export class EntitlementService {
       usage: Number(meterResult.usage),
       limit: validatedState.limit ?? undefined,
       cost,
-      rate,
       notifiedOverLimit: consumeResult.overThreshold,
     }
   }
@@ -476,6 +589,13 @@ export class EntitlementService {
       now?: number
     }
   }): Promise<Result<MinimalEntitlement[], FetchError | UnPriceEntitlementError>> {
+    // Add business context once at the start
+    obs.add("business", {
+      operation: "getActiveEntitlements",
+      customerId,
+      projectId,
+    })
+
     const cacheKey = `${projectId}:${customerId}`
 
     if (opts?.skipCache) {
@@ -548,9 +668,13 @@ export class EntitlementService {
         return Ok([])
       }
 
-      this.logger.info("Lazy computing entitlements", {
+      this.logger.debug("Lazy computing entitlements", {
         customerId,
         projectId,
+      })
+
+      obs.add("entitlement", {
+        lazyComputing: true,
       })
 
       const computeResult = await this.grantsManager.computeGrantsForCustomer({
@@ -609,12 +733,21 @@ export class EntitlementService {
 
     // Immutable snapshot for avoiding race conditions
     const snapshot: Readonly<EntitlementState> = { ...state }
+
+    // Add business context once at the start (this runs in background, needs its own context)
+    obs.add("business", {
+      operation: "reconcileFeatureUsage",
+      customerId: snapshot.customerId,
+      projectId: snapshot.projectId,
+      featureSlug: snapshot.featureSlug,
+    })
+
     const config = AGGREGATION_CONFIG[snapshot.aggregationMethod]
     const meter = snapshot.meter
 
     // if the feature is a flat feature we don't need to reconcile
     if (snapshot.featureType === "flat") {
-      this.logger.info("skipping reconcile for flat feature", {
+      this.logger.debug("skipping reconcile for flat feature", {
         featureSlug: snapshot.featureSlug,
         customerId: snapshot.customerId,
         projectId: snapshot.projectId,
@@ -624,7 +757,7 @@ export class EntitlementService {
 
     // drift only makes sense for sum behavior
     if (config.behavior !== "sum") {
-      this.logger.info("skipping reconcile for non-sum behavior", {
+      this.logger.debug("skipping reconcile for non-sum behavior", {
         behavior: config.behavior,
         featureSlug: snapshot.featureSlug,
         customerId: snapshot.customerId,
@@ -671,13 +804,20 @@ export class EntitlementService {
         })
       : null
 
+    obs.add("entitlement", {
+      watermarkCycleWindow: watermarkCycleWindow?.start,
+      currentCycleWindow: currentCycleWindow?.start,
+      aggregationMethod: snapshot.aggregationMethod,
+      featureType: snapshot.featureType,
+    })
+
     // avoid reconcile if there was a change in the cycle window
     if (
       watermarkCycleWindow &&
       currentCycleWindow &&
       watermarkCycleWindow.start !== currentCycleWindow.start
     ) {
-      this.logger.info("skipping reconcile, the watermark cycle window has changed", {
+      this.logger.debug("skipping reconcile, the watermark cycle window has changed", {
         watermarkCycleWindow: watermarkCycleWindow.start,
         currentCycleWindow: currentCycleWindow.start,
         featureSlug: snapshot.featureSlug,
@@ -694,10 +834,15 @@ export class EntitlementService {
     const lastReconciledId = meter.lastReconciledId
     const beforeRecordId = ulid(watermark) // ulid is more reliable than timestamp
 
+    obs.add("entitlement", {
+      lastReconciledId,
+      beforeRecordId,
+    })
+
     // Only reconcile if we have at least 5 minutes of settled time
     // in the current cycle window
     if (lastReconciledId >= beforeRecordId) {
-      this.logger.info(
+      this.logger.debug(
         "skipping reconcile, reconciliation already happened in the past 5 minutes",
         {
           lastReconciledId,
@@ -712,7 +857,7 @@ export class EntitlementService {
 
     // if the cycle hasn't been started at least in the past 5 minutes we can't reconcile
     if (watermark < effectiveAt) {
-      this.logger.info(
+      this.logger.debug(
         "skipping reconcile, not enough time has passed since the last reconciliation",
         {
           watermark,
@@ -728,6 +873,11 @@ export class EntitlementService {
     // if the last reconciled id is empty we can't reconcile.
     // this means something went wrong in the initialization of the meter or the entiltment was used for the first time.
     if (lastReconciledId === "") {
+      obs.add("entitlement", {
+        lastReconciledId,
+        lastReconciledIdEmpty: true,
+      })
+
       this.logger.warn("skipping reconcile, the last reconciled id is empty", {
         lastReconciledId,
         featureSlug: snapshot.featureSlug,
@@ -758,6 +908,11 @@ export class EntitlementService {
         featureSlug: snapshot.featureSlug,
       }),
     ])
+
+    obs.add("entitlement", {
+      analyticsResult,
+      entitlementResult,
+    })
 
     if (entitlementResult.err) {
       this.logger.error("Failed to get entitlement state", {
@@ -903,6 +1058,16 @@ export class EntitlementService {
       }
     )
 
+    obs.add("entitlement", {
+      meter: {
+        usage: analyticsResult?.usage,
+        lastRecordId: analyticsResult?.lastRecordId,
+        beforeRecordId: beforeRecordId,
+        afterRecordId: afterRecordId,
+        watermarkCycleWindow: watermarkCycleWindow?.start,
+      },
+    })
+
     if (analyticsErr) {
       // No analytics data yet or error, return error
       return Err(
@@ -960,7 +1125,10 @@ export class EntitlementService {
 
     // cache miss - load from cache
     if (!cached) {
-      this.logger.info("Cache miss, loading from DB", params)
+      obs.add("entitlement", {
+        cacheMiss: true,
+      })
+      this.logger.debug("Cache miss, loading from DB", params)
 
       // get the entitlement from cache
       const { val, err } = await this.getActiveEntitlement({
@@ -993,7 +1161,12 @@ export class EntitlementService {
     // if already experied we need to reload the entitlement - expensive operation
     // this don't happen often, entitlement are open ended most of the time
     if (cached.expiresAt && params.now >= cached.expiresAt) {
-      this.logger.info("Current cycle ended, recomputing grants", params)
+      obs.add("entitlement", {
+        expiresAt: cached.expiresAt,
+        now: params.now,
+        recompute: true,
+      })
+      this.logger.debug("Current cycle ended, recomputing grants", params)
 
       try {
         // at expiration we need to recompute the grants because the end date has been reached
@@ -1054,7 +1227,11 @@ export class EntitlementService {
 
     // Cache hit - no cycle boundary crossed, check if we need to revalidate
     if (params.now >= cached.nextRevalidateAt || !cached.meter) {
-      this.logger.info("Revalidation time, checking version", params)
+      obs.add("entitlement", {
+        revalidate: true,
+        nextRevalidateAt: cached.nextRevalidateAt,
+      })
+      this.logger.debug("Revalidation time, checking version", params)
 
       let entitlementState: EntitlementState | undefined = undefined
 

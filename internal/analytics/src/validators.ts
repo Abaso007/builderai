@@ -44,17 +44,38 @@ export const nullableJsonToString = anyObject.nullable().transform((s) => {
 export const stringToUInt32 = z.union([z.string(), z.number()]).transform((s) => Number(s))
 export const booleanToUInt8 = z.boolean().transform((b) => (b ? 1 : 0))
 
-export const metadataSchema = z
-  .record(z.string(), z.any())
-  .nullable()
-  .transform((m) => {
-    // tinybird receives a Map<string, string>
-    const transformed = m
-      ? Object.fromEntries(Object.entries(m).map(([key, value]) => [key, value?.toString() ?? ""]))
-      : null
-
-    return transformed
+// Type-safe metadata schema for application usage
+// We use a base schema for strong typing in the application
+const baseMetadataSchema = z
+  .object({
+    // Analytics fields
+    cost: z.string().optional().describe("incremental cost for this event"),
+    rate: z.string().optional(),
+    rateAmount: z.string().optional(),
+    rateCurrency: z.string().optional(),
+    rateUnitSize: z.string().optional(),
+    usage: z.string().optional().describe("amount of usage requested (verifications)"),
+    remaining: z.string().optional().describe("remaining balance at verification"),
   })
+  .catchall(z.union([z.string(), z.number(), z.boolean(), z.null()]))
+
+export const metadataSchema = baseMetadataSchema.nullable().transform((m) => {
+  if (!m) return null
+
+  // Tinybird receives Map(String, String) - convert camelCase keys to snake_case
+  // and ensure all values are strings
+  const transformed = Object.fromEntries(
+    Object.entries(m).map(([key, value]) => {
+      // Convert camelCase to snake_case (e.g., "rateAmount" -> "rate_amount")
+      const snakeKey = key.replace(/([A-Z])/g, "_$1").toLowerCase()
+
+      // Convert all values to strings
+      return [snakeKey, value?.toString() ?? ""]
+    })
+  )
+
+  return transformed
+})
 
 export const featureVerificationSchemaV1 = z.object({
   projectId: z.string(),

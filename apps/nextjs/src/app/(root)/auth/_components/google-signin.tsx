@@ -1,25 +1,37 @@
 import { signIn } from "@unprice/auth/server"
 import { APP_DOMAIN } from "@unprice/config"
+import { Badge } from "@unprice/ui/badge"
 import { cn } from "@unprice/ui/utils"
 import { AuthButton } from "./auth-button"
 
 export function SignInGoogle({
   className,
   redirectTo,
-}: { className?: string; redirectTo?: string }) {
+  isLastUsed,
+}: { className?: string; redirectTo?: string; isLastUsed?: boolean }) {
   return (
-    <form className={cn("w-full", className)}>
-      <AuthButton
-        provider="google"
-        formAction={async () => {
-          "use server"
-          await signIn("google", {
-            redirectTo: redirectTo ?? APP_DOMAIN,
-          })
-        }}
-      >
-        Google
-      </AuthButton>
-    </form>
+    <div className={cn("relative w-full", className)}>
+      {isLastUsed && (
+        <Badge
+          variant="secondary"
+          className="-top-2.5 absolute right-2 z-10 h-5 whitespace-nowrap px-2 text-[10px]"
+        >
+          Last used
+        </Badge>
+      )}
+      <form className="w-full">
+        <AuthButton
+          provider="google"
+          formAction={async () => {
+            "use server"
+            await signIn("google", {
+              redirectTo: redirectTo ?? APP_DOMAIN,
+            })
+          }}
+        >
+          Google
+        </AuthButton>
+      </form>
+    </div>
   )
 }

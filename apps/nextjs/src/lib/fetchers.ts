@@ -36,7 +36,6 @@ async function fetchPlansData(planVersionIds: string[]) {
   if (planVersionIds.length === 0) return []
 
   const plansUnpriceResponse = await unprice.plans.listPlanVersions({
-    // @ts-ignore: Local package update might not be reflected in dist yet
     planVersionIds,
   })
 
@@ -69,3 +68,21 @@ export const getPlansData = cache(
     return getCachedPlans()
   }
 )
+
+export async function getAllPublishedDomains() {
+  const publishedPages = await db.query.pages.findMany({
+    where: (page, { eq }) => eq(page.published, true),
+    columns: {
+      subdomain: true,
+      customDomain: true,
+    },
+  })
+
+  const domains = new Set<string>()
+  for (const page of publishedPages) {
+    if (page.subdomain) domains.add(page.subdomain)
+    if (page.customDomain) domains.add(page.customDomain)
+  }
+
+  return Array.from(domains)
+}

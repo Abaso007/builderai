@@ -1,3 +1,4 @@
+import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 
 import { getSession } from "@unprice/auth/server-rsc"
@@ -19,6 +20,7 @@ export default async function AuthenticationPage({
   }
 }) {
   const session = await getSession()
+  const lastUsedMethod = cookies().get("last-login-method")?.value
 
   if (session?.user?.id) {
     redirect(APP_DOMAIN)
@@ -34,8 +36,8 @@ export default async function AuthenticationPage({
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
           <div className="flex w-full flex-col items-center justify-between gap-4">
-            <SignInGithub redirectTo={next} />
-            <SignInGoogle redirectTo={next} />
+            <SignInGithub redirectTo={next} isLastUsed={lastUsedMethod === "github"} />
+            <SignInGoogle redirectTo={next} isLastUsed={lastUsedMethod === "google"} />
           </div>
           {env.NODE_ENV === "development" && (
             <>
@@ -44,7 +46,7 @@ export default async function AuthenticationPage({
                   Or continue with
                 </span>
               </div>
-              <SignInCredentials redirectTo={next} />
+              <SignInCredentials redirectTo={next} isLastUsed={lastUsedMethod === "credentials"} />
 
               <div className="text-center text-sm">
                 Don&apos;t have an account?{" "}

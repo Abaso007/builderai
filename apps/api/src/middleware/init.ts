@@ -12,8 +12,10 @@ import type { HonoEnv } from "~/hono/env"
 import { ApiProjectService } from "~/project"
 import { UsageLimiterService } from "~/usagelimiter/service"
 
+import { WideEvent } from "@unprice/logging"
 import { SubscriptionService } from "@unprice/services/subscriptions"
 import { NoopUsageLimiter } from "~/usagelimiter/noop"
+import { runInContext } from "~/util/observability"
 
 /**
  * These maps persist between worker executions and are used for caching
@@ -47,7 +49,12 @@ export function init(): MiddlewareHandler<HonoEnv> {
       isolateCreatedAt = Date.now()
     }
 
-    const requestId = newId("request")
+    const requestId =
+      c.req.header("unprice-request-id") ||
+      c.req.header("x-request-id") ||
+      c.req.header("x-vercel-id") ||
+      newId("request")
+
     const requestStartedAt = Date.now()
     const performanceStart = performance.now()
     // start a new timer
@@ -58,9 +65,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
     c.set("requestStartedAt", requestStartedAt)
     c.set("performanceStart", performanceStart)
 
-    // Set request ID header
-    c.res.headers.set("unprice-request-id", requestId)
-
     const emitMetrics = c.env.EMIT_METRICS_LOGS.toString() === "true"
 
     const logger = emitMetrics
@@ -70,7 +74,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
           requestId,
           environment: c.env.NODE_ENV,
           service: "api",
-          logLevel: c.env.VERCEL_ENV === "production" ? "error" : "warn",
+          logLevel: c.env.VERCEL_ENV === "production" ? "error" : "info",
           defaultFields: {
             isolateId,
             isolateCreatedAt,
@@ -110,8 +114,25 @@ export function init(): MiddlewareHandler<HonoEnv> {
             source: stats.source,
             ip: stats.ip,
             pathname: c.req.path,
+            version: c.env.VERSION,
           },
         })
+
+    // Initialize wide event with infrastructure and geo context, following required shape
+    const wideEvent = new WideEvent(
+      logger,
+      {
+        requestId,
+        timestamp: new Date().toISOString(),
+        infra: {
+          platform: "cloudflare",
+          isolateId,
+        },
+        method: c.req.method,
+        path: c.req.path,
+      },
+      c.env.NODE_ENV === "production" ? 0.1 : 1
+    )
 
     const metrics = emitMetrics
       ? new LogdrainMetrics({
@@ -257,6 +278,11 @@ export function init(): MiddlewareHandler<HonoEnv> {
       duration: performance.now() - performanceStart,
     })
 
-    await next()
+    // Run within the wide event context
+    // This ensures all downstream code has access to the wide event via getWideEvent()
+    // The context is automatically cleaned up after the request completes
+    await runInContext(wideEvent, async () => {
+      await next()
+    })
   }
 }

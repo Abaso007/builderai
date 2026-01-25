@@ -224,23 +224,11 @@ export class UsageMeter {
     deniedReason?: DenyReason
     message?: string
   } {
-    // 0. Check if the feature is flat
-    if (this.config.featureType === "flat") {
-      return {
-        allowed: false,
-        remaining: this.tokens,
-        retryAfterMs: 0,
-        overThreshold: false,
-        deniedReason: "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE",
-        message: "Flat feature not allowed to be reported",
-      }
-    }
-
     // 1. Sync Logic (Check if we jumped to a new mathematical period)
     this.sync(now)
 
     // 2. Check if the usage is valid
-    const { isValid, message } = this.isValidUsage(cost)
+    const { isValid, message, deniedReason } = this.isValidUsage(cost)
 
     if (!isValid) {
       return {
@@ -248,7 +236,7 @@ export class UsageMeter {
         remaining: this.tokens,
         retryAfterMs: 0,
         overThreshold: false,
-        deniedReason: "INVALID_USAGE",
+        deniedReason: deniedReason ?? "INVALID_USAGE",
         message,
       }
     }
@@ -311,11 +299,17 @@ export class UsageMeter {
     }
   }
 
-  private isValidUsage(cost: number) {
-    // check if flat feature
+  private isValidUsage(cost: number): {
+    isValid: boolean
+    message?: string
+    deniedReason?: DenyReason
+  } {
+    // check if flat feature - flat features should not allow reporting usage
     if (this.config.featureType === "flat") {
       return {
-        isValid: true,
+        isValid: false,
+        message: "Flat feature not allowed to be reported",
+        deniedReason: "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE",
       }
     }
 
