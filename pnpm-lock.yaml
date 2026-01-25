@@ -842,9 +842,6 @@ importers:
 
   internal/trpc:
     dependencies:
-      '@baselime/trpc-opentelemetry-middleware':
-        specifier: ^0.1.2
-        version: 0.1.2(@opentelemetry/api@1.9.0)(@trpc/server@11.5.0(typescript@5.9.3))
       '@dinero.js/currencies':
         specifier: 2.0.0-alpha.14
         version: 2.0.0-alpha.14
@@ -1502,12 +1499,6 @@ packages:
   '@babel/types@7.28.6':
     resolution: {integrity: sha512-0ZrskXVEHSWIqZM/sQZ4EV3jZJXRkio/WCxaqKZP1g//CEWEPSfeZFcms4XeKBCHU0ZKnIkdJeU/kF+eRp5lBg==}
     engines: {node: '>=6.9.0'}
-
-  '@baselime/trpc-opentelemetry-middleware@0.1.2':
-    resolution: {integrity: sha512-CSI0ELi3PKnTa7ujdz59sfoRSNAxDGIYNgGfOfnQK2/JpKUKyfGwY87oAetMsfFQWH39dBQM89Lbf7knpTdgOA==}
-    peerDependencies:
-      '@opentelemetry/api': ^1.5.0
-      '@trpc/server': ^10.0.0
 
   '@biomejs/biome@1.9.4':
     resolution: {integrity: sha512-1rkd7G70+o9KkTn5KLmDYXihGoTaIGO9PIIN2ZB7UJxFrWw04CZHPYiMRjYsaDvVV7hP1dYNRLxSANLaBFGpog==}
@@ -7425,11 +7416,6 @@ packages:
       react-dom:
         optional: true
 
-  flat@6.0.1:
-    resolution: {integrity: sha512-/3FfIa8mbrg3xE7+wAhWeV+bd7L2Mof+xtZb5dRDKZ+wDvYJK4WDYeIOuOhre5Yv5aQObZrlbRmk3RTSiuQBtw==}
-    engines: {node: '>=18'}
-    hasBin: true
-
   follow-redirects@1.15.11:
     resolution: {integrity: sha512-deG2P0JfjrTxl50XGCDyfI97ZGVCxIpfKYmfyrQ54n5FO/0gfIES8C/Psl6kWVDolizcaaxZJnTS0QSMxvnsBQ==}
     engines: {node: '>=4.0'}
@@ -12298,12 +12284,6 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.27.1
       '@babel/helper-validator-identifier': 7.28.5
-
-  '@baselime/trpc-opentelemetry-middleware@0.1.2(@opentelemetry/api@1.9.0)(@trpc/server@11.5.0(typescript@5.9.3))':
-    dependencies:
-      '@opentelemetry/api': 1.9.0
-      '@trpc/server': 11.5.0(typescript@5.9.3)
-      flat: 6.0.1
 
   '@biomejs/biome@1.9.4':
     optionalDependencies:
@@ -18733,8 +18713,6 @@ snapshots:
       next: 14.2.32(@opentelemetry/api@1.9.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       react: 18.3.1
       react-dom: 18.3.1(react@18.3.1)
-
-  flat@6.0.1: {}
 
   follow-redirects@1.15.11: {}
 
