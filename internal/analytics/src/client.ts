@@ -10,6 +10,6 @@ export const analytics = new Analytics({
     requestId: "analytics",
     environment: env.NODE_ENV,
     service: "analytics",
-    logLevel: env.VERCEL_ENV === "production" ? "error" : "info",
+    logLevel: env.VERCEL_ENV === "production" ? "warn" : "info",
   }),
 })

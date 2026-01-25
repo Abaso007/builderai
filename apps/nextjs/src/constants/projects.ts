@@ -60,7 +60,7 @@ export const PROJECT_NAV: DashboardRoute[] = [
 
 export const PROJECT_SHORTCUTS: Shortcut[] = [
   {
-    name: "View Models",
+    name: "View Plans",
     href: "plans",
     icon: Link,
     featureSlug: "plans",

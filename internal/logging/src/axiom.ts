@@ -68,43 +68,51 @@ export class AxiomLogger implements Logger {
   public log(level: typeof this.logLevel, message: string, fields?: Fields): void {
     if (level === "off") return
     this.client[level](this.marshal(level, message, fields), {
+      ...this.defaultFields,
       ...fields,
     })
   }
 
   public emit(message: string, fields?: Fields): void {
     if (this.logLevel === "off") return
-    this.client.info(this.marshal("info", message, fields), {
+    this.client.info(message, {
+      ...this.defaultFields,
       ...fields,
     })
   }
+
   public debug(message: string, fields?: Fields): void {
     if (this.logLevel !== "debug") return
     this.client.debug(this.marshal("debug", message, fields), {
+      ...this.defaultFields,
       ...fields,
     })
   }
   public info(message: string, fields?: Fields): void {
     if (!["debug", "info"].includes(this.logLevel)) return
     this.client.info(this.marshal("info", message, fields), {
+      ...this.defaultFields,
       ...fields,
     })
   }
   public warn(message: string, fields?: Fields): void {
     if (!["debug", "info", "warn"].includes(this.logLevel)) return
     this.client.warn(this.marshal("warn", message, fields), {
+      ...this.defaultFields,
       ...fields,
     })
   }
   public error(message: string, fields?: Fields): void {
     if (this.logLevel === "off") return
     this.client.error(this.marshal("error", message, fields), {
+      ...this.defaultFields,
       ...fields,
     })
   }
   public fatal(message: string, fields?: Fields): void {
     if (this.logLevel === "off") return
     this.client.error(this.marshal("fatal", message, fields), {
+      ...this.defaultFields,
       ...fields,
     })
   }

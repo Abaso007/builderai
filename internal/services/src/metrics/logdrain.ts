@@ -12,6 +12,7 @@ export class LogdrainMetrics implements Metrics {
   private country?: string
   private continent?: string
   private durableObjectId?: string
+  private readonly sampleRate: number
 
   constructor(opts: {
     requestId: string
@@ -22,6 +23,7 @@ export class LogdrainMetrics implements Metrics {
     country?: string
     continent?: string
     durableObjectId?: string
+    sampleRate?: number
   }) {
     this.requestId = opts.requestId
     this.logger = opts.logger
@@ -31,9 +33,40 @@ export class LogdrainMetrics implements Metrics {
     this.country = opts.country
     this.continent = opts.continent
     this.durableObjectId = opts.durableObjectId
+    this.sampleRate = opts.sampleRate ?? 0.1
+  }
+
+  /**
+   * Sampling Logic
+   */
+  public shouldSample(metric: Metric): boolean {
+    // 1. Always keep errors (if metric has status field and it's >= 400)
+    if ("status" in metric && typeof metric.status === "number" && metric.status >= 400) {
+      return true
+    }
+
+    // 2. Always keep slow operations (> 1s)
+    const duration =
+      "duration" in metric ? metric.duration : "latency" in metric ? metric.latency : undefined
+    if (duration !== undefined && duration > 1000) {
+      return true
+    }
+
+    // 3. Always keep errors (if metric has error field)
+    if ("error" in metric && metric.error) {
+      return true
+    }
+
+    // 4. Sample based on sample rate for healthy metrics
+    return Math.random() < this.sampleRate
   }
 
   public emit(metric: Metric): void {
+    // Only emit if shouldSample returns true
+    if (!this.shouldSample(metric)) {
+      return
+    }
+
     const log = new Log({
       requestId: this.requestId,
       type: "metric",

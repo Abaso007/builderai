@@ -74,7 +74,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
           requestId,
           environment: c.env.NODE_ENV,
           service: "api",
-          logLevel: c.env.VERCEL_ENV === "production" ? "error" : "info",
+          logLevel: c.env.VERCEL_ENV === "production" ? "warn" : "info",
           defaultFields: {
             isolateId,
             isolateCreatedAt,
@@ -97,7 +97,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
           requestId,
           environment: c.env.NODE_ENV,
           service: "api",
-          logLevel: c.env.VERCEL_ENV === "production" ? "error" : "info",
+          logLevel: c.env.VERCEL_ENV === "production" ? "warn" : "info",
           defaultFields: {
             isolateId,
             isolateCreatedAt,
@@ -143,6 +143,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
           colo: stats.colo,
           country: stats.country,
           continent: stats.continent,
+          sampleRate: 1,
         })
       : new NoopMetrics()
 

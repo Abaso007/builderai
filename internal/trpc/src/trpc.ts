@@ -140,12 +140,12 @@ export const createTRPCContext = async (opts: {
         dataset: env.AXIOM_DATASET,
         environment: env.NODE_ENV,
         service: "trpc",
-        logLevel: env.VERCEL_ENV === "production" ? "error" : "info",
+        logLevel: env.VERCEL_ENV === "production" ? "warn" : "info",
       })
     : new ConsoleLogger({
         requestId,
         environment: env.NODE_ENV,
-        logLevel: env.VERCEL_ENV === "production" ? "error" : "info",
+        logLevel: env.VERCEL_ENV === "production" ? "warn" : "info",
         service: "trpc",
         defaultFields: {
           userId,
@@ -169,6 +169,7 @@ export const createTRPCContext = async (opts: {
         environment: env.NODE_ENV,
         service: "trpc",
         colo: region,
+        sampleRate: 1,
       })
     : new NoopMetrics()
 

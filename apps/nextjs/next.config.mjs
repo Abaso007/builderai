@@ -50,7 +50,7 @@ const nextConfig = {
       "framer-motion",
       "lucide-react",
     ],
-    instrumentationHook: process.env.NODE_ENV === "production",
+    // instrumentationHook: process.env.NODE_ENV === "production",
   },
   /**
    * This is a workaround to allow us to use inside api a path alias

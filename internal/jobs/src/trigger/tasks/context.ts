@@ -35,7 +35,7 @@ export const createContext = async ({
     requestId: taskId,
     environment: env.NODE_ENV,
     service: "jobs",
-    logLevel: env.VERCEL_ENV === "production" ? "error" : "info",
+    logLevel: env.VERCEL_ENV === "production" ? "warn" : "info",
     defaultFields: {
       ...defaultFields,
       subscriptionId,

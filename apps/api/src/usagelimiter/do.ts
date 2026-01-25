@@ -74,7 +74,7 @@ export class DurableObjectUsagelimiter extends Server {
           apiKey: env.AXIOM_API_TOKEN,
           dataset: env.AXIOM_DATASET,
           requestId: this.ctx.id.toString(),
-          logLevel: env.VERCEL_ENV === "production" ? "error" : "info",
+          logLevel: env.VERCEL_ENV === "production" ? "warn" : "info",
           environment: env.NODE_ENV,
           service: "usagelimiter",
           // TODO: add version
@@ -86,7 +86,7 @@ export class DurableObjectUsagelimiter extends Server {
           requestId: this.ctx.id.toString(),
           service: "usagelimiter",
           environment: env.NODE_ENV,
-          logLevel: env.VERCEL_ENV === "production" ? "error" : "info",
+          logLevel: env.VERCEL_ENV === "production" ? "warn" : "info",
           defaultFields: {
             durableObjectId: this.ctx.id.toString(),
           },
@@ -99,6 +99,7 @@ export class DurableObjectUsagelimiter extends Server {
           logger: this.logger,
           service: "usagelimiter",
           durableObjectId: this.ctx.id.toString(),
+          sampleRate: 1,
         })
       : new NoopMetrics()
 
