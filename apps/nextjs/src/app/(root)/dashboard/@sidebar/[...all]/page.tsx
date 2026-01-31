@@ -20,10 +20,10 @@ export default async function DashboardNavigationDesktopSlot(props: {
   // delete first segment because it's always "/app" for the redirection from the middleware
   all.shift()
 
-  // pages has another layout
-  // if (all.length > 3 && all.includes("pages")) {
-  //   return null
-  // }
+  // If you want to hide the sidebar for a specific route, you can return null here
+  if (all.length === 2 && all.includes("onboarding")) {
+    return null
+  }
 
   let routes = [] as DashboardRoute[]
   let shortcuts = [] as Shortcut[]
