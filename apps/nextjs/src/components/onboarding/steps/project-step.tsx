@@ -7,7 +7,7 @@ import { updateContextCookies } from "~/actions/update-context-cookies"
 import { ProjectForm } from "~/app/(root)/dashboard/[workspaceSlug]/_components/project-form"
 
 export function ProjectStep({ className }: React.ComponentProps<"div"> & StepComponentProps) {
-  const { updateContext, next } = useOnboarding()
+  const { updateContext, next, state } = useOnboarding()
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>()
 
   return (
@@ -27,12 +27,14 @@ export function ProjectStep({ className }: React.ComponentProps<"div"> & StepCom
         </div>
         <div className="animate-content delay-[0.2s]!">
           <ProjectForm
-            defaultValues={{
-              defaultCurrency: "USD",
-              timezone: "UTC",
-              name: "Acme project",
-              url: "https://acme.com",
-            }}
+            defaultValues={
+              state?.context.flowData?.project ?? {
+                defaultCurrency: "USD",
+                timezone: "UTC",
+                name: "Acme project",
+                url: "https://acme.com",
+              }
+            }
             onSuccess={async (project) => {
               // Set cookies so the pricing chat API can access the project
               await updateContextCookies(workspaceSlug, project.slug)

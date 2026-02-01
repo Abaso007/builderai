@@ -1,6 +1,7 @@
 import type { OnboardingStep } from "@onboardjs/react"
 import { ApiKeyStep } from "~/components/onboarding/steps/apikey-step"
 import { FinalStep } from "~/components/onboarding/steps/final-step"
+import { PaymentProviderStep } from "~/components/onboarding/steps/payment-provider-step"
 import { PricingChat } from "~/components/onboarding/steps/pricing-chat-step"
 import { ProjectStep } from "~/components/onboarding/steps/project-step"
 import { WelcomeStep } from "~/components/onboarding/steps/welcome-step"
@@ -12,7 +13,6 @@ export const steps: OnboardingStep[] = [
   {
     id: "welcome",
     component: WelcomeStep,
-    // nextStep: "style-choice",
     nextStep: "project",
   },
   {
@@ -23,6 +23,11 @@ export const steps: OnboardingStep[] = [
   {
     id: "apikey",
     component: ApiKeyStep,
+    nextStep: "payment-provider",
+  },
+  {
+    id: "payment-provider",
+    component: PaymentProviderStep,
     nextStep: "pricing-chat",
     isSkippable: true,
     skipToStep: "pricing-chat",

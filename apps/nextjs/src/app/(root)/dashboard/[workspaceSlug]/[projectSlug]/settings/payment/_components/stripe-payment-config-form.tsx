@@ -22,12 +22,16 @@ export function StripePaymentConfigForm({
   setDialogOpen,
   onSuccess,
   skip,
+  onSkip,
+  isOnboarding,
 }: {
   provider?: PaymentProviderConfig
   paymentProvider: PaymentProvider
   setDialogOpen?: (open: boolean) => void
   onSuccess?: (key: string) => void
   skip?: boolean
+  onSkip?: () => void
+  isOnboarding?: boolean
 }) {
   const params = useParams()
   const searchParams = useSearchParams()
@@ -41,10 +45,10 @@ export function StripePaymentConfigForm({
 
   const saveConfig = useMutation(
     trpc.paymentProvider.saveConfig.mutationOptions({
-      onSuccess: () => {
+      onSuccess: (data) => {
         toastAction("saved")
         setDialogOpen?.(false)
-        onSuccess?.("")
+        onSuccess?.(data.paymentProviderConfig.paymentProvider)
         revalidateAppPath(`/${workspaceSlug}/${projectSlug}/settings/payment`, "page")
       },
     })
@@ -107,10 +111,24 @@ export function StripePaymentConfigForm({
           {skip && (
             <Button
               variant="ghost"
-              onClick={(e) => {
+              onClick={async (e) => {
                 e.preventDefault()
                 setDialogOpen?.(false)
-                onSuccess?.("")
+
+                if (isOnboarding) {
+                  // create a default config for the onboarding
+                  const config = await saveConfig.mutateAsync({
+                    paymentProvider: "sandbox",
+                    key: "onboarding-key",
+                    keyIv: "",
+                    active: true,
+                  })
+
+                  onSuccess?.(config.paymentProviderConfig.paymentProvider)
+                  return
+                }
+
+                onSkip?.()
               }}
             >
               Skip

@@ -58,6 +58,7 @@ export default function CreateApiKey() {
             }}
           >
             <CreateApiKeyForm
+              isOnboarding={true}
               skip={true}
               onSuccess={() => {
                 const searchParams = new URLSearchParams(window.location.search)

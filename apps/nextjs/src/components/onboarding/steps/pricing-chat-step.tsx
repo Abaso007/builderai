@@ -1,6 +1,7 @@
 "use client"
 
 import { useChat } from "@ai-sdk/react"
+import type { PlanVersionFeatureDragDrop } from "@unprice/db/validators"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Card } from "@unprice/ui/card"
@@ -28,20 +29,13 @@ import {
   X,
 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { FeaturePlan } from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/plans/_components/feature-plan"
 import type { PricingChatMessage } from "~/app/api/chat/route"
 import { PricingCard } from "~/components/forms/pricing-card"
 
 // =============================================================================
 // Types
 // =============================================================================
-
-type FeatureData = {
-  id: string
-  title: string
-  slug: string
-  description: string | null
-  unit: string
-}
 
 type PlanData = {
   id: string
@@ -67,19 +61,11 @@ type PlanVersionData = {
   }
 }
 
-type PlanVersionFeatureData = {
-  id: string
-  featureType: string
-  feature: FeatureData
-  planVersionId: string
-}
-
 type FullPlanVersionData = RouterOutputs["planVersions"]["getById"]["planVersion"]
 
 type Artifact = {
   id: string
   type: "feature" | "plan" | "planVersion" | "planVersionFeature" | "publishedPlanVersion"
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data: any
   toolInput: Record<string, unknown>
   createdAt: number
@@ -259,48 +245,6 @@ function ApiPreview({ toolName, input }: { toolName: string; input: Record<strin
 // Artifact Cards (for Panel)
 // =============================================================================
 
-function FeatureCard({
-  feature,
-  isSelected,
-  onSelect,
-}: {
-  feature: FeatureData
-  isSelected?: boolean
-  onSelect?: () => void
-}) {
-  return (
-    <Card
-      className={cn(
-        "cursor-pointer border p-4 transition-all duration-200",
-        isSelected
-          ? "border-primary-border bg-primary-bg ring-1 ring-primary-border"
-          : "border-background-border bg-background-bgSubtle hover:border-background-borderHover hover:bg-background-bg"
-      )}
-      onClick={onSelect}
-    >
-      <div className="flex items-start gap-3">
-        <div className="rounded-lg border border-primary-border bg-primary-bg p-2">
-          <Package className="h-4 w-4 text-primary-solid" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h4 className="font-medium text-background-textContrast">{feature.title}</h4>
-            <span className="rounded-full border border-background-border bg-background-bg px-2 py-0.5 font-mono text-background-text text-xs">
-              {feature.slug}
-            </span>
-          </div>
-          {feature.description && (
-            <p className="mt-1 line-clamp-2 text-background-text text-sm">{feature.description}</p>
-          )}
-          <p className="mt-1.5 text-background-text text-xs">
-            <span className="font-medium">Unit:</span> {feature.unit}
-          </p>
-        </div>
-      </div>
-    </Card>
-  )
-}
-
 function PlanCard({
   plan,
   isSelected,
@@ -384,45 +328,6 @@ function PlanVersionCard({
               <span>{version.currency}</span>
             </div>
           </div>
-        </div>
-      </div>
-    </Card>
-  )
-}
-
-function PlanVersionFeatureCard({
-  feature,
-  isSelected,
-  onSelect,
-}: {
-  feature: PlanVersionFeatureData
-  isSelected?: boolean
-  onSelect?: () => void
-}) {
-  return (
-    <Card
-      className={cn(
-        "cursor-pointer border p-4 transition-all duration-200",
-        isSelected
-          ? "border-primary-border bg-primary-bg ring-1 ring-primary-border"
-          : "border-background-border bg-background-bgSubtle hover:border-background-borderHover hover:bg-background-bg"
-      )}
-      onClick={onSelect}
-    >
-      <div className="flex items-start gap-3">
-        <div className="rounded-lg border border-primary-border bg-primary-bg p-2">
-          <Tag className="h-4 w-4 text-primary-solid" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h4 className="font-medium text-background-textContrast">{feature.feature.title}</h4>
-            <span className="rounded-full border border-background-border bg-background-bg px-2 py-0.5 text-background-text text-xs capitalize">
-              {feature.featureType}
-            </span>
-          </div>
-          <p className="mt-1 text-background-text text-xs">
-            <span className="font-medium">Unit:</span> {feature.feature.unit}
-          </p>
         </div>
       </div>
     </Card>
@@ -681,10 +586,9 @@ function ArtifactsPanel({
                       if (el) artifactRefs.current.set(artifact.id, el)
                     }}
                   >
-                    <FeatureCard
-                      feature={artifact.data as FeatureData}
-                      isSelected={artifact.id === selectedArtifactId}
-                      onSelect={() => onSelectArtifact(artifact.id)}
+                    <FeaturePlan
+                      mode="Feature"
+                      planFeatureVersion={{ feature: artifact.data } as PlanVersionFeatureDragDrop}
                     />
                   </div>
                 ))}
@@ -707,10 +611,9 @@ function ArtifactsPanel({
                       if (el) artifactRefs.current.set(artifact.id, el)
                     }}
                   >
-                    <PlanVersionFeatureCard
-                      feature={artifact.data as PlanVersionFeatureData}
-                      isSelected={artifact.id === selectedArtifactId}
-                      onSelect={() => onSelectArtifact(artifact.id)}
+                    <FeaturePlan
+                      mode="FeaturePlan"
+                      planFeatureVersion={artifact.data as PlanVersionFeatureDragDrop}
                     />
                   </div>
                 ))}

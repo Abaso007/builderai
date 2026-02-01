@@ -32,6 +32,7 @@ import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
 
 export default function CreateApiKeyForm(props: {
+  isOnboarding?: boolean
   setDialogOpen?: (open: boolean) => void
   onSuccess?: (key: string) => void
   defaultValues?: CreateApiKey
@@ -58,8 +59,6 @@ export default function CreateApiKeyForm(props: {
     schema: createApiKeySchema,
     defaultValues: {
       ...props.defaultValues,
-      // from onboarding we can't infer the projectSlug, so we pass it as a search param
-      ...(projectSlug ? { projectSlug } : {}),
     },
   })
 
@@ -68,6 +67,9 @@ export default function CreateApiKeyForm(props: {
       onSuccess: (data) => {
         toastAction("success")
         setKey(data.apikey.key ?? null)
+        if (props.isOnboarding) {
+          props.onSuccess?.(data.apikey.key ?? "")
+        }
       },
     })
   )

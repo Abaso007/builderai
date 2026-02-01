@@ -2,10 +2,12 @@ import { GalleryVerticalEnd } from "lucide-react"
 
 import { type StepComponentProps, useOnboarding } from "@onboardjs/react"
 import { cn } from "@unprice/ui/utils"
-import CreateApiKeyForm from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/apikeys/_components/create-api-key-form"
+import { StripePaymentConfigForm } from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/settings/payment/_components/stripe-payment-config-form"
 
-export function ApiKeyStep({ className }: React.ComponentProps<"div"> & StepComponentProps) {
-  const { updateContext, next } = useOnboarding()
+export function PaymentProviderStep({
+  className,
+}: React.ComponentProps<"div"> & StepComponentProps) {
+  const { updateContext, next, skip } = useOnboarding()
 
   return (
     <div className={cn("flex max-w-md flex-col gap-6", className)}>
@@ -17,28 +19,33 @@ export function ApiKeyStep({ className }: React.ComponentProps<"div"> & StepComp
               <GalleryVerticalEnd className="size-6" />
             </div>
           </a>
-          <h1 className="animate-content font-bold text-2xl delay-0!">Create a new API Key</h1>
+          <h1 className="animate-content font-bold text-2xl delay-0!">Payment Provider</h1>
           <div className="animate-content text-center text-sm delay-0!">
-            API Keys are used to authenticate your requests to the Unprice API.
+            Unprice will support multiple payment providers in the future. For now, we only support
+            Stripe. You can configure it later in the settings.
           </div>
         </div>
         <div className="animate-content delay-[0.2s]!">
-          <CreateApiKeyForm
+          <StripePaymentConfigForm
             isOnboarding={true}
+            paymentProvider="sandbox"
+            skip={true}
             onSuccess={(data) => {
               updateContext({
                 flowData: {
-                  apiKey: data,
+                  paymentProvider: data,
                 },
               })
-
-              // go to the next step
               next()
             }}
-            defaultValues={{
-              name: "api-key-onboarding",
-              // this key will expire in 1 day
-              expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24).getTime(),
+            onSkip={() => {
+              updateContext({
+                flowData: {
+                  paymentProvider: "sandbox",
+                },
+              })
+              // go to the next step
+              skip()
             }}
           />
         </div>

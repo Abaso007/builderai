@@ -1,11 +1,15 @@
 import { auth } from "@unprice/auth/server"
-import { currencies } from "@unprice/db/utils"
+import { BILLING_CONFIG, currencies } from "@unprice/db/utils"
 import {
   type BillingConfig,
   type ConfigFeatureVersionType,
+  aggregationMethodSchema,
   featureInsertBaseSchema,
   planInsertBaseSchema,
+  priceSchema,
+  tierModeSchema,
   typeFeatureSchema,
+  usageModeSchema,
 } from "@unprice/db/validators"
 import {
   type InferUITools,
@@ -31,10 +35,7 @@ export const preferredRegion = ["fra1"]
 // =============================================================================
 const createPriceSchema = z
   .object({
-    amount: z
-      .string()
-      .regex(/^\d+(\.\d{1,2})?$/, "Price must be a number with up to 2 decimal places")
-      .describe("Price amount as string, e.g., '9.99', '100', '0.50'"),
+    amount: priceSchema.describe("Price amount as string, e.g., '9.99', '100', '0.50'"),
     currency: z.enum(["USD", "EUR"]).describe("Currency code: USD or EUR"),
   })
   .describe("Price configuration with amount and currency")
@@ -291,29 +292,11 @@ const createPlanVersionTool = tool({
       // Map simple billing period to full billing config
       let billingConfig: BillingConfig
       if (billingPeriod === "monthly") {
-        billingConfig = {
-          name: "monthly",
-          billingInterval: "month",
-          billingIntervalCount: 1,
-          billingAnchor: "dayOfCreation",
-          planType: "recurring",
-        }
+        billingConfig = BILLING_CONFIG.monthly as unknown as BillingConfig
       } else if (billingPeriod === "yearly") {
-        billingConfig = {
-          name: "yearly",
-          billingInterval: "year",
-          billingIntervalCount: 1,
-          billingAnchor: "dayOfCreation",
-          planType: "recurring",
-        }
+        billingConfig = BILLING_CONFIG.yearly as unknown as BillingConfig
       } else {
-        billingConfig = {
-          name: "onetime",
-          billingInterval: "onetime",
-          billingIntervalCount: 1,
-          billingAnchor: "dayOfCreation",
-          planType: "onetime",
-        }
+        billingConfig = BILLING_CONFIG.onetime as unknown as BillingConfig
       }
 
       const result = await api.planVersions.create({
@@ -378,8 +361,7 @@ const createPlanVersionFeatureInputSchema = z.object({
     .describe("For 'flat' type: the fixed price. For 'package' type: price per package."),
 
   // Tier pricing config
-  tierMode: z
-    .enum(["volume", "graduated"])
+  tierMode: tierModeSchema
     .optional()
     .describe(
       "For 'tier' type: 'volume' (all units at the tier price) or 'graduated' (each unit priced at its tier)"
@@ -390,8 +372,7 @@ const createPlanVersionFeatureInputSchema = z.object({
     .describe("For 'tier' type: array of pricing tiers. Tiers must be consecutive with no gaps."),
 
   // Usage pricing config
-  usageMode: z
-    .enum(["unit", "tier", "package"])
+  usageMode: usageModeSchema
     .optional()
     .describe(
       "For 'usage' type: 'unit' (price per unit), 'tier' (tiered usage), 'package' (usage packages)"
@@ -428,8 +409,7 @@ const createPlanVersionFeatureInputSchema = z.object({
     .boolean()
     .optional()
     .describe("If true, hide this feature from pricing displays. Useful for internal features."),
-  aggregationMethod: z
-    .enum(["sum", "count", "max", "last_during_period"])
+  aggregationMethod: aggregationMethodSchema
     .optional()
     .describe(
       "For 'usage' type: how to aggregate usage events. 'sum' (total values), 'count' (count events), 'max' (highest value)"
