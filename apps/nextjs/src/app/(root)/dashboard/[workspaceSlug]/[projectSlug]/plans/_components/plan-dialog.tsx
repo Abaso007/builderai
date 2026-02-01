@@ -38,9 +38,11 @@ export function PlanDialog({
           defaultValues={
             defaultValues ?? {
               slug: "",
+              title: "",
               description: "",
               active: true,
               defaultPlan: false,
+              enterprisePlan: false,
             }
           }
           setDialogOpen={setDialogOpen}

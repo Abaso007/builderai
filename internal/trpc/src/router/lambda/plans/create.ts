@@ -17,7 +17,7 @@ export const create = protectedProjectProcedure
     })
   )
   .mutation(async (opts) => {
-    const { slug, description, defaultPlan, enterprisePlan } = opts.input
+    const { slug, description, defaultPlan, enterprisePlan, title } = opts.input
     const project = opts.ctx.project
     const workspace = opts.ctx.project.workspace
     const customerId = workspace.unPriceCustomerId
@@ -85,6 +85,7 @@ export const create = protectedProjectProcedure
       .values({
         id: planId,
         slug,
+        title,
         projectId: project.id,
         description,
         active: true,

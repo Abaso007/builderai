@@ -21,6 +21,7 @@ import { Switch } from "@unprice/ui/switch"
 import { Textarea } from "@unprice/ui/text-area"
 
 import { useMutation } from "@tanstack/react-query"
+import { slugify } from "@unprice/db/utils"
 import { ConfirmAction } from "~/components/confirm-action"
 import { SubmitButton } from "~/components/submit-button"
 import { toastAction } from "~/lib/toast"
@@ -144,6 +145,34 @@ export function PlanForm({
         <div className="space-y-8">
           <FormField
             control={form.control}
+            name="title"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Plan Slug</FormLabel>
+                <FormDescription>
+                  The slug is a unique identifier for the plan and will be used for api calls.
+                </FormDescription>
+                <FormControl>
+                  <Input
+                    {...field}
+                    placeholder="FREE"
+                    disabled={editMode}
+                    onChange={(e) => {
+                      field.onChange(e)
+                      if (!editMode) {
+                        const slug = slugify(e.target.value)
+                        form.setValue("slug", slug)
+                      }
+                    }}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
             name="slug"
             render={({ field }) => (
               <FormItem>
@@ -152,7 +181,7 @@ export function PlanForm({
                   The slug is a unique identifier for the plan and will be used for api calls.
                 </FormDescription>
                 <FormControl>
-                  <Input {...field} placeholder="FREE" disabled={editMode} />
+                  <Input {...field} placeholder="free" readOnly disabled />
                 </FormControl>
                 <FormMessage />
               </FormItem>

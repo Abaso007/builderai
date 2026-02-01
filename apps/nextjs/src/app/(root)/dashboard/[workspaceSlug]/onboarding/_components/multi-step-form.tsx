@@ -25,7 +25,7 @@ export function Onboarding(props: { workspaceSlug: string }) {
   const step = search.get("step")
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-14rem)] w-full max-w-screen-sm flex-col items-center">
+    <div className="mx-auto flex h-[calc(100vh-14rem)] w-full max-w-screen-lg flex-col items-center">
       <AnimatePresence mode="wait">
         {!step && <Intro key="intro" nextStep="create-project" />}
         {step === "create-project" && <CreateProject nextStep="create-payment-config" />}

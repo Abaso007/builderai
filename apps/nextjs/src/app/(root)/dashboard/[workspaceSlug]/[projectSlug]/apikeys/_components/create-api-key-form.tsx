@@ -36,6 +36,7 @@ export default function CreateApiKeyForm(props: {
   onSuccess?: (key: string) => void
   defaultValues?: CreateApiKey
   skip?: boolean
+  onSkip?: () => void
 }) {
   const trpc = useTRPC()
 
@@ -193,7 +194,7 @@ export default function CreateApiKeyForm(props: {
               onClick={(e) => {
                 e.preventDefault()
                 props.setDialogOpen?.(false)
-                props.onSuccess?.("")
+                props.onSkip?.()
               }}
             >
               Skip

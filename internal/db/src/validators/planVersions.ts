@@ -9,9 +9,18 @@ import { billingConfigSchema, billingIntervalSchema, currencySchema } from "./sh
 
 extendZodWithOpenApi(z)
 
-export const planVersionMetadataSchema = z.object({
-  externalId: z.string().optional(),
-})
+export const planVersionMetadataSchema = z
+  .object({
+    externalId: z
+      .string()
+      .optional()
+      .describe(
+        "External identifier for integrating with third-party systems (e.g., Stripe price ID). Useful for syncing plan versions with external billing providers"
+      ),
+  })
+  .describe(
+    "Additional metadata for the plan version used for external integrations and custom data"
+  )
 
 export const insertBillingConfigSchema = billingConfigSchema
   .partial()
@@ -53,25 +62,55 @@ export const insertBillingConfigSchema = billingConfigSchema
 
     return true
   })
+  .describe(
+    "Billing configuration for creating a plan version. Requires: name (config name like 'monthly'), billingInterval ('month', 'year', 'week', 'day'), billingIntervalCount (number of intervals), planType ('recurring' or 'onetime'). For recurring plans, billingAnchor is also required (day of month 1-31 or 'dayOfCreation')"
+  )
   .openapi({
     description: "The billing configuration for the plan version",
   })
 
 export const planVersionSelectBaseSchema = createSelectSchema(versions, {
-  tags: z.array(z.string()),
-  metadata: planVersionMetadataSchema,
-  currency: currencySchema,
-  billingConfig: billingConfigSchema.openapi({
-    description: "The billing configuration for the plan version",
-  }),
-})
+  tags: z
+    .array(z.string())
+    .describe(
+      "Array of tags for categorizing and filtering plan versions. Examples: ['popular', 'recommended', 'enterprise', 'startup']"
+    ),
+  metadata: planVersionMetadataSchema.describe(
+    "Plan version metadata containing external integration identifiers"
+  ),
+  currency: currencySchema.describe(
+    "ISO 4217 currency code for this plan version. Examples: 'USD', 'EUR'. Each plan version is tied to a single currency"
+  ),
+  billingConfig: billingConfigSchema
+    .describe(
+      "Complete billing cycle configuration including interval, count, anchor date, and plan type"
+    )
+    .openapi({
+      description: "The billing configuration for the plan version",
+    }),
+}).describe("Schema for reading/selecting plan version data from the database")
 
 export const versionInsertBaseSchema = createInsertSchema(versions, {
-  tags: z.array(z.string()),
-  metadata: planVersionMetadataSchema,
-  currency: currencySchema,
-  billingConfig: insertBillingConfigSchema,
-  trialUnits: z.coerce.number().int().min(0).default(0),
+  tags: z
+    .array(z.string())
+    .describe(
+      "Optional tags for categorizing the plan version. Examples: ['popular', 'recommended', 'limited-time']"
+    ),
+  metadata: planVersionMetadataSchema.describe("Optional metadata for external integrations"),
+  currency: currencySchema.describe(
+    "Required. ISO 4217 currency code. Examples: 'USD', 'EUR'. Determines the currency for all pricing in this version"
+  ),
+  billingConfig: insertBillingConfigSchema.describe(
+    "Required. Billing cycle configuration including interval, count, anchor, and plan type"
+  ),
+  trialUnits: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .default(0)
+    .describe(
+      "Number of trial period units (based on billing interval). Example: 14 for a 14-day trial when interval is 'day'. Default: 0 (no trial)"
+    ),
 })
   .required({
     planId: true,
@@ -91,65 +130,134 @@ export const versionInsertBaseSchema = createInsertSchema(versions, {
     updatedAtM: true,
   })
   .extend({
-    isDefault: z.boolean().optional(),
+    isDefault: z
+      .boolean()
+      .optional()
+      .describe(
+        "Whether this is the default plan version shown to new customers. Only one version per plan should be default"
+      ),
   })
+  .describe(
+    "Schema for creating a new plan version. Required fields: planId (parent plan), currency, paymentProvider ('stripe' or 'square'), paymentMethodRequired (boolean), whenToBill ('pay_in_arrear' or 'pay_in_advance'), billingConfig, autoRenew (boolean)"
+  )
 
-export const planVersionExtendedSchema = planVersionSelectBaseSchema.extend({
-  planFeatures: z.array(
-    planVersionFeatureSelectBaseSchema.extend({
-      feature: featureSelectBaseSchema,
-    })
-  ),
-})
+export const planVersionExtendedSchema = planVersionSelectBaseSchema
+  .extend({
+    planFeatures: z
+      .array(
+        planVersionFeatureSelectBaseSchema.extend({
+          feature: featureSelectBaseSchema.describe(
+            "The base feature definition with title, slug, and unit"
+          ),
+        })
+      )
+      .describe(
+        "Array of features included in this plan version with their pricing configurations"
+      ),
+  })
+  .describe(
+    "Extended plan version schema that includes all associated features and their configurations"
+  )
 
-export const getPlanVersionListSchema = z.object({
-  onlyPublished: z.boolean().optional().openapi({
-    description: "Whether to include published plan versions",
-    example: true,
-  }),
-  onlyEnterprisePlan: z.boolean().optional().openapi({
-    description: "Whether to include enterprise plan versions",
-    example: false,
-  }),
-  onlyLatest: z.boolean().optional().openapi({
-    description: "Whether to include the latest plan version",
-    example: true,
-  }),
-  planVersionIds: z
-    .array(z.string())
-    .optional()
-    .openapi({
-      description: "Filter by plan version IDs",
-      example: ["pv_123"],
-    }),
-  billingInterval: billingIntervalSchema.optional().openapi({
-    description: "The billing interval to filter the plan versions",
-    example: "month",
-  }),
-  currency: currencySchema.optional().openapi({
-    description: "The currency to filter the plan versions",
-    example: "USD",
-  }),
-})
-
-export const getPlanVersionApiResponseSchema = planVersionSelectBaseSchema.extend({
-  plan: planSelectBaseSchema.openapi({
-    description: "The plan information",
-  }),
-  planFeatures: z.array(
-    planVersionFeatureSelectBaseSchema.extend({
-      displayFeatureText: z.string().openapi({
-        description: "The text you can use to show the clients",
+export const getPlanVersionListSchema = z
+  .object({
+    onlyPublished: z
+      .boolean()
+      .optional()
+      .describe(
+        "When true, only returns published (active) plan versions. Published versions are visible to customers"
+      )
+      .openapi({
+        description: "Whether to include published plan versions",
+        example: true,
       }),
-      feature: featureSelectBaseSchema.openapi({
-        description: "The feature information",
+    onlyEnterprisePlan: z
+      .boolean()
+      .optional()
+      .describe(
+        "When true, only returns enterprise-tier plan versions. Enterprise plans typically have custom pricing"
+      )
+      .openapi({
+        description: "Whether to include enterprise plan versions",
+        example: false,
       }),
-    })
-  ),
-  flatPrice: z.string().openapi({
-    description: "Flat price of the plan",
-  }),
-})
+    onlyLatest: z
+      .boolean()
+      .optional()
+      .describe(
+        "When true, only returns the most recent version of each plan. Useful for showing current pricing"
+      )
+      .openapi({
+        description: "Whether to include the latest plan version",
+        example: true,
+      }),
+    planVersionIds: z
+      .array(z.string())
+      .optional()
+      .describe("Filter results to specific plan version IDs. Example: ['pv_abc123', 'pv_def456']")
+      .openapi({
+        description: "Filter by plan version IDs",
+        example: ["pv_123"],
+      }),
+    billingInterval: billingIntervalSchema
+      .optional()
+      .describe(
+        "Filter by billing interval: 'month', 'year', 'week', 'day', 'minute', or 'onetime'"
+      )
+      .openapi({
+        description: "The billing interval to filter the plan versions",
+        example: "month",
+      }),
+    currency: currencySchema
+      .optional()
+      .describe("Filter by currency code. Examples: 'USD', 'EUR'")
+      .openapi({
+        description: "The currency to filter the plan versions",
+        example: "USD",
+      }),
+  })
+  .describe("Query parameters for filtering and listing plan versions")
+
+export const getPlanVersionApiResponseSchema = planVersionSelectBaseSchema
+  .extend({
+    plan: planSelectBaseSchema
+      .describe("The parent plan containing basic plan information like slug and name")
+      .openapi({
+        description: "The plan information",
+      }),
+    planFeatures: z
+      .array(
+        planVersionFeatureSelectBaseSchema.extend({
+          displayFeatureText: z
+            .string()
+            .describe(
+              "Pre-formatted text describing the feature for display on pricing pages. Example: '10,000 API calls/month', 'Unlimited storage'"
+            )
+            .openapi({
+              description: "The text you can use to show the clients",
+            }),
+          feature: featureSelectBaseSchema
+            .describe("The base feature definition with title, slug, unit, and description")
+            .openapi({
+              description: "The feature information",
+            }),
+        })
+      )
+      .describe(
+        "Array of features with their pricing configurations and display text for customer-facing UIs"
+      ),
+    flatPrice: z
+      .string()
+      .describe(
+        "Total flat/base price of the plan as a formatted string. Sum of all flat-rate feature prices. Example: '$49.99'"
+      )
+      .openapi({
+        description: "Flat price of the plan",
+      }),
+  })
+  .describe(
+    "Complete API response schema for a plan version including plan details, all features with display text, and calculated pricing"
+  )
 
 export type InsertPlanVersion = z.infer<typeof versionInsertBaseSchema>
 export type PlanVersionMetadata = z.infer<typeof planVersionMetadataSchema>

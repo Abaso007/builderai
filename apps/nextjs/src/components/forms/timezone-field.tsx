@@ -20,13 +20,24 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@unprice/ui/popover"
 import { cn } from "@unprice/ui/utils"
 import { CheckIcon, ChevronDown } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import type { FieldPath, FieldValues, UseFormReturn } from "react-hook-form"
 import { FilterScroll } from "~/components/filter-scroll"
 import { TIMEZONES } from "~/lib/timezones"
 
 interface FormValues extends FieldValues {
   timezone?: string
+}
+
+function getBrowserTimezone(): string {
+  try {
+    const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    // Verify the browser timezone exists in our list
+    const isValidTimezone = TIMEZONES.some((tz) => tz.tzCode === browserTimezone)
+    return isValidTimezone ? browserTimezone : "UTC"
+  } catch {
+    return "UTC"
+  }
 }
 
 export default function TimeZoneFormField<TFieldValues extends FormValues>({
@@ -39,6 +50,15 @@ export default function TimeZoneFormField<TFieldValues extends FormValues>({
   isLoading?: boolean
 }) {
   const [switcherCustomerOpen, setSwitcherCustomerOpen] = useState(false)
+
+  // Set browser timezone as default if no value is provided
+  useEffect(() => {
+    const currentValue = form.getValues("timezone" as FieldPath<TFieldValues>)
+    if (!currentValue) {
+      const browserTimezone = getBrowserTimezone()
+      form.setValue("timezone" as FieldPath<TFieldValues>, browserTimezone as never)
+    }
+  }, [form])
 
   return (
     <FormField
@@ -69,7 +89,7 @@ export default function TimeZoneFormField<TFieldValues extends FormValues>({
                     disabled={isDisabled}
                     className={cn("w-full justify-between")}
                   >
-                    {field.value}
+                    {field.value || "Select timezone..."}
                     <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
                 </FormControl>

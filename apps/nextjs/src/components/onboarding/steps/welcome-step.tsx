@@ -10,7 +10,7 @@ export function WelcomeStep({ className }: React.ComponentProps<"div">) {
   const { next } = useOnboarding()
   const { theme } = useTheme()
   return (
-    <div className={cn("flex flex-col gap-6", className)}>
+    <div className={cn("flex w-full flex-col gap-6", className)}>
       <div className="flex flex-col items-center gap-2 text-center">
         {/* biome-ignore lint/a11y/useValidAnchor: <explanation> */}
         <a href="#" className="flex flex-col items-center gap-2 font-medium">

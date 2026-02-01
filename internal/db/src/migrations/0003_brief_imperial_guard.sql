@@ -1,0 +1,1 @@
+ALTER TABLE "unprice_plans" ADD COLUMN "title" text NOT NULL DEFAULT 'Plan';

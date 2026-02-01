@@ -1,0 +1,11 @@
+import { createOpenRouter } from "@openrouter/ai-sdk-provider"
+import { env } from "~/env"
+
+const openrouter = createOpenRouter({
+  apiKey: env.OPENROUTER_API_KEY,
+  headers: {
+    "X-Title": "unprice",
+  },
+})
+
+export const model = openrouter("openai/o4-mini")

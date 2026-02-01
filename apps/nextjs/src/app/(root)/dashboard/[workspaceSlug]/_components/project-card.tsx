@@ -16,7 +16,8 @@ function ProjectTierIndicator(props: { tier: string; isInternal?: boolean }) {
         }
       )}
     >
-      {props.tier} {props.isInternal && " - INTERNAL"}
+      {`${props.tier.length > 4 ? `${props.tier.slice(0, 4)}.` : props.tier}`}{" "}
+      {props.isInternal && " - INTER."}
     </span>
   )
 }
@@ -53,7 +54,7 @@ export function ProjectCardSkeleton(props: { pulse?: boolean }) {
       <CardHeader>
         <CardTitle className="flex items-center justify-between">
           <span className={cn("flex-1 bg-muted", pulse && "animate-pulse")}>&nbsp;</span>
-          <ProjectTierIndicator tier="" />
+          <ProjectTierIndicator tier="FREE" />
         </CardTitle>
         <CardDescription className={cn("bg-muted", pulse && "animate-pulse")}>
           &nbsp;

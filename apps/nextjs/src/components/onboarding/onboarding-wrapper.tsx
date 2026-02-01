@@ -9,8 +9,8 @@ export function OnboardingWrapper({ children }: PropsWithChildren) {
   return (
     <OnboardingProvider
       steps={steps}
-      onFlowComplete={(ctx) => {
-        console.info("Onboarding complete", ctx)
+      onFlowComplete={() => {
+        console.info("Onboarding complete")
         // TODO: set onboarding complete flag in the database
       }}
       debug={false}
@@ -19,7 +19,7 @@ export function OnboardingWrapper({ children }: PropsWithChildren) {
           ? undefined
           : {
               key: "unprice_onboarding_v1",
-              ttl: 1000 * 60 * 60 * 24, // 1 day
+              ttl: 1000 * 60 * 60 * 24 * 30, // 30 days
             }
       }
     >

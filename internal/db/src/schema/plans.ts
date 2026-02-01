@@ -17,6 +17,7 @@ export const plans = pgTableProject(
     ...projectID,
     ...timestamps,
     slug: text("slug").notNull(),
+    title: text("title").notNull(),
     // whether the plan is active or not, if not active, it won't be available for purchase
     // this is useful for plans that are not available anymore so the api won't list them
     active: boolean("active").default(true),

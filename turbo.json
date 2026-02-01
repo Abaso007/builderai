@@ -52,7 +52,8 @@
         "UPSTASH_REDIS_REST_URL",
         "UPSTASH_REDIS_REST_TOKEN",
         "USERJOT_ID",
-        "USERJOT_SECRET"
+        "USERJOT_SECRET",
+        "OPENROUTER_API_KEY"
       ]
     },
     "fmt": {
@@ -102,7 +103,8 @@
         "UPSTASH_REDIS_REST_URL",
         "UPSTASH_REDIS_REST_TOKEN",
         "USERJOT_ID",
-        "USERJOT_SECRET"
+        "USERJOT_SECRET",
+        "OPENROUTER_API_KEY"
       ]
     },
     "test": {
