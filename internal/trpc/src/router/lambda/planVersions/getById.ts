@@ -14,6 +14,7 @@ export const getById = protectedProjectProcedure
   .input(
     z.object({
       id: z.string(),
+      projectSlug: z.string().optional(),
     })
   )
   .output(

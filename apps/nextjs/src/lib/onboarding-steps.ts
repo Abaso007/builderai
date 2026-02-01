@@ -36,6 +36,8 @@ export const steps: OnboardingStep[] = [
     id: "pricing-chat",
     component: PricingChat,
     nextStep: "done",
+    isSkippable: true,
+    skipToStep: "done",
   },
   {
     id: "done",

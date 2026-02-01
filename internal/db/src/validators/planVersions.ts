@@ -91,6 +91,12 @@ export const planVersionSelectBaseSchema = createSelectSchema(versions, {
 }).describe("Schema for reading/selecting plan version data from the database")
 
 export const versionInsertBaseSchema = createInsertSchema(versions, {
+  title: z
+    .string()
+    .describe(
+      "Human-readable plan version title (1-50 chars). Will be UPPERCASED. Examples: 'Starter', 'Pro', 'Enterprise'"
+    ),
+  description: z.string().describe("Description of the plan version explaining what's included"),
   tags: z
     .array(z.string())
     .describe(

@@ -87,7 +87,7 @@ export const create = protectedProjectProcedure
         slug,
         title,
         projectId: project.id,
-        description,
+        description: description ?? "",
         active: true,
         defaultPlan: defaultPlan ?? false,
         enterprisePlan: enterprisePlan ?? false,

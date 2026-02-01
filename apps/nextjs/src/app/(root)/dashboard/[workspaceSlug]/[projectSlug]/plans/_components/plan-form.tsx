@@ -148,15 +148,12 @@ export function PlanForm({
             name="title"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Plan Slug</FormLabel>
-                <FormDescription>
-                  The slug is a unique identifier for the plan and will be used for api calls.
-                </FormDescription>
+                <FormLabel>Plan Title</FormLabel>
+                <FormDescription>The title is the display name of the plan.</FormDescription>
                 <FormControl>
                   <Input
                     {...field}
                     placeholder="FREE"
-                    disabled={editMode}
                     onChange={(e) => {
                       field.onChange(e)
                       if (!editMode) {

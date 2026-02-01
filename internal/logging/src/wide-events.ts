@@ -441,7 +441,7 @@ export class WideEventLogger {
    * })
    * ```
    */
-  emit(): void {
+  emit(message?: string): void {
     const ctx = this.storage.getStore()
     if (!ctx) return
 
@@ -456,12 +456,24 @@ export class WideEventLogger {
         if (status >= 400) {
           if (status === 429) {
             // rate limited - warn level since this is often expected
-            this.config.emitter("warn", "", event)
+            this.config.emitter(
+              "warn",
+              message ?? `wide event warn: ${event["request.id"]?.toString()}`,
+              event
+            )
           } else {
-            this.config.emitter("error", "", event)
+            this.config.emitter(
+              "error",
+              message ?? `wide event error: ${event["request.id"]?.toString()}`,
+              event
+            )
           }
         } else {
-          this.config.emitter("info", "", event)
+          this.config.emitter(
+            "info",
+            message ?? `wide event info: ${event["request.id"]?.toString()}`,
+            event
+          )
         }
       }
     } catch (e) {

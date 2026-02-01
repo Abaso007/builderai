@@ -1,9 +1,14 @@
 "use client"
 
+import { ChevronDown } from "lucide-react"
+import { useState } from "react"
 import type { UseFormReturn } from "react-hook-form"
 
 import type { Currency, PlanVersionFeatureInsert } from "@unprice/db/validators"
+import { Button } from "@unprice/ui/button"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@unprice/ui/collapsible"
 import { Separator } from "@unprice/ui/separator"
+import { cn } from "@unprice/ui/utils"
 
 import {
   AggregationMethodFormField,
@@ -27,17 +32,18 @@ export function UsageFormFields({
   isDisabled?: boolean
   units: string
 }) {
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
+
+  // Watch aggregation method to conditionally show reset config
+  // Methods ending with "_all" (sum_all, count_all, max_all) are lifetime/accumulated
+  // and don't need reset configuration
+  const aggregationMethod = form.watch("aggregationMethod")
+  const isLifetimeAggregation = aggregationMethod?.endsWith("_all")
+
   return (
     <div className="flex flex-col space-y-6">
-      <BillingConfigFeatureFormField form={form} isDisabled={isDisabled} />
-      <ResetConfigFeatureFormField form={form} isDisabled={isDisabled} />
-
-      <Separator />
-
+      {/* Core settings - always visible */}
       <AggregationMethodFormField form={form} isDisabled={isDisabled} />
-      <OverageStrategyFormField form={form} isDisabled={isDisabled} />
-
-      <Separator />
 
       <div className="flex w-full justify-between">
         <LimitFormField form={form} isDisabled={isDisabled} units={units} />
@@ -45,6 +51,7 @@ export function UsageFormFields({
 
       <Separator />
 
+      {/* Pricing section based on usage mode */}
       {form.getValues("config.usageMode") === "unit" && (
         <div className="flex w-full justify-between">
           <PriceFormField form={form} currency={currency} isDisabled={isDisabled} />
@@ -65,6 +72,38 @@ export function UsageFormFields({
           </div>
         </div>
       )}
+
+      <Separator />
+
+      {/* Advanced settings - collapsible */}
+      <Collapsible open={isAdvancedOpen} onOpenChange={setIsAdvancedOpen}>
+        <CollapsibleTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            className="flex w-full items-center justify-between bg-background-bgSubtle px-4 py-3 font-medium text-sm hover:bg-background-bgHover"
+          >
+            <span>Advanced Settings</span>
+            <ChevronDown
+              className={cn(
+                "size-4 text-muted-foreground transition-transform duration-200",
+                isAdvancedOpen && "rotate-180"
+              )}
+            />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="mt-4 flex flex-col gap-6 rounded-md border bg-background-bgSubtle/50 p-4">
+            <BillingConfigFeatureFormField form={form} isDisabled={isDisabled} />
+            {/* Only show reset config for period-based aggregation methods */}
+            {!isLifetimeAggregation && (
+              <ResetConfigFeatureFormField form={form} isDisabled={isDisabled} />
+            )}
+            <Separator />
+            <OverageStrategyFormField form={form} isDisabled={isDisabled} />
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
     </div>
   )
 }

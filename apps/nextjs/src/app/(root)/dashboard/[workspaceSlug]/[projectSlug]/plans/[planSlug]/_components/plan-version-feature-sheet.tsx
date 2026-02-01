@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 
+import type { PlanVersionFeatureDragDrop } from "@unprice/db/validators"
 import {
   Sheet,
   SheetContent,
@@ -11,22 +12,28 @@ import {
   SheetTrigger,
 } from "@unprice/ui/sheet"
 
-import { usePlanVersionFeatureOpen } from "~/hooks/use-features"
+import { useActiveFeature, usePlanVersionFeatureOpen } from "~/hooks/use-features"
 import { FeatureConfig } from "./feature-config"
 
 export function PlanVersionFeatureSheet({
   children,
+  planFeatureVersion,
 }: {
   label?: string
   children?: React.ReactNode
+  planFeatureVersion?: PlanVersionFeatureDragDrop
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [_, setPlanVersionFeatureOpen] = usePlanVersionFeatureOpen()
+  const [__, setActiveFeature] = useActiveFeature()
 
   return (
     <Sheet
       open={isOpen}
       onOpenChange={(open) => {
+        if (open && planFeatureVersion) {
+          setActiveFeature(planFeatureVersion)
+        }
         setIsOpen(open)
         setPlanVersionFeatureOpen(open)
       }}

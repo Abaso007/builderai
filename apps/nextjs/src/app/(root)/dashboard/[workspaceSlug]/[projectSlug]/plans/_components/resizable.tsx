@@ -22,7 +22,13 @@ export function ResizablePanelConfig({
         document.cookie = `react-resizable-panels:layout=${JSON.stringify(sizes)}`
       }}
     >
-      <ResizablePanel defaultSize={defaultLayout[0]} collapsible={false} minSize={30} maxSize={50}>
+      <ResizablePanel
+        defaultSize={defaultLayout[0]}
+        collapsible={false}
+        minSize={30}
+        maxSize={50}
+        suppressHydrationWarning
+      >
         {featureList}
       </ResizablePanel>
       <ResizableHandle withHandle />

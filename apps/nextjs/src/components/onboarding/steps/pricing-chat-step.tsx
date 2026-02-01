@@ -1,6 +1,8 @@
 "use client"
 
 import { useChat } from "@ai-sdk/react"
+import { useOnboarding } from "@onboardjs/react"
+import { useQuery } from "@tanstack/react-query"
 import type { PlanVersionFeatureDragDrop } from "@unprice/db/validators"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
@@ -18,20 +20,23 @@ import {
   ChevronRight,
   Code,
   Copy,
+  CreditCard,
+  Folder,
   Layers,
-  Package,
   PanelRightClose,
   PanelRightOpen,
+  Puzzle,
   Rocket,
   Send,
   Sparkles,
-  Tag,
   X,
 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { FeaturePlan } from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/plans/_components/feature-plan"
 import type { PricingChatMessage } from "~/app/api/chat/route"
 import { PricingCard } from "~/components/forms/pricing-card"
+import { useActivePlanVersion } from "~/hooks/use-features"
+import { useTRPC } from "~/trpc/client"
 
 // =============================================================================
 // Types
@@ -63,16 +68,23 @@ type PlanVersionData = {
 
 type FullPlanVersionData = RouterOutputs["planVersions"]["getById"]["planVersion"]
 
+type ArtifactType =
+  | "feature"
+  | "plan"
+  | "planVersion"
+  | "planVersionFeature"
+  | "publishedPlanVersion"
+
 type Artifact = {
   id: string
-  type: "feature" | "plan" | "planVersion" | "planVersionFeature" | "publishedPlanVersion"
-  data: any
+  type: ArtifactType
+  data: unknown
   toolInput: Record<string, unknown>
   createdAt: number
 }
 
 // =============================================================================
-// API Documentation
+// Constants
 // =============================================================================
 
 const API_DOCS = {
@@ -92,21 +104,275 @@ const API_DOCS = {
     endpoint: "POST /api/plan-version-features",
     description: "Adds a feature to a plan version with pricing configuration.",
   },
-  publishPlanVersion: {
-    endpoint: "POST /api/plan-versions/{id}/publish",
-    description: "Publishes a plan version, making it available to customers.",
-  },
-  listFeatures: {
-    endpoint: "GET /api/features",
-    description: "Retrieves all available features.",
-  },
-  listPlans: {
-    endpoint: "GET /api/plans",
-    description: "Retrieves all pricing plans.",
-  },
+} as const
+
+// Tool types that should always be visible (not hidden on desktop)
+const ALWAYS_VISIBLE_TOOL_TYPES = new Set(["tool-getPlanVersionById"])
+
+// =============================================================================
+// Utility Functions
+// =============================================================================
+
+function getArtifactIcon(type: ArtifactType) {
+  switch (type) {
+    case "plan":
+      return <Folder className="h-4 w-4 text-primary-solid" />
+    case "planVersion":
+      return <CreditCard className="h-4 w-4 text-secondary-solid" />
+    case "planVersionFeature":
+      return <CheckCircle2 className="h-4 w-4 text-primary-solid" />
+    case "publishedPlanVersion":
+      return <Rocket className="h-4 w-4 text-success-solid" />
+    default:
+      return <Puzzle className="h-4 w-4 text-primary-solid" />
+  }
 }
 
-function generateApiCode(toolName: string, input: Record<string, unknown>): string {
+function isToolCreating(state: string): boolean {
+  return state === "input-streaming" || state === "input-available"
+}
+
+function hasToolError(part: { state?: string; output?: { state?: string } }): boolean {
+  return part.state === "output-available" && part.output?.state === "error"
+}
+
+function isToolOutputReady(part: { state?: string; output?: { state?: string } }): boolean {
+  return part.state === "output-available" && part.output?.state !== "error"
+}
+
+// =============================================================================
+// Custom Hooks
+// =============================================================================
+
+function useApiKey() {
+  const { state } = useOnboarding()
+  return (state?.context?.flowData as { apiKey?: string })?.apiKey ?? "YOUR_API_KEY"
+}
+
+function usePlanVersionId() {
+  const { state } = useOnboarding()
+  return (state?.context?.flowData as { planVersionId?: string })?.planVersionId
+}
+
+function useProjectSlug() {
+  const { state } = useOnboarding()
+  return (state?.context?.flowData as { project?: { slug: string } })?.project?.slug
+}
+
+function usePlanVersionData(planVersionId: string | undefined, projectSlug: string | undefined) {
+  const trpc = useTRPC()
+
+  return useQuery(
+    trpc.planVersions.getById.queryOptions(
+      { id: planVersionId ?? "", projectSlug },
+      { enabled: !!planVersionId && !!projectSlug }
+    )
+  )
+}
+
+function useAutoTextareaResize(
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>,
+  value: string
+) {
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (textarea) {
+      textarea.style.height = "auto"
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 150)}px`
+    }
+  }, [value, textareaRef])
+}
+
+function useScrollToBottom(ref: React.RefObject<HTMLDivElement | null>, deps: unknown[]) {
+  useEffect(() => {
+    ref.current?.scrollIntoView({ behavior: "smooth" })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps)
+}
+
+function useAutoOpenPanel(
+  hasArtifacts: boolean,
+  showPanel: boolean,
+  setShowPanel: (show: boolean) => void
+) {
+  const hasAutoOpenedRef = useRef(false)
+
+  useEffect(() => {
+    if (hasArtifacts && !showPanel && !hasAutoOpenedRef.current) {
+      if (typeof window !== "undefined" && window.innerWidth >= 768) {
+        setShowPanel(true)
+      }
+      hasAutoOpenedRef.current = true
+    }
+  }, [hasArtifacts, showPanel, setShowPanel])
+}
+
+// =============================================================================
+// Artifact Extraction Hooks
+// =============================================================================
+
+function useMessageArtifacts(messages: PricingChatMessage[]): Artifact[] {
+  return useMemo(() => {
+    const result: Artifact[] = []
+
+    for (const message of messages) {
+      if (message.role !== "assistant") continue
+
+      for (const part of message.parts) {
+        const artifact = extractArtifactFromPart(part)
+        if (artifact) result.push(artifact)
+      }
+    }
+
+    return result
+  }, [messages])
+}
+
+function extractArtifactFromPart(part: PricingChatMessage["parts"][number]): Artifact | null {
+  if (part.type === "tool-createFeature") {
+    if (part.state === "output-available" && part.output.state === "created") {
+      return {
+        id: part.output.feature.id,
+        type: "feature",
+        data: part.output.feature,
+        toolInput: part.input,
+        createdAt: Date.now(),
+      }
+    }
+  }
+
+  if (part.type === "tool-createPlan") {
+    if (part.state === "output-available" && part.output.state === "created") {
+      return {
+        id: part.output.plan.id,
+        type: "plan",
+        data: part.output.plan,
+        toolInput: part.input,
+        createdAt: Date.now(),
+      }
+    }
+  }
+
+  if (part.type === "tool-createPlanVersion") {
+    if (
+      part.state === "output-available" &&
+      part.output.state === "created" &&
+      part.output.planVersion
+    ) {
+      return {
+        id: part.output.planVersion.id,
+        type: "planVersion",
+        data: part.output.planVersion,
+        toolInput: part.input,
+        createdAt: Date.now(),
+      }
+    }
+  }
+
+  if (part.type === "tool-createPlanVersionFeature") {
+    if (
+      part.state === "output-available" &&
+      part.output.state === "created" &&
+      part.output.planVersionFeature
+    ) {
+      return {
+        id: part.output.planVersionFeature.id,
+        type: "planVersionFeature",
+        data: part.output.planVersionFeature,
+        toolInput: part.input,
+        createdAt: Date.now(),
+      }
+    }
+  }
+
+  return null
+}
+
+function useLoadedArtifacts(
+  planVersion: FullPlanVersionData | undefined,
+  isLoading: boolean
+): Artifact[] {
+  return useMemo(() => {
+    if (!planVersion || isLoading) return []
+
+    const result: Artifact[] = []
+
+    // Plan
+    result.push({
+      id: planVersion.plan.id,
+      type: "plan",
+      data: planVersion.plan,
+      toolInput: {
+        slug: planVersion.plan.slug,
+        description: planVersion.plan.description,
+        defaultPlan: planVersion.plan.defaultPlan,
+        enterprisePlan: planVersion.plan.enterprisePlan,
+      },
+      createdAt: Date.now(),
+    })
+
+    // Plan Version
+    result.push({
+      id: planVersion.id,
+      type: "planVersion",
+      data: planVersion,
+      toolInput: {
+        planId: planVersion.planId,
+        currency: planVersion.currency,
+        billingPeriod: planVersion.billingConfig.billingInterval,
+        trialDays: 0,
+      },
+      createdAt: Date.now(),
+    })
+
+    // Features and PlanVersionFeatures
+    for (const pf of planVersion.planFeatures) {
+      result.push({
+        id: pf.feature.id,
+        type: "feature",
+        data: pf.feature,
+        toolInput: {
+          title: pf.feature.title,
+          slug: pf.feature.slug,
+          description: pf.feature.description,
+          unit: pf.feature.unit,
+        },
+        createdAt: Date.now(),
+      })
+
+      result.push({
+        id: pf.id,
+        type: "planVersionFeature",
+        data: pf,
+        toolInput: {
+          planVersionId: planVersion.id,
+          featureId: pf.featureId,
+          featureType: pf.featureType,
+        },
+        createdAt: Date.now(),
+      })
+    }
+
+    return result
+  }, [planVersion, isLoading])
+}
+
+function useCombinedArtifacts(
+  messageArtifacts: Artifact[],
+  loadedArtifacts: Artifact[]
+): Artifact[] {
+  return useMemo(() => {
+    const existingIds = new Set(messageArtifacts.map((a) => a.id))
+    const newArtifacts = loadedArtifacts.filter((a) => !existingIds.has(a.id))
+    return [...messageArtifacts, ...newArtifacts]
+  }, [messageArtifacts, loadedArtifacts])
+}
+
+// =============================================================================
+// API Code Generation
+// =============================================================================
+
+function generateApiCode(toolName: string, input: Record<string, unknown>, apiKey: string): string {
   const docs = API_DOCS[toolName as keyof typeof API_DOCS]
   if (!docs) return ""
 
@@ -114,12 +380,15 @@ function generateApiCode(toolName: string, input: Record<string, unknown>): stri
     return JSON.stringify(obj, null, 2).split("\n").join("\n  ")
   }
 
+  const baseUrl = "https://api.unprice.dev/v1"
+  const headers = `-H "Content-Type: application/json" \\
+  -H "Authorization: Bearer ${apiKey}"`
+
   switch (toolName) {
     case "createFeature":
       return `# ${docs.description}
-curl -X POST https://api.unprice.dev/v1/features \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
+curl -X POST ${baseUrl}/features \\
+  ${headers} \\
   -d '${formatJsonBody({
     title: input.title,
     slug: input.slug,
@@ -129,9 +398,8 @@ curl -X POST https://api.unprice.dev/v1/features \\
 
     case "createPlan":
       return `# ${docs.description}
-curl -X POST https://api.unprice.dev/v1/plans \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
+curl -X POST ${baseUrl}/plans \\
+  ${headers} \\
   -d '${formatJsonBody({
     slug: input.slug,
     description: input.description,
@@ -141,9 +409,8 @@ curl -X POST https://api.unprice.dev/v1/plans \\
 
     case "createPlanVersion":
       return `# ${docs.description}
-curl -X POST https://api.unprice.dev/v1/plan-versions \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
+curl -X POST ${baseUrl}/plan-versions \\
+  ${headers} \\
   -d '${formatJsonBody({
     planId: input.planId,
     currency: input.currency,
@@ -153,20 +420,13 @@ curl -X POST https://api.unprice.dev/v1/plan-versions \\
 
     case "createPlanVersionFeature":
       return `# ${docs.description}
-curl -X POST https://api.unprice.dev/v1/plan-version-features \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
+curl -X POST ${baseUrl}/plan-version-features \\
+  ${headers} \\
   -d '${formatJsonBody({
     planVersionId: input.planVersionId,
     featureId: input.featureId,
     featureType: input.featureType,
   })}'`
-
-    case "publishPlanVersion":
-      return `# ${docs.description}
-curl -X POST https://api.unprice.dev/v1/plan-versions/${input.planVersionId}/publish \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer YOUR_API_KEY"`
 
     default:
       return ""
@@ -174,13 +434,38 @@ curl -X POST https://api.unprice.dev/v1/plan-versions/${input.planVersionId}/pub
 }
 
 // =============================================================================
-// API Preview Component (for Artifacts Panel)
+// Memoized Sub-Components
 // =============================================================================
 
-function ApiPreview({ toolName, input }: { toolName: string; input: Record<string, unknown> }) {
+const ErrorMessage = memo(function ErrorMessage({ error }: { error: string }) {
+  return (
+    <div className="my-2 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-900">
+      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+      <span className="text-sm">{error}</span>
+    </div>
+  )
+})
+
+const LoadingIndicator = memo(function LoadingIndicator({ text }: { text: string }) {
+  return (
+    <div className="my-2 flex items-center gap-2 text-background-text text-sm md:hidden">
+      <LoadingAnimation className="h-4 w-4" />
+      <span>{text}</span>
+    </div>
+  )
+})
+
+const ApiPreview = memo(function ApiPreview({
+  toolName,
+  input,
+}: {
+  toolName: string
+  input: Record<string, unknown>
+}) {
   const [isOpen, setIsOpen] = useState(false)
   const [copied, setCopied] = useState(false)
-  const code = generateApiCode(toolName, input)
+  const apiKey = useApiKey()
+  const code = generateApiCode(toolName, input, apiKey)
   const docs = API_DOCS[toolName as keyof typeof API_DOCS]
 
   if (!code || !docs) return null
@@ -239,13 +524,13 @@ function ApiPreview({ toolName, input }: { toolName: string; input: Record<strin
       )}
     </div>
   )
-}
+})
 
 // =============================================================================
-// Artifact Cards (for Panel)
+// Artifact Cards
 // =============================================================================
 
-function PlanCard({
+const PlanCard = memo(function PlanCard({
   plan,
   isSelected,
   onSelect,
@@ -284,9 +569,9 @@ function PlanCard({
       </div>
     </Card>
   )
-}
+})
 
-function PlanVersionCard({
+const PlanVersionCard = memo(function PlanVersionCard({
   version,
   isSelected,
   onSelect,
@@ -307,7 +592,7 @@ function PlanVersionCard({
     >
       <div className="flex items-start gap-3">
         <div className="rounded-lg border border-primary-border bg-primary-bg p-2">
-          <Layers className="h-4 w-4 text-primary-solid" />
+          <CreditCard className="h-4 w-4 text-primary-solid" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -332,9 +617,9 @@ function PlanVersionCard({
       </div>
     </Card>
   )
-}
+})
 
-function PublishedPlanCard({
+const PublishedPlanCard = memo(function PublishedPlanCard({
   planVersion,
   isSelected,
   onSelect,
@@ -345,51 +630,31 @@ function PublishedPlanCard({
 }) {
   return (
     <div className={cn("relative transition-all duration-200", isSelected && "scale-[1.02]")}>
-      <div className="absolute -top-2 -right-2 z-10">
-        <span className="flex h-6 items-center gap-1 rounded-full bg-success-solid px-2 text-success-foreground text-xs font-bold shadow-sm">
+      <div className="-top-2 -right-2 absolute z-10">
+        <span className="flex h-6 items-center gap-1 rounded-full bg-success-solid px-2 font-bold text-success-foreground text-xs shadow-sm">
           <Rocket className="h-3 w-3" />
           PUBLISHED
         </span>
       </div>
-      <div
-        // biome-ignore lint/a11y/useSemanticElements: <explanation>
-        role="button"
-        tabIndex={0}
-        onClick={onSelect}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            onSelect?.()
-          }
-        }}
-        className="w-full cursor-pointer text-left"
-      >
+      <button type="button" onClick={onSelect} className="w-full cursor-pointer text-left">
         <PricingCard planVersion={planVersion} />
-      </div>
+      </button>
     </div>
   )
-}
+})
 
 // =============================================================================
 // Artifact Reference (inline in chat messages)
 // =============================================================================
 
-function ErrorMessage({ error }: { error: string }) {
-  return (
-    <div className="my-2 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-900">
-      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
-      <span className="text-sm">{error}</span>
-    </div>
-  )
-}
-
-function ArtifactReference({
+const ArtifactReference = memo(function ArtifactReference({
   type,
   name,
   onView,
   isCreating,
   subtext,
 }: {
-  type: "feature" | "plan" | "planVersion" | "planVersionFeature" | "publishedPlanVersion"
+  type: ArtifactType
   name: string
   onView: () => void
   isCreating?: boolean
@@ -406,12 +671,6 @@ function ArtifactReference({
     )
   }
 
-  let icon = <Package className="h-4 w-4 text-primary-solid" />
-  if (type === "plan") icon = <Layers className="h-4 w-4 text-primary-solid" />
-  if (type === "planVersion") icon = <Layers className="h-4 w-4 text-secondary-solid" />
-  if (type === "planVersionFeature") icon = <Tag className="h-4 w-4 text-primary-solid" />
-  if (type === "publishedPlanVersion") icon = <Rocket className="h-4 w-4 text-success-solid" />
-
   return (
     <button
       type="button"
@@ -419,7 +678,7 @@ function ArtifactReference({
       className="my-2 flex w-full items-center justify-between gap-2 rounded-lg border border-background-line bg-background-bgSubtle px-3 py-2 text-left transition-colors hover:border-primary-border hover:bg-primary-bg md:hidden"
     >
       <div className="flex items-center gap-2">
-        {icon}
+        {getArtifactIcon(type)}
         <div className="flex flex-col">
           <span className="font-medium text-background-textContrast text-sm">{name}</span>
           {subtext && <span className="text-background-text text-xs">{subtext}</span>}
@@ -431,13 +690,13 @@ function ArtifactReference({
       </div>
     </button>
   )
-}
+})
 
 // =============================================================================
 // Artifacts Panel
 // =============================================================================
 
-function ArtifactsPanel({
+const ArtifactsPanel = memo(function ArtifactsPanel({
   artifacts,
   selectedArtifactId,
   onSelectArtifact,
@@ -456,20 +715,32 @@ function ArtifactsPanel({
   useEffect(() => {
     if (selectedArtifactId) {
       const element = artifactRefs.current.get(selectedArtifactId)
-      if (element) {
-        element.scrollIntoView({ behavior: "smooth", block: "center" })
-      }
+      element?.scrollIntoView({ behavior: "smooth", block: "center" })
     }
   }, [selectedArtifactId])
 
-  // Group artifacts
-  const features = artifacts.filter((a) => a.type === "feature")
-  const plans = artifacts.filter((a) => a.type === "plan")
-  const versions = artifacts.filter((a) => a.type === "planVersion")
-  const versionFeatures = artifacts.filter((a) => a.type === "planVersionFeature")
-  const published = artifacts.filter((a) => a.type === "publishedPlanVersion")
+  // Group artifacts by type
+  const groupedArtifacts = useMemo(() => {
+    return {
+      published: artifacts.filter((a) => a.type === "publishedPlanVersion"),
+      versions: artifacts.filter((a) => a.type === "planVersion"),
+      plans: artifacts.filter((a) => a.type === "plan"),
+      features: artifacts.filter((a) => a.type === "feature"),
+      versionFeatures: artifacts.filter((a) => a.type === "planVersionFeature"),
+    }
+  }, [artifacts])
 
-  const selectedArtifact = artifacts.find((a) => a.id === selectedArtifactId)
+  const selectedArtifact = useMemo(
+    () => artifacts.find((a) => a.id === selectedArtifactId),
+    [artifacts, selectedArtifactId]
+  )
+
+  const setArtifactRef = useCallback(
+    (id: string) => (el: HTMLDivElement | null) => {
+      if (el) artifactRefs.current.set(id, el)
+    },
+    []
+  )
 
   return (
     <div className="flex h-full flex-col bg-background-base">
@@ -493,132 +764,83 @@ function ArtifactsPanel({
       <ScrollArea className="flex-1">
         <div className="space-y-6 p-4">
           {/* Published Plans */}
-          {published.length > 0 && (
-            <div>
-              <h4 className="mb-2 flex items-center gap-1.5 font-medium text-background-text text-xs uppercase tracking-wide">
-                <Rocket className="h-3.5 w-3.5" />
-                Published Plans
-              </h4>
-              <div className="space-y-4">
-                {published.map((artifact) => (
-                  <div
-                    key={artifact.id}
-                    ref={(el) => {
-                      if (el) artifactRefs.current.set(artifact.id, el)
-                    }}
-                    className="flex justify-center"
-                  >
-                    <PublishedPlanCard
-                      planVersion={artifact.data as FullPlanVersionData}
-                      isSelected={artifact.id === selectedArtifactId}
-                      onSelect={() => onSelectArtifact(artifact.id)}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
+          {groupedArtifacts.published.length > 0 && (
+            <ArtifactSection title="Published Plans" icon={<Rocket className="h-3.5 w-3.5" />}>
+              {groupedArtifacts.published.map((artifact) => (
+                <div
+                  key={artifact.id}
+                  ref={setArtifactRef(artifact.id)}
+                  className="flex justify-center"
+                >
+                  <PublishedPlanCard
+                    planVersion={artifact.data as FullPlanVersionData}
+                    isSelected={artifact.id === selectedArtifactId}
+                    onSelect={() => onSelectArtifact(artifact.id)}
+                  />
+                </div>
+              ))}
+            </ArtifactSection>
           )}
 
           {/* Plan Versions */}
-          {versions.length > 0 && (
-            <div>
-              <h4 className="mb-2 flex items-center gap-1.5 font-medium text-background-text text-xs uppercase tracking-wide">
-                <Layers className="h-3.5 w-3.5" />
-                Plan Versions
-              </h4>
-              <div className="space-y-2">
-                {versions.map((artifact) => (
-                  <div
-                    key={artifact.id}
-                    ref={(el) => {
-                      if (el) artifactRefs.current.set(artifact.id, el)
-                    }}
-                  >
-                    <PlanVersionCard
-                      version={artifact.data as PlanVersionData}
-                      isSelected={artifact.id === selectedArtifactId}
-                      onSelect={() => onSelectArtifact(artifact.id)}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
+          {groupedArtifacts.versions.length > 0 && (
+            <ArtifactSection title="Plan Versions" icon={<CreditCard className="h-3.5 w-3.5" />}>
+              {groupedArtifacts.versions.map((artifact) => (
+                <div key={artifact.id} ref={setArtifactRef(artifact.id)}>
+                  <PlanVersionCard
+                    version={artifact.data as PlanVersionData}
+                    isSelected={artifact.id === selectedArtifactId}
+                    onSelect={() => onSelectArtifact(artifact.id)}
+                  />
+                </div>
+              ))}
+            </ArtifactSection>
           )}
 
           {/* Plans */}
-          {plans.length > 0 && (
-            <div>
-              <h4 className="mb-2 flex items-center gap-1.5 font-medium text-background-text text-xs uppercase tracking-wide">
-                <Layers className="h-3.5 w-3.5" />
-                Plans
-              </h4>
-              <div className="space-y-2">
-                {plans.map((artifact) => (
-                  <div
-                    key={artifact.id}
-                    ref={(el) => {
-                      if (el) artifactRefs.current.set(artifact.id, el)
-                    }}
-                  >
-                    <PlanCard
-                      plan={artifact.data as PlanData}
-                      isSelected={artifact.id === selectedArtifactId}
-                      onSelect={() => onSelectArtifact(artifact.id)}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
+          {groupedArtifacts.plans.length > 0 && (
+            <ArtifactSection title="Plans" icon={<Folder className="h-3.5 w-3.5" />}>
+              {groupedArtifacts.plans.map((artifact) => (
+                <div key={artifact.id} ref={setArtifactRef(artifact.id)}>
+                  <PlanCard
+                    plan={artifact.data as PlanData}
+                    isSelected={artifact.id === selectedArtifactId}
+                    onSelect={() => onSelectArtifact(artifact.id)}
+                  />
+                </div>
+              ))}
+            </ArtifactSection>
           )}
 
           {/* Features */}
-          {features.length > 0 && (
-            <div>
-              <h4 className="mb-2 flex items-center gap-1.5 font-medium text-background-text text-xs uppercase tracking-wide">
-                <Package className="h-3.5 w-3.5" />
-                Features
-              </h4>
-              <div className="space-y-2">
-                {features.map((artifact) => (
-                  <div
-                    key={artifact.id}
-                    ref={(el) => {
-                      if (el) artifactRefs.current.set(artifact.id, el)
-                    }}
-                  >
-                    <FeaturePlan
-                      mode="Feature"
-                      planFeatureVersion={{ feature: artifact.data } as PlanVersionFeatureDragDrop}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
+          {groupedArtifacts.features.length > 0 && (
+            <ArtifactSection title="Features" icon={<Puzzle className="h-3.5 w-3.5" />}>
+              {groupedArtifacts.features.map((artifact) => (
+                <div key={artifact.id} ref={setArtifactRef(artifact.id)}>
+                  <FeaturePlan
+                    mode="Feature"
+                    planFeatureVersion={{ feature: artifact.data } as PlanVersionFeatureDragDrop}
+                  />
+                </div>
+              ))}
+            </ArtifactSection>
           )}
 
           {/* Plan Version Features */}
-          {versionFeatures.length > 0 && (
-            <div>
-              <h4 className="mb-2 flex items-center gap-1.5 font-medium text-background-text text-xs uppercase tracking-wide">
-                <Tag className="h-3.5 w-3.5" />
-                Added Features
-              </h4>
-              <div className="space-y-2">
-                {versionFeatures.map((artifact) => (
-                  <div
-                    key={artifact.id}
-                    ref={(el) => {
-                      if (el) artifactRefs.current.set(artifact.id, el)
-                    }}
-                  >
-                    <FeaturePlan
-                      mode="FeaturePlan"
-                      planFeatureVersion={artifact.data as PlanVersionFeatureDragDrop}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
+          {groupedArtifacts.versionFeatures.length > 0 && (
+            <ArtifactSection
+              title="Features in Plan Version"
+              icon={<CheckCircle2 className="h-3.5 w-3.5" />}
+            >
+              {groupedArtifacts.versionFeatures.map((artifact) => (
+                <div key={artifact.id} ref={setArtifactRef(artifact.id)}>
+                  <FeaturePlan
+                    mode="FeaturePlan"
+                    planFeatureVersion={artifact.data as PlanVersionFeatureDragDrop}
+                  />
+                </div>
+              ))}
+            </ArtifactSection>
           )}
         </div>
       </ScrollArea>
@@ -645,368 +867,340 @@ function ArtifactsPanel({
       )}
     </div>
   )
+})
+
+const ArtifactSection = memo(function ArtifactSection({
+  title,
+  icon,
+  children,
+}: {
+  title: string
+  icon: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <div>
+      <h4 className="mb-2 flex items-center gap-1.5 font-medium text-background-text text-xs uppercase tracking-wide">
+        {icon}
+        {title}
+      </h4>
+      <div className="space-y-2">{children}</div>
+    </div>
+  )
+})
+
+// =============================================================================
+// Message Part Renderers
+// =============================================================================
+
+function useMessagePartRenderer(handleViewArtifact: (id: string) => void) {
+  return useCallback(
+    (part: PricingChatMessage["parts"][number], index: number): React.ReactNode => {
+      switch (part.type) {
+        case "text":
+          if (!part.text.trim()) return null
+          return (
+            <div key={index} className="whitespace-pre-wrap text-sm leading-relaxed">
+              {part.text}
+            </div>
+          )
+
+        case "tool-createFeature":
+          return renderCreateFeaturePart(part, index, handleViewArtifact)
+
+        case "tool-createPlan":
+          return renderCreatePlanPart(part, index, handleViewArtifact)
+
+        case "tool-createPlanVersion":
+          return renderCreatePlanVersionPart(part, index, handleViewArtifact)
+
+        case "tool-createPlanVersionFeature":
+          return renderCreatePlanVersionFeaturePart(part, index, handleViewArtifact)
+
+        case "tool-getPlanVersionById":
+          return renderGetPlanVersionByIdPart(part, index)
+
+        case "tool-listFeatures":
+        case "tool-listPlans":
+        case "tool-listPlanVersionFeatures":
+        case "tool-getPlanBySlug":
+          return renderListToolPart(part, index)
+
+        default:
+          return null
+      }
+    },
+    [handleViewArtifact]
+  )
+}
+
+function renderCreateFeaturePart(
+  part: Extract<PricingChatMessage["parts"][number], { type: "tool-createFeature" }>,
+  index: number,
+  handleViewArtifact: (id: string) => void
+) {
+  if (hasToolError(part)) {
+    return <ErrorMessage key={index} error={(part.output as { error: string }).error} />
+  }
+
+  if (part.state === "output-available" && part.output.state === "created" && part.output.feature) {
+    const feature = part.output.feature
+    return (
+      <ArtifactReference
+        key={index}
+        type="feature"
+        name={feature.title}
+        onView={() => handleViewArtifact(feature.id)}
+      />
+    )
+  }
+
+  if (isToolCreating(part.state)) {
+    return <ArtifactReference key={index} type="feature" name="..." onView={() => {}} isCreating />
+  }
+
+  return null
+}
+
+function renderCreatePlanPart(
+  part: Extract<PricingChatMessage["parts"][number], { type: "tool-createPlan" }>,
+  index: number,
+  handleViewArtifact: (id: string) => void
+) {
+  if (hasToolError(part)) {
+    return <ErrorMessage key={index} error={(part.output as { error: string }).error} />
+  }
+
+  if (part.state === "output-available" && part.output.state === "created" && part.output.plan) {
+    const plan = part.output.plan
+    return (
+      <ArtifactReference
+        key={index}
+        type="plan"
+        name={plan.slug}
+        onView={() => handleViewArtifact(plan.id)}
+      />
+    )
+  }
+
+  if (isToolCreating(part.state)) {
+    return <ArtifactReference key={index} type="plan" name="..." onView={() => {}} isCreating />
+  }
+
+  return null
+}
+
+function renderCreatePlanVersionPart(
+  part: Extract<PricingChatMessage["parts"][number], { type: "tool-createPlanVersion" }>,
+  index: number,
+  handleViewArtifact: (id: string) => void
+) {
+  if (hasToolError(part)) {
+    return <ErrorMessage key={index} error={(part.output as { error: string }).error} />
+  }
+
+  if (
+    part.state === "output-available" &&
+    part.output.state === "created" &&
+    part.output.planVersion
+  ) {
+    const version = part.output.planVersion
+    return (
+      <ArtifactReference
+        key={index}
+        type="planVersion"
+        name={version.title || `Version ${version.version}`}
+        subtext={`${version.currency} • ${version.billingConfig.name}`}
+        onView={() => handleViewArtifact(version.id)}
+      />
+    )
+  }
+
+  if (isToolCreating(part.state)) {
+    return (
+      <ArtifactReference key={index} type="planVersion" name="..." onView={() => {}} isCreating />
+    )
+  }
+
+  return null
+}
+
+function renderCreatePlanVersionFeaturePart(
+  part: Extract<PricingChatMessage["parts"][number], { type: "tool-createPlanVersionFeature" }>,
+  index: number,
+  handleViewArtifact: (id: string) => void
+) {
+  if (hasToolError(part)) {
+    return <ErrorMessage key={index} error={(part.output as { error: string }).error} />
+  }
+
+  if (
+    part.state === "output-available" &&
+    part.output.state === "created" &&
+    part.output.planVersionFeature
+  ) {
+    const feature = part.output.planVersionFeature
+    return (
+      <ArtifactReference
+        key={index}
+        type="planVersionFeature"
+        name={feature.feature.title}
+        subtext={feature.featureType}
+        onView={() => handleViewArtifact(feature.id)}
+      />
+    )
+  }
+
+  if (isToolCreating(part.state)) {
+    return (
+      <ArtifactReference
+        key={index}
+        type="planVersionFeature"
+        name="..."
+        onView={() => {}}
+        isCreating
+      />
+    )
+  }
+
+  return null
+}
+
+function renderGetPlanVersionByIdPart(
+  part: Extract<PricingChatMessage["parts"][number], { type: "tool-getPlanVersionById" }>,
+  index: number
+) {
+  const { next } = useOnboarding()
+  if (hasToolError(part)) {
+    return <ErrorMessage key={index} error={(part.output as { error: string }).error} />
+  }
+
+  if (isToolCreating(part.state)) {
+    return <LoadingIndicator key={index} text="Checking..." />
+  }
+
+  if (
+    part.state === "output-available" &&
+    part.output.state === "ready" &&
+    part.output.planVersion
+  ) {
+    return (
+      <div key={index} className="my-4">
+        <PricingCard
+          planVersion={part.output.planVersion}
+          onPublish={() => {
+            next()
+          }}
+        />
+      </div>
+    )
+  }
+
+  return null
+}
+
+function renderListToolPart(part: { state?: string; output?: { state?: string } }, index: number) {
+  if (hasToolError(part)) {
+    return <ErrorMessage key={index} error={(part.output as { error: string }).error} />
+  }
+
+  if (part.state === "input-streaming" || part.state === "input-available") {
+    return <LoadingIndicator key={index} text="Checking..." />
+  }
+
+  return null
 }
 
 // =============================================================================
-// Main Component
+// Message Visibility Helpers
 // =============================================================================
 
-export function PricingChat() {
-  const [input, setInput] = useState("")
+function shouldHideMessageOnDesktop(parts: PricingChatMessage["parts"]): boolean {
+  return parts.every((part) => {
+    if (part.type === "text") return !part.text.trim()
+
+    if (part.type.startsWith("tool-")) {
+      // Errors are always visible
+      if (hasToolError(part as { state?: string; output?: { state?: string } })) {
+        return false
+      }
+
+      // tool-getPlanVersionById with ready state should be visible (shows PricingCard)
+      if (
+        ALWAYS_VISIBLE_TOOL_TYPES.has(part.type) &&
+        isToolOutputReady(part as { state?: string; output?: { state?: string } })
+      ) {
+        return false
+      }
+
+      // Other tool results are hidden on desktop (shown in artifacts panel)
+      return true
+    }
+
+    return false
+  })
+}
+
+function hasVisibleContent(parts: PricingChatMessage["parts"]): boolean {
+  return parts.some((part) => {
+    if (part.type === "text" && part.text.trim()) return true
+    if (part.type.startsWith("tool-")) return true
+    return false
+  })
+}
+
+// =============================================================================
+// Chat Panel Component
+// =============================================================================
+
+const ChatPanel = memo(function ChatPanel({
+  messages,
+  input,
+  setInput,
+  isLoading,
+  showThinking,
+  hasArtifacts,
+  showArtifactsPanel,
+  setShowArtifactsPanel,
+  onSubmit,
+  renderMessagePart,
+}: {
+  messages: PricingChatMessage[]
+  input: string
+  setInput: (value: string) => void
+  isLoading: boolean
+  showThinking: boolean
+  hasArtifacts: boolean
+  showArtifactsPanel: boolean
+  setShowArtifactsPanel: (show: boolean) => void
+  onSubmit: () => void
+  renderMessagePart: (part: PricingChatMessage["parts"][number], index: number) => React.ReactNode
+}) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null)
-  const [showArtifactsPanel, setShowArtifactsPanel] = useState(false)
 
-  const { messages, sendMessage, status } = useChat<PricingChatMessage>({
-    transport: new DefaultChatTransport({ api: "/api/chat" }),
-  })
+  useAutoTextareaResize(textareaRef, input)
+  useScrollToBottom(messagesEndRef, [messages])
 
-  // Extract artifacts from messages
-  const artifacts = useMemo(() => {
-    const result: Artifact[] = []
-    for (const message of messages) {
-      if (message.role !== "assistant") continue
-      for (const part of message.parts) {
-        if (part.type === "tool-createFeature") {
-          if (part.state === "output-available" && part.output.state === "created") {
-            result.push({
-              id: part.output.feature.id,
-              type: "feature",
-              data: part.output.feature,
-              toolInput: part.input,
-              createdAt: Date.now(),
-            })
-          }
-        } else if (part.type === "tool-createPlan") {
-          if (part.state === "output-available" && part.output.state === "created") {
-            result.push({
-              id: part.output.plan.id,
-              type: "plan",
-              data: part.output.plan,
-              toolInput: part.input,
-              createdAt: Date.now(),
-            })
-          }
-        } else if (part.type === "tool-createPlanVersion") {
-          if (
-            part.state === "output-available" &&
-            part.output.state === "created" &&
-            part.output.planVersion
-          ) {
-            result.push({
-              id: part.output.planVersion.id,
-              type: "planVersion",
-              data: part.output.planVersion,
-              toolInput: part.input,
-              createdAt: Date.now(),
-            })
-          }
-        } else if (part.type === "tool-createPlanVersionFeature") {
-          if (
-            part.state === "output-available" &&
-            part.output.state === "created" &&
-            part.output.planVersionFeature
-          ) {
-            result.push({
-              id: part.output.planVersionFeature.id,
-              type: "planVersionFeature",
-              data: part.output.planVersionFeature,
-              toolInput: part.input,
-              createdAt: Date.now(),
-            })
-          }
-        } else if (part.type === "tool-publishPlanVersion") {
-          if (
-            part.state === "output-available" &&
-            part.output.state === "published" &&
-            part.output.planVersion
-          ) {
-            // Check if we already have this published version to avoid duplicates
-            if (!result.find((a) => a.id === part.output.planVersion!.id)) {
-              result.push({
-                id: part.output.planVersion!.id,
-                type: "publishedPlanVersion",
-                data: part.output.planVersion,
-                toolInput: part.input,
-                createdAt: Date.now(),
-              })
-            }
-          }
-        }
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault()
+      onSubmit()
+    },
+    [onSubmit]
+  )
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault()
+        onSubmit()
       }
-    }
-    return result
-  }, [messages])
+    },
+    [onSubmit]
+  )
 
-  const hasArtifacts = artifacts.length > 0
-
-  // Auto-show panel when first artifact is created
-  const hasAutoOpenedRef = useRef(false)
-
-  useEffect(() => {
-    if (hasArtifacts && !showArtifactsPanel && !hasAutoOpenedRef.current) {
-      // Only auto-show on desktop
-      if (window.innerWidth >= 768) {
-        setShowArtifactsPanel(true)
-      }
-      hasAutoOpenedRef.current = true
-    }
-  }, [hasArtifacts, showArtifactsPanel])
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
-
-  // Auto-resize textarea
-  useEffect(() => {
-    const textarea = textareaRef.current
-    if (textarea) {
-      textarea.style.height = "auto"
-      textarea.style.height = `${Math.min(textarea.scrollHeight, 150)}px`
-    }
-  }, [input])
-
-  const handleViewArtifact = useCallback((artifactId: string) => {
-    setSelectedArtifactId(artifactId)
-    setShowArtifactsPanel(true)
-  }, [])
-
-  const isLoading = status === "streaming" || status === "submitted"
-
-  // Check if we should show "Thinking..." indicator
-  const lastMessage = messages[messages.length - 1]
-  const showThinking = useMemo(() => {
-    if (!isLoading) return false
-    if (!lastMessage || lastMessage.role === "user") return true
-    if (lastMessage.parts.length === 0) return true
-
-    // Check if any part actually renders content
-    const hasRenderedContent = lastMessage.parts.some((part) => {
-      if (part.type === "text" && part.text.trim()) return true
-      if (part.type.startsWith("tool-")) {
-        const state = (part as { state?: string }).state
-        return (
-          state === "input-streaming" || state === "input-available" || state === "output-available"
-        )
-      }
-      return false
-    })
-
-    return !hasRenderedContent
-  }, [isLoading, lastMessage])
-
-  // Render message parts
-  const renderMessagePart = (
-    part: PricingChatMessage["parts"][number],
-    index: number,
-    _messageId: string
-  ) => {
-    switch (part.type) {
-      case "text":
-        if (!part.text.trim()) return null
-        return (
-          <div key={index.toString()} className="whitespace-pre-wrap text-sm leading-relaxed">
-            {part.text}
-          </div>
-        )
-
-      case "tool-createFeature": {
-        const isCreating = part.state === "input-streaming" || part.state === "input-available"
-        if (part.state === "output-available" && (part.output as any).state === "error") {
-          return <ErrorMessage key={index.toString()} error={(part.output as any).error} />
-        }
-        if (
-          part.state === "output-available" &&
-          part.output.state === "created" &&
-          part.output.feature
-        ) {
-          const feature = part.output.feature
-          return (
-            <ArtifactReference
-              key={index.toString()}
-              type="feature"
-              name={feature.title}
-              onView={() => handleViewArtifact(feature.id)}
-            />
-          )
-        }
-        if (isCreating) {
-          return (
-            <ArtifactReference
-              key={index.toString()}
-              type="feature"
-              name="..."
-              onView={() => {}}
-              isCreating
-            />
-          )
-        }
-        return null
-      }
-
-      case "tool-createPlan": {
-        const isCreating = part.state === "input-streaming" || part.state === "input-available"
-        if (part.state === "output-available" && (part.output as any).state === "error") {
-          return <ErrorMessage key={index.toString()} error={(part.output as any).error} />
-        }
-        if (
-          part.state === "output-available" &&
-          part.output.state === "created" &&
-          part.output.plan
-        ) {
-          const plan = part.output.plan
-          return (
-            <ArtifactReference
-              key={index.toString()}
-              type="plan"
-              name={plan.slug}
-              onView={() => handleViewArtifact(plan.id)}
-            />
-          )
-        }
-        if (isCreating) {
-          return (
-            <ArtifactReference
-              key={index.toString()}
-              type="plan"
-              name="..."
-              onView={() => {}}
-              isCreating
-            />
-          )
-        }
-        return null
-      }
-
-      case "tool-createPlanVersion": {
-        const isCreating = part.state === "input-streaming" || part.state === "input-available"
-        if (part.state === "output-available" && (part.output as any).state === "error") {
-          return <ErrorMessage key={index.toString()} error={(part.output as any).error} />
-        }
-        if (
-          part.state === "output-available" &&
-          part.output.state === "created" &&
-          part.output.planVersion
-        ) {
-          const version = part.output.planVersion
-          return (
-            <ArtifactReference
-              key={index.toString()}
-              type="planVersion"
-              name={version.title || `Version ${version.version}`}
-              subtext={`${version.currency} • ${version.billingConfig.name}`}
-              onView={() => handleViewArtifact(version.id)}
-            />
-          )
-        }
-        if (isCreating) {
-          return (
-            <ArtifactReference
-              key={index.toString()}
-              type="planVersion"
-              name="..."
-              onView={() => {}}
-              isCreating
-            />
-          )
-        }
-        return null
-      }
-
-      case "tool-createPlanVersionFeature": {
-        const isCreating = part.state === "input-streaming" || part.state === "input-available"
-        if (part.state === "output-available" && (part.output as any).state === "error") {
-          return <ErrorMessage key={index.toString()} error={(part.output as any).error} />
-        }
-        if (
-          part.state === "output-available" &&
-          part.output.state === "created" &&
-          part.output.planVersionFeature
-        ) {
-          const feature = part.output.planVersionFeature
-          return (
-            <ArtifactReference
-              key={index.toString()}
-              type="planVersionFeature"
-              name={feature.feature.title}
-              subtext={feature.featureType}
-              onView={() => handleViewArtifact(feature.id)}
-            />
-          )
-        }
-        if (isCreating) {
-          return (
-            <ArtifactReference
-              key={index.toString()}
-              type="planVersionFeature"
-              name="..."
-              onView={() => {}}
-              isCreating
-            />
-          )
-        }
-        return null
-      }
-
-      case "tool-publishPlanVersion": {
-        if (part.state === "output-available" && (part.output as any).state === "error") {
-          return <ErrorMessage key={index.toString()} error={(part.output as any).error} />
-        }
-        if (
-          part.state === "output-available" &&
-          part.output.state === "published" &&
-          part.output.planVersion
-        ) {
-          const version = part.output.planVersion
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const planName =
-            (version as unknown as { plan?: { slug: string } }).plan?.slug ??
-            "Published Plan Version"
-
-          return (
-            <ArtifactReference
-              key={index.toString()}
-              type="publishedPlanVersion"
-              name={planName}
-              subtext="Published Successfully"
-              onView={() => handleViewArtifact(version.id)}
-            />
-          )
-        }
-        return null
-      }
-
-      case "tool-listFeatures":
-      case "tool-listPlans":
-      case "tool-listPlanVersionFeatures":
-      case "tool-getPlanBySlug":
-      case "tool-getPlanVersionById": {
-        if (part.state === "output-available" && (part.output as any).state === "error") {
-          return <ErrorMessage key={index.toString()} error={(part.output as any).error} />
-        }
-        // Just show status for read operations
-        if (part.state === "input-streaming" || part.state === "input-available") {
-          return (
-            <div
-              key={index.toString()}
-              className="my-2 flex items-center gap-2 text-background-text text-sm md:hidden"
-            >
-              <LoadingAnimation className="h-4 w-4" />
-              <span>Checking...</span>
-            </div>
-          )
-        }
-        return null
-      }
-
-      default:
-        return null
-    }
-  }
-
-  // Chat Panel Content
-  const chatPanel = (
+  return (
     <div className="flex h-full flex-col">
       {/* Header */}
       <div className="flex items-center justify-between border-background-line border-b bg-background-bgSubtle px-4 py-3 md:px-6">
@@ -1022,7 +1216,6 @@ export function PricingChat() {
           </div>
         </div>
 
-        {/* Mobile toggle for artifacts panel */}
         {hasArtifacts && (
           <Button
             variant="ghost"
@@ -1042,72 +1235,12 @@ export function PricingChat() {
       {/* Messages */}
       <ScrollArea className="flex-1">
         <div className="space-y-4 p-4 md:p-6">
-          {messages.length === 0 && (
-            <div className="py-12 text-center">
-              <div className="mx-auto mb-4 w-fit rounded-full border border-primary-border bg-primary-bg p-4">
-                <Sparkles className="h-8 w-8 text-primary-solid" />
-              </div>
-              <h3 className="mb-2 font-semibold text-background-textContrast text-lg">
-                Welcome to Pricing Assistant
-              </h3>
-              <p className="mx-auto max-w-md text-background-text text-sm">
-                Describe your SaaS product and I'll help you create the perfect pricing plan.
-              </p>
-              <div className="mt-6 space-y-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setInput(
-                      "I want to build a plan with tokens as pay-per-usage at 10 euros monthly"
-                    )
-                  }
-                  className="mx-auto block w-full max-w-md rounded-lg border border-background-line bg-background-bg px-4 py-3 text-left text-background-textContrast text-sm transition-all hover:border-background-borderHover hover:bg-background-bgHover"
-                >
-                  "I want to build a plan with tokens as pay-per-usage at 10 euros monthly"
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setInput(
-                      "Create a Pro plan with 100 API calls, 5 team members, unlimited storage for $29/month"
-                    )
-                  }
-                  className="mx-auto block w-full max-w-md rounded-lg border border-background-line bg-background-bg px-4 py-3 text-left text-background-textContrast text-sm transition-all hover:border-background-borderHover hover:bg-background-bgHover"
-                >
-                  "Create a Pro plan with 100 API calls, 5 team members, unlimited storage for
-                  $29/month"
-                </button>
-              </div>
-            </div>
-          )}
+          {messages.length === 0 && <WelcomeScreen setInput={setInput} />}
 
           {messages.map((message) => {
-            const hasContent = message.parts.some((part) => {
-              if (part.type === "text" && part.text.trim()) return true
-              if (part.type.startsWith("tool-")) return true
-              return false
-            })
+            if (!hasVisibleContent(message.parts) && message.role === "assistant") return null
 
-            if (!hasContent && message.role === "assistant") return null
-
-            // Calculate if this message should be hidden on desktop
-            const onlyHiddenContent = message.parts.every((part) => {
-              if (part.type === "text") return !part.text.trim()
-              if (part.type.startsWith("tool-")) {
-                // If it's an error, it's visible
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                if (
-                  "state" in part &&
-                  part.state === "output-available" &&
-                  (part.output as any).state === "error"
-                ) {
-                  return false
-                }
-                // Otherwise (loading or success), it's hidden on desktop
-                return true
-              }
-              return false
-            })
+            const hideOnDesktop = shouldHideMessageOnDesktop(message.parts)
 
             return (
               <div
@@ -1115,7 +1248,7 @@ export function PricingChat() {
                 className={cn(
                   "flex",
                   message.role === "user" ? "justify-end" : "justify-start",
-                  onlyHiddenContent && "md:hidden"
+                  hideOnDesktop && "md:hidden"
                 )}
               >
                 <div
@@ -1126,13 +1259,12 @@ export function PricingChat() {
                       : "border border-background-line bg-background-bg text-background-textContrast"
                   )}
                 >
-                  {message.parts.map((part, index) => renderMessagePart(part, index, message.id))}
+                  {message.parts.map((part, index) => renderMessagePart(part, index))}
                 </div>
               </div>
             )
           })}
 
-          {/* Thinking indicator */}
           {showThinking && (
             <div className="flex justify-start">
               <div className="rounded-2xl border border-background-line bg-background-bg px-4 py-3">
@@ -1150,30 +1282,14 @@ export function PricingChat() {
 
       {/* Input */}
       <div className="border-background-line border-t bg-background-bgSubtle p-4">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (!input.trim() || isLoading) return
-            sendMessage({ text: input })
-            setInput("")
-          }}
-          className="flex items-start gap-3"
-        >
+        <form onSubmit={handleSubmit} className="flex items-start gap-3">
           <Textarea
             id="pricing-chat-input"
             rows={1}
             ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault()
-                if (input.trim() && !isLoading) {
-                  sendMessage({ text: input })
-                  setInput("")
-                }
-              }
-            }}
+            onKeyDown={handleKeyDown}
             placeholder="Describe your pricing needs..."
             disabled={isLoading}
             className="h-[36px] max-h-[100px] resize-none"
@@ -1191,6 +1307,171 @@ export function PricingChat() {
         </form>
       </div>
     </div>
+  )
+})
+
+const WelcomeScreen = memo(function WelcomeScreen({
+  setInput,
+}: {
+  setInput: (value: string) => void
+}) {
+  const prompts = [
+    "I want to build a plan with tokens as pay-per-usage at 10 euros monthly",
+    "Create a Pro plan with 100 API calls, 5 team members, unlimited storage for $29/month",
+  ]
+
+  return (
+    <div className="py-12 text-center">
+      <div className="mx-auto mb-4 w-fit rounded-full border border-primary-border bg-primary-bg p-4">
+        <Sparkles className="h-8 w-8 text-primary-solid" />
+      </div>
+      <h3 className="mb-2 font-semibold text-background-textContrast text-lg">
+        Welcome to Pricing Assistant
+      </h3>
+      <p className="mx-auto max-w-md text-background-text text-sm">
+        Describe your SaaS product and I'll help you create the perfect pricing plan.
+      </p>
+      <div className="mt-6 space-y-2">
+        {prompts.map((prompt) => (
+          <button
+            key={prompt}
+            type="button"
+            onClick={() => setInput(prompt)}
+            className="mx-auto block w-full max-w-md rounded-lg border border-background-line bg-background-bg px-4 py-3 text-left text-background-textContrast text-sm transition-all hover:border-background-borderHover hover:bg-background-bgHover"
+          >
+            "{prompt}"
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+})
+
+// =============================================================================
+// Main Component
+// =============================================================================
+
+export function PricingChat() {
+  const [input, setInput] = useState("")
+  const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null)
+  const [showArtifactsPanel, setShowArtifactsPanel] = useState(false)
+
+  const { messages, sendMessage, status, setMessages } = useChat<PricingChatMessage>({
+    transport: new DefaultChatTransport({ api: "/api/chat" }),
+  })
+
+  const { updateContext, state, skip } = useOnboarding()
+  const planVersionId = usePlanVersionId()
+  const projectSlug = useProjectSlug()
+  const { data: loadedData, isLoading: isLoadingPlanVersion } = usePlanVersionData(
+    planVersionId,
+    projectSlug
+  )
+
+  const [, setActivePlanVersion] = useActivePlanVersion()
+
+  useEffect(() => {
+    if (loadedData?.planVersion) {
+      setActivePlanVersion(loadedData.planVersion)
+    }
+  }, [loadedData?.planVersion?.id])
+
+  // Restore pricing card if plan version is loaded but chat is empty
+  const hasRestoredRef = useRef(false)
+  useEffect(() => {
+    if (loadedData?.planVersion && messages.length === 0 && !hasRestoredRef.current) {
+      hasRestoredRef.current = true
+      setMessages([
+        {
+          id: "restored-plan-version",
+          role: "assistant",
+          content: "",
+          parts: [
+            {
+              type: "tool-getPlanVersionById",
+              state: "output-available",
+              toolCallId: "restored-call",
+              input: { planVersionId: loadedData.planVersion.id },
+              output: {
+                state: "ready",
+                planVersion: loadedData.planVersion,
+              },
+            },
+          ],
+        } as PricingChatMessage,
+      ])
+    }
+  }, [loadedData?.planVersion, messages.length, setMessages])
+
+  // Extract and combine artifacts
+  const messageArtifacts = useMessageArtifacts(messages)
+  const loadedArtifacts = useLoadedArtifacts(loadedData?.planVersion, isLoadingPlanVersion)
+  const artifacts = useCombinedArtifacts(messageArtifacts, loadedArtifacts)
+
+  // Update context when a plan version is created
+  useEffect(() => {
+    const latestPlanVersion = [...artifacts].reverse().find((a) => a.type === "planVersion")
+
+    if (latestPlanVersion) {
+      const planVersionData = latestPlanVersion.data as PlanVersionData
+      const currentPlanVersionId = (state?.context?.flowData as { planVersionId?: string })
+        ?.planVersionId
+
+      if (currentPlanVersionId !== planVersionData.id) {
+        updateContext({ flowData: { planVersionId: planVersionData.id } })
+      }
+    }
+  }, [artifacts, updateContext, state?.context?.flowData])
+
+  const hasArtifacts = artifacts.length > 0
+  useAutoOpenPanel(hasArtifacts, showArtifactsPanel, setShowArtifactsPanel)
+
+  const isLoading = status === "streaming" || status === "submitted"
+
+  const showThinking = useMemo(() => {
+    if (!isLoading) return false
+    const lastMessage = messages[messages.length - 1]
+    if (!lastMessage || lastMessage.role === "user") return true
+    if (lastMessage.parts.length === 0) return true
+
+    return !lastMessage.parts.some((part) => {
+      if (part.type === "text" && part.text.trim()) return true
+      if (part.type.startsWith("tool-")) {
+        const state = (part as { state?: string }).state
+        return (
+          state === "input-streaming" || state === "input-available" || state === "output-available"
+        )
+      }
+      return false
+    })
+  }, [isLoading, messages])
+
+  const handleViewArtifact = useCallback((artifactId: string) => {
+    setSelectedArtifactId(artifactId)
+    setShowArtifactsPanel(true)
+  }, [])
+
+  const handleSubmit = useCallback(() => {
+    if (!input.trim() || isLoading) return
+    sendMessage({ text: input })
+    setInput("")
+  }, [input, isLoading, sendMessage])
+
+  const renderMessagePart = useMessagePartRenderer(handleViewArtifact)
+
+  const chatPanel = (
+    <ChatPanel
+      messages={messages}
+      input={input}
+      setInput={setInput}
+      isLoading={isLoading}
+      showThinking={showThinking}
+      hasArtifacts={hasArtifacts}
+      showArtifactsPanel={showArtifactsPanel}
+      setShowArtifactsPanel={setShowArtifactsPanel}
+      onSubmit={handleSubmit}
+      renderMessagePart={renderMessagePart}
+    />
   )
 
   // Mobile: Overlay panel
@@ -1233,8 +1514,15 @@ export function PricingChat() {
 
   // No artifacts yet - just show chat
   return (
-    <div className="flex h-full max-h-[800px] animate-content flex-col overflow-hidden rounded-xl border border-background-border bg-background-base shadow-sm delay-[0.2s]!">
-      {chatPanel}
-    </div>
+    <>
+      <div className="flex h-full max-h-[800px] animate-content flex-col overflow-hidden rounded-xl border border-background-border bg-background-base shadow-sm delay-[0.2s]!">
+        {chatPanel}
+      </div>
+      <div className="flex animate-content justify-center p-8 delay-[0.2s]!">
+        <Button variant="outline" onClick={() => skip()} className="w-full">
+          I'll do it manually
+        </Button>
+      </div>
+    </>
   )
 }

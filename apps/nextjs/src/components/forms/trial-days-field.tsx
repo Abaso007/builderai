@@ -1,12 +1,7 @@
 "use client"
-import {
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@unprice/ui/form"
+import { FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
+import { HelpCircle } from "@unprice/ui/icons"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { cn } from "@unprice/ui/utils"
 import type { FieldPath, FieldValues, UseFormReturn } from "react-hook-form"
 import { InputWithAddons } from "~/components/input-addons"
@@ -30,8 +25,18 @@ export default function TrialUnitsFormField<TFieldValues extends FormValues>({
       name={"trialUnits" as FieldPath<TFieldValues>}
       render={({ field }) => (
         <FormItem className={cn("flex w-full flex-col", className)}>
-          <FormLabel>Trial Units</FormLabel>
-          <FormDescription>The number of units trial for the phase.</FormDescription>
+          <div className="flex items-center gap-1">
+            <FormLabel>Trial Units</FormLabel>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <HelpCircle className="size-3.5 text-muted-foreground" />
+              </TooltipTrigger>
+              <TooltipContent side="right" className="max-w-[250px]">
+                Free trial duration based on the billing interval (e.g., 7 units = 7 days for daily
+                billing).
+              </TooltipContent>
+            </Tooltip>
+          </div>
           <FormControl className="w-full">
             <InputWithAddons
               {...field}

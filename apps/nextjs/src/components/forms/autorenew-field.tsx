@@ -1,13 +1,8 @@
 "use client"
-import {
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@unprice/ui/form"
+import { FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
+import { HelpCircle } from "@unprice/ui/icons"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import type { FieldPath, FieldValues, UseFormReturn } from "react-hook-form"
 
 interface FormValues extends FieldValues {
@@ -27,8 +22,18 @@ export default function AutoRenewFormField<TFieldValues extends FormValues>({
       name={"autoRenew" as FieldPath<TFieldValues>}
       render={({ field }) => (
         <FormItem className="flex w-full flex-col">
-          <FormLabel>Auto Renew</FormLabel>
-          <FormDescription>If the subscription should be auto renewed.</FormDescription>
+          <div className="flex items-center gap-1">
+            <FormLabel>Auto Renew</FormLabel>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <HelpCircle className="size-3.5 text-muted-foreground" />
+              </TooltipTrigger>
+              <TooltipContent side="right" className="max-w-[250px]">
+                When enabled, the subscription automatically renews at the end of each billing
+                cycle.
+              </TooltipContent>
+            </Tooltip>
+          </div>
           <Select
             onValueChange={(value) => field.onChange(value === "true")}
             value={field.value?.toString() ?? "true"}
@@ -37,7 +42,7 @@ export default function AutoRenewFormField<TFieldValues extends FormValues>({
             <FormControl>
               <SelectTrigger>
                 <SelectValue
-                  placeholder="Select if the subscription should be auto renewed"
+                  placeholder="Select auto-renewal"
                   defaultValue={field.value?.toString() ?? "true"}
                 />
               </SelectTrigger>

@@ -1,5 +1,5 @@
 import { auth } from "@unprice/auth/server"
-import { BILLING_CONFIG, currencies } from "@unprice/db/utils"
+import { currencies } from "@unprice/db/utils"
 import {
   type BillingConfig,
   type ConfigFeatureVersionType,
@@ -10,6 +10,7 @@ import {
   tierModeSchema,
   typeFeatureSchema,
   usageModeSchema,
+  versionInsertBaseSchema,
 } from "@unprice/db/validators"
 import {
   type InferUITools,
@@ -171,36 +172,12 @@ const getPlanBySlugTool = tool({
 // =============================================================================
 // Tool: Create Plan
 // =============================================================================
-const createPlanInputSchema = z.object({
-  title: planInsertBaseSchema.shape.title.describe(
-    "Human-readable plan title (1-50 chars). Will be UPPERCASED. Examples: 'Starter', 'Pro', 'Enterprise'"
-  ),
-  slug: planInsertBaseSchema.shape.slug.describe(
-    "URL-friendly plan identifier (lowercase, hyphens). Examples: 'starter', 'pro', 'enterprise'. This becomes the parent for all plan versions."
-  ),
-  description: z
-    .string()
-    .optional()
-    .describe("Description of the plan explaining its target audience and value proposition"),
-  defaultPlan: z
-    .boolean()
-    .optional()
-    .describe(
-      "Whether this is the default plan shown to new users (only one plan can be default). Use for your 'Starter' or 'Free' tier."
-    ),
-  enterprisePlan: z
-    .boolean()
-    .optional()
-    .describe(
-      "Whether this is an enterprise plan with custom pricing. Enterprise plans show 'Contact Us' instead of a price."
-    ),
-})
 
 const createPlanTool = tool({
   description:
     "Create a new pricing plan CONTAINER. A plan is the parent that holds multiple plan VERSIONS. The slug identifies the plan family. After creating a plan, you MUST create a plan VERSION to define the actual pricing. Check if plan exists first with getPlanBySlug - if it exists, just create a new version.",
-  inputSchema: createPlanInputSchema,
-  async *execute({ slug, description, defaultPlan, enterprisePlan, title }) {
+  inputSchema: planInsertBaseSchema,
+  async *execute({ title, slug, description, defaultPlan, enterprisePlan }) {
     yield { state: "creating" as const, slug }
 
     try {
@@ -258,32 +235,24 @@ const listPlansTool = tool({
 // =============================================================================
 const createPlanVersionInputSchema = z.object({
   planId: z.string().describe("The ID of the parent plan (get from createPlan or listPlans)"),
-  title: z
-    .string()
-    .optional()
-    .describe("Title of the plan version, normally the same as the plan title"),
-  description: z
-    .string()
-    .optional()
-    .describe("Description of this plan version explaining what's included"),
+  title: versionInsertBaseSchema.shape.title.describe(
+    "Human-readable plan version title (1-50 chars). Will be UPPERCASED. Examples: 'Starter', 'Pro', 'Enterprise"
+  ),
+  description: versionInsertBaseSchema.shape.description.describe(
+    "Description of this plan version explaining what's included"
+  ),
   currency: z.enum(["USD", "EUR"]).describe("Currency for all pricing in this version"),
   billingPeriod: z
     .enum(["monthly", "yearly", "onetime"])
     .describe(
       "Billing frequency: 'monthly' (charged every month), 'yearly' (charged annually), 'onetime' (one-time purchase)"
     ),
-  trialDays: z
-    .number()
-    .int()
-    .min(0)
-    .max(365)
-    .optional()
-    .describe("Number of trial days before billing starts. 0 or omit for no trial."),
+  trialDays: versionInsertBaseSchema.shape.trialUnits,
 })
 
 const createPlanVersionTool = tool({
   description:
-    "Create a new VERSION of a plan with billing configuration. Plan versions define the actual pricing terms (currency, billing period, trial). After creating a plan version, add features using createPlanVersionFeature. A plan version starts as 'draft' - use publishPlanVersion when ready.",
+    "Create a new VERSION of a plan with billing configuration. Plan versions define the actual pricing terms (currency, billing period, trial). After creating a plan version, add features using createPlanVersionFeature. A plan version starts as 'draft'.",
   inputSchema: createPlanVersionInputSchema,
   async *execute({ planId, title, description, currency, billingPeriod, trialDays }) {
     yield { state: "creating" as const, planId }
@@ -292,16 +261,34 @@ const createPlanVersionTool = tool({
       // Map simple billing period to full billing config
       let billingConfig: BillingConfig
       if (billingPeriod === "monthly") {
-        billingConfig = BILLING_CONFIG.monthly as unknown as BillingConfig
+        billingConfig = {
+          name: "monthly",
+          billingInterval: "month",
+          billingIntervalCount: 1,
+          billingAnchor: "dayOfCreation",
+          planType: "recurring",
+        }
       } else if (billingPeriod === "yearly") {
-        billingConfig = BILLING_CONFIG.yearly as unknown as BillingConfig
+        billingConfig = {
+          name: "yearly",
+          billingInterval: "year",
+          billingIntervalCount: 1,
+          billingAnchor: "dayOfCreation",
+          planType: "recurring",
+        }
       } else {
-        billingConfig = BILLING_CONFIG.onetime as unknown as BillingConfig
+        billingConfig = {
+          name: "onetime",
+          billingInterval: "onetime",
+          billingIntervalCount: 1,
+          billingAnchor: "dayOfCreation",
+          planType: "onetime",
+        }
       }
 
       const result = await api.planVersions.create({
         planId,
-        title: title ?? "",
+        title: title?.toUpperCase() ?? "",
         description: description ?? "",
         currency,
         billingConfig,
@@ -409,11 +396,7 @@ const createPlanVersionFeatureInputSchema = z.object({
     .boolean()
     .optional()
     .describe("If true, hide this feature from pricing displays. Useful for internal features."),
-  aggregationMethod: aggregationMethodSchema
-    .optional()
-    .describe(
-      "For 'usage' type: how to aggregate usage events. 'sum' (total values), 'count' (count events), 'max' (highest value)"
-    ),
+  aggregationMethod: aggregationMethodSchema.optional(),
 })
 
 const createPlanVersionFeatureTool = tool({
@@ -566,6 +549,13 @@ If a feature already exists in the plan version, it will not be duplicated.`,
         featureType: input.featureType,
         config: config,
         billingConfig: planVersion.billingConfig,
+        resetConfig: {
+          name: planVersion.billingConfig.name,
+          resetInterval: planVersion.billingConfig.billingInterval,
+          resetIntervalCount: planVersion.billingConfig.billingIntervalCount,
+          resetAnchor: planVersion.billingConfig.billingAnchor,
+          planType: planVersion.billingConfig.planType,
+        },
         defaultQuantity: input.defaultQuantity ?? 1,
         limit: input.limit,
         aggregationMethod:
@@ -618,34 +608,6 @@ const listPlanVersionFeaturesTool = tool({
 })
 
 // =============================================================================
-// Tool: Publish Plan Version
-// =============================================================================
-const publishPlanVersionTool = tool({
-  description:
-    "Publish a plan version to make it available to customers. Once published, the plan version cannot be modified (create a new version instead). Only publish when all features have been added.",
-  inputSchema: z.object({
-    planVersionId: z.string().describe("The ID of the plan version to publish"),
-  }),
-  async *execute({ planVersionId }) {
-    yield { state: "publishing" as const, planVersionId }
-
-    try {
-      const result = await api.planVersions.publish({ id: planVersionId })
-
-      yield {
-        state: "published" as const,
-        planVersion: result.planVersion,
-      }
-    } catch (error) {
-      yield {
-        state: "error" as const,
-        error: error instanceof Error ? error.message : "Failed to publish plan version",
-      }
-    }
-  },
-})
-
-// =============================================================================
 // Tool: Get Plan Version by ID
 // =============================================================================
 const getPlanVersionByIdTool = tool({
@@ -687,7 +649,6 @@ const tools = {
   // Plan Versions
   createPlanVersion: createPlanVersionTool,
   getPlanVersionById: getPlanVersionByIdTool,
-  publishPlanVersion: publishPlanVersionTool,
   // Plan Version Features
   createPlanVersionFeature: createPlanVersionFeatureTool,
   listPlanVersionFeatures: listPlanVersionFeaturesTool,
@@ -698,25 +659,28 @@ export type PricingChatMessage = UIMessage<never, UIDataTypes, InferUITools<type
 // =============================================================================
 // System Prompt
 // =============================================================================
-const systemPrompt = `You are an expert SaaS pricing consultant helping users create complete pricing plans.
+const systemPrompt = `You are an expert in SaaS pricing and monetization strategy. Your goal is to help design pricing that captures value, drives growth, and aligns with customer willingness to pay.
 
 ## CORE CONCEPTS
 
 1. **Feature**: The building block - represents a capability (e.g., "API Calls", "Team Members", "Storage").
-   - Features have a title (UPPERCASED), slug (lowercase-hyphens), and unit.
+   - Features have a title, slug (lowercase-hyphens), and unit.
+   - Try to figure out the simplest name of the feature, like if the feature is unlimited tokens, the name should be tokens. The unlimited part is configured in the plan version feature.
    - Create features FIRST before adding them to plans.
 
 2. **Plan**: A container/parent that groups related plan versions (e.g., "starter", "pro", "enterprise").
-   - The slug identifies the plan family.
+   - The slug identifies the plan family (lowercase-hyphens).
+   - The title is the display name of the plan.
    - Check if plan exists with getPlanBySlug before creating.
 
 3. **Plan Version**: The actual pricing configuration for a plan.
    - Defines currency, billing period (monthly/yearly/onetime), trial days.
    - A plan can have multiple versions (v1, v2, etc.).
-   - Starts as "draft" - must be published to be available to customers.
+   - Starts as "draft" - the user will publish the plan version themselves.
 
 4. **Plan Version Feature**: A feature attached to a plan version with pricing config.
    - This is where you define HOW the feature is priced.
+   - for the base features of the plan you can hide them from the UI by setting the hidden flag to true. So features like pay-access or free-access are not visible in the pricing card.
 
 ## PRICING TYPES (4 options)
 
@@ -748,6 +712,68 @@ const systemPrompt = `You are an expert SaaS pricing consultant helping users cr
    - Best for: Credits, token packs, bulk purchases.
    - Example: "100 credits for $10"
    - Config: flatPrice + packageUnits required
+
+## AGGREGATION METHODS (for USAGE type features)
+
+Aggregation determines HOW usage events are calculated for billing. Choose based on feature behavior:
+
+### Period-Scoped (Resets each billing cycle)
+
+1. **sum**: Adds up all event values within the current billing period.
+   - Best for: API calls, tokens consumed, emails sent, bandwidth used.
+   - Example: Customer sends 1000 API calls this month → usage = 1000
+   - Resets to 0 at the start of each new billing cycle.
+
+2. **count**: Counts the NUMBER of events (ignores event values).
+   - Best for: Number of operations, transactions, requests.
+   - Example: Customer makes 50 transactions → usage = 50
+   - Each event adds +1 regardless of its value.
+
+3. **max**: Takes the maximum event value within the period.
+   - Best for: Peak concurrent users, max storage reached, highest tier accessed.
+   - Example: Peak users during month was 150 → usage = 150
+   - Only the highest value matters, not the sum.
+
+4. **last_during_period**: Uses the last reported value in the period.
+   - Best for: Seat counts, active users, storage snapshots.
+   - Example: Customer ends month with 10 seats → usage = 10
+   - Each report replaces the previous value.
+
+### Lifetime-Scoped (Never Resets - Accumulation)
+
+5. **sum_all**: Adds up all event values EVER (across all billing cycles).
+   - Best for: Total credits purchased, lifetime data processed, cumulative usage.
+   - Example: Customer has used 50,000 API calls total since signup → usage = 50,000
+   - NEVER resets, keeps accumulating forever.
+
+6. **count_all**: Counts total number of events EVER.
+   - Best for: Lifetime transaction count, total operations performed.
+   - Example: Customer has made 500 transactions since signup → usage = 500
+   - NEVER resets, keeps counting forever.
+
+7. **max_all**: Maximum event value EVER recorded.
+   - Best for: Highest tier ever reached, peak usage ever, record high.
+   - Example: Customer's highest concurrent users ever was 200 → usage = 200
+   - NEVER resets, only updates if a higher value is reported.
+
+### Choosing the Right Aggregation
+
+| Use Case | Aggregation | Why |
+|----------|-------------|-----|
+| API calls per month | sum | Reset each cycle, add up all calls |
+| Seat-based billing | last_during_period | Current seat count, not cumulative |
+| Peak concurrent users | max | Only charge for the peak |
+| Lifetime credits used | sum_all | Track total ever used |
+| Storage used | last_during_period | Current snapshot, not cumulative |
+| Requests this period | count | Count events, ignore values |
+
+### Important Notes
+
+- **FLAT and PACKAGE types**: Aggregation method is NOT used (set to 'none').
+- **USAGE type**: Aggregation method is REQUIRED - choose based on billing model.
+- **Period vs Lifetime**: Period-scoped resets each billing cycle. Lifetime-scoped accumulates forever.
+- **Default choice**: For most metered features (API calls, tokens), use **sum**.
+- **For seat-based**: Use **last_during_period** to bill current seat count.
 
 ## DECISION GUIDE
 
@@ -785,26 +811,31 @@ Always follow this order:
    - Choose appropriate pricing type
    - Set limits and defaults as needed
 
-6. **Publish Plan Version** (when ready)
-   - Use publishPlanVersion to make it live
-   - After publishing, use getPlanVersionById to show the final pricing
+6. **Review Plan Version**
+   - Use getPlanVersionById to show the final pricing card.
+   - The user will publish the plan themselves.
 
 ## BEST PRACTICES
 
 - Use descriptive slugs: "pro", "starter", "enterprise", "api-calls", "team-members"
 - For trials: 7-14 days is common
-- For usage: Always set aggregationMethod (sum for values, count for events)
+- Set the aggregation method based on feature behavior:
+  - FLAT/PACKAGE types: Use 'none' (aggregation not applicable)
+  - USAGE type with consumables (API calls, tokens, emails): Use 'sum'
+  - USAGE type with seats/licenses: Use 'last_during_period'
+  - USAGE type with peak billing: Use 'max'
+  - Lifetime tracking (total credits ever): Use 'sum_all', 'count_all', or 'max_all'
 - For limits: Set them to prevent abuse, leave undefined for unlimited
-- Always confirm with the user before publishing
 - Suggest appropriate pricing based on industry standards
 
 ## IMPORTANT
 
-- Feature titles are automatically UPPERCASED
-- Plan slugs should be lowercase with hyphens
+- Feature titles should be descriptive and unique. Capitalize the first letter of each word
+- Plan slugs should be lowercase with hyphens, avoid using special characters or spaces
 - Always create features before adding them to plan versions
 - Check for existing plans before creating new ones
-- A plan version must have at least one feature before publishing`
+- Always create a feature pay-access or free-access with type flat and price the base price of the plan. This is the way can identify and verify access without refactoring the code.
+- A plan version must have at least one feature`
 
 // =============================================================================
 // Handler

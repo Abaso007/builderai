@@ -4,6 +4,7 @@ import { Separator } from "@unprice/ui/separator"
 
 import { Button } from "@unprice/ui/button"
 import { Settings } from "lucide-react"
+import { CopyButton } from "~/components/copy-button"
 import { useActiveFeature, useActivePlanVersion } from "~/hooks/use-features"
 import { FeatureDialog } from "../../_components/feature-dialog"
 import { FeatureConfigForm } from "./feature-config-form"
@@ -33,6 +34,7 @@ export function FeatureConfig({
               </div>
               <div className="line-clamp-1 text-xs">
                 <b>slug:</b> {activeFeature.feature.slug}
+                <CopyButton value={activeFeature.id} className="size-2 opacity-50" />
               </div>
               <div className="text-xs">
                 <b>description: </b>

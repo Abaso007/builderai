@@ -22,7 +22,11 @@ export const planSelectBaseSchema = createSelectSchema(schema.plans, {
 }).describe("Schema for reading/selecting plan data from the database")
 
 export const planInsertBaseSchema = createInsertSchema(schema.plans, {
-  title: z.string().describe("Title of the plan"),
+  title: z
+    .string()
+    .describe(
+      "Human-readable plan title (1-50 chars). Will be UPPERCASED. Examples: 'Starter', 'Pro', 'Enterprise'"
+    ),
   metadata: planMetadataSchema
     .optional()
     .describe("Optional metadata for external integrations and custom data"),
@@ -30,7 +34,23 @@ export const planInsertBaseSchema = createInsertSchema(schema.plans, {
     .string()
     .min(3, "Slug must be at least 3 characters")
     .describe(
-      "URL-friendly unique identifier for the plan. Must be at least 3 characters, lowercase with hyphens. Examples: 'starter', 'pro-monthly', 'enterprise-annual'"
+      "URL-friendly plan identifier (lowercase, hyphens). Examples: 'starter', 'pro', 'enterprise'. This becomes the parent for all plan versions."
+    ),
+  description: z
+    .string()
+    .optional()
+    .describe("Description of the plan explaining its target audience and value proposition"),
+  defaultPlan: z
+    .boolean()
+    .optional()
+    .describe(
+      "Whether this is the default plan shown to new users (only one plan can be default). Use for your 'Starter' or 'Free' tier."
+    ),
+  enterprisePlan: z
+    .boolean()
+    .optional()
+    .describe(
+      "Whether this is an enterprise plan with custom pricing. Enterprise plans show 'Contact Us' instead of a price."
     ),
 })
   .omit({

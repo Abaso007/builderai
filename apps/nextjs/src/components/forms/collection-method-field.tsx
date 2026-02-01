@@ -1,15 +1,10 @@
 "use client"
 import { COLLECTION_METHODS } from "@unprice/db/utils"
 import type { CollectionMethod } from "@unprice/db/validators"
-import {
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@unprice/ui/form"
+import { FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
+import { HelpCircle } from "@unprice/ui/icons"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import type { FieldPath, FieldValues, UseFormReturn } from "react-hook-form"
 
 interface FormValues extends FieldValues {
@@ -29,10 +24,17 @@ export default function CollectionMethodFormField<TFieldValues extends FormValue
       name={"collectionMethod" as FieldPath<TFieldValues>}
       render={({ field }) => (
         <FormItem className="flex w-full flex-col">
-          <FormLabel>Collection Method</FormLabel>
-          <FormDescription>
-            Whether the subscription will be billed automatically or via invoice.
-          </FormDescription>
+          <div className="flex items-center gap-1">
+            <FormLabel>Collection Method</FormLabel>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <HelpCircle className="size-3.5 text-muted-foreground" />
+              </TooltipTrigger>
+              <TooltipContent side="right" className="max-w-[250px]">
+                Choose automatic payment (charges card on file) or invoice-based billing.
+              </TooltipContent>
+            </Tooltip>
+          </div>
           <Select
             onValueChange={field.onChange}
             value={field.value?.toString() ?? ""}

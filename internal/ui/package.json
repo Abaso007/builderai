@@ -81,6 +81,7 @@
     "./kbd": "./src/kbd.tsx",
     "./slider": "./src/slider.tsx",
     "./alert": "./src/alert.tsx",
+    "./collapsible": "./src/collapsible.tsx",
     "./chart": "./src/charts.tsx",
     "./utils": "./src/utils/index.ts",
     "./skeleton": "./src/skeleton.tsx",

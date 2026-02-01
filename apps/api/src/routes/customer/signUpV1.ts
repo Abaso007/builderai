@@ -77,6 +77,7 @@ export const registerSignUpV1 = (app: App) =>
         externalId,
         billingInterval,
         sessionId,
+        // TODO: this can bloat storage, we should only store the necessary metadata
         metadata: {
           ...metadata,
           // analytics

@@ -466,6 +466,12 @@ export class CustomerService {
       })
 
     if (!config) {
+      this.logger.error("error getting payment provider config", {
+        customerId,
+        projectId,
+        provider,
+      })
+
       return Err(
         new UnPriceCustomerError({
           code: "PAYMENT_PROVIDER_CONFIG_NOT_FOUND",
@@ -481,14 +487,31 @@ export class CustomerService {
       ciphertext: config.key,
     })
 
+    const providerCustomerId = this.getProviderCustomerId(customerData, provider)
+
     const paymentProviderService = new PaymentProviderService({
-      providerCustomerId: customerData?.stripeCustomerId ?? undefined,
+      providerCustomerId: providerCustomerId,
       logger: this.logger,
       paymentProvider: provider,
       token: decryptedKey,
     })
 
     return Ok(paymentProviderService)
+  }
+
+  private getProviderCustomerId(
+    customerData: Customer | undefined,
+    provider: PaymentProvider
+  ): string | undefined {
+    if (provider === "stripe") {
+      return customerData?.stripeCustomerId ?? undefined
+    }
+
+    if (provider === "sandbox") {
+      return customerData?.id ?? undefined
+    }
+
+    return customerData?.stripeCustomerId ?? undefined
   }
 
   /**
@@ -591,6 +614,8 @@ export class CustomerService {
       provider,
     })
 
+    console.log("paymentProviderService", paymentProviderService)
+
     if (err) {
       return []
     }
@@ -652,6 +677,17 @@ export class CustomerService {
       skipCache?: boolean // skip cache to force revalidation
     }
   }): Promise<Result<CustomerPaymentMethod[], FetchError | UnPriceCustomerError>> {
+    const cacheKey = `${projectId}:${customerId}:${provider}`
+
+    if (opts?.skipCache) {
+      this.logger.debug("skipping cache for getPaymentMethods", {
+        customerId,
+        projectId,
+        provider,
+        cacheKey,
+      })
+    }
+
     // first try to get the payment methods from cache, if not found try to get it from DO,
     const { val, err } = opts?.skipCache
       ? await wrapResult(
@@ -676,7 +712,7 @@ export class CustomerService {
       : await retry(
           3,
           async () =>
-            this.cache.customerPaymentMethods.swr(`${customerId}:${provider}`, () =>
+            this.cache.customerPaymentMethods.swr(cacheKey, () =>
               this.getPaymentMethodsData({
                 customerId,
                 provider,
@@ -691,6 +727,8 @@ export class CustomerService {
             })
           }
         )
+
+    console.log("val", val)
 
     if (err) {
       this.logger.error("error getting payment methods", {

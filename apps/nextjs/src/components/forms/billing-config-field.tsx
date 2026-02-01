@@ -2,15 +2,10 @@
 
 import { BILLING_CONFIG } from "@unprice/db/utils"
 import type { BillingConfig, BillingInterval, InsertBillingConfig } from "@unprice/db/validators"
-import {
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@unprice/ui/form"
+import { FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
+import { HelpCircle } from "@unprice/ui/icons"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { m } from "framer-motion"
 import type { FieldPath, FieldValues, PathValue, UseFormReturn } from "react-hook-form"
 import { FilterScroll } from "~/components/filter-scroll"
@@ -53,10 +48,17 @@ export default function BillingConfigFormField<TFieldValues extends FormValues>(
         name={"billingConfig.name" as FieldPath<TFieldValues>}
         render={({ field }) => (
           <FormItem className="flex w-full flex-col">
-            <FormLabel>Billing Interval</FormLabel>
-            <FormDescription>
-              The interval the subscription will be billed. Can be monthly, yearly, daily, etc.
-            </FormDescription>
+            <div className="flex items-center gap-1">
+              <FormLabel>Billing Interval</FormLabel>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="size-3.5 text-muted-foreground" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-[250px]">
+                  How often customers are charged (monthly, yearly, daily, etc.).
+                </TooltipContent>
+              </Tooltip>
+            </div>
             <Select
               onValueChange={(value) => {
                 const config = BILLING_CONFIG[value]
@@ -125,8 +127,17 @@ export default function BillingConfigFormField<TFieldValues extends FormValues>(
             name={"billingConfig.billingAnchor" as FieldPath<TFieldValues>}
             render={({ field }) => (
               <FormItem className="flex w-full flex-col">
-                <FormLabel>Billing Anchor</FormLabel>
-                <FormDescription>Anchor specific to the billing interval.</FormDescription>
+                <div className="flex items-center gap-1">
+                  <FormLabel>Billing Anchor</FormLabel>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="size-3.5 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="max-w-[250px]">
+                      The day when billing cycles start (e.g., 1st of month for monthly plans).
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
                 <Select
                   onValueChange={(value) => {
                     field.onChange(value)

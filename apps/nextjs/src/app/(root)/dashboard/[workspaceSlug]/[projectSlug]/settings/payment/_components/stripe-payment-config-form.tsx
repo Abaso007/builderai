@@ -6,7 +6,6 @@ import type {
   PaymentProviderConfig,
 } from "@unprice/db/validators"
 import { insertPaymentProviderConfigSchema } from "@unprice/db/validators"
-import { Button } from "@unprice/ui/button"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
 import { Input } from "@unprice/ui/input"
 import { useParams, useSearchParams } from "next/navigation"
@@ -109,30 +108,30 @@ export function StripePaymentConfigForm({
 
         <div className="flex items-end justify-end gap-2 pt-4">
           {skip && (
-            <Button
+            <SubmitButton
               variant="ghost"
-              onClick={async (e) => {
-                e.preventDefault()
+              onClick={() => {
                 setDialogOpen?.(false)
 
                 if (isOnboarding) {
                   // create a default config for the onboarding
-                  const config = await saveConfig.mutateAsync({
+                  saveConfig.mutate({
                     paymentProvider: "sandbox",
                     key: "onboarding-key",
                     keyIv: "",
                     active: true,
                   })
 
-                  onSuccess?.(config.paymentProviderConfig.paymentProvider)
+                  onSuccess?.("sandbox")
                   return
                 }
 
                 onSkip?.()
               }}
-            >
-              Skip
-            </Button>
+              isDisabled={form.formState.isSubmitting}
+              isSubmitting={form.formState.isSubmitting}
+              label="Skip"
+            />
           )}
 
           <SubmitButton

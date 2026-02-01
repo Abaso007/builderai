@@ -74,7 +74,6 @@ export const registerCanV1 = (app: App) =>
 
     // validate the request
     const key = await keyAuth(c)
-
     const projectId = await resolveContextProjectId(c, key.projectId, customerId)
 
     // bouncer is explicitly ignored here because we don't want to hurt latency on the verification path
