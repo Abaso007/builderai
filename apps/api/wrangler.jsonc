@@ -18,6 +18,12 @@
         "pattern": "api.unprice.dev",
         "custom_domain": true
       },
+      "r2_buckets": [
+        {
+          "binding": "LAKEHOUSE",
+          "bucket_name": "unprice-lakehouse-prod"
+        }
+      ],
       "unsafe": {
         "bindings": [
           {
@@ -63,6 +69,12 @@
         "pattern": "preview-api.unprice.dev",
         "custom_domain": true
       },
+      "r2_buckets": [
+        {
+          "binding": "LAKEHOUSE",
+          "bucket_name": "unprice-lakehouse-preview"
+        }
+      ],
       "unsafe": {
         // # Limit: the number of tokens allowed within a given period in a single
         // # Cloudflare location
@@ -107,6 +119,12 @@
         "pattern": "localhost:8787",
         "custom_domain": false
       },
+      "r2_buckets": [
+        {
+          "binding": "LAKEHOUSE",
+          "bucket_name": "unprice-lakehouse-dev"
+        }
+      ],
       "unsafe": {
         // # Limit: the number of tokens allowed within a given period in a single
         // # Cloudflare location

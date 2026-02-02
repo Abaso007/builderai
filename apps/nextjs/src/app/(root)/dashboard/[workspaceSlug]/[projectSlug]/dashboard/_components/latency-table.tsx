@@ -46,7 +46,7 @@ export function LatencyTable() {
   } = useSuspenseQuery(
     trpc.analytics.getVerificationRegions.queryOptions(
       {
-        intervalDays: intervalFilter.intervalDays,
+        interval_days: intervalFilter.intervalDays,
       },
       {
         staleTime: ANALYTICS_STALE_TIME,
@@ -63,7 +63,7 @@ export function LatencyTable() {
       ["analytics", "getVerificationRegions"],
       {
         input: {
-          intervalDays: param,
+          interval_days: param,
         },
         type: "query",
       },

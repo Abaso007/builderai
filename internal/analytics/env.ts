@@ -10,6 +10,10 @@ export const env = createEnv({
   server: {
     TINYBIRD_TOKEN: z.string(),
     TINYBIRD_URL: z.string(),
+    R2_ACCESS_KEY_ID: z.string().optional(),
+    R2_SECRET_ACCESS_KEY: z.string().optional(),
+    R2_ACCOUNT_ID: z.string().optional(),
+    LAKEHOUSE_BUCKET: z.string().optional(),
     EMIT_ANALYTICS: z
       .string()
       .optional()

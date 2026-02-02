@@ -27,7 +27,6 @@ SCHEMA >
     `engine` LowCardinality(String) `json:$.engine`,
     `engine_version` String `json:$.engine_version`,
     `cpu_architecture` LowCardinality(String) `json:$.cpu_architecture`,
-    `ua` String `json:$.ua`,
     `bot` UInt8 `json:$.bot`,
     `referrer` String `json:$.referrer`,
     `referrer_url` String `json:$.referrer_url`,

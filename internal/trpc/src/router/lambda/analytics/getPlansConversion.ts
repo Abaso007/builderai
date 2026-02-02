@@ -11,15 +11,15 @@ export const getPlansConversion = protectedProjectProcedure
     })
   )
   .query(async (opts) => {
-    const { intervalDays } = opts.input
-    const projectId = opts.ctx.project.id
+    const { interval_days } = opts.input
+    const project_id = opts.ctx.project.id
 
-    const cacheKey = `${projectId}:${intervalDays}`
+    const cacheKey = `${project_id}:${interval_days}`
     const result = await opts.ctx.cache.getPlansConversion.swr(cacheKey, async () => {
       const result = await opts.ctx.analytics
         .getPlansConversion({
-          projectId,
-          intervalDays,
+          project_id,
+          interval_days,
         })
         .then((res) => res.data)
 
@@ -28,8 +28,8 @@ export const getPlansConversion = protectedProjectProcedure
 
     if (result.err) {
       opts.ctx.logger.error(result.err.message, {
-        projectId,
-        intervalDays,
+        project_id,
+        interval_days,
       })
 
       return { data: [], error: result.err.message }

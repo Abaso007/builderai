@@ -6,18 +6,18 @@ NODE feature_verifications_node
 SQL >
     %
     SELECT
-        projectId,
-        {% if defined(customerId) %} customerId, {% end %}
-        featureSlug,
+        project_id,
+        {% if defined(customer_id) %} customer_id, {% end %}
+        feature_slug,
         countMerge(count) AS count,
         quantileTDigestMerge(0.50)(p50_latency) AS p50_latency,
         quantileTDigestMerge(0.95)(p95_latency) AS p95_latency,
         quantileTDigestMerge(0.99)(p99_latency) AS p99_latency
     FROM
-    {% if defined(intervalDays) %}
-        {% if Int32(intervalDays) > 180 %}
+    {% if defined(interval_days) %}
+        {% if Int32(interval_days) > 180 %}
             unprice_feature_verifications_monthly_mv
-        {% elif Int32(intervalDays) > 7 %}
+        {% elif Int32(interval_days) > 7 %}
             unprice_feature_verifications_daily_mv
         {% else %}
             unprice_feature_verifications_hourly_mv
@@ -36,23 +36,23 @@ SQL >
     {% end %}
     WHERE
         1 = 1
-        {% if defined(customerId) %}
-            AND customerId = {{ String(customerId) }}
+        {% if defined(customer_id) %}
+            AND customer_id = {{ String(customer_id) }}
         {% end %}
-        {% if defined(projectId) %}
-            AND projectId = {{ String(projectId) }}
+        {% if defined(project_id) %}
+            AND project_id = {{ String(project_id) }}
         {% end %}
-        {% if defined(featureSlugs) %}
-            AND featureSlug IN {{ Array(featureSlugs, 'String') }}
+        {% if defined(feature_slugs) %}
+            AND feature_slug IN {{ Array(feature_slugs, 'String') }}
         {% end %}
         {% if defined(start) & defined(end) %}
             AND date BETWEEN fromUnixTimestamp64Milli({{ Int64(start) }})
             AND fromUnixTimestamp64Milli({{ Int64(end) }})
-        {% elif defined(intervalDays) %}
-            AND date >= toStartOfDay(today() - {{ Int32(intervalDays) }})
+        {% elif defined(interval_days) %}
+            AND date >= toStartOfDay(today() - {{ Int32(interval_days) }})
         {% else %}
             AND date >= toStartOfDay(today() - 7)
         {% end %}
-    {% if defined(customerId) %} GROUP BY projectId, customerId, featureSlug {% else %} GROUP BY projectId, featureSlug {% end %}
+    {% if defined(customer_id) %} GROUP BY project_id, customer_id, feature_slug {% else %} GROUP BY project_id, feature_slug {% end %}
 
 TYPE endpoint

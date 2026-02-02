@@ -20,8 +20,8 @@ SQL >
         {% if defined(session_id) %} AND session_id = {{ String(session_id) }} {% end %}
         {% if defined(page_id) %} AND page_id = {{ String(page_id) }} {% end %}
         {% if defined(plan_version_id) %} AND plan_version_id = {{ String(plan_version_id) }} {% end %}
-        {% if defined(intervalDays) %}
-            AND date >= timestampAdd(today(), interval -{{ Int(intervalDays) }} day)
+        {% if defined(interval_days) %}
+            AND date >= timestampAdd(today(), interval -{{ Int(interval_days) }} day)
         {% else %} AND date >= timestampAdd(today(), interval -30 day)
         {% end %}
         {% if defined(project_id) %} AND project_id = {{ String(project_id) }} {% end %}

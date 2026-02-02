@@ -14,7 +14,7 @@ export const migrate = protectedProjectProcedure
     })
   )
   .mutation(async (opts) => {
-    const projectId = opts.ctx.project.id
+    const project_id = opts.ctx.project.id
     const isMain = opts.ctx.project.workspace.isMain
     const isInternal = opts.ctx.project.workspace.isInternal
 
@@ -26,7 +26,7 @@ export const migrate = protectedProjectProcedure
     }
 
     const project = await opts.ctx.db.query.projects.findFirst({
-      where: (fields, operators) => operators.eq(fields.id, projectId),
+      where: (fields, operators) => operators.eq(fields.id, project_id),
     })
 
     if (!project) {
@@ -55,7 +55,7 @@ export const migrate = protectedProjectProcedure
         },
       },
       where: (versions, { eq, and }) =>
-        and(eq(versions.projectId, projectId), eq(versions.status, "published")),
+        and(eq(versions.projectId, project_id), eq(versions.status, "published")),
     })
 
     if (!data || data.length === 0) {
@@ -163,7 +163,7 @@ export const migrate = protectedProjectProcedure
             analyticsUpdatedAt: Date.now(),
           },
         })
-        .where(eq(projects.id, projectId))
+        .where(eq(projects.id, project_id))
 
       return { success: true, message: "Analytics data migrated successfully" }
     } catch (err) {

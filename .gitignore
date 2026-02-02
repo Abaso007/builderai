@@ -93,3 +93,4 @@ tsconfig.tsbuildinfo
 .vitest
 
 mailpit/
+.opencode/

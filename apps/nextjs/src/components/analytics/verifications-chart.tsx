@@ -68,7 +68,7 @@ export function VerificationsChart() {
   } = useSuspenseQuery(
     trpc.analytics.getVerifications.queryOptions(
       {
-        intervalDays: intervalFilter.intervalDays,
+        interval_days: intervalFilter.intervalDays,
       },
       {
         staleTime: ANALYTICS_STALE_TIME,
@@ -85,7 +85,7 @@ export function VerificationsChart() {
       ["analytics", "getVerifications"],
       {
         input: {
-          intervalDays: param,
+          interval_days: param,
         },
         type: "query",
       },
@@ -97,7 +97,7 @@ export function VerificationsChart() {
   }
 
   const chartData = verifications.verifications.map((v) => ({
-    feature: v.featureSlug,
+    feature: v.feature_slug,
     verifications: v.count,
     p50_latency: v.p50_latency,
     p95_latency: v.p95_latency,

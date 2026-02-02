@@ -9,15 +9,10 @@ import {
   CommandList,
   CommandLoading,
 } from "@unprice/ui/command"
-import {
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@unprice/ui/form"
+import { FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
+import { HelpCircle } from "@unprice/ui/icons"
 import { Popover, PopoverContent, PopoverTrigger } from "@unprice/ui/popover"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { cn } from "@unprice/ui/utils"
 import { CheckIcon, ChevronDown } from "lucide-react"
 import { useEffect, useState } from "react"
@@ -66,10 +61,18 @@ export default function TimeZoneFormField<TFieldValues extends FormValues>({
       name={"timezone" as FieldPath<TFieldValues>}
       render={({ field }) => (
         <FormItem className="flex flex-col">
-          <FormLabel>Timezone</FormLabel>
-          <FormDescription>
-            Subscriptions will use this timezone for all its invoices.
-          </FormDescription>
+          <div className="flex items-center gap-2">
+            <FormLabel className="font-semibold text-sm">Timezone</FormLabel>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <HelpCircle className="size-3.5 text-muted-foreground" />
+              </TooltipTrigger>
+              <TooltipContent side="right" className="max-w-[250px]">
+                Customer's timezone for billing calculations. Subscription cycles and invoice dates
+                will be based on this timezone.
+              </TooltipContent>
+            </Tooltip>
+          </div>
           <Popover
             modal={true}
             open={switcherCustomerOpen}

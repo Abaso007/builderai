@@ -21,61 +21,61 @@ SQL >
         INNER JOIN unprice_plan_version_features pvf ON pv.id = pvf.plan_version_id
         INNER JOIN unprice_features f ON pvf.feature_id = f.id AND f.project_id = pv.project_id
         WHERE 1 = 1
-        {% if defined(projectId) %}
-            AND pv.project_id = {{ String(projectId) }}
+        {% if defined(project_id) %}
+            AND pv.project_id = {{ String(project_id) }}
         {% end %}
     ),
 
     usage_stats AS (
         -- Aggregate usage data from materialized view
         SELECT
-            projectId,
-            featureSlug,
+            project_id,
+            feature_slug,
             countMerge(count) as total_usage_count,
             sumMerge(sum) as total_usage_sum
         FROM unprice_feature_usage_hourly_mv
         WHERE 1 = 1
-        {% if defined(projectId) %}
-            AND projectId = {{ String(projectId) }}
+        {% if defined(project_id) %}
+            AND project_id = {{ String(project_id) }}
         {% end %}
         {% if defined(start) & defined(end) %}
             AND date BETWEEN fromUnixTimestamp64Milli({{ Int64(start) }})
             AND fromUnixTimestamp64Milli({{ Int64(end) }})
-        {% elif defined(intervalDays) %}
-            AND date >= toStartOfDay(today() - {{ Int32(intervalDays) }})
+        {% elif defined(interval_days) %}
+            AND date >= toStartOfDay(today() - {{ Int32(interval_days) }})
         {% else %}
             AND date >= toStartOfDay(today() - 7)
         {% end %}
-        GROUP BY projectId, featureSlug
+        GROUP BY project_id, feature_slug
     ),
 
     verification_stats AS (
         -- Aggregate verification data from materialized view
         SELECT
-            projectId,
-            featureSlug,
+            project_id,
+            feature_slug,
             countMerge(count) as total_verification_count
         FROM unprice_feature_verifications_hourly_mv
         WHERE 1 = 1
-        {% if defined(projectId) %}
-            AND projectId = {{ String(projectId) }}
+        {% if defined(project_id) %}
+            AND project_id = {{ String(project_id) }}
         {% end %}
         {% if defined(start) & defined(end) %}
             AND date BETWEEN fromUnixTimestamp64Milli({{ Int64(start) }})
             AND fromUnixTimestamp64Milli({{ Int64(end) }})
-        {% elif defined(intervalDays) %}
-            AND date >= toStartOfDay(today() - {{ Int32(intervalDays) }})
+        {% elif defined(interval_days) %}
+            AND date >= toStartOfDay(today() - {{ Int32(interval_days) }})
         {% else %}
             AND date >= toStartOfDay(today() - 7)
         {% end %}
-        GROUP BY projectId, featureSlug
+        GROUP BY project_id, feature_slug
     ),
 
     total_activity AS (
         SELECT
             sum(us.total_usage_count) + sum(vs.total_verification_count) as max_activity
         FROM usage_stats us
-        FULL OUTER JOIN verification_stats vs ON us.projectId = vs.projectId
+        FULL OUTER JOIN verification_stats vs ON us.project_id = vs.project_id
     )
 
         SELECT
@@ -102,11 +102,11 @@ SQL >
 
     FROM plan_features pf
     LEFT JOIN usage_stats us
-        ON pf.feature_slug = us.featureSlug
-        AND pf.project_id = us.projectId
+        ON pf.feature_slug = us.feature_slug
+        AND pf.project_id = us.project_id
     LEFT JOIN verification_stats vs
-        ON pf.feature_slug = vs.featureSlug
-        AND pf.project_id = vs.projectId
+        ON pf.feature_slug = vs.feature_slug
+        AND pf.project_id = vs.project_id
     CROSS JOIN total_activity ta
     GROUP BY
         pf.plan_slug,

@@ -75,7 +75,7 @@ export const registerReportUsageV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customerId, featureSlug, usage, idempotenceKey, metadata } = c.req.valid("json")
     const { usagelimiter } = c.get("services")
-    const stats = c.get("stats")
+    // const stats = c.get("stats")
     const requestId = c.get("requestId")
 
     // validate the request
@@ -104,17 +104,12 @@ export const registerReportUsageV1 = (app: App) =>
       flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
       projectId,
       requestId,
-      metadata: {
-        ...metadata,
-        ip: stats.ip,
-        country: stats.country,
-        region: stats.region,
-        colo: stats.colo,
-        city: stats.city,
-        ua: stats.ua,
-        continent: stats.continent,
-        source: stats.source,
-      },
+      // keyId: key.id, // important to see with which keys are driving the usage
+      // resourceId: key.resourceId, // important to see with which resources are driving the usage
+      // action: key.action, // important to see with which actions are driving the usage
+      // country: stats.country,
+      // region: stats.region
+      metadata: metadata ?? null,
     })
 
     // end the timer

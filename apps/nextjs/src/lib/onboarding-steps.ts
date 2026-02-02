@@ -6,6 +6,7 @@ import { PaymentProviderStep } from "~/components/onboarding/steps/payment-provi
 import { PricingChat } from "~/components/onboarding/steps/pricing-chat-step"
 import { ProjectStep } from "~/components/onboarding/steps/project-step"
 import { ReportUsageStep } from "~/components/onboarding/steps/report-usage-step"
+import { VerifyStep } from "~/components/onboarding/steps/verify-step"
 import { WelcomeStep } from "~/components/onboarding/steps/welcome-step"
 
 // steps.tsx - export your step IDs
@@ -17,6 +18,7 @@ export const STEP_IDS = [
   "pricing-chat",
   "create-customer",
   "report-usage",
+  "verify",
   "done",
 ] as const
 
@@ -47,8 +49,6 @@ export const steps: OnboardingStep[] = [
     id: "pricing-chat",
     component: PricingChat,
     nextStep: "create-customer",
-    isSkippable: true,
-    skipToStep: "create-customer",
   },
   {
     id: "create-customer",
@@ -58,6 +58,11 @@ export const steps: OnboardingStep[] = [
   {
     id: "report-usage",
     component: ReportUsageStep,
+    nextStep: "verify",
+  },
+  {
+    id: "verify",
+    component: VerifyStep,
     nextStep: "done",
   },
   {

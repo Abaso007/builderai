@@ -1,7 +1,7 @@
 import { createRoute } from "@hono/zod-openapi"
+import { verificationResultSchema } from "@unprice/db/validators"
 import { endTime } from "hono/timing"
 import { startTime } from "hono/timing"
-import { verificationResultSchema } from "node_modules/@unprice/db/src/validators/entitlements"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 
@@ -68,7 +68,7 @@ export const registerCanV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customerId, featureSlug, metadata, usage } = c.req.valid("json")
     const { usagelimiter } = c.get("services")
-    const stats = c.get("stats")
+    // const stats = c.get("stats")
     const requestId = c.get("requestId")
     const performanceStart = c.get("performanceStart")
 
@@ -94,17 +94,12 @@ export const registerCanV1 = (app: App) =>
       // short ttl for dev
       flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
       timestamp: Date.now(), // for now we report the usage at the time of the request
-      metadata: {
-        ...metadata,
-        ip: stats.ip,
-        country: stats.country,
-        region: stats.region,
-        colo: stats.colo,
-        city: stats.city,
-        ua: stats.ua,
-        continent: stats.continent,
-        source: stats.source,
-      },
+      // country: stats.country,
+      // region: stats.region,
+      // action: key.action,
+      // resourceId: key.resourceId,
+      // keyId: key.id,
+      metadata: metadata ?? null,
     })
 
     // end the timer

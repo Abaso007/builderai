@@ -1,6 +1,4 @@
-import { type Connection, Server } from "partyserver"
-
-import { env } from "cloudflare:workers"
+import type { R2Bucket } from "@cloudflare/workers-types"
 import { CloudflareStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
@@ -25,6 +23,7 @@ import { CacheService } from "@unprice/services/cache"
 import type { DenyReason } from "@unprice/services/customers"
 import { EntitlementService } from "@unprice/services/entitlements"
 import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/metrics"
+import { type Connection, Server } from "partyserver"
 import type { Env } from "~/env"
 import { SqliteDOStorageProvider } from "./sqlite-do-provider"
 
@@ -37,6 +36,8 @@ interface UsageLimiterConfig {
 // It is used to validate the usage of a feature and to report the usage to tinybird.
 // think of it as a queue that will be flushed to the db periodically
 export class DurableObjectUsagelimiter extends Server {
+  // environment variables
+  private readonly _env: Env
   // logger service
   private logger: Logger
   // entitlement service
@@ -60,6 +61,8 @@ export class DurableObjectUsagelimiter extends Server {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
 
+    this._env = env
+
     // set a revalidation period of 5 secs for development
     if (env.VERCEL_ENV === "development") {
       this.TTL_ANALYTICS = 1000 * 10 // 10 seconds
@@ -82,9 +85,9 @@ export class DurableObjectUsagelimiter extends Server {
           logLevel: env.VERCEL_ENV === "production" ? "warn" : "info",
           environment: env.NODE_ENV,
           service: "usagelimiter",
-          // TODO: add version
           defaultFields: {
             durableObjectId: this.ctx.id.toString(),
+            version: this._env.VERSION,
           },
         })
       : new ConsoleLogger({
@@ -94,6 +97,7 @@ export class DurableObjectUsagelimiter extends Server {
           logLevel: env.VERCEL_ENV === "production" ? "warn" : "info",
           defaultFields: {
             durableObjectId: this.ctx.id.toString(),
+            version: this._env.VERSION,
           },
         })
 
@@ -164,10 +168,27 @@ export class DurableObjectUsagelimiter extends Server {
         tinybirdUrl: env.TINYBIRD_URL,
         logger: this.logger,
       }),
+      lakehouse: env.LAKEHOUSE as unknown as R2Bucket,
     })
 
-    // initialize the storage provider
-    storage.initialize()
+    // initialize the storage provider - must block until complete
+    // If initialization fails (e.g., schema version changed), reset storage and retry
+    this.ctx.blockConcurrencyWhile(async () => {
+      const result = await storage.initialize()
+      if (result.err) {
+        this.logger.warn("Storage initialization failed, resetting storage", {
+          error: result.err.message,
+        })
+        // reset the storage and retry initialization - this is a last resort
+        await this.ctx.storage.deleteAll()
+        const retryResult = await storage.initialize()
+        if (retryResult.err) {
+          this.logger.error("Storage initialization failed after reset", {
+            error: retryResult.err.message,
+          })
+        }
+      }
+    })
 
     // initialize the entitlement service
     this.entitlementService = new EntitlementService({
@@ -297,8 +318,8 @@ export class DurableObjectUsagelimiter extends Server {
   public async verify(data: VerifyRequest): Promise<VerificationResult> {
     const wideEventLogger = createWideEventLogger({
       "service.name": "usagelimiter",
-      "service.version": env.VERSION,
-      "service.environment": env.NODE_ENV as
+      "service.version": this._env.VERSION,
+      "service.environment": this._env.NODE_ENV as
         | "production"
         | "staging"
         | "development"
@@ -312,6 +333,9 @@ export class DurableObjectUsagelimiter extends Server {
 
     return await wideEventLogger.runAsync(async () => {
       try {
+        // set the wide event helpers
+        this.entitlementService.setWideEventHelpers(wideEventHelpers)
+
         // set the request id for the metrics and logs
         this.logger.x(data.requestId)
         this.metrics.x(data.requestId)
@@ -326,7 +350,7 @@ export class DurableObjectUsagelimiter extends Server {
         wideEventLogger.add("usagelimiter.operation", "verify")
         wideEventLogger.add("usagelimiter.input", data)
         // All logic handled internally!
-        const result = await this.entitlementService.verify(data, wideEventLogger)
+        const result = await this.entitlementService.verify(data)
         wideEventLogger.add("usagelimiter.result", result)
         // Set alarm to flush buffers
         await this.ensureAlarmIsSet(wideEventLogger, data.flushTime)
@@ -367,8 +391,8 @@ export class DurableObjectUsagelimiter extends Server {
   public async reportUsage(data: ReportUsageRequest): Promise<ReportUsageResult> {
     const wideEventLogger = createWideEventLogger({
       "service.name": "usagelimiter",
-      "service.version": env.VERSION,
-      "service.environment": env.NODE_ENV as
+      "service.version": this._env.VERSION,
+      "service.environment": this._env.NODE_ENV as
         | "production"
         | "staging"
         | "development"
@@ -382,6 +406,9 @@ export class DurableObjectUsagelimiter extends Server {
 
     return await wideEventLogger.runAsync(async () => {
       try {
+        // set the wide event helpers
+        this.entitlementService.setWideEventHelpers(wideEventHelpers)
+
         // set the request id for the metrics and logs
         this.logger.x(data.requestId)
         this.metrics.x(data.requestId)
@@ -397,7 +424,7 @@ export class DurableObjectUsagelimiter extends Server {
         wideEventLogger.add("usagelimiter.operation", "reportUsage")
         wideEventLogger.add("usagelimiter.input", data)
 
-        const result = await this.entitlementService.reportUsage(data, wideEventLogger)
+        const result = await this.entitlementService.reportUsage(data)
         wideEventLogger.add("usagelimiter.result", result)
         // Set alarm to flush buffers
         await this.ensureAlarmIsSet(wideEventLogger, data.flushTime)
@@ -496,6 +523,7 @@ export class DurableObjectUsagelimiter extends Server {
 
   // when the alarm is triggered
   async onAlarm(): Promise<void> {
+    this.logger.debug("Triggering alarm flush")
     // flush the usage records
     await this.entitlementService.flush()
     // flush the metrics and logs

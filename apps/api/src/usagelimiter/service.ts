@@ -12,7 +12,7 @@ import type {
 } from "@unprice/db/validators"
 import type { CurrentUsage } from "@unprice/db/validators"
 import { type BaseError, Err, type FetchError, Ok, type Result } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import type { Logger, WideEventHelpers } from "@unprice/logging"
 import type { Cache, CacheNamespaces } from "@unprice/services/cache"
 import type { CustomerService } from "@unprice/services/customers"
 import type { UnPriceCustomerError } from "@unprice/services/customers"
@@ -43,6 +43,7 @@ export class UsageLimiterService implements UsageLimiter {
   private readonly stats: Stats
   private readonly requestId: string
   private hashCache: Map<string, string>
+  private wideEventHelpers?: WideEventHelpers
 
   constructor(opts: {
     namespace: DurableObjectNamespace<DurableObjectUsagelimiter>
@@ -59,6 +60,7 @@ export class UsageLimiterService implements UsageLimiter {
     db: Database
     customer: CustomerService
     stats: Stats
+    wideEventHelpers?: WideEventHelpers
   }) {
     this.namespace = opts.namespace
     this.logger = opts.logger
@@ -72,6 +74,7 @@ export class UsageLimiterService implements UsageLimiter {
     this.stats = opts.stats
     this.requestId = opts.requestId
     this.hashCache = opts.hashCache
+    this.wideEventHelpers = opts.wideEventHelpers
 
     // we don't need storage for this so we don't need to call the DO
     // instead we use the entitlement service
@@ -83,7 +86,18 @@ export class UsageLimiterService implements UsageLimiter {
       waitUntil: this.waitUntil,
       cache: this.cache,
       metrics: this.metrics,
+      wideEventHelpers: this.wideEventHelpers,
     })
+  }
+
+  /**
+   * Sets the wide event helpers for request-scoped logging context.
+   * This should be called inside the wideEventLogger.runAsync() context.
+   * Propagates to nested services (entitlementService).
+   */
+  public setWideEventHelpers(wideEventHelpers: WideEventHelpers) {
+    this.wideEventHelpers = wideEventHelpers
+    this.entitlementService.setWideEventHelpers(wideEventHelpers)
   }
 
   // in memory cache with size and TTL limits

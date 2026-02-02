@@ -12,16 +12,16 @@ export const getFeaturesOverview = protectedProjectProcedure
     })
   )
   .query(async (opts) => {
-    const { intervalDays } = opts.input
-    const projectId = opts.ctx.project.id
+    const { interval_days } = opts.input
+    const project_id = opts.ctx.project.id
     const timezone = opts.ctx.project.timezone
 
-    const cacheKey = `${projectId}:${timezone}:${intervalDays}`
+    const cacheKey = `${project_id}:${timezone}:${interval_days}`
     const result = await opts.ctx.cache.getFeaturesOverview.swr(cacheKey, async () => {
       const result = await opts.ctx.analytics
         .getFeaturesOverview({
-          projectId,
-          intervalDays,
+          project_id,
+          interval_days,
           timezone,
         })
         .then((res) => res.data)
@@ -31,8 +31,8 @@ export const getFeaturesOverview = protectedProjectProcedure
 
     if (result.err) {
       opts.ctx.logger.error(result.err.message, {
-        projectId,
-        intervalDays,
+        project_id,
+        interval_days,
       })
 
       return { data: [], error: result.err.message }

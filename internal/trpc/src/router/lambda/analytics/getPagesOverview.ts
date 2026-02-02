@@ -12,21 +12,21 @@ export const getPagesOverview = protectedProjectProcedure
     })
   )
   .query(async (opts) => {
-    const { intervalDays, pageId } = opts.input
-    const projectId = opts.ctx.project.id
-    const withAllPage = pageId === "all"
+    const { interval_days, page_id } = opts.input
+    const project_id = opts.ctx.project.id
+    const withAllPage = page_id === "all"
 
-    if (!pageId) {
+    if (!page_id) {
       return { data: [], error: "Page ID is required" }
     }
 
     if (withAllPage) {
-      const cacheKey = `${projectId}:all:${intervalDays}`
+      const cacheKey = `${project_id}:all:${interval_days}`
       const result = await opts.ctx.cache.getPagesOverview.swr(cacheKey, async () => {
         const result = await opts.ctx.analytics
           .getPagesOverview({
-            intervalDays,
-            projectId,
+            interval_days,
+            project_id,
           })
           .then((res) => res.data)
 
@@ -35,8 +35,8 @@ export const getPagesOverview = protectedProjectProcedure
 
       if (result.err) {
         opts.ctx.logger.error(result.err.message, {
-          projectId,
-          intervalDays,
+          project_id,
+          interval_days,
         })
 
         return { data: [], error: result.err.message }
@@ -48,20 +48,20 @@ export const getPagesOverview = protectedProjectProcedure
     }
 
     const page = await opts.ctx.db.query.pages.findFirst({
-      where: (table, { eq, and }) => and(eq(table.id, pageId), eq(table.projectId, projectId)),
+      where: (table, { eq, and }) => and(eq(table.id, page_id), eq(table.projectId, project_id)),
     })
 
     if (!page) {
       return { data: [], error: "Page not found" }
     }
 
-    const cacheKey = `${projectId}:${page.id}:${intervalDays}`
+    const cacheKey = `${project_id}:${page.id}:${interval_days}`
     const result = await opts.ctx.cache.getPagesOverview.swr(cacheKey, async () => {
       const result = await opts.ctx.analytics
         .getPagesOverview({
-          pageId: page.id,
-          intervalDays,
-          projectId,
+          page_id: page.id,
+          interval_days,
+          project_id,
         })
         .then((res) => res.data)
 
@@ -70,8 +70,8 @@ export const getPagesOverview = protectedProjectProcedure
 
     if (result.err) {
       opts.ctx.logger.error(result.err.message, {
-        projectId,
-        intervalDays,
+        project_id,
+        interval_days,
       })
 
       return { data: [], error: result.err.message }

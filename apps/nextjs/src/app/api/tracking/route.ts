@@ -93,7 +93,6 @@ const trackPageHit = async (
       os: ua.os.name || "Unknown",
       os_version: ua.os.version || "Unknown",
       cpu_architecture: ua.cpu?.architecture || "Unknown",
-      ua: ua.ua || "Unknown",
       bot: ua.isBot,
       referrer: payload.referrer ? getDomainWithoutWWW(payload.referrer) || "(direct)" : "(direct)",
       referrer_url: payload.referrer || "(direct)",

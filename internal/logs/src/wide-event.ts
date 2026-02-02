@@ -97,6 +97,21 @@ export const EntitlementsSchema = z.object({
   already_recorded: z.boolean().optional(),
 })
 
+export const CustomerSchema = z.object({
+  operation: z.string().optional(),
+  email: z.string().email(),
+  name: z.string().optional(),
+  currency: z.string().optional(),
+  plan_version_id: z.string().optional(),
+  plan_slug: z.string().optional(),
+  success_url: z.string().optional(),
+  cancel_url: z.string().optional(),
+  session_id: z.string().optional(),
+  customer_id: z.string().optional(),
+  subscription_id: z.string().optional(),
+  subscription_phase_id: z.string().optional(),
+})
+
 export const WideEventNestedSchema = z.object({
   service: ServiceSchema,
   request: RequestSchema.partial(),
@@ -106,6 +121,7 @@ export const WideEventNestedSchema = z.object({
   cloud: CloudSchema.optional(),
   usagelimiter: UsageLimiterSchema.optional(),
   entitlements: EntitlementsSchema.optional(),
+  customers: CustomerSchema.optional(),
 })
 
 export type WideEventNested = z.infer<typeof WideEventNestedSchema>

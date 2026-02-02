@@ -6,40 +6,40 @@ NODE reconciliation_delta_node
 SQL >
     %
     WITH
-        {{ String(afterRecordId, '') }} AS after_cursor,
-        {% if defined(beforeRecordId) %}
-        {{ String(beforeRecordId) }} AS before_cursor
+        {{ String(after_record_id, '') }} AS after_cursor,
+        {% if defined(before_record_id) %}
+        {{ String(before_record_id) }} AS before_cursor
         {% else %}
         'zzzzzzzzzzzzzzzzzzzzzzzzz' AS before_cursor  -- ULID max value
         {% end %}
 
     SELECT
-        projectId,
-        customerId,
-        featureSlug,
+        project_id,
+        customer_id,
+        feature_slug,
 
         -- Delta metrics (records in cursor window)
-        toUInt64(count()) AS deltaCount,
-        sum(usage) AS deltaSum,
-        max(usage) AS deltaMax,
-        argMax(usage, id) AS lastValue,
+        toUInt64(count()) AS delta_count,
+        sum(usage) AS delta_sum,
+        max(usage) AS delta_max,
+        argMax(usage, id) AS last_value,
 
         -- New cursor position
-        argMax(id, timestamp) AS lastRecordId
+        argMax(id, timestamp) AS last_record_id
 
     FROM unprice_feature_usage_records
     WHERE
         deleted = 0
-        AND projectId = {{ String(projectId) }}
-        AND customerId = {{ String(customerId) }}
-        AND featureSlug = {{ String(featureSlug) }}
+        AND project_id = {{ String(project_id) }}
+        AND customer_id = {{ String(customer_id) }}
+        AND feature_slug = {{ String(feature_slug) }}
         -- Cursor window
         AND id > after_cursor
         AND id <= before_cursor
-        {% if defined(billingPeriodStart) %}
-        AND timestamp >= {{ Int64(billingPeriodStart) }}
+        {% if defined(billing_period_start) %}
+        AND timestamp >= {{ Int64(billing_period_start) }}
         {% end %}
     GROUP BY
-        projectId, customerId, featureSlug
+        project_id, customer_id, feature_slug
 
 TYPE endpoint

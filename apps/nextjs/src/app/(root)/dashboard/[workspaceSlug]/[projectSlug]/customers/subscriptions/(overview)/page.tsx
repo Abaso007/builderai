@@ -49,7 +49,7 @@ export default async function PlanSubscriptionsPage({
               <SuperLink href={`/${workspaceSlug}/${projectSlug}/customers/subscriptions/new`}>
                 <Button variant={"primary"}>
                   <Plus className="mr-2 h-4 w-4" />
-                  Establish Subscription
+                  Subscription
                 </Button>
               </SuperLink>
             </div>

@@ -66,7 +66,7 @@ function toDineroPrice(amount: string, currency: "USD" | "EUR") {
 // =============================================================================
 const createFeatureInputSchema = z.object({
   title: featureInsertBaseSchema.shape.title.describe(
-    "Human-readable feature name (1-50 chars). Will be UPPERCASED. Examples: 'API Calls', 'Team Members'"
+    "Human-readable feature name (1-50 chars). Capitalize the first letter of each word. Examples: 'API Calls', 'Team Members'"
   ),
   slug: featureInsertBaseSchema.shape.slug.describe(
     "URL-friendly identifier (lowercase, hyphens). Examples: 'api-calls', 'team-members'"
@@ -81,14 +81,14 @@ const createFeatureInputSchema = z.object({
 
 const createFeatureTool = tool({
   description:
-    "Create a new feature for pricing plans. Features are the building blocks of your pricing - they represent capabilities, limits, or usage metrics. Examples: 'API Calls', 'Team Members', 'Storage GB'. The title will be automatically UPPERCASED. The slug should be URL-friendly (lowercase with hyphens). ALWAYS create features BEFORE creating plan version features.",
+    "Create a new feature for pricing plans. Features are the building blocks of your pricing - they represent capabilities, limits, or usage metrics. Examples: 'API Calls', 'Team Members', 'Storage GB'. The slug should be URL-friendly (lowercase with hyphens). ALWAYS create features BEFORE creating plan version features.",
   inputSchema: createFeatureInputSchema,
   async *execute({ title, slug, description, unit }) {
     yield { state: "creating" as const, title }
 
     try {
       const result = await api.features.create({
-        title: title.toUpperCase(),
+        title: title,
         slug,
         description,
         unit,
@@ -236,7 +236,7 @@ const listPlansTool = tool({
 const createPlanVersionInputSchema = z.object({
   planId: z.string().describe("The ID of the parent plan (get from createPlan or listPlans)"),
   title: versionInsertBaseSchema.shape.title.describe(
-    "Human-readable plan version title (1-50 chars). Will be UPPERCASED. Examples: 'Starter', 'Pro', 'Enterprise"
+    "Human-readable plan version title (1-50 chars). Examples: 'Starter', 'Pro', 'Enterprise"
   ),
   description: versionInsertBaseSchema.shape.description.describe(
     "Description of this plan version explaining what's included"
@@ -666,7 +666,7 @@ const systemPrompt = `You are an expert in SaaS pricing and monetization strateg
 1. **Feature**: The building block - represents a capability (e.g., "API Calls", "Team Members", "Storage").
    - Features have a title, slug (lowercase-hyphens), and unit.
    - Try to figure out the simplest name of the feature, like if the feature is unlimited tokens, the name should be tokens. The unlimited part is configured in the plan version feature.
-   - Create features FIRST before adding them to plans.
+   - Create features first if they don't exist before adding them to plans.
 
 2. **Plan**: A container/parent that groups related plan versions (e.g., "starter", "pro", "enterprise").
    - The slug identifies the plan family (lowercase-hyphens).
@@ -843,14 +843,30 @@ Always follow this order:
 const handler = auth(async (req: NextRequest) => {
   const body = await req.json()
 
+  // Extract currency from request body (sent from the frontend)
+  const projectCurrency = body.currency ?? "USD"
+
   const messages = await validateUIMessages<PricingChatMessage>({
     messages: body.messages,
     tools,
   })
 
+  // Add currency enforcement to the system prompt
+  const currencyEnforcedSystemPrompt = `${systemPrompt}
+
+## PROJECT CURRENCY CONSTRAINT
+
+CRITICAL: This project uses ${projectCurrency} as its default currency. You MUST:
+- ALWAYS use ${projectCurrency} for all pricing in plan versions
+- IGNORE any currency specified in the user's prompt - always use ${projectCurrency}
+- When creating plan versions, set currency to "${projectCurrency}"
+- When creating prices (flatPrice, usagePrice, tiers), always use currency: "${projectCurrency}"
+- Do NOT ask the user which currency they want - the project currency is ${projectCurrency}
+- If the user mentions a different currency (e.g., "10 euros" when project is USD), convert to ${projectCurrency} conceptually and use the same numeric value with ${projectCurrency}`
+
   const result = streamText({
     model,
-    system: systemPrompt,
+    system: currencyEnforcedSystemPrompt,
     messages: await convertToModelMessages(messages),
     stopWhen: stepCountIs(15),
     tools,

@@ -8,7 +8,7 @@ SQL >
     %
     WITH
         toStartOfDay(
-            toTimeZone(toDateTime64(now() - INTERVAL {{ Int32(intervalDays) }} DAY, 3), {{ String(timezone, 'UTC') }})
+            toTimeZone(toDateTime64(now() - INTERVAL {{ Int32(interval_days) }} DAY, 3), {{ String(timezone, 'UTC') }})
         ) AS start,
         toStartOfDay(
             toTimeZone(toDateTime64(now() + INTERVAL 1 DAY, 3), {{ String(timezone, 'UTC') }})
@@ -27,7 +27,7 @@ SQL >
     %
     WITH
         toStartOfHour(
-            toTimeZone(toDateTime64(now() - INTERVAL {{ Int32(intervalDays, 1) }} DAY, 3), {{ String(timezone, 'UTC') }})
+            toTimeZone(toDateTime64(now() - INTERVAL {{ Int32(interval_days, 1) }} DAY, 3), {{ String(timezone, 'UTC') }})
         ) AS start,
         toStartOfHour(
             toTimeZone(toDateTime64(now() + INTERVAL 1 DAY, 3), {{ String(timezone, 'UTC') }})
@@ -45,25 +45,25 @@ NODE feature_verification_regions_node
 SQL >
     %
     SELECT
-        {% if Int32(intervalDays) == 1 %}
+        {% if Int32(interval_days) == 1 %}
             toStartOfHour(fromUnixTimestamp64Milli(timestamp, {{ String(timezone, 'UTC') }})) as interval,
         {% else %}
             toStartOfDay(fromUnixTimestamp64Milli(timestamp, {{ String(timezone, 'UTC') }})) as interval,
         {% end %}
-        metadata['colo'] AS region,
+        region,
         count() AS count,
         round(quantile(0.50)(latency), 2) AS p50_latency,
         round(quantile(0.95)(latency), 2) AS p95_latency,
         round(quantile(0.99)(latency), 2) AS p99_latency
     FROM unprice_feature_verifications
     WHERE
-        region != '' AND
-        projectId = {{ String(projectId) }}
+        region != '' AND region != 'UNK' AND
+        project_id = {{ String(project_id) }}
         {% if defined(region) %}
             AND region = {{ String(region) }}
         {% end %}
-        {% if defined(intervalDays) %}
-            AND fromUnixTimestamp64Milli(timestamp) >= toStartOfDay(toTimeZone(now(), {{ String(timezone, 'UTC') }}) - INTERVAL {{ Int32(intervalDays) }} DAY)
+        {% if defined(interval_days) %}
+            AND fromUnixTimestamp64Milli(timestamp) >= toStartOfDay(toTimeZone(now(), {{ String(timezone, 'UTC') }}) - INTERVAL {{ Int32(interval_days) }} DAY)
         {% else %}
             AND fromUnixTimestamp64Milli(timestamp) >= toStartOfDay(toTimeZone(now(), {{ String(timezone, 'UTC') }}) - INTERVAL 7 DAY)
         {% end %}
@@ -82,7 +82,7 @@ SQL >
         p95_latency,
         p99_latency
     FROM
-        {% if Int32(intervalDays) == 1 %} hour_intervals
+        {% if Int32(interval_days) == 1 %} hour_intervals
         {% else %} day_intervals
         {% end %}
     LEFT JOIN feature_verification_regions_node USING interval

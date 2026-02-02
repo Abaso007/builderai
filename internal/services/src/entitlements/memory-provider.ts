@@ -175,7 +175,7 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
   ): Promise<Result<boolean, UnPriceEntitlementStorageError>> {
     try {
       this.isInitialized()
-      const exists = this.usageRecords.some((r) => r.idempotenceKey === idempotenceKey)
+      const exists = this.usageRecords.some((r) => r.idempotence_key === idempotenceKey)
       return Ok(exists)
     } catch (error) {
       return Err(
@@ -294,7 +294,7 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
         },
         verification: {
           count: this.verifications.length,
-          lastId: this.verifications[this.verifications.length - 1]?.requestId ?? null,
+          lastId: this.verifications[this.verifications.length - 1]?.request_id ?? null,
         },
       }
 

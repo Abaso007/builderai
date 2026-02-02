@@ -1,11 +1,11 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { Ok } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import { type Logger, createWideEventHelpers } from "@unprice/logging"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
-import { createClock, createMockEntitlementState } from "../test-utils"
+import { createClock, createMockEntitlementState, createMockWideEventLogger } from "../test-utils"
 import { MemoryEntitlementStorageProvider } from "./memory-provider"
 import { EntitlementService } from "./service"
 
@@ -124,6 +124,8 @@ describe("EntitlementService - Idempotency & Flush", () => {
     })
     await mockStorage.initialize()
 
+    const mockWideEventLogger = createMockWideEventLogger("entitlements-test", "0.0.1", "test")
+
     service = new EntitlementService({
       db: mockDb,
       storage: mockStorage,
@@ -132,6 +134,7 @@ describe("EntitlementService - Idempotency & Flush", () => {
       waitUntil: vi.fn((promise) => promise),
       cache: mockCache,
       metrics: mockMetrics,
+      wideEventHelpers: createWideEventHelpers(mockWideEventLogger),
     })
   })
 
@@ -184,7 +187,7 @@ describe("EntitlementService - Idempotency & Flush", () => {
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     const callArgs = (mockAnalytics.ingestFeaturesUsage as any).mock.calls[0][0]
     expect(callArgs).toHaveLength(1)
-    expect(callArgs[0].idempotenceKey).toBe(idempotenceKey)
+    expect(callArgs[0].idempotence_key).toBe(idempotenceKey)
   })
 
   it("should flush verifications correctly", async () => {

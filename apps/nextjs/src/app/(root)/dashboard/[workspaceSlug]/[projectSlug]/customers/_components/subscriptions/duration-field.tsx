@@ -1,24 +1,18 @@
 "use client"
 
 import { add, addDays, endOfDay, startOfDay, startOfMonth } from "date-fns"
-import { ArrowRight, CalendarIcon } from "lucide-react"
+import { ArrowRight, CalendarIcon, HelpCircle } from "lucide-react"
 import { useState } from "react"
 import type { FieldErrors, FieldPath, UseFormReturn } from "react-hook-form"
 
 import { Button } from "@unprice/ui/button"
 import { Calendar } from "@unprice/ui/calendar"
-import {
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@unprice/ui/form"
+import { FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
 import { Popover, PopoverContent, PopoverTrigger } from "@unprice/ui/popover"
 import { cn } from "@unprice/ui/utils"
 import { toastAction } from "~/lib/toast"
 
+import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { toZonedTime } from "date-fns-tz"
 import type { FieldValues } from "react-hook-form"
 import { formatDate } from "~/lib/dates"
@@ -69,16 +63,24 @@ export default function DurationFormField<TFieldValues extends FormValues>({
 
   return (
     <div className={cn("flex w-full flex-col gap-2", className)}>
-      <FormLabel
-        className={cn({
-          "text-destructive": errors.startAt,
-        })}
-      >
-        Duration
-      </FormLabel>
+      <div className="flex items-center gap-1">
+        <FormLabel
+          className={cn({
+            "text-destructive": errors.startAt,
+          })}
+        >
+          Duration
+        </FormLabel>
 
-      <FormDescription>The duration of the phase.</FormDescription>
-
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <HelpCircle className="size-3.5 text-muted-foreground" />
+          </TooltipTrigger>
+          <TooltipContent side="right" className="max-w-[250px]">
+            The duration of the phase
+          </TooltipContent>
+        </Tooltip>
+      </div>
       <div className="flex flex-row rounded-md border bg-background-bg">
         <FormField
           control={form.control}

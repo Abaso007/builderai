@@ -45,7 +45,7 @@ export function PlansConversion() {
   } = useSuspenseQuery(
     trpc.analytics.getPlansConversion.queryOptions(
       {
-        intervalDays: intervalFilter.intervalDays,
+        interval_days: intervalFilter.intervalDays,
       },
       {
         staleTime: ANALYTICS_STALE_TIME,

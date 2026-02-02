@@ -19,15 +19,15 @@ export const getOverviewStats = protectedProjectProcedure
     })
   )
   .query(async (opts) => {
-    const projectId = opts.ctx.project.id
+    const project_id = opts.ctx.project.id
 
     const interval = opts.input.interval
     const preparedInterval = prepareInterval(interval)
 
-    const cacheKey = `${projectId}:${preparedInterval.start}:${preparedInterval.end}`
+    const cacheKey = `${project_id}:${preparedInterval.start}:${preparedInterval.end}`
     const result = await opts.ctx.cache.getOverviewStats.swr(cacheKey, async () => {
       const data = await opts.ctx.db.query.subscriptions.findMany({
-        where: (table, { eq }) => eq(table.projectId, projectId),
+        where: (table, { eq }) => eq(table.projectId, project_id),
         columns: {
           id: true,
         },
@@ -130,7 +130,7 @@ export const getOverviewStats = protectedProjectProcedure
 
     if (result.err) {
       opts.ctx.logger.error(result.err.message, {
-        projectId,
+        project_id,
         interval,
       })
 

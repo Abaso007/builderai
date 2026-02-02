@@ -106,7 +106,7 @@ export function FeaturesStats() {
   } = useSuspenseQuery(
     trpc.analytics.getFeaturesOverview.queryOptions(
       {
-        intervalDays: intervalFilter.intervalDays,
+        interval_days: intervalFilter.intervalDays,
       },
       {
         staleTime: ANALYTICS_STALE_TIME,
@@ -123,7 +123,7 @@ export function FeaturesStats() {
       ["analytics", "getFeaturesOverview"],
       {
         input: {
-          intervalDays: param,
+          interval_days: param,
         },
         type: "query",
       },

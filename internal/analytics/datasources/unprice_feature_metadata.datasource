@@ -1,0 +1,17 @@
+TOKEN "web-apps" APPEND
+
+DESCRIPTION >
+    This table stores feature metadata per customer, entitlement, project and date, optimized for time-series analytics with deduplication support
+
+TAGS "metadata"
+
+SCHEMA >
+  `meta_id` UInt64 `json:$.meta_id`,
+  `tags` String `json:$.tags`,
+  `project_id` String `json:$.project_id`,
+  `customer_id` String `json:$.customer_id`,
+  `timestamp` DateTime64(3) `json:$.timestamp`,
+
+ENGINE MergeTree
+ENGINE_PARTITION_KEY toYYYYMM(timestamp)
+ENGINE_SORTING_KEY project_id, customer_id, meta_id

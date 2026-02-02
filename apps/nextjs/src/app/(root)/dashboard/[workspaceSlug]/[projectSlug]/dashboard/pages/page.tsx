@@ -38,8 +38,8 @@ export default async function DashboardPages(props: {
   batchPrefetch([
     trpc.analytics.getPagesOverview.queryOptions(
       {
-        intervalDays: interval.intervalDays,
-        pageId: page.pageId,
+        interval_days: interval.intervalDays,
+        page_id: page.pageId,
       },
       {
         staleTime: ANALYTICS_STALE_TIME,
@@ -48,7 +48,7 @@ export default async function DashboardPages(props: {
     ),
     trpc.analytics.getCountryVisits.queryOptions(
       {
-        intervalDays: interval.intervalDays,
+        interval_days: interval.intervalDays,
         page_id: page.pageId,
       },
       {
@@ -58,7 +58,7 @@ export default async function DashboardPages(props: {
     ),
     trpc.analytics.getBrowserVisits.queryOptions(
       {
-        intervalDays: interval.intervalDays,
+        interval_days: interval.intervalDays,
         page_id: page.pageId,
       },
       {

@@ -1,4 +1,10 @@
-import type { Analytics, AnalyticsUsage, AnalyticsVerification } from "@unprice/analytics"
+import type { R2Bucket } from "@cloudflare/workers-types"
+import type {
+  Analytics,
+  AnalyticsFeatureMetadata,
+  AnalyticsUsage,
+  AnalyticsVerification,
+} from "@unprice/analytics"
 import type { EntitlementState } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logging"
@@ -6,659 +12,345 @@ import {
   type UnPriceEntitlementStorage,
   UnPriceEntitlementStorageError,
 } from "@unprice/services/entitlements"
-import { count, desc, eq, sql } from "drizzle-orm"
+import { desc, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
-import { schema } from "~/db/types"
+import xxhash, { type XXHashAPI } from "xxhash-wasm"
+import { type UsageRecord, type Verification, schema } from "~/db/types"
 import migrations from "../../drizzle/migrations"
+
+// Constants
+const BATCH_SIZE = 1000
+const METADATA_RETENTION_DAYS = 3
+const STATE_KEY_PREFIX = "state:"
+const SEEN_META_PREFIX = "seen_meta_"
+
+// Type guard for EntitlementState
+function isEntitlementState(value: unknown): value is EntitlementState {
+  if (!value || typeof value !== "object") return false
+  const obj = value as Record<string, unknown>
+  return (
+    typeof obj.customerId === "string" &&
+    typeof obj.projectId === "string" &&
+    typeof obj.featureSlug === "string"
+  )
+}
+
+// Batch result type for type safety
+interface BatchResult<T, ID> {
+  records: T[]
+  firstId: ID | null
+  lastId: ID | null
+}
+
+// Tinybird ingestion payload types (what analytics.ingest* methods expect)
+interface TinybirdUsagePayload {
+  id: string
+  timestamp: number
+  usage: number
+  meta_id: number
+  deleted: number
+  project_id: string
+  customer_id: string
+  feature_slug: string
+  request_id: string
+  created_at: number
+  idempotence_key: string
+}
+
+interface TinybirdVerificationPayload {
+  timestamp: number
+  meta_id: number
+  latency: number
+  denied_reason: string | undefined
+  allowed: number
+  project_id: string
+  customer_id: string
+  feature_slug: string
+  request_id: string
+  created_at: number
+  region: string
+}
+
+interface TinybirdMetadataPayload {
+  timestamp: number
+  project_id: string
+  customer_id: string
+  meta_id: number
+  tags: string
+}
+
+// Processed record with metadata for internal use
+interface ProcessedUsageRecord {
+  record: UsageRecord
+  metaId: number
+  metadata: Record<string, unknown> | null
+}
+
+interface ProcessedVerificationRecord {
+  record: Verification
+  metaId: number
+  region: string
+}
+
+interface MetadataProcessingResult {
+  usageRecords: ProcessedUsageRecord[]
+  verificationRecords: ProcessedVerificationRecord[]
+  uniqueMetadata: AnalyticsFeatureMetadata[]
+  seenMetaSet: Set<string>
+  todayKey: string
+}
 
 /**
  * SQLite Storage Provider for Durable Objects
- * Uses Drizzle ORM with DO's internal SQLite database
  *
- * Tables needed in your schema:
- * - entitlementStates: Cache entitlement snapshots
- * - usageRecordsBuffer: Buffer usage for Tinybird
- * - verificationsBuffer: Buffer verifications for Tinybird
+ * Key design principles:
+ * 1. All state mutations happen inside blockConcurrencyWhile to prevent race conditions
+ * 2. Fail-fast with Result type - no throwing except for unrecoverable errors
+ * 3. Single responsibility methods with clear boundaries
+ * 4. Type-safe transformations between storage and analytics types
  */
 export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   readonly name = "sqlite-do"
-  private db: DrizzleSqliteDODatabase<typeof schema>
-  private storage: DurableObjectStorage
-  private state: DurableObjectState
-  private analytics: Analytics
-  private logger: Logger
-  private memoizedStates: Map<string, EntitlementState> = new Map()
-  // if the storage provider is initialized
-  private initialized = false
 
-  /**
-   * Constructor
-   */
+  private readonly db: DrizzleSqliteDODatabase<typeof schema>
+  private readonly storage: DurableObjectStorage
+  private readonly state: DurableObjectState
+  private readonly analytics: Analytics
+  private readonly logger: Logger
+  private readonly lakehouse: R2Bucket | undefined
+
+  // Memoized entitlement states for fast lookups
+  private stateCache = new Map<string, EntitlementState>()
+  private initialized = false
+  private lastR2UsageId: string | null = null
+  private lastR2VerificationId: number | null = null
+
+  // Lazily initialized xxhash instance (WASM module)
+  private xxhashInstance: XXHashAPI | null = null
+
   constructor(args: {
     storage: DurableObjectStorage
     state: DurableObjectState
     analytics: Analytics
     logger: Logger
+    lakehouse?: R2Bucket
   }) {
     this.storage = args.storage
     this.state = args.state
     this.analytics = args.analytics
     this.logger = args.logger
+    this.lakehouse = args.lakehouse
     this.db = drizzle(args.storage, { schema, logger: false })
   }
 
-  /**
-   * Initialize the storage provider
-   */
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Initialization
+  // ─────────────────────────────────────────────────────────────────────────────
+
   async initialize(): Promise<Result<void, UnPriceEntitlementStorageError>> {
     return this.state.blockConcurrencyWhile(async () => {
       try {
-        // first migrate the database
-        await this._migrate()
-
-        // then set the initialized flag
+        await migrate(this.db, migrations)
+        await this.loadStateCache()
         this.initialized = true
-
-        // then memoize the states
-        const { err } = await this.getAll()
-
-        if (err) {
-          return Err(err)
-        }
-
-        // return ok
         return Ok(undefined)
       } catch (error) {
-        // set the initialized flag to false
         this.initialized = false
-
-        // clear the memoized states
-        this.memoizedStates.clear()
-
-        this.logger.error(`Storage provider ${this.state.id.toString()} initialize failed`, {
-          error: error instanceof Error ? error.message : "unknown",
-        })
-
-        return Err(
-          new UnPriceEntitlementStorageError({
-            message: `Initialize failed: ${error instanceof Error ? error.message : "unknown"}`,
-          })
-        )
+        this.stateCache.clear()
+        return this.logAndError("initialize", error)
       }
     })
   }
 
-  async _migrate() {
-    try {
-      await migrate(this.db, migrations)
-    } catch (error) {
-      // Log the error
-      this.logger.error(`Storage provider ${this.state.id.toString()} migrate failed`, {
-        error: error instanceof Error ? error.message : "unknown",
-      })
+  private assertInitialized(): void {
+    if (!this.initialized) {
+      throw new UnPriceEntitlementStorageError({ message: "Storage provider not initialized" })
     }
   }
 
-  private isInitialized(): Result<void, UnPriceEntitlementStorageError> {
-    if (this.initialized) {
-      return Ok(undefined)
-    }
+  private async loadStateCache(): Promise<void> {
+    const entries = await this.storage.list({ prefix: STATE_KEY_PREFIX })
+    this.stateCache.clear()
 
-    throw new UnPriceEntitlementStorageError({ message: "Storage provider not initialized" })
-  }
-
-  /**
-   * Delete all states from the storage
-   */
-  async deleteAll(): Promise<Result<void, UnPriceEntitlementStorageError>> {
-    try {
-      this.isInitialized()
-
-      // delete all the states from the storage
-      await this.storage.deleteAll()
-
-      // clear the memoized states
-      this.memoizedStates.clear()
-
-      // migrate the database again
-      await this._migrate()
-      return Ok(undefined)
-    } catch (error) {
-      return Err(
-        new UnPriceEntitlementStorageError({
-          message: `Delete all failed: ${error instanceof Error ? error.message : "unknown"}`,
-        })
-      )
+    for (const [key, value] of entries) {
+      if (isEntitlementState(value)) {
+        this.stateCache.set(key, value)
+      }
     }
   }
 
-  /**
-   * Get all entitlement states from DO
-   */
-  async getAll(): Promise<Result<EntitlementState[], UnPriceEntitlementStorageError>> {
-    try {
-      this.isInitialized()
+  // ─────────────────────────────────────────────────────────────────────────────
+  // State CRUD Operations
+  // ─────────────────────────────────────────────────────────────────────────────
 
-      // get the states from the storage
-      const states = await this.storage.list<EntitlementState>()
-
-      // clear the memoized states
-      this.memoizedStates.clear()
-
-      // memoize the new states
-      states.forEach((value, key) => {
-        // skip config key
-        if (key.includes("config")) {
-          return
-        }
-
-        if (value) {
-          this.memoizedStates.set(key, value)
-        }
-      })
-
-      // return the states
-      return Ok(Array.from(this.memoizedStates.values()))
-    } catch (error) {
-      this.logger.error(`Storage provider ${this.state.id.toString()} getAll failed`, {
-        error: error instanceof Error ? error.message : "unknown",
-      })
-      return Err(
-        new UnPriceEntitlementStorageError({
-          message: `Get all failed: ${error instanceof Error ? error.message : "unknown"}`,
-        })
-      )
-    }
-  }
-
-  /**
-   * Get entitlement state from DO
-   */
   async get(params: {
     customerId: string
     projectId: string
     featureSlug: string
   }): Promise<Result<EntitlementState | null, UnPriceEntitlementStorageError>> {
     try {
-      this.isInitialized()
-
+      this.assertInitialized()
       const key = this.makeKey(params)
 
-      // check if the state is memoized
-      const memoizedState = this.memoizedStates.get(key)
+      // Check cache first
+      const cached = this.stateCache.get(key)
+      if (cached) return Ok(cached)
 
-      // if the state is memoized, return it
-      if (memoizedState) {
-        return Ok(memoizedState)
+      // Fall back to storage
+      const value = await this.storage.get(key)
+      if (value && isEntitlementState(value)) {
+        this.stateCache.set(key, value)
+        return Ok(value)
       }
 
-      // get the state from the storage
-      const value = await this.storage.get<EntitlementState>(key)
-
-      // memoize the state
-      if (value) {
-        this.memoizedStates.set(key, value)
-      }
-
-      // return the state
-      return Ok(value ?? null)
+      return Ok(null)
     } catch (error) {
-      this.logger.error(`Storage provider ${this.state.id.toString()} get failed`, {
-        error: error instanceof Error ? error.message : "unknown",
-      })
-      return Err(
-        new UnPriceEntitlementStorageError({
-          message: `Get failed: ${error instanceof Error ? error.message : "unknown"}`,
-        })
-      )
+      return this.logAndError("get", error)
     }
   }
 
-  /**
-   * Set entitlement state in DO
-   */
-  async set(params: { state: EntitlementState }): Promise<
-    Result<void, UnPriceEntitlementStorageError>
-  > {
+  async getAll(): Promise<Result<EntitlementState[], UnPriceEntitlementStorageError>> {
     try {
-      this.isInitialized()
+      this.assertInitialized()
+      return Ok(Array.from(this.stateCache.values()))
+    } catch (error) {
+      return this.logAndError("getAll", error)
+    }
+  }
 
+  async set(params: {
+    state: EntitlementState
+  }): Promise<Result<void, UnPriceEntitlementStorageError>> {
+    try {
+      this.assertInitialized()
       const key = this.makeKey({
         customerId: params.state.customerId,
         projectId: params.state.projectId,
         featureSlug: params.state.featureSlug,
       })
 
-      // put the state in the storage
       await this.storage.put(key, params.state)
+      this.stateCache.set(key, params.state)
 
-      // memoize the state
-      this.memoizedStates.set(key, params.state)
-
-      // return ok
       return Ok(undefined)
     } catch (error) {
-      this.logger.error(`Storage provider ${this.state.id.toString()} set failed`, {
-        error: error instanceof Error ? error.message : "unknown",
-      })
-      return Err(
-        new UnPriceEntitlementStorageError({
-          message: `Set failed: ${error instanceof Error ? error.message : "unknown"}`,
-        })
-      )
+      return this.logAndError("set", error)
     }
   }
 
-  /**
-   * Delete entitlement state from DO
-   */
   async delete(params: {
     customerId: string
     projectId: string
     featureSlug: string
   }): Promise<Result<void, UnPriceEntitlementStorageError>> {
     try {
-      this.isInitialized()
-
-      // make the key
+      this.assertInitialized()
       const key = this.makeKey(params)
 
-      // delete the state from the storage
       await this.storage.delete(key)
+      this.stateCache.delete(key)
 
-      // delete the state from the memoized states
-      this.memoizedStates.delete(key)
-
-      // return ok
       return Ok(undefined)
     } catch (error) {
-      this.logger.error(`Storage provider ${this.state.id.toString()} delete failed`, {
-        error: error instanceof Error ? error.message : "unknown",
-      })
-      return Err(
-        new UnPriceEntitlementStorageError({
-          message: `Delete failed: ${error instanceof Error ? error.message : "unknown"}`,
-        })
-      )
+      return this.logAndError("delete", error)
     }
   }
 
-  /**
-   * Check if idempotence key exists (fast local query)
-   */
+  async deleteAll(): Promise<Result<void, UnPriceEntitlementStorageError>> {
+    return this.state.blockConcurrencyWhile(async () => {
+      try {
+        this.assertInitialized()
+        await this.storage.deleteAll()
+        this.stateCache.clear()
+        await migrate(this.db, migrations)
+        return Ok(undefined)
+      } catch (error) {
+        return this.logAndError("deleteAll", error)
+      }
+    })
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Usage & Verification Recording
+  // ─────────────────────────────────────────────────────────────────────────────
+
   async hasIdempotenceKey(
     idempotenceKey: string
   ): Promise<Result<boolean, UnPriceEntitlementStorageError>> {
     try {
-      this.isInitialized()
+      this.assertInitialized()
 
       const result = await this.db
         .select({ id: schema.usageRecords.id })
         .from(schema.usageRecords)
-        .where(eq(schema.usageRecords.idempotenceKey, idempotenceKey))
+        .where(sql`${schema.usageRecords.idempotence_key} = ${idempotenceKey}`)
         .limit(1)
 
       return Ok(result.length > 0)
     } catch (error) {
-      this.logger.error(`Storage provider ${this.state.id.toString()} hasIdempotenceKey failed`, {
-        error: error instanceof Error ? error.message : "unknown",
-      })
-      return Err(
-        new UnPriceEntitlementStorageError({
-          message: `Has idempotence key failed: ${error instanceof Error ? error.message : "unknown"}`,
-        })
-      )
+      return this.logAndError("hasIdempotenceKey", error)
     }
   }
 
-  /**
-   * Insert usage record in SQLite
-   */
   async insertUsageRecord(
     record: AnalyticsUsage
   ): Promise<Result<void, UnPriceEntitlementStorageError>> {
     try {
-      this.isInitialized()
+      this.assertInitialized()
 
-      // insert the usage record into the database
       await this.db
         .insert(schema.usageRecords)
         .values({
           id: record.id,
-          customerId: record.customerId,
-          featureSlug: record.featureSlug,
-          usage: record.usage.toString(),
+          customer_id: record.customer_id,
+          feature_slug: record.feature_slug,
+          usage: String(record.usage),
           timestamp: record.timestamp,
-          createdAt: record.createdAt,
+          created_at: record.created_at,
           metadata: record.metadata ? JSON.stringify(record.metadata) : null,
-          deleted: record.deleted ? 1 : 0,
-          idempotenceKey: record.idempotenceKey,
-          requestId: record.requestId,
-          projectId: record.projectId,
-        }) // on conflict do nothing because we don't want to insert duplicates
+          deleted: record.deleted ?? 0,
+          idempotence_key: record.idempotence_key,
+          request_id: record.request_id,
+          project_id: record.project_id,
+        })
         .onConflictDoNothing()
 
       return Ok(undefined)
     } catch (error) {
-      this.logger.error(`Storage provider ${this.state.id.toString()} insert usage record failed`, {
-        error: error instanceof Error ? error.message : "unknown",
-      })
-      return Err(
-        new UnPriceEntitlementStorageError({
-          message: `Insert usage record failed: ${error instanceof Error ? error.message : "unknown"}`,
-        })
-      )
+      return this.logAndError("insertUsageRecord", error)
     }
   }
 
-  /**
-   * Buffer verification in SQLite
-   */
   async insertVerification(
     record: AnalyticsVerification
   ): Promise<Result<void, UnPriceEntitlementStorageError>> {
     try {
-      this.isInitialized()
+      this.assertInitialized()
 
-      // insert the verification into the database
       await this.db.insert(schema.verifications).values({
-        customerId: record.customerId,
-        featureSlug: record.featureSlug,
-        projectId: record.projectId,
+        customer_id: record.customer_id,
+        feature_slug: record.feature_slug,
+        project_id: record.project_id,
         timestamp: record.timestamp,
-        createdAt: record.createdAt,
-        requestId: record.requestId,
-        deniedReason: record.deniedReason,
-        latency: record.latency ? record.latency.toString() : "0",
+        created_at: record.created_at,
+        request_id: record.request_id,
+        denied_reason: record.denied_reason ?? null,
+        latency: record.latency != null ? String(record.latency) : "0",
         allowed: record.allowed,
         metadata: record.metadata ? JSON.stringify(record.metadata) : null,
       })
 
       return Ok(undefined)
     } catch (error) {
-      this.logger.error(`Storage provider ${this.state.id.toString()} insert verification failed`, {
-        error: error instanceof Error ? error.message : "unknown",
-      })
-      return Err(
-        new UnPriceEntitlementStorageError({
-          message: `Insert verification failed: ${error instanceof Error ? error.message : "unknown"}`,
-        })
-      )
+      return this.logAndError("insertVerification", error)
     }
   }
 
-  /**
-   * Reset the storage provider
-   */
-  public async reset(): Promise<Result<void, UnPriceEntitlementStorageError>> {
-    try {
-      // try to flush
-      await this.flush()
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Flush & Reset
+  // ─────────────────────────────────────────────────────────────────────────────
 
-      // check if everything was flushed
-      const events = await this.db
-        .select({
-          count: count(),
-        })
-        .from(schema.usageRecords)
-        .then((e) => e[0])
-
-      const verification_events = await this.db
-        .select({
-          count: count(),
-        })
-        .from(schema.verifications)
-        .then((e) => e[0])
-
-      // if there are any events, do not delete
-      if ((events?.count ?? 0) !== 0 || (verification_events?.count ?? 0) !== 0) {
-        return Err(
-          new UnPriceEntitlementStorageError({
-            message: `Storage provider has ${events?.count} events and ${verification_events?.count} verification events, can't delete.`,
-          })
-        )
-      }
-    } catch (error) {
-      this.logger.error("error resetting storage provider", {
-        error: error instanceof Error ? error.message : "unknown error",
-      })
-
-      return Err(
-        new UnPriceEntitlementStorageError({
-          message: `Reset failed: ${error instanceof Error ? error.message : "unknown"}`,
-        })
-      )
-    }
-
-    // we are setting the state so better do it inside a block concurrency
-    return await this.state.blockConcurrencyWhile(async () => {
-      try {
-        // clear the memoized states
-        this.memoizedStates.clear()
-        // delete all the states from the storage
-        await this.storage.deleteAll()
-        // set initialized to false
-        this.initialized = false
-        // initialize the storage provider again in case there are concurrent requests
-        await this.initialize()
-
-        return Ok(undefined)
-      } catch (error) {
-        this.logger.error("error resetting storage provider", {
-          error: error instanceof Error ? error.message : "unknown error",
-        })
-
-        return Err(
-          new UnPriceEntitlementStorageError({
-            message: `Reset failed: ${error instanceof Error ? error.message : "unknown"}`,
-          })
-        )
-      }
-    })
-  }
-
-  private async sendVerificationsToTinybird(): Promise<{
-    count: number
-    lastId: string | null
-  }> {
-    // Process events in batches to avoid memory issues
-    const BATCH_SIZE = 1000
-
-    // Get a batch of events
-    const verificationEvents = await this.db
-      .select()
-      .from(schema.verifications)
-      .limit(BATCH_SIZE)
-      .orderBy(schema.verifications.id)
-
-    if (verificationEvents.length === 0) return { count: 0, lastId: null }
-
-    const firstId = verificationEvents[0]?.id
-    const lastId = verificationEvents[verificationEvents.length - 1]?.id
-
-    try {
-      // transform the verifications to the format expected by the analytics
-      const transformedEvents = verificationEvents.map((verification) => ({
-        ...verification,
-        metadata: JSON.parse(verification.metadata ?? "{}"),
-        latency: verification.latency ? Number(verification.latency) : 0,
-        deniedReason: verification.deniedReason ?? undefined,
-      }))
-
-      await this.analytics
-        .ingestFeaturesVerification(transformedEvents)
-        .catch((e) => {
-          this.logger.error(
-            `Failed in ingestFeaturesVerification from storage provider ${this.state.id.toString()} ${e.message}`,
-            {
-              error: JSON.stringify(e),
-              customerId: transformedEvents[0]?.customerId,
-              projectId: transformedEvents[0]?.projectId,
-            }
-          )
-        })
-        .then(async (data) => {
-          const rows = data?.successful_rows ?? 0
-          const quarantined = data?.quarantined_rows ?? 0
-          const total = rows + quarantined
-
-          if (quarantined > 0) {
-            this.logger.debug("quarantined verifications", {
-              quarantined,
-            })
-          }
-
-          if (total >= verificationEvents.length) {
-            // Delete by range - much more efficient, only 2 SQL variables
-            const deletedResult = await this.db
-              .delete(schema.verifications)
-              .where(sql`id >= ${firstId} AND id <= ${lastId}`)
-              .returning({ id: schema.verifications.id })
-
-            const deleted = deletedResult.length
-
-            this.logger.debug(
-              `deleted ${deleted} verifications from storage provider ${this.state.id.toString()} (range: ${firstId}-${lastId})`,
-              {
-                rows: total,
-                deleted,
-                expectedCount: verificationEvents.length,
-              }
-            )
-          } else {
-            this.logger.warn(
-              "the total of verifications sent to tinybird are not the same as the total of verifications in the db",
-              {
-                total,
-                expected: verificationEvents.length,
-                customerId: transformedEvents[0]?.customerId,
-                projectId: transformedEvents[0]?.projectId,
-              }
-            )
-          }
-        })
-    } catch (error) {
-      this.logger.error(
-        `Failed to send verifications to Tinybird from storage provider ${this.state.id.toString()} ${error instanceof Error ? error.message : "unknown error"}`,
-        {
-          error: error instanceof Error ? JSON.stringify(error) : "unknown error",
-          customerId: verificationEvents[0]?.customerId,
-          projectId: verificationEvents[0]?.projectId,
-        }
-      )
-    }
-
-    // Update the last processed ID
-    return { count: verificationEvents.length, lastId: lastId ? lastId.toString() : null }
-  }
-
-  private async sendUsageToTinybird(): Promise<{
-    count: number
-    lastId: string | null
-  }> {
-    const BATCH_SIZE = 1000
-
-    // Get a batch of events
-    // if featureSlug is provided, filter by featureSlug
-    const events = await this.db
-      .select()
-      .from(schema.usageRecords)
-      .limit(BATCH_SIZE)
-      .orderBy(desc(schema.usageRecords.id))
-
-    if (events.length === 0) return { count: 0, lastId: null }
-
-    const firstId = events[0]?.id
-    const lastId = events[events.length - 1]?.id
-
-    // Create a Map to deduplicate events based on their unique identifiers
-    const uniqueEvents = new Map()
-    for (const event of events) {
-      if (!uniqueEvents.has(event.idempotenceKey)) {
-        uniqueEvents.set(event.idempotenceKey, {
-          ...event,
-          metadata: event.metadata ? JSON.parse(event.metadata) : null,
-        })
-      }
-    }
-
-    const deduplicatedEvents = Array.from(uniqueEvents.values())
-
-    if (deduplicatedEvents.length > 0) {
-      try {
-        await this.analytics
-          .ingestFeaturesUsage(deduplicatedEvents)
-          .catch((e) => {
-            this.logger.error(
-              `Failed to send ${deduplicatedEvents.length} events to Tinybird from storage provider ${this.state.id.toString()}:`,
-              {
-                error: e.message,
-                customerId: deduplicatedEvents[0]?.customerId,
-                projectId: deduplicatedEvents[0]?.projectId,
-              }
-            )
-          })
-          .then(async (data) => {
-            const rows = data?.successful_rows ?? 0
-            const quarantined = data?.quarantined_rows ?? 0
-            const total = rows + quarantined
-
-            if (total >= deduplicatedEvents.length) {
-              this.logger.debug(
-                `successfully sent ${deduplicatedEvents.length} usage records to Tinybird`,
-                {
-                  rows: total,
-                }
-              )
-
-              // Delete by range - much more efficient, only 2 SQL variables
-              const deletedResult = await this.db
-                .delete(schema.usageRecords)
-                .where(sql`id >= ${lastId} AND id <= ${firstId}`)
-                .returning({ id: schema.usageRecords.id })
-
-              const deleted = deletedResult.length
-
-              this.logger.debug(
-                `deleted ${deleted} usage records from storage provider ${this.state.id.toString()} (range: ${firstId}-${lastId})`,
-                {
-                  count: events.length,
-                  deleted,
-                }
-              )
-            } else {
-              this.logger.warn(
-                "the total of usage records sent to tinybird are not the same as the total of usage records in the db",
-                {
-                  total,
-                  expected: events.length,
-                  customerId: deduplicatedEvents[0]?.customerId,
-                  projectId: deduplicatedEvents[0]?.projectId,
-                }
-              )
-            }
-          })
-      } catch (error) {
-        this.logger.error(
-          `Failed to send events to Tinybird from storage provider ${this.state.id.toString()}:`,
-          {
-            error: error instanceof Error ? error.message : "unknown error",
-            customerId: deduplicatedEvents[0]?.customerId,
-            projectId: deduplicatedEvents[0]?.projectId,
-          }
-        )
-      }
-    }
-
-    // Update the last processed ID for the next batch
-    return { count: events.length, lastId: lastId ?? null }
-  }
-
-  /**
-   * Flush usage records and verifications
-   * flushing on interval, if failed, retry later
-   */
   async flush(): Promise<
     Result<
       {
@@ -669,35 +361,627 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     >
   > {
     try {
-      this.isInitialized()
+      this.assertInitialized()
 
-      // delete usage records and verifications in parallel (fire and forget)
-      const [usage, verification] = await Promise.all([
-        this.sendUsageToTinybird(),
-        this.sendVerificationsToTinybird(),
+      // 1. Fetch batches
+      const usageBatch = await this.fetchUsageBatch()
+      const verificationBatch = await this.fetchVerificationBatch()
+
+      // 2. Process metadata (compute meta_id, extract unique metadata)
+      const processed = await this.processMetadata(usageBatch.records, verificationBatch.records)
+
+      // 3. Send to destinations in parallel (R2 is best-effort)
+      const [_r2, usageResult, verificationResult, _metaResult] = await Promise.all([
+        this.flushToR2(processed).catch((err) => {
+          this.logger.error("R2 flush failed (best-effort)", { error: this.errorMessage(err) })
+          return { success: false }
+        }),
+        this.ingestUsageToTinybird(processed.usageRecords),
+        this.ingestVerificationsToTinybird(processed.verificationRecords),
+        this.ingestMetadataToTinybird(processed.uniqueMetadata),
       ])
 
+      // 4. Update seen metadata set
+      if (processed.uniqueMetadata.length > 0) {
+        await this.updateSeenMetaSet(processed.todayKey, processed.seenMetaSet)
+      }
+
+      // 5. Delete successfully processed records
+      if (usageResult.success && usageBatch.firstId && usageBatch.lastId) {
+        await this.deleteUsageRecordsBatch(usageBatch.firstId, usageBatch.lastId)
+      }
+
+      if (verificationResult.success && verificationBatch.firstId && verificationBatch.lastId) {
+        await this.deleteVerificationRecordsBatch(
+          verificationBatch.firstId,
+          verificationBatch.lastId
+        )
+      }
+
       return Ok({
-        usage,
-        verification,
+        usage: { count: usageBatch.records.length, lastId: usageBatch.lastId },
+        verification: {
+          count: verificationBatch.records.length,
+          lastId: verificationBatch.lastId?.toString() ?? null,
+        },
       })
     } catch (error) {
-      this.logger.error(`Storage provider ${this.state.id.toString()} flush failed`, {
-        error: error instanceof Error ? error.message : "unknown",
-      })
-      return Err(
-        new UnPriceEntitlementStorageError({
-          message: `Flush failed: ${error instanceof Error ? error.message : "unknown"}`,
-        })
-      )
+      return this.logAndError("flush", error)
     }
   }
+
+  async reset(): Promise<Result<void, UnPriceEntitlementStorageError>> {
+    // Wrap entire reset in blockConcurrencyWhile to prevent race conditions
+    return this.state.blockConcurrencyWhile(async () => {
+      try {
+        // 1. Try to flush pending data
+        const flushResult = await this.flush()
+        if (flushResult.err) {
+          this.logger.warn("Flush during reset failed, continuing anyway", {
+            error: flushResult.err.message,
+          })
+        }
+
+        // 2. Check for remaining records
+        const [usageCount, verificationCount] = await Promise.all([
+          this.db
+            .select({ count: sql<number>`count(*)` })
+            .from(schema.usageRecords)
+            .then((r) => r[0]?.count ?? 0),
+          this.db
+            .select({ count: sql<number>`count(*)` })
+            .from(schema.verifications)
+            .then((r) => r[0]?.count ?? 0),
+        ])
+
+        if (usageCount > 0 || verificationCount > 0) {
+          return Err(
+            new UnPriceEntitlementStorageError({
+              message: `Cannot reset: ${usageCount} usage records and ${verificationCount} verifications pending`,
+            })
+          )
+        }
+
+        // 3. Clear everything and reinitialize
+        this.stateCache.clear()
+        await this.storage.deleteAll()
+        this.initialized = false
+
+        // Reinitialize
+        await migrate(this.db, migrations)
+        await this.loadStateCache()
+        this.initialized = true
+
+        return Ok(undefined)
+      } catch (error) {
+        return this.logAndError("reset", error)
+      }
+    })
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Batch Fetching
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  private async fetchUsageBatch(): Promise<BatchResult<UsageRecord, string>> {
+    const records = await this.db
+      .select()
+      .from(schema.usageRecords)
+      .orderBy(desc(schema.usageRecords.id))
+      .limit(BATCH_SIZE)
+
+    if (records.length === 0) {
+      return { records: [], firstId: null, lastId: null }
+    }
+
+    // Deduplicate by idempotence_key (keep first occurrence)
+    const seen = new Set<string>()
+    const deduplicated = records.filter((r) => {
+      if (seen.has(r.idempotence_key)) return false
+      seen.add(r.idempotence_key)
+      return true
+    })
+
+    // firstId is highest (DESC order), lastId is lowest
+    const firstId = records[0]?.id ?? null
+    const lastId = records[records.length - 1]?.id ?? null
+
+    return { records: deduplicated, firstId, lastId }
+  }
+
+  private async fetchVerificationBatch(): Promise<BatchResult<Verification, number>> {
+    const records = await this.db
+      .select()
+      .from(schema.verifications)
+      .orderBy(schema.verifications.id)
+      .limit(BATCH_SIZE)
+
+    if (records.length === 0) {
+      return { records: [], firstId: null, lastId: null }
+    }
+
+    const firstId = records[0]?.id ?? null
+    const lastId = records[records.length - 1]?.id ?? null
+
+    return { records, firstId, lastId }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Metadata Processing
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  private async processMetadata(
+    usageRecords: UsageRecord[],
+    verifications: Verification[]
+  ): Promise<MetadataProcessingResult> {
+    const todayKey = this.getTodayKey()
+    const seenMetaSet = await this.getSeenMetaSet(todayKey)
+    const uniqueMetadata: AnalyticsFeatureMetadata[] = []
+
+    // Process usage records
+    const processedUsage: ProcessedUsageRecord[] = []
+    for (const record of usageRecords) {
+      const metadata = this.parseMetadata(record.metadata)
+      const { hash, json } = await this.computeMetaId(metadata)
+      const metaId = Number(hash)
+      const metaIdKey = hash.toString() // string key for Set deduplication
+
+      if (hash !== BigInt(0) && !seenMetaSet.has(metaIdKey)) {
+        seenMetaSet.add(metaIdKey)
+        uniqueMetadata.push({
+          meta_id: metaId,
+          tags: json,
+          project_id: record.project_id,
+          customer_id: record.customer_id,
+          timestamp: record.timestamp,
+        })
+      }
+
+      processedUsage.push({ record, metaId, metadata })
+    }
+
+    // Process verifications
+    const processedVerifications: ProcessedVerificationRecord[] = []
+    for (const record of verifications) {
+      const metadata = this.parseMetadata(record.metadata)
+      const { hash, json } = await this.computeMetaId(metadata)
+      const metaId = Number(hash)
+      const metaIdKey = hash.toString() // string key for Set deduplication
+      const region = (metadata?.colo as string) ?? "UNK"
+
+      if (hash !== BigInt(0) && !seenMetaSet.has(metaIdKey)) {
+        seenMetaSet.add(metaIdKey)
+        uniqueMetadata.push({
+          meta_id: metaId,
+          tags: json,
+          project_id: record.project_id,
+          customer_id: record.customer_id,
+          timestamp: record.timestamp,
+        })
+      }
+
+      processedVerifications.push({ record, metaId, region })
+    }
+
+    return {
+      usageRecords: processedUsage,
+      verificationRecords: processedVerifications,
+      uniqueMetadata,
+      seenMetaSet,
+      todayKey,
+    }
+  }
+
+  private parseMetadata(raw: string | null): Record<string, unknown> | null {
+    if (!raw) return null
+    try {
+      return JSON.parse(raw)
+    } catch {
+      return null
+    }
+  }
+
+  private async computeMetaId(
+    metadata: Record<string, unknown> | null
+  ): Promise<{ hash: bigint; json: string }> {
+    if (!metadata || Object.keys(metadata).length === 0) {
+      return { hash: BigInt(0), json: "{}" }
+    }
+
+    // Sort keys for stable hashing
+    const sortedKeys = Object.keys(metadata).sort()
+    const normalized: Record<string, unknown> = {}
+    for (const key of sortedKeys) {
+      normalized[key] = metadata[key]
+    }
+
+    const json = JSON.stringify(normalized)
+    const hasher = await this.getXxhash()
+
+    return { hash: hasher.h64(json), json }
+  }
+
+  private async getXxhash(): Promise<XXHashAPI> {
+    if (!this.xxhashInstance) {
+      this.xxhashInstance = await xxhash()
+    }
+    return this.xxhashInstance
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Tinybird Ingestion
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  private async ingestUsageToTinybird(
+    records: ProcessedUsageRecord[]
+  ): Promise<{ success: boolean }> {
+    if (records.length === 0) return { success: true }
+
+    try {
+      const payload: TinybirdUsagePayload[] = records.map(({ record, metaId }) => ({
+        id: record.id,
+        timestamp: record.timestamp,
+        usage: Number(record.usage ?? 0),
+        meta_id: metaId,
+        deleted: record.deleted,
+        project_id: record.project_id,
+        customer_id: record.customer_id,
+        feature_slug: record.feature_slug,
+        request_id: record.request_id,
+        created_at: record.created_at,
+        idempotence_key: record.idempotence_key,
+      }))
+
+      const result = await this.analytics.ingestFeaturesUsage(payload)
+
+      // Verify all rows were processed (either successful or quarantined)
+      const successful = result?.successful_rows ?? 0
+      const quarantined = result?.quarantined_rows ?? 0
+      const total = successful + quarantined
+
+      if (total >= records.length) {
+        return { success: true }
+      }
+
+      this.logger.warn("Tinybird usage ingestion incomplete", {
+        expected: records.length,
+        successful,
+        quarantined,
+      })
+      return { success: false }
+    } catch (error) {
+      this.logger.error("Failed to ingest usage to Tinybird", { error: this.errorMessage(error) })
+      return { success: false }
+    }
+  }
+
+  private async ingestVerificationsToTinybird(
+    records: ProcessedVerificationRecord[]
+  ): Promise<{ success: boolean }> {
+    if (records.length === 0) return { success: true }
+
+    try {
+      const payload: TinybirdVerificationPayload[] = records.map(({ record, metaId, region }) => ({
+        timestamp: record.timestamp,
+        meta_id: metaId,
+        latency: record.latency ? Number(record.latency) : 0,
+        denied_reason: record.denied_reason ?? undefined,
+        allowed: record.allowed,
+        project_id: record.project_id,
+        customer_id: record.customer_id,
+        feature_slug: record.feature_slug,
+        request_id: record.request_id,
+        created_at: record.created_at,
+        region,
+      }))
+
+      const result = await this.analytics.ingestFeaturesVerification(payload)
+
+      // Verify all rows were processed
+      const successful = result?.successful_rows ?? 0
+      const quarantined = result?.quarantined_rows ?? 0
+      const total = successful + quarantined
+
+      if (total >= records.length) {
+        return { success: true }
+      }
+
+      this.logger.warn("Tinybird verification ingestion incomplete", {
+        expected: records.length,
+        successful,
+        quarantined,
+      })
+      return { success: false }
+    } catch (error) {
+      this.logger.error("Failed to ingest verifications to Tinybird", {
+        error: this.errorMessage(error),
+      })
+      return { success: false }
+    }
+  }
+
+  private async ingestMetadataToTinybird(
+    metadata: AnalyticsFeatureMetadata[]
+  ): Promise<{ success: boolean }> {
+    if (metadata.length === 0) return { success: true }
+
+    try {
+      const payload: TinybirdMetadataPayload[] = metadata.map((m) => ({
+        timestamp: m.timestamp,
+        project_id: m.project_id,
+        customer_id: m.customer_id,
+        meta_id: m.meta_id,
+        tags: m.tags,
+      }))
+
+      const result = await this.analytics.ingestMetadata(payload)
+
+      // Verify all rows were processed
+      const successful = result?.successful_rows ?? 0
+      const quarantined = result?.quarantined_rows ?? 0
+      const total = successful + quarantined
+
+      if (total >= metadata.length) {
+        return { success: true }
+      }
+
+      this.logger.warn("Tinybird metadata ingestion incomplete", {
+        expected: metadata.length,
+        successful,
+        quarantined,
+      })
+      return { success: false }
+    } catch (error) {
+      this.logger.error("Failed to ingest metadata to Tinybird", {
+        error: this.errorMessage(error),
+      })
+      return { success: false }
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Record Deletion
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  private async deleteUsageRecordsBatch(firstId: string, lastId: string): Promise<number> {
+    // Usage is ordered DESC, so firstId > lastId lexicographically
+    const result = await this.db
+      .delete(schema.usageRecords)
+      .where(
+        sql`${schema.usageRecords.id} >= ${lastId} AND ${schema.usageRecords.id} <= ${firstId}`
+      )
+      .returning({ id: schema.usageRecords.id })
+
+    return result.length
+  }
+
+  private async deleteVerificationRecordsBatch(firstId: number, lastId: number): Promise<number> {
+    // Verifications ordered ASC, so firstId < lastId
+    const result = await this.db
+      .delete(schema.verifications)
+      .where(
+        sql`${schema.verifications.id} >= ${firstId} AND ${schema.verifications.id} <= ${lastId}`
+      )
+      .returning({ id: schema.verifications.id })
+
+    return result.length
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // R2 Lakehouse
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  private async flushToR2(processed: MetadataProcessingResult): Promise<{ success: boolean }> {
+    if (!this.lakehouse) return { success: true }
+
+    try {
+      // Filter out usage records that have already been flushed to R2
+      const newUsageRecords = processed.usageRecords.filter((p) => {
+        if (!this.lastR2UsageId) return true
+        return p.record.id > this.lastR2UsageId
+      })
+
+      // Filter out verification records that have already been flushed to R2
+      const newVerificationRecords = processed.verificationRecords.filter((p) => {
+        if (this.lastR2VerificationId === null) return true
+        return p.record.id > this.lastR2VerificationId
+      })
+
+      // If nothing new to flush, return early
+      if (
+        newUsageRecords.length === 0 &&
+        newVerificationRecords.length === 0 &&
+        processed.uniqueMetadata.length === 0
+      ) {
+        return { success: true }
+      }
+
+      const now = new Date()
+      const year = now.getUTCFullYear()
+      const month = String(now.getUTCMonth() + 1).padStart(2, "0")
+      const day = String(now.getUTCDate()).padStart(2, "0")
+      const uuid = crypto.randomUUID()
+      const timestamp = now.getTime()
+
+      const uploads: Promise<void>[] = []
+
+      // Group and upload new usage records
+      if (newUsageRecords.length > 0) {
+        const usageGroups = this.groupByProjectCustomer(newUsageRecords.map((p) => p.record))
+        for (const [key, records] of usageGroups) {
+          const [projectId, customerId] = key.split("/")
+          const path = `${projectId}/${customerId}/${year}/${month}/${day}/usage_${timestamp}_${uuid}.ndjson`
+          const buffer = this.toNDJSON(records)
+          uploads.push(this.lakehouse.put(path, buffer).then(() => undefined))
+        }
+      }
+
+      // Group and upload new verifications
+      if (newVerificationRecords.length > 0) {
+        const verificationGroups = this.groupByProjectCustomer(
+          newVerificationRecords.map((p) => p.record)
+        )
+        for (const [key, records] of verificationGroups) {
+          const [projectId, customerId] = key.split("/")
+          const path = `${projectId}/${customerId}/${year}/${month}/${day}/verifications_${timestamp}_${uuid}.ndjson`
+          const buffer = this.toNDJSON(records)
+          uploads.push(this.lakehouse.put(path, buffer).then(() => undefined))
+        }
+      }
+
+      // Upload metadata globally (not date-partitioned) - it's a dimension table
+      // Partitioned only by project for efficient lookups by meta_id
+      // Metadata is always flushed if it's unique in the batch, deduplication happens in processMetadata
+      if (processed.uniqueMetadata.length > 0) {
+        const metadataGroups = this.groupByProject(processed.uniqueMetadata)
+        for (const [projectId, records] of metadataGroups) {
+          const path = `${projectId}/_metadata/metadata_${timestamp}_${uuid}.ndjson`
+          const buffer = this.toNDJSON(records)
+          uploads.push(this.lakehouse.put(path, buffer).then(() => undefined))
+        }
+      }
+
+      await Promise.all(uploads)
+
+      // Update state with the latest IDs we successfully flushed
+      // Since records are processed from the batch, we can look at the original sorted batch
+      // But filtering might have removed some. The "latest" in the batch is what matters.
+      // fetchUsageBatch returns records ordered by ID DESC. So the first record has the highest ID.
+      // We should use the highest ID from the *original* batch to ensure we don't re-scan them for R2.
+      // However, we only have processed records here. processed.usageRecords preserves order from batch?
+      // Yes, processMetadata iterates sequentially.
+      // So processed.usageRecords[0] is the highest ID.
+      if (processed.usageRecords.length > 0) {
+        const firstRecord = processed.usageRecords[0]
+        if (firstRecord) {
+          this.lastR2UsageId = firstRecord.record.id
+        }
+      }
+
+      // Verification batch is ordered by ID ASC in fetchVerificationBatch.
+      // So the LAST record has the highest ID.
+      if (processed.verificationRecords.length > 0) {
+        const lastRec = processed.verificationRecords[processed.verificationRecords.length - 1]
+        if (lastRec) {
+          this.lastR2VerificationId = lastRec.record.id
+        }
+      }
+
+      return { success: true }
+    } catch (error) {
+      this.logger.error("Failed to flush to R2", { error: this.errorMessage(error) })
+      return { success: false }
+    }
+  }
+
+  private groupByProjectCustomer<T extends { project_id: string; customer_id: string }>(
+    records: T[]
+  ): Map<string, T[]> {
+    const groups = new Map<string, T[]>()
+
+    for (const record of records) {
+      const key = `${record.project_id}/${record.customer_id}`
+      const group = groups.get(key)
+      if (group) {
+        group.push(record)
+      } else {
+        groups.set(key, [record])
+      }
+    }
+
+    return groups
+  }
+
+  private groupByProject<T extends { project_id: string }>(records: T[]): Map<string, T[]> {
+    const groups = new Map<string, T[]>()
+
+    for (const record of records) {
+      const group = groups.get(record.project_id)
+      if (group) {
+        group.push(record)
+      } else {
+        groups.set(record.project_id, [record])
+      }
+    }
+
+    return groups
+  }
+
+  private toNDJSON<T extends object>(records: T[]): Uint8Array {
+    if (records.length === 0) return new Uint8Array()
+    const ndjson = records.map((r) => JSON.stringify(r)).join("\n")
+    return new TextEncoder().encode(ndjson)
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Seen Metadata Management
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  private getTodayKey(): string {
+    return new Date().toISOString().slice(0, 10)
+  }
+
+  private async getSeenMetaSet(date: string): Promise<Set<string>> {
+    const key = `${SEEN_META_PREFIX}${date}`
+    const stored = await this.storage.get<string[]>(key)
+    return new Set(stored ?? [])
+  }
+
+  private async updateSeenMetaSet(date: string, metaIds: Set<string>): Promise<void> {
+    const key = `${SEEN_META_PREFIX}${date}`
+    await this.storage.put(key, Array.from(metaIds))
+    await this.rotateSeenMetadata(date)
+  }
+
+  private async rotateSeenMetadata(currentDateStr: string): Promise<void> {
+    try {
+      const keys = await this.storage.list({ prefix: SEEN_META_PREFIX })
+      const cutoffDate = new Date(currentDateStr)
+      cutoffDate.setDate(cutoffDate.getDate() - METADATA_RETENTION_DAYS)
+
+      const keysToDelete: string[] = []
+
+      for (const [key] of keys) {
+        const datePart = key.replace(SEEN_META_PREFIX, "")
+        const keyDate = new Date(datePart)
+
+        if (!Number.isNaN(keyDate.getTime()) && keyDate < cutoffDate) {
+          keysToDelete.push(key)
+        }
+      }
+
+      if (keysToDelete.length > 0) {
+        await Promise.all(keysToDelete.map((key) => this.storage.delete(key)))
+      }
+    } catch (error) {
+      this.logger.error("Failed to rotate seen metadata", { error: this.errorMessage(error) })
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Utilities
+  // ─────────────────────────────────────────────────────────────────────────────
 
   public makeKey(params: {
     customerId: string
     projectId: string
     featureSlug: string
   }): string {
-    return `${params.projectId}:${params.customerId}:${params.featureSlug}`
+    return `${STATE_KEY_PREFIX}${params.projectId}:${params.customerId}:${params.featureSlug}`
+  }
+
+  private errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : "unknown"
+  }
+
+  private logAndError<T>(
+    operation: string,
+    error: unknown
+  ): Result<T, UnPriceEntitlementStorageError> {
+    const message = this.errorMessage(error)
+    this.logger.error(`Storage provider ${this.state.id.toString()} ${operation} failed`, {
+      error: message,
+    })
+    return Err(new UnPriceEntitlementStorageError({ message: `${operation} failed: ${message}` }))
   }
 }

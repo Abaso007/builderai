@@ -6,12 +6,24 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unpr
 import { Input } from "@unprice/ui/input"
 import { Label } from "@unprice/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@unprice/ui/tabs"
 import { cn } from "@unprice/ui/utils"
-import { Activity, Check, Copy, Loader2 } from "lucide-react"
+import { AnimatePresence, motion } from "framer-motion"
+import { Activity, Check, CheckCircle, Copy, Loader2, XCircle } from "lucide-react"
 import { useState } from "react"
 import { toast } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
+
+interface UsageReportResponse {
+  success: boolean
+  message?: string
+  usage?: number
+  featureSlug?: string
+  customerId?: string
+  error?: string
+  code?: string
+  statusCode?: number
+  deniedReason?: string
+}
 
 export function ReportUsageStep({ className }: React.ComponentProps<"div"> & StepComponentProps) {
   const { state, next } = useOnboarding()
@@ -19,7 +31,8 @@ export function ReportUsageStep({ className }: React.ComponentProps<"div"> & Ste
   const [copied, setCopied] = useState(false)
   const [usageAmount, setUsageAmount] = useState<string>("10")
   const [selectedFeature, setSelectedFeature] = useState<string>("")
-  const [activeTab, setActiveTab] = useState("ui")
+  const [reportResult, setReportResult] = useState<UsageReportResponse | null>(null)
+  const [resultKey, setResultKey] = useState(0)
 
   const apiKey = (state?.context?.flowData as { apiKey?: string })?.apiKey || ""
   const planVersionId =
@@ -69,6 +82,7 @@ export function ReportUsageStep({ className }: React.ComponentProps<"div"> & Ste
     }
 
     setIsLoading(true)
+
     try {
       const response = await fetch(`${API_DOMAIN}v1/customer/reportUsage`, {
         method: "POST",
@@ -84,14 +98,27 @@ export function ReportUsageStep({ className }: React.ComponentProps<"div"> & Ste
         }),
       })
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.message || "Failed to report usage")
-      }
+      const data = await response.json()
 
-      toast.success("Usage reported successfully!")
-      next()
+      // Always set the result, even for non-200 responses
+      if (!response.ok) {
+        setReportResult({
+          success: false,
+          statusCode: response.status,
+          ...data,
+        })
+        toast.error(data.message || "Request failed")
+      } else {
+        setReportResult(data)
+        toast.success("Usage reported successfully!")
+      }
+      setResultKey((prev) => prev + 1)
     } catch (error) {
+      setReportResult({
+        success: false,
+        error: error instanceof Error ? error.message : "Something went wrong",
+      })
+      setResultKey((prev) => prev + 1)
       toast.error(error instanceof Error ? error.message : "Something went wrong")
     } finally {
       setIsLoading(false)
@@ -126,103 +153,137 @@ export function ReportUsageStep({ className }: React.ComponentProps<"div"> & Ste
     )
   }
 
+  const isSuccess =
+    reportResult &&
+    reportResult.success !== false &&
+    !reportResult.error &&
+    !reportResult.statusCode
+
   return (
-    <div className={cn("flex max-w-lg flex-col gap-6", className)}>
-      <div className="flex flex-col gap-6">
-        <div className="flex flex-col items-center gap-2">
-          <div className="flex size-10 animate-content items-center justify-center rounded-md bg-primary/10 delay-0!">
-            <Activity className="size-6 text-primary" />
-          </div>
-          <h1 className="animate-content font-bold text-2xl delay-0!">Report Usage</h1>
-          <div className="animate-content text-center text-muted-foreground text-sm delay-0!">
-            Simulate usage for your customer to test metered billing.
-          </div>
+    <div className={cn("flex flex-col gap-6", className)}>
+      <div className="flex flex-col items-center gap-2">
+        <div className="flex size-10 animate-content items-center justify-center rounded-md bg-primary/10 delay-0!">
+          <Activity className="size-6 text-primary" />
         </div>
+        <h1 className="animate-content font-bold text-2xl delay-0!">Report Usage</h1>
+        <div className="animate-content text-center text-muted-foreground text-sm delay-0!">
+          Simulate usage for your customer to test metered billing.
+        </div>
+      </div>
 
-        <div className="animate-content delay-200!">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="ui">Quick Report</TabsTrigger>
-              <TabsTrigger value="curl">cURL</TabsTrigger>
-            </TabsList>
+      <div className="flex flex-col items-center justify-center gap-4 md:flex-row md:items-start">
+        <motion.div
+          layout
+          className="w-full max-w-md animate-content delay-200!"
+          transition={{ duration: 0.3, ease: "easeInOut" }}
+        >
+          <Card className="h-full">
+            <CardHeader>
+              <CardTitle>API Request</CardTitle>
+              <CardDescription>Run this command to report usage via API.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="feature">Feature</Label>
+                <Select value={selectedFeature} onValueChange={setSelectedFeature}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a feature" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {meteredFeatures.map((pf) => (
+                      <SelectItem key={pf.id} value={pf.feature?.slug || ""}>
+                        {pf.feature?.title} ({pf.feature?.slug})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <TabsContent value="ui" className="mt-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Report Usage</CardTitle>
-                  <CardDescription>
-                    Send usage events for your customer's subscription.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="feature">Feature</Label>
-                    <Select value={selectedFeature} onValueChange={setSelectedFeature}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a feature" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {meteredFeatures.map((pf) => (
-                          <SelectItem key={pf.id} value={pf.feature?.slug || ""}>
-                            {pf.feature?.title} ({pf.feature?.slug})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="usage">Amount</Label>
-                    <Input
-                      id="usage"
-                      type="number"
-                      value={usageAmount}
-                      onChange={(e) => setUsageAmount(e.target.value)}
-                    />
-                  </div>
-                  <Button className="w-full" onClick={handleReportUsage} disabled={isLoading}>
-                    {isLoading ? (
+              <div className="space-y-2">
+                <Label htmlFor="usage">Amount</Label>
+                <Input
+                  id="usage"
+                  type="number"
+                  value={usageAmount}
+                  onChange={(e) => setUsageAmount(e.target.value)}
+                />
+              </div>
+
+              <div className="relative rounded-md bg-slate-950 p-4 font-mono text-slate-50 text-xs">
+                <pre className="overflow-x-auto whitespace-pre-wrap break-all">{curlCommand}</pre>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="absolute top-2 right-2 h-8 w-8 text-slate-400 hover:text-slate-50"
+                  onClick={handleCopy}
+                >
+                  {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                </Button>
+              </div>
+
+              <Button className="w-full" onClick={handleReportUsage} disabled={isLoading}>
+                {isLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Reporting...
+                  </>
+                ) : (
+                  "Report Usage"
+                )}
+              </Button>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        <AnimatePresence mode="wait">
+          {reportResult && (
+            <motion.div
+              key={resultKey}
+              className="w-full max-w-md"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+            >
+              <Card className="h-full">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center gap-2">
+                    {isSuccess ? (
                       <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Reporting...
+                        <CheckCircle className="h-5 w-5 text-green-500" />
+                        <CardTitle className="text-green-600">Usage Reported</CardTitle>
                       </>
                     ) : (
-                      "Report Usage"
+                      <>
+                        <XCircle className="h-5 w-5 text-red-500" />
+                        <CardTitle className="text-red-600">
+                          {reportResult.deniedReason ? "Usage Denied" : "Request Failed"}
+                        </CardTitle>
+                        {reportResult.statusCode && (
+                          <span className="rounded bg-red-100 px-2 py-0.5 font-mono text-red-600 text-xs">
+                            {reportResult.statusCode}
+                          </span>
+                        )}
+                      </>
                     )}
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="rounded-md bg-muted p-3">
+                    <p className="mb-2 font-medium text-sm">Response:</p>
+                    <pre className="overflow-x-auto whitespace-pre-wrap text-muted-foreground text-xs">
+                      {JSON.stringify(reportResult, null, 2)}
+                    </pre>
+                  </div>
+
+                  <Button className="w-full" onClick={() => next()}>
+                    Continue
                   </Button>
                 </CardContent>
               </Card>
-            </TabsContent>
-
-            <TabsContent value="curl" className="mt-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>API Request</CardTitle>
-                  <CardDescription>Run this command to report usage via API.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="relative rounded-md bg-slate-950 p-4 font-mono text-slate-50 text-xs">
-                    <pre className="overflow-x-auto whitespace-pre-wrap break-all">
-                      {curlCommand}
-                    </pre>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="absolute top-2 right-2 h-8 w-8 text-slate-400 hover:text-slate-50"
-                      onClick={handleCopy}
-                    >
-                      {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                    </Button>
-                  </div>
-                  <div className="mt-4 flex justify-end">
-                    <p className="text-muted-foreground text-xs">
-                      Use the Quick Report tab to proceed with the onboarding flow.
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
-        </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   )

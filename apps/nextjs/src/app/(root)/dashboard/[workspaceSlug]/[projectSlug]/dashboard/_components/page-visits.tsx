@@ -121,8 +121,8 @@ export function PageVisits() {
   } = useSuspenseQuery(
     trpc.analytics.getPagesOverview.queryOptions(
       {
-        intervalDays: intervalFilter.intervalDays,
-        pageId: pageFilter.pageId,
+        interval_days: intervalFilter.intervalDays,
+        page_id: pageFilter.pageId,
       },
       {
         enabled: pageFilter.isSelected,
@@ -140,8 +140,8 @@ export function PageVisits() {
       ["analytics", "getPagesOverview"],
       {
         input: {
-          intervalDays: param,
-          pageId: pageFilter.pageId,
+          interval_days: param,
+          page_id: pageFilter.pageId,
         },
         type: "query",
       },

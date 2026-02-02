@@ -3,7 +3,7 @@ import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
 export const getUsage = protectedProjectProcedure
-  .input(z.custom<Omit<Parameters<Analytics["getFeaturesUsagePeriod"]>[0], "projectId">>())
+  .input(z.custom<Omit<Parameters<Analytics["getFeaturesUsagePeriod"]>[0], "project_id">>())
   .output(
     z.object({
       usage: z.custom<Usage>(),
@@ -11,15 +11,15 @@ export const getUsage = protectedProjectProcedure
     })
   )
   .query(async (opts) => {
-    const projectId = opts.ctx.project.id
-    const { intervalDays } = opts.input
+    const project_id = opts.ctx.project.id
+    const { interval_days } = opts.input
 
-    const cacheKey = `${projectId}:${intervalDays}`
+    const cacheKey = `${project_id}:${interval_days}`
     const result = await opts.ctx.cache.getUsage.swr(cacheKey, async () => {
       const result = await opts.ctx.analytics
         .getFeaturesUsagePeriod({
-          projectId,
-          intervalDays,
+          project_id,
+          interval_days,
         })
         .then((res) => res.data)
 
@@ -28,8 +28,8 @@ export const getUsage = protectedProjectProcedure
 
     if (result.err) {
       opts.ctx.logger.error(result.err.message, {
-        projectId,
-        intervalDays,
+        project_id,
+        interval_days,
       })
 
       return { usage: [], error: result.err.message }

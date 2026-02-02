@@ -24,12 +24,7 @@ import {
   calculateWaterfallPrice,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
-import {
-  type Logger,
-  type WideEventHelpers,
-  type WideEventLogger,
-  createWideEventHelpers,
-} from "@unprice/logging"
+import type { Logger, WideEventHelpers } from "@unprice/logging"
 import { format, subMinutes } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
 import { BillingService } from "../billing"
@@ -67,7 +62,7 @@ export class EntitlementService {
   private readonly cache: Cache
   private readonly metrics: Metrics
   private readonly customerService: CustomerService
-  private readonly wideEventHelpers: WideEventHelpers
+  private wideEventHelpers?: WideEventHelpers
 
   constructor(opts: {
     db: Database
@@ -78,7 +73,7 @@ export class EntitlementService {
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
     metrics: Metrics
-    wideEventLogger?: WideEventLogger | null
+    wideEventHelpers?: WideEventHelpers
     config?: {
       revalidateInterval?: number // How often to check for version changes
     }
@@ -96,7 +91,7 @@ export class EntitlementService {
     this.waitUntil = opts.waitUntil
     this.cache = opts.cache
     this.metrics = opts.metrics
-    this.wideEventHelpers = createWideEventHelpers(opts.wideEventLogger)
+    this.wideEventHelpers = opts.wideEventHelpers
     this.customerService = new CustomerService({
       db: opts.db,
       logger: opts.logger,
@@ -104,7 +99,13 @@ export class EntitlementService {
       waitUntil: opts.waitUntil,
       cache: opts.cache,
       metrics: opts.metrics,
+      wideEventHelpers: opts.wideEventHelpers,
     })
+  }
+
+  // this is needed because of rpc in do
+  public setWideEventHelpers(wideEventHelpers?: WideEventHelpers) {
+    this.wideEventHelpers = wideEventHelpers
   }
 
   /**
@@ -112,11 +113,8 @@ export class EntitlementService {
    * Groups everything under "entitlements" key for clear identification in logs.
    * Keeps only essential information for debugging.
    */
-  private addEntitlementContext(
-    context: Parameters<WideEventHelpers["addEntitlement"]>[0],
-    helpers?: WideEventHelpers
-  ) {
-    ;(helpers ?? this.wideEventHelpers).addEntitlement(context)
+  private addEntitlementContext(context: Parameters<WideEventHelpers["addEntitlement"]>[0]) {
+    this.wideEventHelpers?.addEntitlement(context)
   }
 
   /**
@@ -153,9 +151,7 @@ export class EntitlementService {
    * Check if usage is allowed (low latency)
    * Handles cache miss and revalidation internally (single network call)
    */
-  async verify(params: VerifyRequest, logger?: WideEventLogger): Promise<VerificationResult> {
-    const helpers = logger ? createWideEventHelpers(logger) : undefined
-
+  async verify(params: VerifyRequest): Promise<VerificationResult> {
     // Add business context once at the start
     const { err: stateErr, val: state } = await this.getStateWithRevalidation({
       customerId: params.customerId,
@@ -165,13 +161,10 @@ export class EntitlementService {
     })
 
     if (stateErr) {
-      this.addEntitlementContext(
-        {
-          allowed: false,
-          denied_reason: "ENTITLEMENT_ERROR",
-        },
-        helpers
-      )
+      this.addEntitlementContext({
+        allowed: false,
+        denied_reason: "ENTITLEMENT_ERROR",
+      })
       return {
         allowed: false,
         message: stateErr.message,
@@ -180,31 +173,31 @@ export class EntitlementService {
     }
 
     if (!state) {
-      this.addEntitlementContext(
-        {
-          allowed: false,
-          denied_reason: "ENTITLEMENT_NOT_FOUND",
-          state_found: false,
-        },
-        helpers
-      )
+      this.addEntitlementContext({
+        allowed: false,
+        denied_reason: "ENTITLEMENT_NOT_FOUND",
+        state_found: false,
+      })
+
       const latency = performance.now() - params.performanceStart
       this.waitUntil(
         this.storage.insertVerification({
-          customerId: params.customerId,
-          projectId: params.projectId,
-          featureSlug: params.featureSlug,
+          customer_id: params.customerId,
+          project_id: params.projectId,
+          feature_slug: params.featureSlug,
           timestamp: params.timestamp,
           allowed: 0,
-          deniedReason: "ENTITLEMENT_NOT_FOUND",
+          denied_reason: "ENTITLEMENT_NOT_FOUND",
           metadata: {
             ...params.metadata,
             usage: (params.usage ?? 0).toString(),
             remaining: "0",
           },
           latency,
-          requestId: params.requestId,
-          createdAt: Date.now(),
+          request_id: params.requestId,
+          created_at: Date.now(),
+          meta_id: 0,
+          region: params.metadata?.region ?? "UNK",
         })
       )
 
@@ -239,20 +232,22 @@ export class EntitlementService {
 
     this.waitUntil(
       this.storage.insertVerification({
-        customerId: params.customerId,
-        projectId: params.projectId,
-        featureSlug: params.featureSlug,
+        customer_id: params.customerId,
+        project_id: params.projectId,
+        feature_slug: params.featureSlug,
         timestamp: params.timestamp,
         allowed: verifyResult.allowed ? 1 : 0,
-        deniedReason: verifyResult.deniedReason ?? undefined,
+        denied_reason: verifyResult.deniedReason ?? undefined,
         metadata: {
           ...params.metadata,
           usage: (params.usage ?? 0).toString(),
           remaining: verifyResult.remaining.toString(),
         },
         latency,
-        requestId: params.requestId,
-        createdAt: Date.now(),
+        request_id: params.requestId,
+        created_at: Date.now(),
+        region: params.metadata?.region ?? "UNK",
+        meta_id: 0, // this is a placeholder for the meta_id
       })
     )
 
@@ -264,17 +259,14 @@ export class EntitlementService {
 
     await this.storage.set({ state: { ...validatedState, meter: meterResult } })
 
-    this.addEntitlementContext(
-      {
-        allowed: verifyResult.allowed,
-        denied_reason: verifyResult.deniedReason,
-        feature_type: validatedState.featureType,
-        limit: validatedState.limit ?? undefined,
-        usage: Number(meterResult.usage),
-        remaining: verifyResult.remaining,
-      },
-      helpers
-    )
+    this.addEntitlementContext({
+      allowed: verifyResult.allowed,
+      denied_reason: verifyResult.deniedReason,
+      feature_type: validatedState.featureType,
+      limit: validatedState.limit ?? undefined,
+      usage: Number(meterResult.usage),
+      remaining: verifyResult.remaining,
+    })
 
     this.waitUntil(
       this.customerService.updateAccessControlList({
@@ -374,12 +366,7 @@ export class EntitlementService {
    * Report usage with priority-based consumption
    * Handles revalidation internally (single network call)
    */
-  async reportUsage(
-    params: ReportUsageRequest,
-    logger?: WideEventLogger
-  ): Promise<ReportUsageResult> {
-    const helpers = logger ? createWideEventHelpers(logger) : undefined
-
+  async reportUsage(params: ReportUsageRequest): Promise<ReportUsageResult> {
     const { err: stateErr, val: state } = await this.getStateWithRevalidation({
       customerId: params.customerId,
       projectId: params.projectId,
@@ -388,13 +375,11 @@ export class EntitlementService {
     })
 
     if (stateErr) {
-      this.addEntitlementContext(
-        {
-          allowed: false,
-          denied_reason: "ENTITLEMENT_ERROR",
-        },
-        helpers
-      )
+      this.addEntitlementContext({
+        allowed: false,
+        denied_reason: "ENTITLEMENT_ERROR",
+      })
+
       return {
         allowed: false,
         message: stateErr.message,
@@ -404,14 +389,12 @@ export class EntitlementService {
     }
 
     if (!state) {
-      this.addEntitlementContext(
-        {
-          allowed: false,
-          denied_reason: "ENTITLEMENT_NOT_FOUND",
-          state_found: false,
-        },
-        helpers
-      )
+      this.addEntitlementContext({
+        allowed: false,
+        denied_reason: "ENTITLEMENT_NOT_FOUND",
+        state_found: false,
+      })
+
       return {
         allowed: false,
         message: "No entitlement found for the given customer, project and feature",
@@ -446,17 +429,14 @@ export class EntitlementService {
         usage: Number(meterResult.usage),
       })
 
-      this.addEntitlementContext(
-        {
-          allowed: true,
-          key_exists: true,
-          already_recorded: true,
-          cost,
-          usage: Number(meterResult.usage),
-          limit: validatedState.limit ?? undefined,
-        },
-        helpers
-      )
+      this.addEntitlementContext({
+        allowed: true,
+        key_exists: true,
+        already_recorded: true,
+        cost,
+        usage: Number(meterResult.usage),
+        limit: validatedState.limit ?? undefined,
+      })
 
       return {
         allowed: true,
@@ -503,22 +483,23 @@ export class EntitlementService {
 
       const usageRecord = {
         id: ulid(),
-        customerId: params.customerId,
-        projectId: params.projectId,
-        featureSlug: params.featureSlug,
+        customer_id: params.customerId,
+        project_id: params.projectId,
+        feature_slug: params.featureSlug,
         usage: params.usage,
         timestamp: params.timestamp,
-        idempotenceKey: params.idempotenceKey,
-        requestId: params.requestId,
-        createdAt: Date.now(),
+        idempotence_key: params.idempotenceKey,
+        request_id: params.requestId,
+        created_at: Date.now(),
         metadata: {
           ...params.metadata,
           cost: incrementalCost.toString(),
           rate: rate ?? "",
-          rateAmount: (this.roundToTwoDecimals(rateAmount) ?? 0).toString(),
-          rateCurrency: rateCurrency ?? "",
+          rate_amount: (this.roundToTwoDecimals(rateAmount) ?? 0).toString(),
+          rate_currency: rateCurrency ?? "",
         },
         deleted: 0,
+        meta_id: 0, // this is a placeholder for the meta_id
       }
 
       this.waitUntil(this.storage.insertUsageRecord(usageRecord))
@@ -528,21 +509,18 @@ export class EntitlementService {
       consumeResult.deniedReason === "LIMIT_EXCEEDED" &&
       validatedState.metadata?.blockCustomer === true
 
-    this.addEntitlementContext(
-      {
-        allowed: consumeResult.allowed,
-        denied_reason: consumeResult.deniedReason,
-        feature_type: validatedState.featureType,
-        limit: validatedState.limit ?? undefined,
+    this.addEntitlementContext({
+      allowed: consumeResult.allowed,
+      denied_reason: consumeResult.deniedReason,
+      feature_type: validatedState.featureType,
+      limit: validatedState.limit ?? undefined,
+      usage: Number(meterResult.usage),
+      remaining: consumeResult.remaining,
+      cost: this.calculateCostAndRate({
+        state: validatedState,
         usage: Number(meterResult.usage),
-        remaining: consumeResult.remaining,
-        cost: this.calculateCostAndRate({
-          state: validatedState,
-          usage: Number(meterResult.usage),
-        }).cost,
-      },
-      helpers
-    )
+      }).cost,
+    })
 
     if (
       shouldBlockCustomer ||
@@ -623,7 +601,7 @@ export class EntitlementService {
     }
   }): Promise<Result<MinimalEntitlement[], FetchError | UnPriceEntitlementError>> {
     // Add business context once at the start
-    this.wideEventHelpers.addBusiness({
+    this.wideEventHelpers?.addBusiness({
       operation: "getActiveEntitlements",
       customer_id: customerId,
       project_id: projectId,
@@ -744,7 +722,7 @@ export class EntitlementService {
     const snapshot: Readonly<EntitlementState> = { ...state }
 
     // Add business context once at the start (this runs in background, needs its own context)
-    this.wideEventHelpers.addBusiness({
+    this.wideEventHelpers?.addBusiness({
       operation: "reconcileFeatureUsage",
       customer_id: snapshot.customerId,
       project_id: snapshot.projectId,
@@ -1121,7 +1099,7 @@ export class EntitlementService {
       if (err) {
         return Err(
           new UnPriceEntitlementError({
-            message: `unable to get entitlement from cache - ${err.message}`,
+            message: `Entitlement not found - ${err.message}`,
           })
         )
       }
@@ -1223,7 +1201,7 @@ export class EntitlementService {
         if (err) {
           return Err(
             new UnPriceEntitlementError({
-              message: `unable to get entitlement from cache - ${err.message}`,
+              message: `Entitlement not found - ${err.message}`,
             })
           )
         }
@@ -1970,6 +1948,7 @@ export class EntitlementService {
       waitUntil: this.waitUntil,
       cache: this.cache,
       metrics: this.metrics,
+      wideEventHelpers: this.wideEventHelpers,
     })
 
     const result = await billingService.estimatePriceCurrentUsage({

@@ -11,6 +11,8 @@ export const cloudflareRatelimiter = z.custom<{
   limit: (opts: { key: string }) => Promise<{ success: boolean }>
 }>((r) => !!r && typeof r.limit === "function")
 
+export const r2Bucket = z.custom<R2Bucket>((b) => typeof b === "object")
+
 // This function should be called at the start of each request.
 export function createRuntimeEnv(workerEnv: Record<string, string | number | boolean | undefined>) {
   return createEnv({
@@ -31,6 +33,7 @@ export function createRuntimeEnv(workerEnv: Record<string, string | number | boo
       CLOUDFLARE_ZONE_ID: z.string().optional(),
       CLOUDFLARE_API_TOKEN: z.string().optional(),
       CLOUDFLARE_CACHE_DOMAIN: z.string().optional(),
+      LAKEHOUSE: r2Bucket.optional(),
     },
     emptyStringAsUndefined: true,
     runtimeEnv: workerEnv,

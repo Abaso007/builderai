@@ -69,7 +69,7 @@ export function UsageChart() {
   } = useSuspenseQuery(
     trpc.analytics.getUsage.queryOptions(
       {
-        intervalDays: intervalFilter.intervalDays,
+        interval_days: intervalFilter.intervalDays,
       },
       {
         staleTime: ANALYTICS_STALE_TIME,
@@ -86,7 +86,7 @@ export function UsageChart() {
       ["analytics", "getUsage"],
       {
         input: {
-          intervalDays: param,
+          interval_days: param,
         },
         type: "query",
       },
@@ -98,7 +98,7 @@ export function UsageChart() {
   }
 
   const chartData = usage.usage.map((v) => ({
-    feature: v.featureSlug,
+    feature: v.feature_slug,
     usage: v.sum,
   }))
 

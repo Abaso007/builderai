@@ -14,7 +14,7 @@ import {
   getAnchor,
 } from "@unprice/db/validators"
 import { Err, Ok, type Result, type SchemaError } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import type { Logger, WideEventHelpers } from "@unprice/logging"
 import { env } from "../../env"
 import { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
@@ -38,6 +38,7 @@ export class SubscriptionService {
   private customerService: CustomerService
   private billingService: BillingService
   private grantService: GrantsManager
+  private wideEventHelpers?: WideEventHelpers
 
   constructor({
     db,
@@ -46,6 +47,7 @@ export class SubscriptionService {
     waitUntil,
     cache,
     metrics,
+    wideEventHelpers,
   }: {
     db: Database
     logger: Logger
@@ -54,6 +56,7 @@ export class SubscriptionService {
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
     metrics: Metrics
+    wideEventHelpers?: WideEventHelpers
   }) {
     this.db = db
     this.logger = logger
@@ -68,6 +71,7 @@ export class SubscriptionService {
       waitUntil,
       cache,
       metrics,
+      wideEventHelpers,
     })
     this.billingService = new BillingService({
       db,
@@ -76,12 +80,26 @@ export class SubscriptionService {
       waitUntil,
       cache,
       metrics,
+      wideEventHelpers,
     })
 
     this.grantService = new GrantsManager({
       db: db ?? this.db,
       logger: this.logger,
     })
+
+    this.wideEventHelpers = wideEventHelpers
+  }
+
+  /**
+   * Sets the wide event helpers for request-scoped logging context.
+   * This should be called inside the wideEventLogger.runAsync() context.
+   * Propagates to nested services (customerService, billingService).
+   */
+  public setWideEventHelpers(wideEventHelpers?: WideEventHelpers) {
+    this.wideEventHelpers = wideEventHelpers
+    this.customerService.setWideEventHelpers(wideEventHelpers)
+    this.billingService.setWideEventHelpers(wideEventHelpers)
   }
 
   private validatePhasesAction({
@@ -373,9 +391,15 @@ export class SubscriptionService {
     // if (billingAnchorToUse === "dayOfCreation") {
     //   billingAnchorToUse = getDate(toZonedTime(startAtToUse, subscriptionTimezone))
     // }
+    // let's skip the payment method validation if the payment provider is sandbox
+    const paymentProvider = versionData.paymentProvider
 
     // validate payment method is required and if not provided
-    if (paymentMethodRequired && (!paymentMethodId || paymentMethodId === "")) {
+    if (
+      paymentMethodRequired &&
+      paymentProvider !== "sandbox" &&
+      (!paymentMethodId || paymentMethodId === "")
+    ) {
       return Err(
         new UnPriceSubscriptionError({
           message: "Payment method is required for this plan version",
@@ -393,6 +417,7 @@ export class SubscriptionService {
       })
 
       if (err) {
+        this.wideEventHelpers?.addError(err)
         return Err(
           new UnPriceSubscriptionError({
             message: err.message,

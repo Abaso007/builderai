@@ -35,7 +35,7 @@ export default async function DashboardOverview(props: {
     ),
     trpc.analytics.getFeatureHeatmap.queryOptions(
       {
-        intervalDays: interval.intervalDays,
+        interval_days: interval.intervalDays,
       },
       {
         staleTime: ANALYTICS_STALE_TIME,
@@ -43,7 +43,7 @@ export default async function DashboardOverview(props: {
     ),
     trpc.analytics.getFeaturesOverview.queryOptions(
       {
-        intervalDays: interval.intervalDays,
+        interval_days: interval.intervalDays,
       },
       {
         staleTime: ANALYTICS_STALE_TIME,
@@ -51,7 +51,7 @@ export default async function DashboardOverview(props: {
     ),
     trpc.analytics.getVerifications.queryOptions(
       {
-        intervalDays: interval.intervalDays,
+        interval_days: interval.intervalDays,
       },
       {
         staleTime: ANALYTICS_STALE_TIME,
@@ -59,7 +59,7 @@ export default async function DashboardOverview(props: {
     ),
     trpc.analytics.getUsage.queryOptions(
       {
-        intervalDays: interval.intervalDays,
+        interval_days: interval.intervalDays,
       },
       {
         staleTime: ANALYTICS_STALE_TIME,

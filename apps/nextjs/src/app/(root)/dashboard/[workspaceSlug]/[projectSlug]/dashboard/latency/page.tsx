@@ -24,7 +24,7 @@ export default async function DashboardLatency(props: {
   batchPrefetch([
     trpc.analytics.getVerificationRegions.queryOptions(
       {
-        intervalDays: interval.intervalDays,
+        interval_days: interval.intervalDays,
       },
       {
         staleTime: ANALYTICS_STALE_TIME,

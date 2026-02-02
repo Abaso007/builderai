@@ -1,12 +1,13 @@
 import { NoopTinybird, Tinybird } from "@jhonsfran/zod-bird"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import type { Logger, WideEventHelpers } from "@unprice/logging"
 import { z } from "zod"
 import { UnPriceAnalyticsError } from "./errors"
 import {
   type AnalyticsEventAction,
   analyticsEventSchema,
   auditLogSchemaV1,
+  featureMetadataSchemaV1,
   featureUsageSchemaV1,
   featureVerificationSchemaV1,
   pageEventSchema,
@@ -22,6 +23,7 @@ export class Analytics {
   public readonly writeClient: Tinybird | NoopTinybird
   public readonly isNoop: boolean
   private readonly logger: Logger
+  private wideEventHelpers?: WideEventHelpers
 
   constructor(opts: {
     logger: Logger
@@ -32,8 +34,10 @@ export class Analytics {
       url: string
       token: string
     }
+    wideEventHelpers?: WideEventHelpers
   }) {
     this.logger = opts.logger
+    this.wideEventHelpers = opts.wideEventHelpers
     this.readClient =
       opts.tinybirdToken && opts.emit
         ? new Tinybird({ token: opts.tinybirdToken, baseUrl: opts.tinybirdUrl })
@@ -51,6 +55,14 @@ export class Analytics {
     this.isNoop = this.writeClient instanceof NoopTinybird
   }
 
+  /**
+   * Sets the wide event helpers for request-scoped logging context.
+   * This should be called inside the wideEventLogger.runAsync() context.
+   */
+  public setWideEventHelpers(wideEventHelpers: WideEventHelpers) {
+    this.wideEventHelpers = wideEventHelpers
+  }
+
   public get ingestSdkTelemetry() {
     return this.writeClient.buildIngestEndpoint({
       datasource: "sdk_telemetry",
@@ -58,7 +70,7 @@ export class Analytics {
         runtime: z.string(),
         platform: z.string(),
         versions: z.array(z.string()),
-        requestId: z.string(),
+        request_id: z.string(),
         time: z.number(),
       }),
     })
@@ -76,6 +88,15 @@ export class Analytics {
         },
         resources: JSON.stringify(l.resources),
       })),
+    })
+  }
+
+  public get ingestMetadata() {
+    return this.writeClient.buildIngestEndpoint({
+      datasource: "unprice_feature_metadata",
+      event: featureMetadataSchemaV1,
+      // we need to wait for the ingestion to be done before returning
+      wait: true,
     })
   }
 
@@ -179,8 +200,8 @@ export class Analytics {
     return this.readClient.buildPipe({
       pipe: "v1_get_plans_conversion",
       parameters: z.object({
-        intervalDays: z.number().optional(),
-        projectId: z.string().optional(),
+        interval_days: z.number().optional(),
+        project_id: z.string().optional(),
       }),
       data: z.object({
         page_id: z.string(),
@@ -203,7 +224,7 @@ export class Analytics {
     return this.readClient.buildPipe({
       pipe: "v1_get_top_browsers",
       parameters: z.object({
-        intervalDays: z.number().optional(),
+        interval_days: z.number().optional(),
         page_id: z.string().optional(),
         project_id: z.string().optional(),
       }),
@@ -225,7 +246,7 @@ export class Analytics {
     return this.readClient.buildPipe({
       pipe: "v1_get_top_countries",
       parameters: z.object({
-        intervalDays: z.number().optional(),
+        interval_days: z.number().optional(),
         page_id: z.string().optional(),
         project_id: z.string().optional(),
       }),
@@ -246,9 +267,9 @@ export class Analytics {
     return this.readClient.buildPipe({
       pipe: "v1_get_pages_overview",
       parameters: z.object({
-        intervalDays: z.number().optional(),
-        pageId: z.string().optional(),
-        projectId: z.string().optional(),
+        interval_days: z.number().optional(),
+        page_id: z.string().optional(),
+        project_id: z.string().optional(),
       }),
       data: z.object({
         date: z.coerce.date(),
@@ -275,8 +296,8 @@ export class Analytics {
     return this.readClient.buildPipe({
       pipe: "v1_get_features_overview",
       parameters: z.object({
-        intervalDays: z.number().optional(),
-        projectId: z.string().optional(),
+        interval_days: z.number().optional(),
+        project_id: z.string().optional(),
         timezone: z.string().optional(),
       }),
       data: z.object({
@@ -297,15 +318,15 @@ export class Analytics {
     return this.readClient.buildPipe({
       pipe: "v1_get_feature_verifications",
       parameters: z.object({
-        projectId: z.string().optional(),
-        customerId: z.string().optional(),
-        featureSlugs: z.array(z.string()).optional(),
-        intervalDays: z.number().optional(),
+        project_id: z.string().optional(),
+        customer_id: z.string().optional(),
+        feature_slugs: z.array(z.string()).optional(),
+        interval_days: z.number().optional(),
       }),
       data: z.object({
-        projectId: z.string(),
-        customerId: z.string().optional(),
-        featureSlug: z.string(),
+        project_id: z.string(),
+        customer_id: z.string().optional(),
+        feature_slug: z.string(),
         count: z.number(),
         p50_latency: z.number(),
         p95_latency: z.number(),
@@ -324,8 +345,8 @@ export class Analytics {
     return this.readClient.buildPipe({
       pipe: "v1_get_feature_verification_regions",
       parameters: z.object({
-        intervalDays: z.number().optional(),
-        projectId: z.string(),
+        interval_days: z.number().optional(),
+        project_id: z.string(),
         timezone: z.string().optional(),
         region: z.string().optional(),
         start: z.number().optional(),
@@ -352,17 +373,17 @@ export class Analytics {
     return this.readClient.buildPipe({
       pipe: "v1_get_feature_usage_period",
       parameters: z.object({
-        projectId: z.string(),
-        customerId: z.string().optional(),
-        featureSlugs: z.array(z.string()).optional(),
-        intervalDays: z.number().optional(),
+        project_id: z.string(),
+        customer_id: z.string().optional(),
+        feature_slugs: z.array(z.string()).optional(),
+        interval_days: z.number().optional(),
         start: z.number().optional(),
         end: z.number().optional(),
       }),
       data: z.object({
-        projectId: z.string(),
-        customerId: z.string().optional(),
-        featureSlug: z.string(),
+        project_id: z.string(),
+        customer_id: z.string().optional(),
+        feature_slug: z.string(),
         count: z.number(),
         sum: z.number(),
         max: z.number(),
@@ -381,22 +402,22 @@ export class Analytics {
     return this.readClient.buildPipe({
       pipe: "v1_get_feature_usage_cursor",
       parameters: z.object({
-        projectId: z.string(),
-        customerId: z.string(),
-        featureSlug: z.string(),
-        afterRecordId: z.string(),
-        beforeRecordId: z.string().optional(),
-        billingPeriodStart: z.number().optional(),
+        project_id: z.string(),
+        customer_id: z.string(),
+        feature_slug: z.string(),
+        after_record_id: z.string(),
+        before_record_id: z.string().optional(),
+        billing_period_start: z.number().optional(),
       }),
       data: z.object({
-        featureSlug: z.string(),
-        projectId: z.string(),
-        customerId: z.string(),
-        deltaCount: z.number(),
-        deltaSum: z.number(),
-        deltaMax: z.number(),
-        lastValue: z.number(),
-        lastRecordId: z.string(),
+        feature_slug: z.string(),
+        project_id: z.string(),
+        customer_id: z.string(),
+        delta_count: z.number(),
+        delta_sum: z.number(),
+        delta_max: z.number(),
+        last_value: z.number(),
+        last_record_id: z.string(),
       }),
       opts: {
         cache: "no-store",
@@ -410,16 +431,16 @@ export class Analytics {
     return this.readClient.buildPipe({
       pipe: "v1_get_feature_usage_no_duplicates",
       parameters: z.object({
-        featureSlugs: z.array(z.string()).optional(),
-        customerId: z.string(),
-        projectId: z.string(),
+        feature_slugs: z.array(z.string()).optional(),
+        customer_id: z.string(),
+        project_id: z.string(),
         start: z.number(),
         end: z.number(),
       }),
       data: z.object({
-        projectId: z.string(),
-        customerId: z.string(),
-        featureSlug: z.string(),
+        project_id: z.string(),
+        customer_id: z.string(),
+        feature_slug: z.string(),
         sum: z.number(),
         max: z.number(),
         count: z.number(),
@@ -437,10 +458,10 @@ export class Analytics {
     return this.readClient.buildPipe({
       pipe: "v1_get_feature_heatmap",
       parameters: z.object({
-        projectId: z.string().optional(),
+        project_id: z.string().optional(),
         start: z.number().optional(),
         end: z.number().optional(),
-        intervalDays: z.number().optional(),
+        interval_days: z.number().optional(),
       }),
       data: z.object({
         plan_slug: z.string(),
@@ -519,9 +540,9 @@ export class Analytics {
     // more accurate one because it's using FINAL in ClickHouse queries
     // to merge data parts at query time to resolve updates and deletions
     const totalPeriodUsages = await this.getBillingUsage({
-      customerId,
-      projectId,
-      featureSlugs: featureSlugsArray,
+      customer_id: customerId,
+      project_id: projectId,
+      feature_slugs: featureSlugsArray,
       start: startAt,
       end: endAt,
     })
@@ -531,7 +552,7 @@ export class Analytics {
         this.logger.error(`Error getBillingUsage:${error.message}`, {
           customerId,
           projectId,
-          featureSlugs: featureSlugsArray,
+          feature_slugs: featureSlugsArray,
           startAt,
           endAt,
         })
@@ -555,7 +576,7 @@ export class Analytics {
     // iterate over the features
     for (const feature of featuresUsage) {
       const totalPeriodUsage = totalPeriodUsages.find(
-        (usage) => usage.featureSlug === feature.featureSlug
+        (usage) => usage.feature_slug === feature.featureSlug
       )
 
       if (!totalPeriodUsage) {
@@ -682,12 +703,12 @@ export class Analytics {
     // TODO: need to improve this for long range dates
     // and idea could be tiered mv for the different periods
     const result = await this.getFeaturesUsage({
-      customerId,
-      projectId,
-      featureSlug: feature.featureSlug,
-      afterRecordId,
-      beforeRecordId,
-      billingPeriodStart: startAt,
+      customer_id: customerId,
+      project_id: projectId,
+      feature_slug: feature.featureSlug,
+      after_record_id: afterRecordId,
+      before_record_id: beforeRecordId,
+      billing_period_start: startAt,
     })
       .then((usage) => usage.data ?? [])
       .catch((error) => {
@@ -724,20 +745,20 @@ export class Analytics {
 
     if (config.behavior === "sum") {
       if (feature.aggregationMethod === "count") {
-        usage = delta.deltaCount
+        usage = delta.delta_count
       } else {
-        usage = delta.deltaSum
+        usage = delta.delta_sum
       }
     } else if (config.behavior === "max") {
-      usage = delta.deltaMax
+      usage = delta.delta_max
     } else if (config.behavior === "last") {
-      usage = delta.lastValue
+      usage = delta.last_value
     }
 
     return Ok({
       featureSlug: feature.featureSlug,
       usage,
-      lastRecordId: delta.lastRecordId,
+      lastRecordId: delta.last_record_id,
     })
   }
 }

@@ -11,15 +11,15 @@ export const getVerifications = protectedProjectProcedure
     })
   )
   .query(async (opts) => {
-    const projectId = opts.ctx.project.id
+    const project_id = opts.ctx.project.id
     const input = opts.input
 
-    const cacheKey = `${projectId}:${input.intervalDays}`
+    const cacheKey = `${project_id}:${input.interval_days}`
     const result = await opts.ctx.cache.getVerifications.swr(cacheKey, async () => {
       const result = opts.ctx.analytics
         .getFeaturesVerifications({
-          projectId,
-          intervalDays: input.intervalDays,
+          project_id,
+          interval_days: input.interval_days,
         })
         .then((res) => res.data)
 
@@ -28,8 +28,8 @@ export const getVerifications = protectedProjectProcedure
 
     if (result.err) {
       opts.ctx.logger.error(result.err.message, {
-        projectId,
-        intervalDays: input.intervalDays,
+        project_id,
+        interval_days: input.interval_days,
       })
 
       return { verifications: [], error: result.err.message }

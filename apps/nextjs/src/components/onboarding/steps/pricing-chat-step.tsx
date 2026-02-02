@@ -23,6 +23,7 @@ import {
   CreditCard,
   Folder,
   Layers,
+  Loader2,
   PanelRightClose,
   PanelRightOpen,
   Puzzle,
@@ -157,6 +158,14 @@ function usePlanVersionId() {
 function useProjectSlug() {
   const { state } = useOnboarding()
   return (state?.context?.flowData as { project?: { slug: string } })?.project?.slug
+}
+
+function useProjectCurrency() {
+  const { state } = useOnboarding()
+  return (
+    (state?.context?.flowData as { project?: { defaultCurrency: string } })?.project
+      ?.defaultCurrency ?? "USD"
+  )
 }
 
 function usePlanVersionData(planVersionId: string | undefined, projectSlug: string | undefined) {
@@ -893,7 +902,10 @@ const ArtifactSection = memo(function ArtifactSection({
 // Message Part Renderers
 // =============================================================================
 
-function useMessagePartRenderer(handleViewArtifact: (id: string) => void) {
+function useMessagePartRenderer(
+  handleViewArtifact: (id: string) => void,
+  onPlanVersionReady: () => void
+) {
   return useCallback(
     (part: PricingChatMessage["parts"][number], index: number): React.ReactNode => {
       switch (part.type) {
@@ -918,7 +930,7 @@ function useMessagePartRenderer(handleViewArtifact: (id: string) => void) {
           return renderCreatePlanVersionFeaturePart(part, index, handleViewArtifact)
 
         case "tool-getPlanVersionById":
-          return renderGetPlanVersionByIdPart(part, index)
+          return renderGetPlanVersionByIdPart(part, index, onPlanVersionReady)
 
         case "tool-listFeatures":
         case "tool-listPlans":
@@ -930,7 +942,7 @@ function useMessagePartRenderer(handleViewArtifact: (id: string) => void) {
           return null
       }
     },
-    [handleViewArtifact]
+    [handleViewArtifact, onPlanVersionReady]
   )
 }
 
@@ -1068,9 +1080,9 @@ function renderCreatePlanVersionFeaturePart(
 
 function renderGetPlanVersionByIdPart(
   part: Extract<PricingChatMessage["parts"][number], { type: "tool-getPlanVersionById" }>,
-  index: number
+  index: number,
+  onPlanVersionReady: () => void
 ) {
-  const { next } = useOnboarding()
   if (hasToolError(part)) {
     return <ErrorMessage key={index} error={(part.output as { error: string }).error} />
   }
@@ -1086,12 +1098,7 @@ function renderGetPlanVersionByIdPart(
   ) {
     return (
       <div key={index} className="my-4">
-        <PricingCard
-          planVersion={part.output.planVersion}
-          onPublish={() => {
-            next()
-          }}
-        />
+        <PricingCard planVersion={part.output.planVersion} onPublish={onPlanVersionReady} />
       </div>
     )
   }
@@ -1159,22 +1166,28 @@ const ChatPanel = memo(function ChatPanel({
   setInput,
   isLoading,
   showThinking,
+  isGeneratingArtifacts,
+  isChatDisabled,
   hasArtifacts,
   showArtifactsPanel,
   setShowArtifactsPanel,
   onSubmit,
   renderMessagePart,
+  currency,
 }: {
   messages: PricingChatMessage[]
   input: string
   setInput: (value: string) => void
   isLoading: boolean
   showThinking: boolean
+  isGeneratingArtifacts: boolean
+  isChatDisabled: boolean
   hasArtifacts: boolean
   showArtifactsPanel: boolean
   setShowArtifactsPanel: (show: boolean) => void
   onSubmit: () => void
   renderMessagePart: (part: PricingChatMessage["parts"][number], index: number) => React.ReactNode
+  currency: string
 }) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -1211,7 +1224,7 @@ const ChatPanel = memo(function ChatPanel({
           <div>
             <h2 className="font-semibold text-background-textContrast">Pricing Assistant</h2>
             <p className="hidden text-background-text text-sm sm:block">
-              Create and manage your SaaS pricing plans
+              Let's publish your first pricing plan.
             </p>
           </div>
         </div>
@@ -1235,7 +1248,7 @@ const ChatPanel = memo(function ChatPanel({
       {/* Messages */}
       <ScrollArea className="flex-1">
         <div className="space-y-4 p-4 md:p-6">
-          {messages.length === 0 && <WelcomeScreen setInput={setInput} />}
+          {messages.length === 0 && <WelcomeScreen setInput={setInput} currency={currency} />}
 
           {messages.map((message) => {
             if (!hasVisibleContent(message.parts) && message.role === "assistant") return null
@@ -1265,12 +1278,14 @@ const ChatPanel = memo(function ChatPanel({
             )
           })}
 
-          {showThinking && (
+          {(showThinking || isGeneratingArtifacts) && (
             <div className="flex justify-start">
               <div className="rounded-2xl border border-background-line bg-background-bg px-4 py-3">
                 <div className="flex items-center gap-3">
                   <LoadingAnimation variant="dots" className="text-primary-solid" />
-                  <span className="text-background-text text-sm">Thinking...</span>
+                  <span className="text-background-text text-sm">
+                    {isGeneratingArtifacts ? "Generating artifacts..." : "Thinking..."}
+                  </span>
                 </div>
               </div>
             </div>
@@ -1282,54 +1297,80 @@ const ChatPanel = memo(function ChatPanel({
 
       {/* Input */}
       <div className="border-background-line border-t bg-background-bgSubtle p-4">
-        <form onSubmit={handleSubmit} className="flex items-start gap-3">
-          <Textarea
-            id="pricing-chat-input"
-            rows={1}
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Describe your pricing needs..."
-            disabled={isLoading}
-            className="h-[36px] max-h-[100px] resize-none"
-          />
-          <Button
-            type="submit"
-            disabled={isLoading || !input.trim()}
-            variant="primary"
-            size="icon"
-            className="shrink-0"
-          >
-            {isLoading ? <LoadingAnimation className="h-4 w-4" /> : <Send className="h-4 w-4" />}
-            <span className="sr-only">Send message</span>
-          </Button>
-        </form>
+        {isChatDisabled ? (
+          <div className="flex items-center justify-center gap-2 rounded-lg border border-success-border bg-success-bg px-4 py-3 text-success-textContrast">
+            <CheckCircle2 className="h-4 w-4 text-success-solid" />
+            <span className="text-sm">
+              Plan version created! Click "Publish" on the pricing card to continue.
+            </span>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="flex items-start gap-3">
+            <Textarea
+              id="pricing-chat-input"
+              rows={1}
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Describe your pricing needs..."
+              disabled={isLoading}
+              className="h-[36px] max-h-[100px] resize-none"
+            />
+            <Button
+              type="submit"
+              disabled={isLoading || !input.trim()}
+              variant="primary"
+              size="icon"
+              className="shrink-0"
+            >
+              {isLoading ? <LoadingAnimation className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+              <span className="sr-only">Send message</span>
+            </Button>
+          </form>
+        )}
       </div>
     </div>
   )
 })
 
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: "$",
+  EUR: "€",
+}
+
+const CURRENCY_NAMES: Record<string, string> = {
+  USD: "dollars",
+  EUR: "euros",
+}
+
+function getPromptExamples(currency: string): string[] {
+  const symbol = CURRENCY_SYMBOLS[currency] ?? "$"
+  const name = CURRENCY_NAMES[currency] ?? "dollars"
+
+  return [
+    `Create a plan called Starter with tokens as pay-per-usage, each token costs 0.001 ${name}, base plan cost 10 ${name} monthly. 100 tokens are included in the base plan. 15 days trial.`,
+    `Create a Pro plan with 100 API calls, 5 team members, unlimited storage for ${symbol}29/month. 15 days trial.`,
+    `Create an Enterprise plan with 1000 API calls, 10 team members, unlimited storage for ${symbol}99/month. 15 days trial.`,
+  ]
+}
+
 const WelcomeScreen = memo(function WelcomeScreen({
   setInput,
+  currency,
 }: {
   setInput: (value: string) => void
+  currency: string
 }) {
-  const prompts = [
-    "I want to build a plan with tokens as pay-per-usage at 10 euros monthly",
-    "Create a Pro plan with 100 API calls, 5 team members, unlimited storage for $29/month",
-  ]
+  const prompts = getPromptExamples(currency)
 
   return (
     <div className="py-12 text-center">
-      <div className="mx-auto mb-4 w-fit rounded-full border border-primary-border bg-primary-bg p-4">
-        <Sparkles className="h-8 w-8 text-primary-solid" />
-      </div>
       <h3 className="mb-2 font-semibold text-background-textContrast text-lg">
         Welcome to Pricing Assistant
       </h3>
       <p className="mx-auto max-w-md text-background-text text-sm">
-        Describe your SaaS product and I'll help you create the perfect pricing plan.
+        Let's create your first pricing plan in {currency} and publish it to your customers.
       </p>
       <div className="mt-6 space-y-2">
         {prompts.map((prompt) => (
@@ -1356,11 +1397,16 @@ export function PricingChat() {
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null)
   const [showArtifactsPanel, setShowArtifactsPanel] = useState(false)
 
+  const projectCurrency = useProjectCurrency()
+
   const { messages, sendMessage, status, setMessages } = useChat<PricingChatMessage>({
-    transport: new DefaultChatTransport({ api: "/api/chat" }),
+    transport: new DefaultChatTransport({
+      api: "/api/chat",
+      body: { currency: projectCurrency },
+    }),
   })
 
-  const { updateContext, state, skip } = useOnboarding()
+  const { updateContext, state, next } = useOnboarding()
   const planVersionId = usePlanVersionId()
   const projectSlug = useProjectSlug()
   const { data: loadedData, isLoading: isLoadingPlanVersion } = usePlanVersionData(
@@ -1428,8 +1474,24 @@ export function PricingChat() {
 
   const isLoading = status === "streaming" || status === "submitted"
 
+  // Check if artifacts are currently being generated (tools in progress)
+  const isGeneratingArtifacts = useMemo(() => {
+    if (!isLoading) return false
+    const lastMessage = messages[messages.length - 1]
+    if (!lastMessage || lastMessage.role !== "assistant") return false
+
+    return lastMessage.parts.some((part) => {
+      if (part.type.startsWith("tool-")) {
+        const state = (part as { state?: string }).state
+        return state === "input-streaming" || state === "input-available"
+      }
+      return false
+    })
+  }, [isLoading, messages])
+
   const showThinking = useMemo(() => {
     if (!isLoading) return false
+    if (isGeneratingArtifacts) return false // Don't show thinking when generating artifacts
     const lastMessage = messages[messages.length - 1]
     if (!lastMessage || lastMessage.role === "user") return true
     if (lastMessage.parts.length === 0) return true
@@ -1444,7 +1506,12 @@ export function PricingChat() {
       }
       return false
     })
-  }, [isLoading, messages])
+  }, [isLoading, messages, isGeneratingArtifacts])
+
+  // Check if a plan version has been created (to disable chat)
+  const hasPlanVersionArtifact = useMemo(() => {
+    return artifacts.some((a) => a.type === "planVersion")
+  }, [artifacts])
 
   const handleViewArtifact = useCallback((artifactId: string) => {
     setSelectedArtifactId(artifactId)
@@ -1457,7 +1524,11 @@ export function PricingChat() {
     setInput("")
   }, [input, isLoading, sendMessage])
 
-  const renderMessagePart = useMessagePartRenderer(handleViewArtifact)
+  const handlePlanVersionReady = useCallback(() => {
+    next()
+  }, [next])
+
+  const renderMessagePart = useMessagePartRenderer(handleViewArtifact, handlePlanVersionReady)
 
   const chatPanel = (
     <ChatPanel
@@ -1466,13 +1537,25 @@ export function PricingChat() {
       setInput={setInput}
       isLoading={isLoading}
       showThinking={showThinking}
+      isGeneratingArtifacts={isGeneratingArtifacts}
+      isChatDisabled={hasPlanVersionArtifact}
       hasArtifacts={hasArtifacts}
       showArtifactsPanel={showArtifactsPanel}
       setShowArtifactsPanel={setShowArtifactsPanel}
       onSubmit={handleSubmit}
       renderMessagePart={renderMessagePart}
+      currency={projectCurrency}
     />
   )
+
+  // Show loading state while fetching plan version data (when step was already done)
+  if (planVersionId && isLoadingPlanVersion) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
 
   // Mobile: Overlay panel
   if (showArtifactsPanel && hasArtifacts) {
@@ -1514,15 +1597,8 @@ export function PricingChat() {
 
   // No artifacts yet - just show chat
   return (
-    <>
-      <div className="flex h-full max-h-[800px] animate-content flex-col overflow-hidden rounded-xl border border-background-border bg-background-base shadow-sm delay-200!">
-        {chatPanel}
-      </div>
-      <div className="flex animate-content justify-center">
-        <Button variant="outline" onClick={() => skip()} className="w-full">
-          I'll do it manually
-        </Button>
-      </div>
-    </>
+    <div className="flex h-full max-h-[800px] animate-content flex-col overflow-hidden rounded-xl border border-background-border bg-background-base shadow-sm delay-200!">
+      {chatPanel}
+    </div>
   )
 }

@@ -13,7 +13,7 @@ import type {
   SubscriptionCache,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import type { Logger, WideEventHelpers } from "@unprice/logging"
 import { env } from "../../env"
 import type { CacheNamespaces, CustomerCache } from "../cache"
 import type { Cache } from "../cache/service"
@@ -41,6 +41,7 @@ export class CustomerService {
   private readonly metrics: Metrics
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
+  private wideEventHelpers?: WideEventHelpers
 
   constructor({
     db,
@@ -49,6 +50,7 @@ export class CustomerService {
     waitUntil,
     cache,
     metrics,
+    wideEventHelpers,
   }: {
     db: Database
     logger: Logger
@@ -57,6 +59,7 @@ export class CustomerService {
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
     metrics: Metrics
+    wideEventHelpers?: WideEventHelpers
   }) {
     this.db = db
     this.logger = logger
@@ -64,6 +67,15 @@ export class CustomerService {
     this.waitUntil = waitUntil
     this.cache = cache
     this.metrics = metrics
+    this.wideEventHelpers = wideEventHelpers
+  }
+
+  /**
+   * Sets the wide event helpers for request-scoped logging context.
+   * This should be called inside the wideEventLogger.runAsync() context.
+   */
+  public setWideEventHelpers(wideEventHelpers?: WideEventHelpers) {
+    this.wideEventHelpers = wideEventHelpers
   }
 
   /**
@@ -494,6 +506,7 @@ export class CustomerService {
       logger: this.logger,
       paymentProvider: provider,
       token: decryptedKey,
+      wideEventHelpers: this.wideEventHelpers,
     })
 
     return Ok(paymentProviderService)
@@ -770,6 +783,7 @@ export class CustomerService {
     })
 
     if (planResolution.err) {
+      this.wideEventHelpers?.addError(planResolution.err)
       return Err(planResolution.err)
     }
 
@@ -788,8 +802,23 @@ export class CustomerService {
       cancelUrl: input.cancelUrl,
     }
 
+    this.wideEventHelpers?.addCustomer({
+      operation: "sign_up",
+      name: input.name,
+      email: input.email,
+      plan_version_id: planVersion.id,
+      plan_slug: planVersion.plan.slug,
+      success_url: successUrl,
+      cancel_url: input.cancelUrl,
+      session_id: input.sessionId,
+      currency: input.defaultCurrency,
+    })
+
+    // let's skip the payment required flow if the payment provider is sandbox
+    const isSandbox = planVersion.paymentProvider === "sandbox"
+
     // Step 3: Branch Logic
-    if (planVersion.paymentMethodRequired) {
+    if (planVersion.paymentMethodRequired && !isSandbox) {
       return this.handlePaymentRequiredFlow(context)
     }
 
@@ -815,6 +844,9 @@ export class CustomerService {
     let pageId: string | null = null
 
     if (sessionId) {
+      this.wideEventHelpers?.add("customers.session_id", sessionId)
+      this.wideEventHelpers?.add("customers.currency", defaultCurrency)
+
       // if session id is provided, we need to get the plan version from the session
       // get the session from analytics
       const data = await this.analytics.getPlanClickBySessionId({
@@ -975,6 +1007,10 @@ export class CustomerService {
       )
     }
 
+    this.wideEventHelpers?.add("customers.plan_version_id", planVersion.id)
+    this.wideEventHelpers?.add("customers.plan_slug", planVersion.plan.slug)
+    this.wideEventHelpers?.add("customers.currency", planVersion.currency)
+
     if (planVersion.status !== "published") {
       return Err(
         new UnPriceCustomerError({
@@ -1010,12 +1046,12 @@ export class CustomerService {
     }
 
     // validate the currency if provided
+    // TODO: why this is needed?
     if (currency !== planVersion.currency) {
       return Err(
         new UnPriceCustomerError({
           code: "CURRENCY_MISMATCH",
-          message:
-            "Currency mismatch, the project default currency does not match the plan version currency",
+          message: `Currency mismatch, the project default currency does not match the plan version currency: ${currency} !== ${planVersion.currency}`,
         })
       )
     }
@@ -1072,6 +1108,7 @@ export class CustomerService {
       logger: this.logger,
       paymentProvider: paymentProvider,
       token: decryptedKey,
+      wideEventHelpers: this.wideEventHelpers,
     })
 
     // create a session with the data of the customer, the plan version and the success and cancel urls
@@ -1217,6 +1254,7 @@ export class CustomerService {
           cache: this.cache,
           metrics: this.metrics,
           db: this.db,
+          wideEventHelpers: this.wideEventHelpers,
         })
 
         const { err, val: newSubscription } = await subscriptionService.createSubscription({
@@ -1230,6 +1268,7 @@ export class CustomerService {
         })
 
         if (err) {
+          this.wideEventHelpers?.addError(err)
           this.logger.error("Error creating subscription", {
             error: err.message,
           })
@@ -1239,7 +1278,7 @@ export class CustomerService {
         }
 
         // create the phase
-        const { err: createPhaseErr } = await subscriptionService.createPhase({
+        const { err: createPhaseErr, val: newPhase } = await subscriptionService.createPhase({
           input: {
             planVersionId: planVersion.id,
             startAt: Date.now(),
@@ -1254,6 +1293,7 @@ export class CustomerService {
         })
 
         if (createPhaseErr) {
+          this.wideEventHelpers?.addError(createPhaseErr)
           trx.rollback()
 
           return Err(
@@ -1263,6 +1303,11 @@ export class CustomerService {
             })
           )
         }
+
+        // add customer and subscription to the wide event helpers
+        this.wideEventHelpers?.add("customers.customer_id", customerId)
+        this.wideEventHelpers?.add("customers.subscription_id", newSubscription?.id ?? "")
+        this.wideEventHelpers?.add("customers.subscription_phase_id", newPhase?.id ?? "")
 
         return { newCustomer, newSubscription }
       })

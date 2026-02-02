@@ -250,6 +250,15 @@ export function init(): MiddlewareHandler<HonoEnv> {
 
     // Run within the wide event context so add() and emit() see the same store
     await wideEventLogger.runAsync(async () => {
+      // Set wide event helpers on all services inside the runAsync context
+      // This ensures AsyncLocalStorage context is properly propagated
+      customer.setWideEventHelpers(wideEventHelpers)
+      subscription.setWideEventHelpers(wideEventHelpers)
+      project.setWideEventHelpers(wideEventHelpers)
+      apikey.setWideEventHelpers(wideEventHelpers)
+      analytics.setWideEventHelpers(wideEventHelpers)
+      usageLimiterService.setWideEventHelpers(wideEventHelpers)
+
       wideEventLogger.addMany({
         request: {
           id: requestId,

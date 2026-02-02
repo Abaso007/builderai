@@ -82,7 +82,7 @@ export function Countries() {
   const { data, isLoading, isFetching, dataUpdatedAt } = useSuspenseQuery(
     trpc.analytics.getCountryVisits.queryOptions(
       {
-        intervalDays: intervalFilter.intervalDays,
+        interval_days: intervalFilter.intervalDays,
         page_id: pageFilter.pageId,
       },
       {
@@ -101,8 +101,8 @@ export function Countries() {
       ["analytics", "getCountryVisits"],
       {
         input: {
-          intervalDays: param,
-          pageId: pageFilter.pageId,
+          interval_days: param,
+          page_id: pageFilter.pageId,
         },
         type: "query",
       },

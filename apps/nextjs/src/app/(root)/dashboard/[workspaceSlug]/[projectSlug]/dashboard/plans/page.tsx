@@ -41,7 +41,7 @@ export default async function DashboardPlans(props: {
     ),
     trpc.analytics.getPlansConversion.queryOptions(
       {
-        intervalDays: interval.intervalDays,
+        interval_days: interval.intervalDays,
       },
       {
         staleTime: ANALYTICS_STALE_TIME,

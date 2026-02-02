@@ -15,11 +15,11 @@ SQL >
     from unprice_analytics_sessions_mv
     where
         1 = 1
-        {% if defined(pageId) %}
-            AND page_id = {{ String(pageId, description="Page ID", required=False) }}
+        {% if defined(page_id) %}
+            AND page_id = {{ String(page_id, description="Page ID", required=False) }}
         {% end %}
-        {% if defined(intervalDays) %}
-            AND date >= toStartOfDay(today() - {{ Int32(intervalDays) }})
+        {% if defined(interval_days) %}
+            AND date >= toStartOfDay(today() - {{ Int32(interval_days) }})
         {% else %}
             AND date >= toStartOfDay(today() - 7)
         {% end %}

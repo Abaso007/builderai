@@ -82,7 +82,7 @@ export function Browsers() {
   const { data, isLoading, isFetching, dataUpdatedAt } = useSuspenseQuery(
     trpc.analytics.getBrowserVisits.queryOptions(
       {
-        intervalDays: intervalFilter.intervalDays,
+        interval_days: intervalFilter.intervalDays,
         page_id: pageFilter.pageId,
       },
       {
@@ -101,8 +101,8 @@ export function Browsers() {
       ["analytics", "getBrowserVisits"],
       {
         input: {
-          intervalDays: param,
-          pageId: pageFilter.pageId,
+          interval_days: param,
+          page_id: pageFilter.pageId,
         },
         type: "query",
       },

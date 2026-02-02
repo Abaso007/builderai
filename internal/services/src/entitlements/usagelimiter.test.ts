@@ -1,11 +1,11 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { Ok } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import { type Logger, createWideEventHelpers } from "@unprice/logging"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
-import { createClock, createMockEntitlementState } from "../test-utils"
+import { createClock, createMockEntitlementState, createMockWideEventLogger } from "../test-utils"
 import { MemoryEntitlementStorageProvider } from "./memory-provider"
 import { EntitlementService } from "./service"
 
@@ -23,6 +23,8 @@ describe("EntitlementService - verify", () => {
   const customerId = "cust_123"
   const projectId = "proj_123"
   const featureSlug = "test-feature"
+
+  const mockWideEventLogger = createMockWideEventLogger("entitlements-test", "0.0.1", "test")
 
   const mockEntitlementState = createMockEntitlementState({
     id: "ent_123",
@@ -156,6 +158,7 @@ describe("EntitlementService - verify", () => {
       waitUntil: vi.fn(),
       cache: mockCache,
       metrics: mockMetrics,
+      wideEventHelpers: createWideEventHelpers(mockWideEventLogger),
     })
   })
 
@@ -195,9 +198,9 @@ describe("EntitlementService - verify", () => {
 
     expect(verifications.val).toHaveLength(1)
     expect(verifications.val?.[0]).toMatchObject({
-      customerId,
-      projectId,
-      featureSlug,
+      customer_id: customerId,
+      project_id: projectId,
+      feature_slug: featureSlug,
       allowed: 1,
     })
   })
@@ -272,7 +275,7 @@ describe("EntitlementService - verify", () => {
     expect(verifications.val).toHaveLength(1)
     expect(verifications.val?.[0]).toMatchObject({
       allowed: 0,
-      deniedReason: "LIMIT_EXCEEDED",
+      denied_reason: "LIMIT_EXCEEDED",
     })
   })
 
@@ -297,9 +300,9 @@ describe("EntitlementService - verify", () => {
     const verifications = await mockStorage.getAllVerifications()
     expect(verifications.val).toHaveLength(1)
     expect(verifications.val?.[0]).toMatchObject({
-      featureSlug: "non-existent",
+      feature_slug: "non-existent",
       allowed: 0,
-      deniedReason: "ENTITLEMENT_NOT_FOUND",
+      denied_reason: "ENTITLEMENT_NOT_FOUND",
     })
   })
 })
@@ -376,6 +379,8 @@ describe("EntitlementService - reportUsage", () => {
       }),
     } as unknown as Analytics
 
+    const mockWideEventLogger = createMockWideEventLogger("entitlements-test", "0.0.1", "test")
+
     // Mock Database
     mockDb = {
       query: {
@@ -440,6 +445,7 @@ describe("EntitlementService - reportUsage", () => {
       waitUntil: vi.fn((promise) => promise), // Execute immediately for testing
       cache: mockCache,
       metrics: mockMetrics,
+      wideEventHelpers: createWideEventHelpers(mockWideEventLogger),
     })
 
     // biome-ignore lint/suspicious/noExplicitAny: on first call the entitlement is not found in the cache so we need to compute it
@@ -480,9 +486,9 @@ describe("EntitlementService - reportUsage", () => {
     const usageRecords = await mockStorage.getAllUsageRecords()
     expect(usageRecords.val).toHaveLength(1)
     expect(usageRecords.val?.[0]).toMatchObject({
-      customerId,
-      projectId,
-      featureSlug,
+      customer_id: customerId,
+      project_id: projectId,
+      feature_slug: featureSlug,
       usage: usageAmount,
     })
   })

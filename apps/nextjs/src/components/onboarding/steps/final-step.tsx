@@ -18,18 +18,33 @@ export function FinalStep({ className }: React.ComponentProps<"div">) {
           You're good to go
         </Typography>
         <Typography variant="p" className="mb-8 w-[640px] max-w-[90vw] animate-title delay-300!">
-          Congratulations! You have already pricing, go ahead and explore the app.
+          Congratulations! You are already pricing like a pro, go ahead and explore the app.
         </Typography>
 
         <Button
+          className="animate-button"
           onClick={() => {
+            // clear the flow data
             updateContext({
               flowData: {
+                project: undefined,
+                customer: undefined,
+                paymentProvider: undefined,
+                planVersionId: undefined,
+                apiKey: undefined,
                 done: true,
               },
             })
 
-            router.push(`/${workspaceSlug}/${state?.context?.flowData?.project?.slug}`)
+            const projectSlug = state?.context?.flowData?.project?.slug
+
+            if (projectSlug) {
+              router.push(`/${workspaceSlug}/${projectSlug}`)
+            } else {
+              router.push(`/${workspaceSlug}`)
+            }
+
+            router.refresh()
           }}
         >
           Go to the app

@@ -10,21 +10,21 @@ NODE feature_usage_no_duplicates_node
 SQL >
     %
     SELECT
-        projectId,
-        customerId,
-        featureSlug,
+        project_id,
+        customer_id,
+        feature_slug,
         count() AS count,
         sum(usage) AS sum,
         max(usage) AS max,
         argMax(usage, timestamp) AS last_during_period
     FROM unprice_feature_usage_records FINAL
     WHERE
-        projectId = {{ String(projectId) }}
-        AND customerId = {{ String(customerId) }}
-        {% if defined(featureSlugs) %}
-            AND featureSlug IN {{ Array(featureSlugs, 'String') }}
+        project_id = {{ String(project_id) }}
+        AND customer_id = {{ String(customer_id) }}
+        {% if defined(feature_slugs) %}
+            AND feature_slug IN {{ Array(feature_slugs, 'String') }}
         {% end %}
         AND timestamp >= {{ Int64(start) }} AND timestamp < {{ Int64(end) }}
-    GROUP BY projectId, customerId, featureSlug
+    GROUP BY project_id, customer_id, feature_slug
 
 TYPE endpoint

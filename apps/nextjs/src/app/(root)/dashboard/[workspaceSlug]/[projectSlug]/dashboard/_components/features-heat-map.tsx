@@ -81,7 +81,7 @@ export function FeatureUsageHeatmapContent() {
   } = useSuspenseQuery(
     trpc.analytics.getFeatureHeatmap.queryOptions(
       {
-        intervalDays: intervalFilter.intervalDays,
+        interval_days: intervalFilter.intervalDays,
       },
       {
         staleTime: ANALYTICS_STALE_TIME,
@@ -98,7 +98,7 @@ export function FeatureUsageHeatmapContent() {
       ["analytics", "getFeatureHeatmap"],
       {
         input: {
-          intervalDays: param,
+          interval_days: param,
         },
         type: "query",
       },

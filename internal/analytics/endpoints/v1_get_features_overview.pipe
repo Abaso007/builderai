@@ -7,7 +7,7 @@ SQL >
     %
     WITH
         toStartOfDay(
-            toTimeZone(toDateTime64(now() - INTERVAL {{ Int32(intervalDays) }} DAY, 3), {{ String(timezone, 'UTC') }})
+            toTimeZone(toDateTime64(now() - INTERVAL {{ Int32(interval_days) }} DAY, 3), {{ String(timezone, 'UTC') }})
         ) AS start,
         toStartOfDay(
             toTimeZone(toDateTime64(now() + INTERVAL 1 DAY, 3), {{ String(timezone, 'UTC') }})
@@ -26,7 +26,7 @@ SQL >
     %
     WITH
         toStartOfHour(
-            toTimeZone(toDateTime64(now() - INTERVAL {{ Int32(intervalDays, 1) }} DAY, 3), {{ String(timezone, 'UTC') }})
+            toTimeZone(toDateTime64(now() - INTERVAL {{ Int32(interval_days, 1) }} DAY, 3), {{ String(timezone, 'UTC') }})
         ) AS start,
         toStartOfHour(
             toTimeZone(toDateTime64(now() + INTERVAL 1 DAY, 3), {{ String(timezone, 'UTC') }})
@@ -44,62 +44,62 @@ NODE feature_verifications_node
 SQL >
     %
     SELECT
-        {% if Int32(intervalDays) == 1 %}
+        {% if Int32(interval_days) == 1 %}
             toStartOfHour(toTimeZone(date, {{ String(timezone, 'UTC') }})) as interval,
         {% else %}
             toStartOfDay(toTimeZone(date, {{ String(timezone, 'UTC') }})) as interval,
         {% end %}
-        projectId,
+        project_id,
         countMerge(count) AS count,
         quantileTDigestMerge(0.99)(p99_latency) AS p99_latency
     FROM unprice_feature_verifications_hourly_mv
     WHERE
-        {% if defined(projectId) %}
-            projectId = {{ String(projectId) }} AND
+        {% if defined(project_id) %}
+            project_id = {{ String(project_id) }} AND
         {% end %}
-        {% if defined(intervalDays) %}
-            date >= toStartOfDay(toTimeZone(now(), {{ String(timezone, 'UTC') }}) - INTERVAL {{ Int32(intervalDays) }} DAY)
+        {% if defined(interval_days) %}
+            date >= toStartOfDay(toTimeZone(now(), {{ String(timezone, 'UTC') }}) - INTERVAL {{ Int32(interval_days) }} DAY)
         {% else %}
             date >= toStartOfDay(toTimeZone(now(), {{ String(timezone, 'UTC') }}) - INTERVAL 7 DAY)
         {% end %}
-    GROUP BY interval, projectId
+    GROUP BY interval, project_id
 
 
 NODE feature_usage_total_node
 SQL >
     %
     SELECT
-        {% if Int32(intervalDays) == 1 %}
+        {% if Int32(interval_days) == 1 %}
             toStartOfHour(toTimeZone(date, {{ String(timezone, 'UTC') }})) as interval,
         {% else %}
             toStartOfDay(toTimeZone(date, {{ String(timezone, 'UTC') }})) as interval,
         {% end %}
-        projectId,
+        project_id,
         countMerge(count) AS count,
         sumMerge(sum) AS sum
     FROM unprice_feature_usage_hourly_mv
     WHERE
-        {% if defined(projectId) %}
-            projectId = {{ String(projectId) }} AND
+        {% if defined(project_id) %}
+            project_id = {{ String(project_id) }} AND
         {% end %}
-        {% if defined(intervalDays) %}
-            date >= toStartOfDay(toTimeZone(now(), {{ String(timezone, 'UTC') }}) - INTERVAL {{ Int32(intervalDays) }} DAY)
+        {% if defined(interval_days) %}
+            date >= toStartOfDay(toTimeZone(now(), {{ String(timezone, 'UTC') }}) - INTERVAL {{ Int32(interval_days) }} DAY)
         {% else %}
             date >= toStartOfDay(toTimeZone(now(), {{ String(timezone, 'UTC') }}) - INTERVAL 7 DAY)
         {% end %}
-    GROUP BY interval, projectId
+    GROUP BY interval, project_id
 
 NODE feature_overview_node
 SQL >
     %
     SELECT
         verifications.interval AS interval,
-        coalesce(verifications.projectId, usage.projectId) AS project_id,
+        coalesce(verifications.project_id, usage.project_id) AS project_id,
         coalesce(verifications.p99_latency, 0) AS latency,
         coalesce(verifications.count, 0) AS verifications,
         coalesce(usage.sum, 0) AS usage
     FROM feature_verifications_node as verifications
-    LEFT JOIN feature_usage_total_node as usage ON verifications.interval = usage.interval AND verifications.projectId = usage.projectId
+    LEFT JOIN feature_usage_total_node as usage ON verifications.interval = usage.interval AND verifications.project_id = usage.project_id
 
 
 NODE timeserie_feature_overview
@@ -111,7 +111,7 @@ SQL >
         verifications,
         usage
     FROM
-        {% if Int32(intervalDays) == 1 %} hour_intervals
+        {% if Int32(interval_days) == 1 %} hour_intervals
         {% else %} day_intervals
         {% end %}
     LEFT JOIN feature_overview_node USING interval

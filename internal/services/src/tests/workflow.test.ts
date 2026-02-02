@@ -2,7 +2,7 @@ import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { PlanVersion } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import { type Logger, createWideEventHelpers } from "@unprice/logging"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
@@ -11,7 +11,7 @@ import { MemoryEntitlementStorageProvider } from "../entitlements/memory-provide
 import { EntitlementService } from "../entitlements/service"
 import type { Metrics } from "../metrics"
 import { SubscriptionService } from "../subscriptions/service"
-import { createClock, createMockEntitlementState } from "../test-utils"
+import { createClock, createMockEntitlementState, createMockWideEventLogger } from "../test-utils"
 import { unprice } from "../utils/unprice"
 
 vi.mock("../env", () => ({
@@ -281,6 +281,8 @@ describe("Golden Scenario - Customer Journey", () => {
     })
     await mockStorage.initialize()
 
+    const mockWideEventLogger = createMockWideEventLogger("workflow-test", "0.0.1", "test")
+
     const serviceDeps = {
       db: mockDb,
       logger: mockLogger,
@@ -289,6 +291,7 @@ describe("Golden Scenario - Customer Journey", () => {
       waitUntil: (p: Promise<any>) => p,
       cache: mockCache,
       metrics: mockMetrics,
+      wideEventHelpers: createWideEventHelpers(mockWideEventLogger),
     }
 
     customerService = new CustomerService(serviceDeps)

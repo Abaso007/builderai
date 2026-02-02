@@ -44,16 +44,15 @@ export const nullableJsonToString = anyObject.nullable().transform((s) => {
 export const stringToUInt32 = z.union([z.string(), z.number()]).transform((s) => Number(s))
 export const booleanToUInt8 = z.boolean().transform((b) => (b ? 1 : 0))
 
-// Type-safe metadata schema for application usage
 // We use a base schema for strong typing in the application
 const baseMetadataSchema = z
   .object({
     // Analytics fields
     cost: z.string().optional().describe("incremental cost for this event"),
     rate: z.string().optional(),
-    rateAmount: z.string().optional(),
-    rateCurrency: z.string().optional(),
-    rateUnitSize: z.string().optional(),
+    rate_amount: z.string().optional(),
+    rate_currency: z.string().optional(),
+    rate_unit_size: z.string().optional(),
     usage: z.string().optional().describe("amount of usage requested (verifications)"),
     remaining: z.string().optional().describe("remaining balance at verification"),
   })
@@ -62,11 +61,11 @@ const baseMetadataSchema = z
 export const metadataSchema = baseMetadataSchema.nullable().transform((m) => {
   if (!m) return null
 
-  // Tinybird receives Map(String, String) - convert camelCase keys to snake_case
+  // Tinybird receives Map(String, String) - convert keys to snake_case if they aren't already
   // and ensure all values are strings
   const transformed = Object.fromEntries(
     Object.entries(m).map(([key, value]) => {
-      // Convert camelCase to snake_case (e.g., "rateAmount" -> "rate_amount")
+      // Convert camelCase to snake_case (e.g., "rate_amount" -> "rate_amount")
       const snakeKey = key.replace(/([A-Z])/g, "_$1").toLowerCase()
 
       // Convert all values to strings
@@ -77,42 +76,61 @@ export const metadataSchema = baseMetadataSchema.nullable().transform((m) => {
   return transformed
 })
 
+// Convert bigint/string to number for UInt64 fields
+// Note: loses precision for values > Number.MAX_SAFE_INTEGER, but acceptable for hash IDs
+export const bigintToNumber = z
+  .union([z.string(), z.number(), z.bigint()])
+  .transform((v) => Number(v))
+
 export const featureVerificationSchemaV1 = z.object({
-  projectId: z.string(),
-  deniedReason: z.string().optional(),
+  project_id: z.string(),
+  denied_reason: z.string().optional(),
   allowed: z.number().int().min(0).max(1).default(0),
   timestamp: z
     .number()
     .default(Date.now())
     .describe("timestamp of when this usage record should be billed"),
-  createdAt: z
+  created_at: z
     .number()
     .default(Date.now())
     .describe("timestamp of when this usage record was created"),
   latency: z.number().optional(),
-  featureSlug: z.string(),
-  customerId: z.string(),
-  requestId: z.string(),
-  metadata: metadataSchema,
+  feature_slug: z.string(),
+  customer_id: z.string(),
+  request_id: z.string(),
+  region: z.string().default("UNK"),
+  meta_id: bigintToNumber.default(0),
+  // metadata is kept for internal SQLite storage, stripped before sending to Tinybird
+  metadata: z.record(z.string(), z.unknown()).nullable().optional(),
 })
 
 export const featureUsageSchemaV1 = z.object({
   id: z.string(),
-  idempotenceKey: z.string(),
-  featureSlug: z.string(),
-  requestId: z.string(),
-  projectId: z.string(),
-  customerId: z.string(),
+  idempotence_key: z.string(),
+  feature_slug: z.string(),
+  request_id: z.string(),
+  project_id: z.string(),
+  customer_id: z.string(),
   timestamp: z.number().describe("timestamp of when this usage record should be billed"),
   usage: stringToUInt32,
-  createdAt: z.number().describe("timestamp of when this usage record was created"),
+  created_at: z.number().describe("timestamp of when this usage record was created"),
   deleted: z.number().int().min(0).max(1).default(0),
-  metadata: metadataSchema,
+  meta_id: bigintToNumber.default(0),
+  // metadata is kept for internal SQLite storage, stripped before sending to Tinybird
+  metadata: z.record(z.string(), z.unknown()).nullable().optional(),
+})
+
+export const featureMetadataSchemaV1 = z.object({
+  meta_id: bigintToNumber,
+  project_id: z.string(),
+  customer_id: z.string(),
+  timestamp: z.number(),
+  tags: z.string(),
 })
 
 export const auditLogSchemaV1 = z.object({
-  workspaceId: z.string(),
-  auditLogId: z.string(),
+  workspace_id: z.string(),
+  audit_log_id: z.string(),
   event: z.string(),
   description: z.string().optional(),
   time: z.number(),
@@ -133,14 +151,14 @@ export const auditLogSchemaV1 = z.object({
   ),
   context: z.object({
     location: z.string(),
-    userAgent: z.string().optional(),
+    user_agent: z.string().optional(),
   }),
 })
 
 export const getAnalyticsVerificationsResponseSchema = z.object({
-  projectId: z.string(),
-  customerId: z.string().optional(),
-  featureSlug: z.string(),
+  project_id: z.string(),
+  customer_id: z.string().optional(),
+  feature_slug: z.string(),
   count: z.number(),
   p50_latency: z.number(),
   p95_latency: z.number(),
@@ -148,9 +166,9 @@ export const getAnalyticsVerificationsResponseSchema = z.object({
 })
 
 export const getUsageResponseSchema = z.object({
-  projectId: z.string(),
-  customerId: z.string().optional(),
-  featureSlug: z.string(),
+  project_id: z.string(),
+  customer_id: z.string().optional(),
+  feature_slug: z.string(),
   count: z.number(),
   sum: z.number(),
   max: z.number(),
@@ -230,7 +248,6 @@ export const pageEventSchema = z.object({
   engine: z.string(),
   engine_version: z.string(),
   cpu_architecture: z.string(),
-  ua: z.string(),
   bot: z.boolean(),
   referrer: z.string(),
   referrer_url: z.string(),
@@ -282,7 +299,7 @@ export type PageAnalyticsEvent = z.infer<typeof pageEventSchema>
 export type AnalyticsEvent = z.infer<typeof analyticsEventSchema>
 export type AnalyticsEventAction = z.infer<typeof analyticsEventSchema>["action"]
 export type GetUsageResponse = z.infer<typeof getUsageResponseSchema>
-
+export type AnalyticsFeatureMetadata = z.infer<typeof featureMetadataSchemaV1>
 export type AnalyticsVerification = z.infer<typeof featureVerificationSchemaV1>
 export type AnalyticsUsage = z.infer<typeof featureUsageSchemaV1>
 

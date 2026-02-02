@@ -1,6 +1,6 @@
 import { index, integer, numeric, sqliteTableCreator, text, unique } from "drizzle-orm/sqlite-core"
 
-export const version = "unpricedo_v1"
+export const version = "usagelimiter_v1"
 
 export const pgTableProject = sqliteTableCreator((name) => `${version}_${name}`)
 
@@ -23,14 +23,14 @@ export const usageRecords = pgTableProject(
     // First 10 chars encode timestamp, rest is random
     // Lexicographic sort = chronological sort
     id: text("id").primaryKey(), // ULID
-    idempotenceKey: text().notNull(),
-    requestId: text().notNull(),
-    featureSlug: text().notNull(),
-    customerId: text().notNull(),
-    projectId: text().notNull(),
+    idempotence_key: text().notNull(),
+    request_id: text().notNull(),
+    feature_slug: text().notNull(),
+    customer_id: text().notNull(),
+    project_id: text().notNull(),
     // time when the usage should be reported
     timestamp: integer().notNull(),
-    createdAt: integer().notNull(),
+    created_at: integer().notNull(),
     usage: numeric(),
     metadata: text(),
     // 0 = not deleted, 1 = deleted
@@ -38,9 +38,9 @@ export const usageRecords = pgTableProject(
   },
   (table) => [
     // Indexes for common queries
-    index("usage_records_feature_idx").on(table.featureSlug),
+    index("usage_records_feature_idx").on(table.feature_slug),
     index("usage_records_timestamp_idx").on(table.timestamp),
-    unique("usage_idempotence_key_idx").on(table.idempotenceKey),
+    unique("usage_idempotence_key_idx").on(table.idempotence_key),
   ]
 )
 
@@ -48,16 +48,16 @@ export const verifications = pgTableProject(
   "verifications",
   {
     id: integer().primaryKey({ autoIncrement: true }),
-    requestId: text().notNull(),
-    projectId: text().notNull(),
-    deniedReason: text(),
+    request_id: text().notNull(),
+    project_id: text().notNull(),
+    denied_reason: text(),
     timestamp: integer().notNull(),
-    createdAt: integer().notNull(),
+    created_at: integer().notNull(),
     latency: numeric(),
-    featureSlug: text().notNull(),
-    customerId: text().notNull(),
+    feature_slug: text().notNull(),
+    customer_id: text().notNull(),
     metadata: text(),
     allowed: integer().notNull().default(0),
   },
-  (table) => [index("verifications_feature_idx").on(table.featureSlug)]
+  (table) => [index("verifications_feature_idx").on(table.feature_slug)]
 )

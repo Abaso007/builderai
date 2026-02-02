@@ -3,7 +3,7 @@ import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
 export const getVerificationRegions = protectedProjectProcedure
-  .input(z.custom<Omit<Parameters<Analytics["getFeaturesVerificationRegions"]>[0], "projectId">>())
+  .input(z.custom<Omit<Parameters<Analytics["getFeaturesVerificationRegions"]>[0], "project_id">>())
   .output(
     z.object({
       verifications: z.custom<VerificationRegions>(),
@@ -11,19 +11,19 @@ export const getVerificationRegions = protectedProjectProcedure
     })
   )
   .query(async (opts) => {
-    const projectId = opts.ctx.project.id
+    const project_id = opts.ctx.project.id
     const timezone = opts.ctx.project.timezone
     const input = opts.input
 
-    const cacheKey = `${projectId}:${input.region}:${timezone}:${input.intervalDays}`
+    const cacheKey = `${project_id}:${input.region}:${timezone}:${input.interval_days}`
 
     const result = await opts.ctx.cache.getVerificationRegions.swr(cacheKey, async () => {
       const result = await opts.ctx.analytics
         .getFeaturesVerificationRegions({
-          projectId,
+          project_id,
           timezone,
           region: input.region,
-          intervalDays: input.intervalDays,
+          interval_days: input.interval_days,
         })
         .then((res) => res.data)
 
@@ -32,9 +32,9 @@ export const getVerificationRegions = protectedProjectProcedure
 
     if (result.err) {
       opts.ctx.logger.error(result.err.message, {
-        projectId,
+        project_id,
         region: input.region,
-        intervalDays: input.intervalDays,
+        interval_days: input.interval_days,
       })
 
       return { verifications: [], error: result.err.message }

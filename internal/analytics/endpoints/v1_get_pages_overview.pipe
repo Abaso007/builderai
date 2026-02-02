@@ -11,7 +11,7 @@ SQL >
     %
     WITH
         toStartOfDay(
-            toDateTime64(today() - {{ Int32(intervalDays) }}, 3),
+            toDateTime64(today() - {{ Int32(interval_days) }}, 3),
             {{ String(timezone, 'UTC') }}
         ) AS start,
         toStartOfDay(
@@ -34,7 +34,7 @@ SQL >
     %
     WITH
         toStartOfHour(
-            toDateTime64(timestampAdd(today(), INTERVAL - {{ Int32(intervalDays, 1) }} DAY), 3),
+            toDateTime64(timestampAdd(today(), INTERVAL - {{ Int32(interval_days, 1) }} DAY), 3),
             {{ String(timezone, 'UTC') }}
         ) AS start,
         toStartOfHour(
@@ -55,7 +55,7 @@ DESCRIPTION >
 SQL >
     %
     select
-        {% if Int32(intervalDays) == 1 %}
+        {% if Int32(interval_days) == 1 %}
             toStartOfHour(toDateTime64(date, 3), {{ String(timezone, 'UTC') }}) as interval,
         {% else %}
             toStartOfDay(toDateTime64(date, 3), {{ String(timezone, 'UTC') }}) as interval,
@@ -67,14 +67,14 @@ SQL >
     from unprice_analytics_sessions_mv
     where
         1 = 1
-        {% if defined(projectId) %}
-            AND project_id = {{ String(projectId, description="Project ID", required=False) }}
+        {% if defined(project_id) %}
+            AND project_id = {{ String(project_id, description="Project ID", required=False) }}
         {% end %}
-        {% if defined(pageId) %}
-            AND page_id = {{ String(pageId, description="Page ID", required=False) }}
+        {% if defined(page_id) %}
+            AND page_id = {{ String(page_id, description="Page ID", required=False) }}
         {% end %}
-        {% if defined(intervalDays) %}
-            AND date >= toStartOfDay(today() - {{ Int32(intervalDays) }})
+        {% if defined(interval_days) %}
+            AND date >= toStartOfDay(today() - {{ Int32(interval_days) }})
         {% else %}
             AND date >= toStartOfDay(today() - 7)
         {% end %}
@@ -98,7 +98,7 @@ SQL >
         sum(visits) as total_visits,
         sum(hits) as total_hits
     FROM
-        {% if Int32(intervalDays) == 1 %} hour_intervals
+        {% if Int32(interval_days) == 1 %} hour_intervals
         {% else %} day_intervals
         {% end %}
     LEFT JOIN page_visits_by_device USING interval
