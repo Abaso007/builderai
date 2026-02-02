@@ -4,14 +4,6 @@ import { customerSelectSchema } from "@unprice/db/validators"
 import { protectedProjectProcedure } from "#trpc"
 
 export const exist = protectedProjectProcedure
-  .meta({
-    span: "customers.exist",
-    openapi: {
-      method: "POST",
-      path: "/lambda/customers.exist",
-      protect: true,
-    },
-  })
   .input(customerSelectSchema.pick({ email: true }))
   .output(z.object({ exist: z.boolean() }))
   .mutation(async (opts) => {

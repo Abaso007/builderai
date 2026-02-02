@@ -22,7 +22,7 @@ export function ApiKeyStep({ className }: React.ComponentProps<"div"> & StepComp
             API Keys are used to authenticate your requests to the Unprice API.
           </div>
         </div>
-        <div className="animate-content delay-[0.2s]!">
+        <div className="animate-content delay-200!">
           <CreateApiKeyForm
             isOnboarding={true}
             onSuccess={(data) => {

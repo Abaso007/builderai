@@ -14,6 +14,7 @@ declare module "next-auth" {
       id: string
       email: string
       workspaces: WorkspacesJWTPayload[]
+      onboardingCompleted: boolean
     } & DefaultSession["user"]
   }
 }

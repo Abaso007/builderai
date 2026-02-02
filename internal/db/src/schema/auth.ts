@@ -16,6 +16,8 @@ export const users = pgTableProject("user", {
   theme: text("theme").default("dark").notNull(),
   defaultWorkspaceSlug: text("default_wk_slug"),
   password: varchar("password", { length: 255 }), // nullable for Oauth users
+  onboardingCompleted: boolean("onboarding_completed").default(false).notNull(),
+  onboardingCompletedAt: timestamp("onboarding_completed_at", { mode: "date" }),
 })
 
 export const accounts = pgTableProject(

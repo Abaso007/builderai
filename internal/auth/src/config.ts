@@ -168,6 +168,8 @@ export const authConfig: NextAuthConfig = {
               isInternal: member.workspace.isInternal,
               isMain: member.workspace.isMain,
             })) ?? []
+
+        session.user.onboardingCompleted = userWithWorkspaces?.onboardingCompleted ?? false
       }
 
       return session

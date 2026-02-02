@@ -1,8 +1,20 @@
+import { getSession } from "@unprice/auth/server-rsc"
+import { redirect } from "next/navigation"
 import { OnboardingUI } from "~/components/onboarding/onboarding-ui"
 import { OnboardingWrapper } from "~/components/onboarding/onboarding-wrapper"
 import { StepNavigator } from "~/components/onboarding/step-navigator"
 
-export default function OnboardingPage() {
+export default async function OnboardingPage(props: {
+  params: { workspaceSlug: string }
+}) {
+  const { workspaceSlug } = props.params
+  const session = await getSession()
+  const onboardingCompleted = session?.user?.onboardingCompleted ?? false
+
+  if (onboardingCompleted) {
+    return redirect(`/${workspaceSlug}`)
+  }
+
   return (
     <div className="mx-auto flex h-[calc(100vh-8rem)] w-full max-w-screen-lg flex-col items-center">
       <OnboardingWrapper>

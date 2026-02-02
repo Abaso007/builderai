@@ -25,7 +25,7 @@ export function ProjectStep({ className }: React.ComponentProps<"div"> & StepCom
             Projects are used to group your products and services.
           </div>
         </div>
-        <div className="animate-content delay-[0.2s]!">
+        <div className="animate-content delay-200!">
           <ProjectForm
             defaultValues={
               state?.context.flowData?.project ?? {

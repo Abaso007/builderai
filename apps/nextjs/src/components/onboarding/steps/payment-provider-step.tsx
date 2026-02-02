@@ -25,7 +25,7 @@ export function PaymentProviderStep({
             Stripe. You can configure it later in the settings.
           </div>
         </div>
-        <div className="animate-content delay-[0.2s]!">
+        <div className="animate-content delay-200!">
           <StripePaymentConfigForm
             isOnboarding={true}
             paymentProvider="sandbox"

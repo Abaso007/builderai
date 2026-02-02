@@ -1477,7 +1477,7 @@ export function PricingChat() {
   // Mobile: Overlay panel
   if (showArtifactsPanel && hasArtifacts) {
     return (
-      <div className="flex h-full max-h-[800px] animate-content flex-col overflow-hidden rounded-xl border border-background-border bg-background-base shadow-sm delay-[0.2s]!">
+      <div className="flex h-full max-h-[800px] animate-content flex-col overflow-hidden rounded-xl border border-background-border bg-background-base shadow-sm delay-200!">
         {/* Mobile: Show artifacts panel as overlay */}
         <div className="relative flex h-full md:hidden">
           {chatPanel}
@@ -1515,10 +1515,10 @@ export function PricingChat() {
   // No artifacts yet - just show chat
   return (
     <>
-      <div className="flex h-full max-h-[800px] animate-content flex-col overflow-hidden rounded-xl border border-background-border bg-background-base shadow-sm delay-[0.2s]!">
+      <div className="flex h-full max-h-[800px] animate-content flex-col overflow-hidden rounded-xl border border-background-border bg-background-base shadow-sm delay-200!">
         {chatPanel}
       </div>
-      <div className="flex animate-content justify-center p-8 delay-[0.2s]!">
+      <div className="flex animate-content justify-center">
         <Button variant="outline" onClick={() => skip()} className="w-full">
           I'll do it manually
         </Button>

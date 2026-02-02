@@ -10,14 +10,6 @@ import { featureGuard } from "#utils/feature-guard"
 import { reportUsageFeature } from "#utils/shared"
 
 export const create = protectedProjectProcedure
-  .meta({
-    span: "customers.create",
-    openapi: {
-      method: "POST",
-      path: "/lambda/customers.create",
-      protect: true,
-    },
-  })
   .input(customerInsertBaseSchema)
   .output(z.object({ customer: customerSelectSchema }))
   .mutation(async (opts) => {
