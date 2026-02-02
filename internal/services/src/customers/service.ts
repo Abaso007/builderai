@@ -614,8 +614,6 @@ export class CustomerService {
       provider,
     })
 
-    console.log("paymentProviderService", paymentProviderService)
-
     if (err) {
       return []
     }
@@ -727,8 +725,6 @@ export class CustomerService {
             })
           }
         )
-
-    console.log("val", val)
 
     if (err) {
       this.logger.error("error getting payment methods", {
