@@ -25,6 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { CopyButton } from "~/components/copy-button"
 import TimeZoneFormField from "~/components/forms/timezone-field"
 import { SubmitButton } from "~/components/submit-button"
+import { useIsOnboarding } from "~/hooks/use-features"
 import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
@@ -36,6 +37,7 @@ export function ProjectForm(props: {
   const router = useRouter()
   const workspaceSlug = useParams().workspaceSlug as string
   const trpc = useTRPC()
+  const [isOnboarding] = useIsOnboarding()
   const queryClient = useQueryClient()
 
   const editMode = !!props.defaultValues.id
@@ -83,9 +85,9 @@ export function ProjectForm(props: {
         // router refresh
         router.refresh()
 
-        if (props.onSuccess) {
-          props.onSuccess(newProject)
-        } else {
+        props.onSuccess?.(newProject)
+
+        if (!isOnboarding) {
           router.push(`/${workspaceSlug}/${newProject?.slug}`)
         }
       },

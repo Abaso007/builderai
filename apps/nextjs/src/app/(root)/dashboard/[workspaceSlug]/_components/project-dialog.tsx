@@ -36,12 +36,10 @@ export function ProjectDialog({
         <ProjectForm
           defaultValues={
             defaultValues ?? {
-              slug: "",
-              name: "",
-              url: "",
+              name: "Acme project",
+              url: "https://acme.com",
               defaultCurrency: "USD",
               timezone: "UTC",
-              contactEmail: "",
             }
           }
           onSuccess={() => setDialogOpen(false)}

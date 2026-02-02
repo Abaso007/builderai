@@ -46,7 +46,14 @@ export default async function WorkspaceOverviewPage(props: {
                 </Button>
               </SuperLink>
             ) : (
-              <ProjectDialog>
+              <ProjectDialog
+                defaultValues={{
+                  defaultCurrency: "USD",
+                  timezone: "UTC",
+                  name: "Acme project",
+                  url: "https://acme.com",
+                }}
+              >
                 <Button>
                   <Plus className="mr-2 h-4 w-4" />
                   Project
