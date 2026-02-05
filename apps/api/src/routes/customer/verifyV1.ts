@@ -10,13 +10,14 @@ import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { reportUsageEvents } from "~/util/reportUsageEvents"
+
 const tags = ["customer"]
 
 export const route = createRoute({
-  path: "/v1/customer/can",
-  operationId: "customers.can",
-  summary: "can feature",
-  description: "Check if a customer can use a feature",
+  path: "/v1/customer/verify",
+  operationId: "customers.verify",
+  summary: "verify feature",
+  description: "Verify if a customer can use a feature",
   method: "post",
   tags,
   request: {
@@ -30,20 +31,30 @@ export const route = createRoute({
           description: "The feature slug",
           example: "tokens",
         }),
+        action: z
+          .string()
+          .openapi({
+            description:
+              "The action being performed (e.g., 'read', 'write', 'delete'). Normalized to lowercase with spaces as hyphens.",
+            example: "read",
+          })
+          .optional()
+          .transform((v) =>
+            v == null || v === "" ? undefined : v.trim().toLowerCase().replace(/\s+/g, "-")
+          ),
         metadata: z
           .record(z.string(), z.string())
           .openapi({
-            description: "The metadata",
+            description: "Additional metadata for the verification",
             example: {
-              action: "create",
-              country: "US",
+              source: "api",
             },
           })
           .optional(),
         usage: z
           .number()
           .openapi({
-            description: "The usage to check feature access for",
+            description: "The usage to check feature access for, if not provided, it will be 0",
             example: 100,
           })
           .optional(),
@@ -52,25 +63,26 @@ export const route = createRoute({
     ),
   },
   responses: {
-    [HttpStatusCodes.OK]: jsonContent(verificationResultSchema, "The result of the can check"),
+    [HttpStatusCodes.OK]: jsonContent(verificationResultSchema, "The result of the verify check"),
     ...openApiErrorResponses,
   },
 })
 
-export type CanRequest = z.infer<
+export type VerifyRequest = z.infer<
   (typeof route.request.body)["content"]["application/json"]["schema"]
 >
-export type CanResponse = z.infer<
+export type VerifyResponse = z.infer<
   (typeof route.responses)[200]["content"]["application/json"]["schema"]
 >
 
-export const registerCanV1 = (app: App) =>
+export const registerVerifyV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId, featureSlug, metadata, usage } = c.req.valid("json")
+    const { customerId, featureSlug, metadata, usage, action } = c.req.valid("json")
     const { usagelimiter } = c.get("services")
-    // const stats = c.get("stats")
+    const stats = c.get("stats")
     const requestId = c.get("requestId")
     const performanceStart = c.get("performanceStart")
+    const requestStartedAt = c.get("requestStartedAt")
 
     // validate the request
     const key = await keyAuth(c)
@@ -81,7 +93,7 @@ export const registerCanV1 = (app: App) =>
     // event if that means some overage usage
 
     // start a new timer
-    startTime(c, "can")
+    startTime(c, "verify")
 
     // validate usage from db
     const { err, val: result } = await usagelimiter.verify({
@@ -93,21 +105,22 @@ export const registerCanV1 = (app: App) =>
       usage,
       // short ttl for dev
       flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
-      timestamp: Date.now(), // for now we report the usage at the time of the request
-      // country: stats.country,
-      // region: stats.region,
-      // action: key.action,
-      // resourceId: key.resourceId,
-      // keyId: key.id,
+      // timestamp of the record (stabilized at request start)
+      timestamp: requestStartedAt,
+      // first-class analytics fields
+      country: stats.country,
+      region: stats.region,
+      action: action,
+      keyId: key.id,
       metadata: metadata ?? null,
     })
 
     // end the timer
-    endTime(c, "can")
+    endTime(c, "verify")
 
     // send analytics event for the unprice customer
     c.executionCtx.waitUntil(
-      reportUsageEvents(c, { action: "can", status: err ? "error" : "success" })
+      reportUsageEvents(c, { action: "verify", status: err ? "error" : "success" })
     )
 
     if (err) {

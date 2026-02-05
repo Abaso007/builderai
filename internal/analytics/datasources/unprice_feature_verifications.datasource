@@ -16,7 +16,10 @@ SCHEMA >
     `denied_reason` LowCardinality(Nullable(String)) `json:$.denied_reason`,
     `allowed` UInt8 `json:$.allowed`,
     `region` LowCardinality(String) `json:$.region` DEFAULT 'UNK',
-    `meta_id` UInt64 `json:$.meta_id` DEFAULT 0
+    `meta_id` UInt64 `json:$.meta_id` DEFAULT 0,
+    `country` LowCardinality(String) `json:$.country` DEFAULT 'UNK',
+    `action` LowCardinality(Nullable(String)) `json:$.action`,
+    `key_id` Nullable(String) `json:$.key_id`
 
 ENGINE MergeTree
 ENGINE_PARTITION_KEY toYYYYMM(fromUnixTimestamp64Milli(timestamp, 'UTC'))

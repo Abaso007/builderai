@@ -35,6 +35,11 @@ export const usageRecords = pgTableProject(
     metadata: text(),
     // 0 = not deleted, 1 = deleted
     deleted: integer().notNull().default(0),
+    // first-class analytics columns
+    country: text().default("UNK"),
+    region: text().default("UNK"),
+    action: text(),
+    key_id: text(),
   },
   (table) => [
     // Indexes for common queries
@@ -58,6 +63,11 @@ export const verifications = pgTableProject(
     customer_id: text().notNull(),
     metadata: text(),
     allowed: integer().notNull().default(0),
+    // first-class analytics columns
+    country: text().default("UNK"),
+    region: text().default("UNK"),
+    action: text(),
+    key_id: text(),
   },
   (table) => [index("verifications_feature_idx").on(table.feature_slug)]
 )

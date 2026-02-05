@@ -75,7 +75,7 @@ export const registerGetAnalyticsVerificationsV1 = (app: App) =>
     // start a new timer
     startTime(c, "getVerifications")
 
-    const { interval_days: intervalDays } = prepareInterval(range)
+    const { intervalDays } = prepareInterval(range)
 
     // main workspace can see all verifications
     const isMain = key.project.workspace.isMain

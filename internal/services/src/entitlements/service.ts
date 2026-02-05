@@ -197,7 +197,11 @@ export class EntitlementService {
           request_id: params.requestId,
           created_at: Date.now(),
           meta_id: 0,
-          region: params.metadata?.region ?? "UNK",
+          region: params.region ?? "UNK",
+          // first-class analytics columns
+          country: params.country ?? "UNK",
+          action: params.action,
+          key_id: params.keyId,
         })
       )
 
@@ -246,8 +250,12 @@ export class EntitlementService {
         latency,
         request_id: params.requestId,
         created_at: Date.now(),
-        region: params.metadata?.region ?? "UNK",
+        region: params.region ?? "UNK",
         meta_id: 0, // this is a placeholder for the meta_id
+        // first-class analytics columns
+        country: params.country ?? "UNK",
+        action: params.action,
+        key_id: params.keyId,
       })
     )
 
@@ -500,6 +508,11 @@ export class EntitlementService {
         },
         deleted: 0,
         meta_id: 0, // this is a placeholder for the meta_id
+        // first-class analytics columns
+        country: params.country ?? "UNK",
+        region: params.region ?? "UNK",
+        action: params.action,
+        key_id: params.keyId,
       }
 
       this.waitUntil(this.storage.insertUsageRecord(usageRecord))

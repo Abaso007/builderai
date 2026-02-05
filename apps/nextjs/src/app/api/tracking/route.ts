@@ -101,6 +101,7 @@ const trackPageHit = async (
       url: payload.url,
     }
 
+    // TODO: lets send to DO for bashing instead of Tinybird directly
     const response = await analytics.ingestPageEvents(event)
     return response
   } catch (error) {

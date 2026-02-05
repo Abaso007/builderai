@@ -102,6 +102,15 @@ export const featureVerificationSchemaV1 = z.object({
   meta_id: bigintToNumber.default(0),
   // metadata is kept for internal SQLite storage, stripped before sending to Tinybird
   metadata: z.record(z.string(), z.unknown()).nullable().optional(),
+  // first-class analytics columns
+  country: z.string().default("UNK"),
+  action: z
+    .string()
+    .optional()
+    .describe(
+      "Action being performed (e.g. 'read', 'write', 'create', 'update', 'delete', 'list'). Use consistent values for filtering in analytics."
+    ),
+  key_id: z.string().optional(),
 })
 
 export const featureUsageSchemaV1 = z.object({
@@ -118,6 +127,16 @@ export const featureUsageSchemaV1 = z.object({
   meta_id: bigintToNumber.default(0),
   // metadata is kept for internal SQLite storage, stripped before sending to Tinybird
   metadata: z.record(z.string(), z.unknown()).nullable().optional(),
+  // first-class analytics columns
+  country: z.string().default("UNK"),
+  region: z.string().default("UNK"),
+  action: z
+    .string()
+    .optional()
+    .describe(
+      "Action being performed (e.g. 'read', 'write', 'create', 'update', 'delete', 'list'). Use consistent values for filtering in analytics."
+    ),
+  key_id: z.string().optional(),
 })
 
 export const featureMetadataSchemaV1 = z.object({

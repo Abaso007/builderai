@@ -39,13 +39,23 @@ export const route = createRoute({
           description: "The idempotence key",
           example: "123e4567-e89b-12d3-a456-426614174000",
         }),
+        action: z
+          .string()
+          .openapi({
+            description:
+              "The action being performed (e.g., 'create', 'update', 'delete', 'send-email', 'flush'). Normalized to lowercase with spaces as hyphens.",
+            example: "create",
+          })
+          .optional()
+          .transform((v) =>
+            v == null || v === "" ? undefined : v.trim().toLowerCase().replace(/\s+/g, "-")
+          ),
         metadata: z
           .record(z.string(), z.string())
           .openapi({
-            description: "The metadata",
+            description: "Additional metadata for the usage report",
             example: {
-              action: "create",
-              country: "US",
+              source: "api",
             },
           })
           .optional(),
@@ -73,10 +83,12 @@ export type ReportUsageResponse = z.infer<
 
 export const registerReportUsageV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId, featureSlug, usage, idempotenceKey, metadata } = c.req.valid("json")
+    const { customerId, featureSlug, usage, idempotenceKey, metadata, action } = c.req.valid("json")
     const { usagelimiter } = c.get("services")
-    // const stats = c.get("stats")
+    const stats = c.get("stats")
     const requestId = c.get("requestId")
+    const requestStartedAt = c.get("requestStartedAt")
+    const performanceStart = c.get("performanceStart")
 
     // validate the request
     const key = await keyAuth(c)
@@ -97,18 +109,19 @@ export const registerReportUsageV1 = (app: App) =>
       customerId,
       featureSlug,
       usage,
-      // timestamp of the record
-      timestamp: Date.now(), // for now we report the usage at the time of the request
+      // timestamp of the record (stabilized at request start)
+      timestamp: requestStartedAt,
       idempotenceKey,
       // short ttl for dev
       flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
       projectId,
       requestId,
-      // keyId: key.id, // important to see with which keys are driving the usage
-      // resourceId: key.resourceId, // important to see with which resources are driving the usage
-      // action: key.action, // important to see with which actions are driving the usage
-      // country: stats.country,
-      // region: stats.region
+      performanceStart,
+      // first-class analytics fields
+      country: stats.country,
+      region: stats.region,
+      action: action,
+      keyId: key.id,
       metadata: metadata ?? null,
     })
 

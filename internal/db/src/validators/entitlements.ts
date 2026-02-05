@@ -71,6 +71,11 @@ export const reportUsageSchema = z.object({
   requestId: z.string(),
   metadata: z.record(z.string(), z.any()).nullable(),
   performanceStart: z.number().optional(),
+  // first-class analytics fields
+  country: z.string().optional(),
+  region: z.string().optional(),
+  action: z.string().optional(),
+  keyId: z.string().optional(),
 })
 
 export const verifySchema = z.object({
@@ -83,6 +88,11 @@ export const verifySchema = z.object({
   metadata: z.record(z.string(), z.any()).nullable(),
   flushTime: z.number().optional(),
   performanceStart: z.number(),
+  // first-class analytics fields
+  country: z.string().optional(),
+  region: z.string().optional(),
+  action: z.string().optional(),
+  keyId: z.string().optional(),
 })
 
 export type ReportUsageRequest = z.infer<typeof reportUsageSchema>
@@ -99,6 +109,8 @@ export const verificationResultSchema = z.object({
   usage: z.number().optional(),
   cost: z.number().optional(),
   latency: z.number().optional(),
+  degraded: z.boolean().optional(),
+  degradedReason: z.string().optional(),
 })
 export type VerificationResult = z.infer<typeof verificationResultSchema>
 
@@ -123,6 +135,9 @@ export const reportUsageResultSchema = z.object({
   notifiedOverLimit: z.boolean().optional(),
   remaining: z.number().optional(),
   deniedReason: deniedReasonSchema.optional(),
+  degraded: z.boolean().optional(),
+  degradedReason: z.string().optional(),
+  cacheHit: z.boolean().optional(),
 })
 export type ReportUsageResult = z.infer<typeof reportUsageResultSchema>
 

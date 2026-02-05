@@ -56,6 +56,11 @@ interface TinybirdUsagePayload {
   request_id: string
   created_at: number
   idempotence_key: string
+  // first-class analytics columns
+  country: string
+  region: string
+  action: string | undefined
+  key_id: string | undefined
 }
 
 interface TinybirdVerificationPayload {
@@ -70,6 +75,10 @@ interface TinybirdVerificationPayload {
   request_id: string
   created_at: number
   region: string
+  // first-class analytics columns
+  country: string
+  action: string | undefined
+  key_id: string | undefined
 }
 
 interface TinybirdMetadataPayload {
@@ -85,12 +94,19 @@ interface ProcessedUsageRecord {
   record: UsageRecord
   metaId: number
   metadata: Record<string, unknown> | null
+  country: string
+  region: string
+  action: string | undefined
+  keyId: string | undefined
 }
 
 interface ProcessedVerificationRecord {
   record: Verification
   metaId: number
   region: string
+  country: string
+  action: string | undefined
+  keyId: string | undefined
 }
 
 interface MetadataProcessingResult {
@@ -313,6 +329,11 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           idempotence_key: record.idempotence_key,
           request_id: record.request_id,
           project_id: record.project_id,
+          // first-class analytics columns
+          country: record.country ?? "UNK",
+          region: record.region ?? "UNK",
+          action: record.action ?? null,
+          key_id: record.key_id ?? null,
         })
         .onConflictDoNothing()
 
@@ -339,6 +360,11 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         latency: record.latency != null ? String(record.latency) : "0",
         allowed: record.allowed,
         metadata: record.metadata ? JSON.stringify(record.metadata) : null,
+        // first-class analytics columns
+        country: record.country ?? "UNK",
+        region: record.region ?? "UNK",
+        action: record.action ?? null,
+        key_id: record.key_id ?? null,
       })
 
       return Ok(undefined)
@@ -537,7 +563,16 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         })
       }
 
-      processedUsage.push({ record, metaId, metadata })
+      // Extract first-class analytics fields from record columns
+      processedUsage.push({
+        record,
+        metaId,
+        metadata,
+        country: record.country ?? "UNK",
+        region: record.region ?? "UNK",
+        action: record.action ?? undefined,
+        keyId: record.key_id ?? undefined,
+      })
     }
 
     // Process verifications
@@ -547,7 +582,6 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       const { hash, json } = await this.computeMetaId(metadata)
       const metaId = Number(hash)
       const metaIdKey = hash.toString() // string key for Set deduplication
-      const region = (metadata?.colo as string) ?? "UNK"
 
       if (hash !== BigInt(0) && !seenMetaSet.has(metaIdKey)) {
         seenMetaSet.add(metaIdKey)
@@ -560,7 +594,15 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         })
       }
 
-      processedVerifications.push({ record, metaId, region })
+      // Extract first-class analytics fields from record columns
+      processedVerifications.push({
+        record,
+        metaId,
+        region: record.region ?? "UNK",
+        country: record.country ?? "UNK",
+        action: record.action ?? undefined,
+        keyId: record.key_id ?? undefined,
+      })
     }
 
     return {
@@ -618,19 +660,26 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     if (records.length === 0) return { success: true }
 
     try {
-      const payload: TinybirdUsagePayload[] = records.map(({ record, metaId }) => ({
-        id: record.id,
-        timestamp: record.timestamp,
-        usage: Number(record.usage ?? 0),
-        meta_id: metaId,
-        deleted: record.deleted,
-        project_id: record.project_id,
-        customer_id: record.customer_id,
-        feature_slug: record.feature_slug,
-        request_id: record.request_id,
-        created_at: record.created_at,
-        idempotence_key: record.idempotence_key,
-      }))
+      const payload: TinybirdUsagePayload[] = records.map(
+        ({ record, metaId, country, region, action, keyId }) => ({
+          id: record.id,
+          timestamp: record.timestamp,
+          usage: Number(record.usage ?? 0),
+          meta_id: metaId,
+          deleted: record.deleted,
+          project_id: record.project_id,
+          customer_id: record.customer_id,
+          feature_slug: record.feature_slug,
+          request_id: record.request_id,
+          created_at: record.created_at,
+          idempotence_key: record.idempotence_key,
+          // first-class analytics columns
+          country,
+          region,
+          action,
+          key_id: keyId,
+        })
+      )
 
       const result = await this.analytics.ingestFeaturesUsage(payload)
 
@@ -661,19 +710,25 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     if (records.length === 0) return { success: true }
 
     try {
-      const payload: TinybirdVerificationPayload[] = records.map(({ record, metaId, region }) => ({
-        timestamp: record.timestamp,
-        meta_id: metaId,
-        latency: record.latency ? Number(record.latency) : 0,
-        denied_reason: record.denied_reason ?? undefined,
-        allowed: record.allowed,
-        project_id: record.project_id,
-        customer_id: record.customer_id,
-        feature_slug: record.feature_slug,
-        request_id: record.request_id,
-        created_at: record.created_at,
-        region,
-      }))
+      const payload: TinybirdVerificationPayload[] = records.map(
+        ({ record, metaId, region, country, action, keyId }) => ({
+          timestamp: record.timestamp,
+          meta_id: metaId,
+          latency: record.latency ? Number(record.latency) : 0,
+          denied_reason: record.denied_reason ?? undefined,
+          allowed: record.allowed,
+          project_id: record.project_id,
+          customer_id: record.customer_id,
+          feature_slug: record.feature_slug,
+          request_id: record.request_id,
+          created_at: record.created_at,
+          region,
+          // first-class analytics columns
+          country,
+          action,
+          key_id: keyId,
+        })
+      )
 
       const result = await this.analytics.ingestFeaturesVerification(payload)
 

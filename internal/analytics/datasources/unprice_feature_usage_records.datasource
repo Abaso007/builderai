@@ -16,7 +16,11 @@ SCHEMA >
     `project_id` String `json:$.project_id`,
     `created_at` Int64 `json:$.created_at`,
     `meta_id` UInt64 `json:$.meta_id` DEFAULT 0,
-    `deleted` UInt8 `json:$.deleted` DEFAULT 0
+    `deleted` UInt8 `json:$.deleted` DEFAULT 0,
+    `country` LowCardinality(String) `json:$.country` DEFAULT 'UNK',
+    `region` LowCardinality(String) `json:$.region` DEFAULT 'UNK',
+    `action` LowCardinality(Nullable(String)) `json:$.action`,
+    `key_id` Nullable(String) `json:$.key_id`
 
 ENGINE ReplacingMergeTree
 ENGINE_IS_DELETED deleted
