@@ -24,6 +24,45 @@ const BATCH_SIZE = 1000
 const METADATA_RETENTION_DAYS = 3
 const STATE_KEY_PREFIX = "state:"
 const SEEN_META_PREFIX = "seen_meta_"
+const ACTIVE_CUSTOMERS_KEY = "active_r2_customers"
+const R2_MANIFEST_MAX_RETRIES = 5
+const R2_MANIFEST_RETRY_BASE_MS = 50
+
+// ─────────────────────────────────────────────────────────────────────────────
+// R2 Lakehouse Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Descriptor for a raw data file in R2 */
+interface R2FileDescriptor {
+  key: string
+  day: string // YYYY-MM-DD for filtering by date range
+  minTs: number // earliest timestamp in file
+  maxTs: number // latest timestamp in file
+  count: number // number of records
+  bytes: number // file size in bytes
+}
+
+/** Manifest for a single data type (usage or verification) - reduces race conditions under concurrency */
+interface R2DataTypeManifest {
+  projectId: string
+  customerId: string
+  updatedAt: string // ISO timestamp
+  files: R2FileDescriptor[]
+  compacted?: R2FileDescriptor[]
+}
+
+/** Customer metadata file structure (append-only, dimension table) */
+interface R2CustomerMetadata {
+  projectId: string
+  customerId: string
+  updatedAt: string
+  entries: Array<{
+    meta_id: number
+    tags: string
+    timestamp: number
+    addedAt: string
+  }>
+}
 
 // Type guard for EntitlementState
 function isEntitlementState(value: unknown): value is EntitlementState {
@@ -826,6 +865,25 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   // R2 Lakehouse
   // ─────────────────────────────────────────────────────────────────────────────
 
+  private async getActiveR2Customers(): Promise<Set<string>> {
+    const list = (await this.storage.get<string[]>(ACTIVE_CUSTOMERS_KEY)) ?? []
+    return new Set(list)
+  }
+
+  private async addActiveR2Customers(keys: string[]): Promise<void> {
+    const active = await this.getActiveR2Customers()
+    let changed = false
+    for (const key of keys) {
+      if (!active.has(key)) {
+        active.add(key)
+        changed = true
+      }
+    }
+    if (changed) {
+      await this.storage.put(ACTIVE_CUSTOMERS_KEY, Array.from(active))
+    }
+  }
+
   private async flushToR2(processed: MetadataProcessingResult): Promise<{ success: boolean }> {
     if (!this.lakehouse) return { success: true }
 
@@ -852,60 +910,151 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       }
 
       const now = new Date()
-      const year = now.getUTCFullYear()
-      const month = String(now.getUTCMonth() + 1).padStart(2, "0")
-      const day = String(now.getUTCDate()).padStart(2, "0")
-      const uuid = crypto.randomUUID()
-      const timestamp = now.getTime()
+      const dayString = now.toISOString().slice(0, 10) // YYYY-MM-DD
 
-      const uploads: Promise<void>[] = []
+      // Collect file descriptors grouped by project/customer for manifest updates
+      const filesByCustomer = new Map<
+        string,
+        { usage: R2FileDescriptor[]; verifications: R2FileDescriptor[] }
+      >()
 
-      // Group and upload new usage records
-      if (newUsageRecords.length > 0) {
-        const usageGroups = this.groupByProjectCustomer(newUsageRecords.map((p) => p.record))
-        for (const [key, records] of usageGroups) {
-          const [projectId, customerId] = key.split("/")
-          const path = `${projectId}/${customerId}/${year}/${month}/${day}/usage_${timestamp}_${uuid}.ndjson`
-          const buffer = this.toNDJSON(records)
-          uploads.push(this.lakehouse.put(path, buffer).then(() => undefined))
+      const getOrCreateCustomerFiles = (projectId: string, customerId: string) => {
+        const key = `${projectId}/${customerId}`
+        let files = filesByCustomer.get(key)
+        if (!files) {
+          files = { usage: [], verifications: [] }
+          filesByCustomer.set(key, files)
         }
+        return files
       }
 
-      // Group and upload new verifications
+      // Phase 1: Write raw NDJSON files to R2
+      // Upload usage records grouped by project/customer
+      if (newUsageRecords.length > 0) {
+        const usageGroups = this.groupByProjectCustomer(newUsageRecords.map((p) => p.record))
+        const uploads: Promise<void>[] = []
+
+        for (const [key, records] of usageGroups) {
+          const [projectId, customerId] = key.split("/") as [string, string]
+          const fileKey = this.getR2RawFileKey(projectId, customerId, now, "usage")
+          const buffer = this.toNDJSON(records)
+
+          // Compute min/max timestamps
+          const timestamps = records.map((r) => r.timestamp).sort((a, b) => a - b)
+          const minTs = timestamps[0]!
+          const maxTs = timestamps[timestamps.length - 1]!
+
+          // Track file descriptor for manifest update
+          const customerFiles = getOrCreateCustomerFiles(projectId, customerId)
+          customerFiles.usage.push({
+            key: fileKey,
+            day: dayString,
+            minTs,
+            maxTs,
+            count: records.length,
+            bytes: buffer.length,
+          })
+
+          uploads.push(
+            this.lakehouse
+              .put(fileKey, buffer, {
+                httpMetadata: { contentType: "application/x-ndjson" },
+              })
+              .then(() => undefined)
+          )
+        }
+
+        await Promise.all(uploads)
+      }
+
+      // Upload verification records grouped by project/customer
       if (newVerificationRecords.length > 0) {
         const verificationGroups = this.groupByProjectCustomer(
           newVerificationRecords.map((p) => p.record)
         )
+        const uploads: Promise<void>[] = []
+
         for (const [key, records] of verificationGroups) {
-          const [projectId, customerId] = key.split("/")
-          const path = `${projectId}/${customerId}/${year}/${month}/${day}/verifications_${timestamp}_${uuid}.ndjson`
+          const [projectId, customerId] = key.split("/") as [string, string]
+          const fileKey = this.getR2RawFileKey(projectId, customerId, now, "verification")
           const buffer = this.toNDJSON(records)
-          uploads.push(this.lakehouse.put(path, buffer).then(() => undefined))
+
+          // Compute min/max timestamps
+          const timestamps = records.map((r) => r.timestamp).sort((a, b) => a - b)
+          const minTs = timestamps[0]!
+          const maxTs = timestamps[timestamps.length - 1]!
+
+          // Track file descriptor for manifest update
+          const customerFiles = getOrCreateCustomerFiles(projectId, customerId)
+          customerFiles.verifications.push({
+            key: fileKey,
+            day: dayString,
+            minTs,
+            maxTs,
+            count: records.length,
+            bytes: buffer.length,
+          })
+
+          uploads.push(
+            this.lakehouse
+              .put(fileKey, buffer, {
+                httpMetadata: { contentType: "application/x-ndjson" },
+              })
+              .then(() => undefined)
+          )
+        }
+
+        await Promise.all(uploads)
+      }
+
+      // Phase 2: Update per-type manifests with ETag CAS (separate usage/verification to reduce race conditions)
+      const manifestUpdates: Promise<void>[] = []
+      const activeCustomersToUpdate: string[] = []
+
+      for (const [key, files] of filesByCustomer) {
+        const [projectId, customerId] = key.split("/") as [string, string]
+        activeCustomersToUpdate.push(key)
+
+        if (files.usage.length > 0) {
+          manifestUpdates.push(this.updateR2UsageManifest(projectId, customerId, files.usage))
+        }
+        if (files.verifications.length > 0) {
+          manifestUpdates.push(
+            this.updateR2VerificationManifest(projectId, customerId, files.verifications)
+          )
         }
       }
 
-      // Upload metadata globally (not date-partitioned) - it's a dimension table
-      // Partitioned only by project for efficient lookups by meta_id
-      // Metadata is always flushed if it's unique in the batch, deduplication happens in processMetadata
+      await Promise.all(manifestUpdates)
+
+      if (activeCustomersToUpdate.length > 0) {
+        await this.addActiveR2Customers(activeCustomersToUpdate)
+      }
+
+      // Phase 3: Update customer metadata files (single file per customer, append-only)
       if (processed.uniqueMetadata.length > 0) {
-        const metadataGroups = this.groupByProject(processed.uniqueMetadata)
-        for (const [projectId, records] of metadataGroups) {
-          const path = `${projectId}/_metadata/metadata_${timestamp}_${uuid}.ndjson`
-          const buffer = this.toNDJSON(records)
-          uploads.push(this.lakehouse.put(path, buffer).then(() => undefined))
-        }
-      }
+        const metadataByCustomer = this.groupByProjectCustomer(processed.uniqueMetadata)
+        const metadataUpdates: Promise<void>[] = []
 
-      await Promise.all(uploads)
+        for (const [key, entries] of metadataByCustomer) {
+          const [projectId, customerId] = key.split("/") as [string, string]
+          metadataUpdates.push(
+            this.updateR2CustomerMetadata(
+              projectId,
+              customerId,
+              entries.map((e) => ({
+                meta_id: e.meta_id,
+                tags: e.tags,
+                timestamp: e.timestamp,
+              }))
+            )
+          )
+        }
+
+        await Promise.all(metadataUpdates)
+      }
 
       // Update state with the latest IDs we successfully flushed
-      // Since records are processed from the batch, we can look at the original sorted batch
-      // But filtering might have removed some. The "latest" in the batch is what matters.
-      // fetchUsageBatch returns records ordered by ID DESC. So the first record has the highest ID.
-      // We should use the highest ID from the *original* batch to ensure we don't re-scan them for R2.
-      // However, we only have processed records here. processed.usageRecords preserves order from batch?
-      // Yes, processMetadata iterates sequentially.
-      // So processed.usageRecords[0] is the highest ID.
       if (processed.usageRecords.length > 0) {
         const firstRecord = processed.usageRecords[0]
         if (firstRecord) {
@@ -913,8 +1062,6 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         }
       }
 
-      // Verification batch is ordered by ID ASC in fetchVerificationBatch.
-      // So the LAST record has the highest ID.
       if (processed.verificationRecords.length > 0) {
         const lastRec = processed.verificationRecords[processed.verificationRecords.length - 1]
         if (lastRec) {
@@ -947,25 +1094,227 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     return groups
   }
 
-  private groupByProject<T extends { project_id: string }>(records: T[]): Map<string, T[]> {
-    const groups = new Map<string, T[]>()
-
-    for (const record of records) {
-      const group = groups.get(record.project_id)
-      if (group) {
-        group.push(record)
-      } else {
-        groups.set(record.project_id, [record])
-      }
-    }
-
-    return groups
-  }
-
   private toNDJSON<T extends object>(records: T[]): Uint8Array {
     if (records.length === 0) return new Uint8Array()
     const ndjson = records.map((r) => JSON.stringify(r)).join("\n")
     return new TextEncoder().encode(ndjson)
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // R2 Key Generation
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  private getR2DayPath(projectId: string, customerId: string, date: Date): string {
+    const year = date.getUTCFullYear()
+    const month = String(date.getUTCMonth() + 1).padStart(2, "0")
+    const day = String(date.getUTCDate()).padStart(2, "0")
+    return `${projectId}/${customerId}/${year}/${month}/${day}`
+  }
+
+  private getR2UsageKey(projectId: string, customerId: string): string {
+    return `${projectId}/${customerId}/usage_manifest.json`
+  }
+
+  private getR2VerificationKey(projectId: string, customerId: string): string {
+    return `${projectId}/${customerId}/verification_manifest.json`
+  }
+
+  private getR2MetadataKey(projectId: string, customerId: string): string {
+    return `${projectId}/${customerId}/metadata.json`
+  }
+
+  private getR2RawFileKey(
+    projectId: string,
+    customerId: string,
+    date: Date,
+    type: "usage" | "verification"
+  ): string {
+    const timestamp = date.getTime()
+    return `${this.getR2DayPath(projectId, customerId, date)}/${type}_${timestamp}.ndjson`
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // R2 Manifest Operations (ETag CAS)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Update usage manifest with ETag CAS for concurrency safety.
+   * Separate manifest per data type to reduce race conditions.
+   * Retries on ETag mismatch up to R2_MANIFEST_MAX_RETRIES times.
+   */
+  private async updateR2UsageManifest(
+    projectId: string,
+    customerId: string,
+    newFiles: R2FileDescriptor[]
+  ): Promise<void> {
+    if (!this.lakehouse || newFiles.length === 0) return
+    await this.updateR2DataTypeManifest(
+      this.getR2UsageKey(projectId, customerId),
+      projectId,
+      customerId,
+      newFiles
+    )
+  }
+
+  /**
+   * Update verification manifest with ETag CAS for concurrency safety.
+   * Separate manifest per data type to reduce race conditions.
+   * Retries on ETag mismatch up to R2_MANIFEST_MAX_RETRIES times.
+   */
+  private async updateR2VerificationManifest(
+    projectId: string,
+    customerId: string,
+    newFiles: R2FileDescriptor[]
+  ): Promise<void> {
+    if (!this.lakehouse || newFiles.length === 0) return
+    await this.updateR2DataTypeManifest(
+      this.getR2VerificationKey(projectId, customerId),
+      projectId,
+      customerId,
+      newFiles
+    )
+  }
+
+  private async updateR2DataTypeManifest(
+    manifestKey: string,
+    projectId: string,
+    customerId: string,
+    newFiles: R2FileDescriptor[]
+  ): Promise<void> {
+    for (let attempt = 0; attempt < R2_MANIFEST_MAX_RETRIES; attempt++) {
+      // Read current manifest with ETag
+      const existing = await this.lakehouse!.get(manifestKey)
+      let manifest: R2DataTypeManifest
+      let currentEtag: string | undefined
+
+      if (existing) {
+        manifest = (await existing.json()) as R2DataTypeManifest
+        currentEtag = existing.etag
+      } else {
+        manifest = {
+          projectId,
+          customerId,
+          updatedAt: new Date().toISOString(),
+          files: [],
+        }
+      }
+
+      const existingKeys = new Set(manifest.files.map((f) => f.key))
+      let addedCount = 0
+      for (const file of newFiles) {
+        if (!existingKeys.has(file.key)) {
+          manifest.files.push(file)
+          addedCount++
+        }
+      }
+
+      if (addedCount === 0) return
+
+      manifest.updatedAt = new Date().toISOString()
+
+      try {
+        const content = JSON.stringify(manifest, null, 2)
+        const httpMetadata = { contentType: "application/json" }
+        if (currentEtag) {
+          await this.lakehouse!.put(manifestKey, content, {
+            httpMetadata,
+            onlyIf: { etagMatches: currentEtag },
+          })
+        } else {
+          await this.lakehouse!.put(manifestKey, content, { httpMetadata })
+        }
+        return
+      } catch (error) {
+        if (attempt < R2_MANIFEST_MAX_RETRIES - 1) {
+          const backoffMs = R2_MANIFEST_RETRY_BASE_MS * 2 ** attempt
+          await new Promise((resolve) => setTimeout(resolve, backoffMs))
+          continue
+        }
+        throw error
+      }
+    }
+  }
+
+  /**
+   * Update customer metadata file (append-only, single file per customer)
+   * Uses ETag CAS for concurrency safety
+   */
+  private async updateR2CustomerMetadata(
+    projectId: string,
+    customerId: string,
+    newEntries: Array<{ meta_id: number; tags: string; timestamp: number }>
+  ): Promise<void> {
+    if (!this.lakehouse || newEntries.length === 0) return
+
+    const metadataKey = this.getR2MetadataKey(projectId, customerId)
+
+    for (let attempt = 0; attempt < R2_MANIFEST_MAX_RETRIES; attempt++) {
+      // Read current metadata with ETag
+      const existing = await this.lakehouse.get(metadataKey)
+      let metadata: R2CustomerMetadata
+      let currentEtag: string | undefined
+
+      if (existing) {
+        metadata = (await existing.json()) as R2CustomerMetadata
+        currentEtag = existing.etag
+      } else {
+        metadata = {
+          projectId,
+          customerId,
+          updatedAt: new Date().toISOString(),
+          entries: [],
+        }
+      }
+
+      // Build set of existing meta_ids for deduplication
+      const existingMetaIds = new Set(metadata.entries.map((e) => e.meta_id))
+      const now = new Date().toISOString()
+
+      // Add only new entries
+      let addedCount = 0
+      for (const entry of newEntries) {
+        if (!existingMetaIds.has(entry.meta_id)) {
+          metadata.entries.push({
+            ...entry,
+            addedAt: now,
+          })
+          addedCount++
+        }
+      }
+
+      // If nothing new to add, we're done
+      if (addedCount === 0) {
+        return
+      }
+
+      metadata.updatedAt = now
+
+      // Write with ETag condition
+      try {
+        const content = JSON.stringify(metadata, null, 2)
+        const httpMetadata = { contentType: "application/json" }
+
+        if (currentEtag) {
+          // Conditional put with ETag match
+          await this.lakehouse.put(metadataKey, content, {
+            httpMetadata,
+            onlyIf: { etagMatches: currentEtag },
+          })
+        } else {
+          // New metadata file - no condition
+          await this.lakehouse.put(metadataKey, content, { httpMetadata })
+        }
+        return // Success
+      } catch (error) {
+        // ETag mismatch - retry with exponential backoff
+        if (attempt < R2_MANIFEST_MAX_RETRIES - 1) {
+          const backoffMs = R2_MANIFEST_RETRY_BASE_MS * 2 ** attempt
+          await new Promise((resolve) => setTimeout(resolve, backoffMs))
+          continue
+        }
+        throw error
+      }
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1010,6 +1359,166 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       }
     } catch (error) {
       this.logger.error("Failed to rotate seen metadata", { error: this.errorMessage(error) })
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Compaction
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  async compact(): Promise<void> {
+    const active = await this.getActiveR2Customers()
+    for (const key of active) {
+      const [projectId, customerId] = key.split("/") as [string, string]
+
+      // Compact usage
+      await this.compactManifest(projectId, customerId, "usage")
+
+      // Compact verifications
+      await this.compactManifest(projectId, customerId, "verification")
+    }
+  }
+
+  private async compactManifest(
+    projectId: string,
+    customerId: string,
+    type: "usage" | "verification"
+  ): Promise<void> {
+    if (!this.lakehouse) return
+
+    const manifestKey =
+      type === "usage"
+        ? this.getR2UsageKey(projectId, customerId)
+        : this.getR2VerificationKey(projectId, customerId)
+
+    const today = new Date().toISOString().slice(0, 10)
+
+    // Retry loop for CAS
+    for (let attempt = 0; attempt < R2_MANIFEST_MAX_RETRIES; attempt++) {
+      const obj = await this.lakehouse.get(manifestKey)
+      if (!obj) return
+
+      const manifest = (await obj.json()) as R2DataTypeManifest
+      const manifestEtag = obj.etag
+
+      // Group raw files by day
+      const filesByDay = new Map<string, R2FileDescriptor[]>()
+      for (const file of manifest.files) {
+        if (!filesByDay.has(file.day)) {
+          filesByDay.set(file.day, [])
+        }
+        filesByDay.get(file.day)!.push(file)
+      }
+
+      const compactedDays = new Set(manifest.compacted?.map((c) => c.day) ?? [])
+      const daysToCompact = Array.from(filesByDay.keys()).filter(
+        (day) => day !== today && !compactedDays.has(day)
+      )
+
+      if (daysToCompact.length === 0) return
+
+      // Compact one day at a time (to avoid huge operations)
+      // We will update manifest after compacting ALL eligible days in this turn?
+      // Or one by one? One by one is safer but slower.
+      // Let's do all eligible days that we can process.
+      // Actually, let's just do one day to be safe with execution time, or maybe a few.
+      // For now, let's try to compact all pending days.
+
+      const newCompactedFiles: R2FileDescriptor[] = []
+      const rawFilesToDelete: Set<string> = new Set()
+
+      for (const day of daysToCompact) {
+        const rawFiles = filesByDay.get(day)!
+        if (rawFiles.length === 0) continue
+
+        // Read all raw files
+        const allLines: string[] = []
+        let minTs: number | null = null
+        let maxTs: number | null = null
+        let totalCount = 0
+
+        for (const rawFile of rawFiles) {
+          const fileObj = await this.lakehouse.get(rawFile.key)
+          if (!fileObj) {
+            this.logger.warn(`Missing raw file during compaction: ${rawFile.key}`)
+            continue
+          }
+
+          const content = await fileObj.text()
+          const lines = content
+            .trim()
+            .split("\n")
+            .filter((l) => l.length > 0)
+          allLines.push(...lines)
+
+          if (minTs === null || rawFile.minTs < minTs) minTs = rawFile.minTs
+          if (maxTs === null || rawFile.maxTs > maxTs) maxTs = rawFile.maxTs
+          totalCount += rawFile.count
+          rawFilesToDelete.add(rawFile.key)
+        }
+
+        if (allLines.length === 0) continue
+
+        // Write compact file
+        const date = new Date(day)
+        const compactKey = `${this.getR2DayPath(projectId, customerId, date)}/compact_${type}.ndjson`
+        const compactContent = `${allLines.join("\n")}\n`
+        const compactBytes = new TextEncoder().encode(compactContent)
+
+        await this.lakehouse.put(compactKey, compactBytes, {
+          httpMetadata: { contentType: "application/x-ndjson" },
+        })
+
+        newCompactedFiles.push({
+          key: compactKey,
+          day,
+          minTs: minTs!,
+          maxTs: maxTs!,
+          count: totalCount,
+          bytes: compactBytes.length,
+        })
+      }
+
+      if (newCompactedFiles.length === 0) return
+
+      // Update manifest
+      const newManifest: R2DataTypeManifest = {
+        ...manifest,
+        updatedAt: new Date().toISOString(),
+        files: manifest.files.filter((f) => !rawFilesToDelete.has(f.key)),
+        compacted: [...(manifest.compacted ?? []), ...newCompactedFiles],
+      }
+
+      try {
+        await this.lakehouse.put(manifestKey, JSON.stringify(newManifest, null, 2), {
+          httpMetadata: { contentType: "application/json" },
+          onlyIf: { etagMatches: manifestEtag },
+        })
+
+        // Delete raw files after successful manifest update
+        // We do this in background (no await) or strictly?
+        // User snippet does it after.
+        for (const key of rawFilesToDelete) {
+          // Fire and forget delete to save time?
+          // Or await to ensure cleanliness?
+          // I'll await with catch.
+          this.lakehouse.delete(key).catch((err) => {
+            this.logger.warn(`Failed to delete raw file ${key}:`, { error: this.errorMessage(err) })
+          })
+        }
+
+        return // Success
+      } catch (error) {
+        // ETag mismatch, retry
+        if (attempt < R2_MANIFEST_MAX_RETRIES - 1) {
+          const backoffMs = R2_MANIFEST_RETRY_BASE_MS * 2 ** attempt
+          await new Promise((resolve) => setTimeout(resolve, backoffMs))
+          continue
+        }
+        this.logger.error(`Failed to update manifest after compaction: ${manifestKey}`, {
+          error: this.errorMessage(error),
+        })
+      }
     }
   }
 

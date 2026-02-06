@@ -57,9 +57,7 @@ export const create = protectedProcedure
         customerId: opts.input.unPriceCustomerId,
         featureSlug,
         isMain: customer?.project.workspace.isMain,
-        metadata: {
-          action: "create",
-        },
+        action: "create",
       })
 
       if (!result.success) {

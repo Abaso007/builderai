@@ -11,7 +11,7 @@ export const options = {
 }
 
 export default function () {
-  const endpoint = "http://host.docker.internal:3000/api/trpc/edge/customers.can"
+  const endpoint = "http://host.docker.internal:3000/api/trpc/edge/customers.verify"
 
   // pick randomly one of the following elements in the array
   const features = ["apikeys", "seats", "basic-access", "verifications", "customers", "pro-access"]

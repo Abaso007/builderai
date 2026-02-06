@@ -6,7 +6,7 @@ description: "Check if a customer can use a feature"
 <RequestExample>
 
 ```ts
-const { result, error } = await unprice.customers.can({
+const { result, error } = await unprice.customers.verify({
   customerId: "cus_1234567890",
   featureSlug: "tokens",
   metadata: {

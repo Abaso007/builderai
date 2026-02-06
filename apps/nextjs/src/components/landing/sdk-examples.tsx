@@ -18,7 +18,7 @@ const unprice = new Unprice({
 })
 
 // verify access to a feature
-const { result, error } = await unprice.customers.can({
+const { result, error } = await unprice.customers.verify({
   customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
   featureSlug: "feature-1",
 })

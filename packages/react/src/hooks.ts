@@ -35,7 +35,7 @@ export function useCustomerCan() {
     mutationFn: async (
       data: paths["/v1/customer/can"]["post"]["requestBody"]["content"]["application/json"]
     ) => {
-      const response = await client.customers.can(data)
+      const response = await client.customers.verify(data)
       if (response.error) {
         throw new Error(response.error.message)
       }

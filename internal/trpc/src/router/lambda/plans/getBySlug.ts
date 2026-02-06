@@ -24,9 +24,7 @@ export const getBySlug = protectedProjectProcedure
       customerId,
       featureSlug,
       isMain: workspace.isMain,
-      metadata: {
-        action: "getBySlug",
-      },
+      action: "getBySlug",
     })
 
     if (!result.success) {

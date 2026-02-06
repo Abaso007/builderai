@@ -25,10 +25,8 @@ export const publish = protectedProjectProcedure
     const result = await featureGuard({
       customerId,
       featureSlug,
-      metadata: {
-        action: "publish",
-      },
       isMain: workspace.isMain,
+      action: "publish",
     })
 
     if (!result.success) {

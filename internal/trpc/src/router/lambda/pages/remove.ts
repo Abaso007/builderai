@@ -26,10 +26,8 @@ export const remove = protectedProjectProcedure
     const result = await featureGuard({
       customerId,
       featureSlug,
-      metadata: {
-        action: "remove",
-      },
       isMain: workspace.isMain,
+      action: "remove",
     })
 
     if (!result.success) {
@@ -60,9 +58,7 @@ export const remove = protectedProjectProcedure
           featureSlug,
           usage: -1,
           isMain: workspace.isMain,
-          metadata: {
-            action: "remove",
-          },
+          action: "remove",
         })
       )
     }

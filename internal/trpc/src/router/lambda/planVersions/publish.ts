@@ -31,10 +31,8 @@ export const publish = protectedProjectProcedure
       customerId: workspace.unPriceCustomerId,
       featureSlug: FEATURE_SLUGS.PLANS.SLUG,
       isMain: workspace.isMain,
-      metadata: {
-        action: "publish",
-        module: "planVersion",
-      },
+      action: "publish",
+      metadata: { module: "planVersion" },
     })
 
     if (!result.success) {

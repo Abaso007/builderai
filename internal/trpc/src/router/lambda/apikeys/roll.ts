@@ -27,9 +27,7 @@ export const roll = protectedProjectProcedure
       customerId: project.workspace.unPriceCustomerId,
       featureSlug: featureSlug,
       isMain: project.workspace.isMain,
-      metadata: {
-        action: "roll",
-      },
+      action: "roll",
     })
 
     if (!result.success) {

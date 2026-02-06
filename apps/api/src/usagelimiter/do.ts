@@ -42,6 +42,8 @@ export class DurableObjectUsagelimiter extends Server {
   private logger: Logger
   // entitlement service
   private entitlementService: EntitlementService
+  // storage provider
+  private storage: SqliteDOStorageProvider
   // metrics service
   private metrics: Metrics
   // default ttl for the usage records and verifications
@@ -158,7 +160,7 @@ export class DurableObjectUsagelimiter extends Server {
     })
 
     // initialize the storage provider
-    const storage = new SqliteDOStorageProvider({
+    this.storage = new SqliteDOStorageProvider({
       storage: this.ctx.storage,
       state: this.ctx,
       logger: this.logger,
@@ -174,14 +176,14 @@ export class DurableObjectUsagelimiter extends Server {
     // initialize the storage provider - must block until complete
     // If initialization fails (e.g., schema version changed), reset storage and retry
     this.ctx.blockConcurrencyWhile(async () => {
-      const result = await storage.initialize()
+      const result = await this.storage.initialize()
       if (result.err) {
         this.logger.warn("Storage initialization failed, resetting storage", {
           error: result.err.message,
         })
         // reset the storage and retry initialization - this is a last resort
         await this.ctx.storage.deleteAll()
-        const retryResult = await storage.initialize()
+        const retryResult = await this.storage.initialize()
         if (retryResult.err) {
           this.logger.error("Storage initialization failed after reset", {
             error: retryResult.err.message,
@@ -193,7 +195,7 @@ export class DurableObjectUsagelimiter extends Server {
     // initialize the entitlement service
     this.entitlementService = new EntitlementService({
       db: db,
-      storage: storage,
+      storage: this.storage,
       logger: this.logger,
       analytics: new Analytics({
         emit: env.EMIT_ANALYTICS.toString() === "true",
@@ -478,9 +480,7 @@ export class DurableObjectUsagelimiter extends Server {
 
     wideEventLogger.add("usagelimiter.next_alarm", nextAlarm)
 
-    if (!alarm) this.ctx.storage.setAlarm(nextAlarm)
-    else if (alarm < now) {
-      this.ctx.storage.deleteAlarm()
+    if (!alarm || nextAlarm < alarm) {
       this.ctx.storage.setAlarm(nextAlarm)
     }
   }
@@ -526,6 +526,39 @@ export class DurableObjectUsagelimiter extends Server {
     this.logger.debug("Triggering alarm flush")
     // flush the usage records
     await this.entitlementService.flush()
+
+    // compaction
+    try {
+      let lastCompaction = (await this.ctx.storage.get<number>("last_compaction")) ?? 0
+      const now = Date.now()
+      const ONE_DAY = 24 * 60 * 60 * 1000
+
+      if (now - lastCompaction > ONE_DAY) {
+        this.logger.debug("Running daily compaction")
+        await this.storage.compact()
+        await this.ctx.storage.put("last_compaction", now)
+        lastCompaction = now
+      }
+
+      // Schedule next compaction if no closer alarm is set
+      const nextCompaction = lastCompaction + ONE_DAY
+      const currentAlarm = await this.ctx.storage.getAlarm()
+
+      if (!currentAlarm || nextCompaction < currentAlarm) {
+        this.ctx.storage.setAlarm(nextCompaction)
+      }
+    } catch (error) {
+      this.logger.error("Error during compaction", {
+        error: error instanceof Error ? error.message : "unknown",
+      })
+      // Ensure we retry or wake up eventually if compaction failed
+      const currentAlarm = await this.ctx.storage.getAlarm()
+      if (!currentAlarm) {
+        // Retry in 1 hour if failed
+        this.ctx.storage.setAlarm(Date.now() + 60 * 60 * 1000)
+      }
+    }
+
     // flush the metrics and logs
     this.ctx.waitUntil(
       (async () => {

@@ -263,13 +263,15 @@ export class Unprice {
         })
       },
 
-      can: async (
-        req: paths["/v1/customer/can"]["post"]["requestBody"]["content"]["application/json"]
+      verify: async (
+        req: paths["/v1/customer/verify"]["post"]["requestBody"]["content"]["application/json"]
       ): Promise<
-        Result<paths["/v1/customer/can"]["post"]["responses"]["200"]["content"]["application/json"]>
+        Result<
+          paths["/v1/customer/verify"]["post"]["responses"]["200"]["content"]["application/json"]
+        >
       > => {
         return await this.fetch({
-          path: ["v1", "customer", "can"],
+          path: ["v1", "customer", "verify"],
           method: "POST",
           body: req,
         })
@@ -370,6 +372,24 @@ export class Unprice {
         return await this.fetch({
           path: ["v1", "project", "getFeatures"],
           method: "GET",
+        })
+      },
+    }
+  }
+
+  public get lakehouse() {
+    return {
+      getManifest: async (
+        req: paths["/v1/lakehouse/manifest"]["post"]["requestBody"]["content"]["application/json"]
+      ): Promise<
+        Result<
+          paths["/v1/lakehouse/manifest"]["post"]["responses"]["200"]["content"]["application/json"]
+        >
+      > => {
+        return await this.fetch({
+          path: ["v1", "lakehouse", "manifest"],
+          method: "POST",
+          body: req,
         })
       },
     }

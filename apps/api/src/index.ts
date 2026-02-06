@@ -18,6 +18,8 @@ import { registerGetUsageV1 } from "./routes/customer/getUsageV1"
 import { registerResetEntitlementsV1 } from "./routes/customer/resetEntitlementsV1"
 import { registerSignUpV1 } from "./routes/customer/signUpV1"
 import { registerVerifyV1 } from "./routes/customer/verifyV1"
+import { registerGetLakehouseFileV1 } from "./routes/lakehouse/getFileV1"
+import { registerGetLakehouseManifestV1 } from "./routes/lakehouse/getManifestV1"
 import { registerStripeSetupV1 } from "./routes/paymentProvider/stripeSetupV1"
 import { registerStripeSignUpV1 } from "./routes/paymentProvider/stripeSignUpV1"
 import { registerGetPlanVersionV1 } from "./routes/plans/getPlanVersionV1"
@@ -96,7 +98,6 @@ registerSignUpV1(app)
 registerCreatePaymentMethodV1(app)
 registerResetEntitlementsV1(app)
 registerUpdateACLV1(app)
-
 // Project routes
 registerGetFeaturesV1(app)
 
@@ -111,6 +112,8 @@ registerStripeSetupV1(app)
 // Analytics routes
 registerGetAnalyticsUsageV1(app)
 registerGetAnalyticsVerificationsV1(app)
+registerGetLakehouseFileV1(app)
+registerGetLakehouseManifestV1(app)
 
 // Export handler
 const handler = {

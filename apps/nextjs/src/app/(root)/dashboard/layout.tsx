@@ -4,6 +4,7 @@ import { Provider } from "jotai"
 import Script from "next/script"
 import { NuqsAdapter } from "nuqs/adapters/next/app"
 import type { ReactNode } from "react"
+import { LakehouseRegisterSw } from "~/components/lakehouse/lakehouse-register-sw"
 import { ToasterProvider } from "~/components/layout/theme-provider"
 import { env } from "~/env"
 import { TRPCReactProvider } from "~/trpc/client"
@@ -27,6 +28,7 @@ export default async function DashboardLayout({
 
   return (
     <div className="min-h-screen overflow-hidden ">
+      <LakehouseRegisterSw />
       <Script id="userjot-init" strategy="afterInteractive">
         {`
           window.$ujq=window.$ujq||[];

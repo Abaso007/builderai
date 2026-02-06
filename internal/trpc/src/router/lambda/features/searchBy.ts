@@ -19,10 +19,8 @@ export const searchBy = protectedProjectProcedure
       customerId: project.workspace.unPriceCustomerId,
       featureSlug: FEATURE_SLUGS.PLANS.SLUG,
       isMain: project.workspace.isMain,
-      metadata: {
-        action: "searchBy",
-        module: "feature",
-      },
+      action: "searchBy",
+      metadata: { module: "feature" },
     })
 
     if (!result.success) {

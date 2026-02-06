@@ -14,6 +14,7 @@ export const featureGuard = async ({
   usage,
   isMain = false,
   metadata = {},
+  action,
 }: {
   /** The UnPrice customer ID to check feature access for */
   customerId: string
@@ -25,6 +26,8 @@ export const featureGuard = async ({
   isMain?: boolean
   /** Metadata to include in the feature verification. Defaults to an empty object */
   metadata?: Record<string, string | undefined>
+  /** The action being performed (e.g., 'read', 'write', 'delete'). Normalized to lowercase with spaces as hyphens. */
+  action?: string
 }): Promise<{
   success: boolean
   deniedReason?: string
@@ -38,11 +41,12 @@ export const featureGuard = async ({
   }
 
   try {
-    const data = await unprice.customers.can({
+    const data = await unprice.customers.verify({
       customerId,
       featureSlug,
       metadata,
       usage,
+      action,
     })
 
     if (data.error) {

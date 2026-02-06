@@ -10,7 +10,7 @@ describe("dummy test", () => {
 // describe("client", () => {
 //   test("errors are correctly passed through to the caller", async () => {
 //     const unprice = new Unprice({ token: "rawr", baseUrl: "http://localhost:8787" })
-//     const res = await unprice.customers.can({
+//     const res = await unprice.customers.verify({
 //       customerId: "meow",
 //       featureSlug: "meow",
 //       metadata: {

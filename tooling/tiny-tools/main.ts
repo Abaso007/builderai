@@ -62,7 +62,7 @@ async function generateData(customerId: string, async?: boolean) {
     if (randomFeatureSlug) {
       // verify the usage
       const nowDate = Date.now()
-      const result = await unprice.customers.can({
+      const result = await unprice.customers.verify({
         customerId,
         featureSlug: randomFeatureSlug,
       })

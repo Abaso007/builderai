@@ -32,9 +32,7 @@ export const verify = protectedWorkspaceProcedure
       customerId,
       featureSlug,
       isMain: workspace.isMain,
-      metadata: {
-        action: "verify",
-      },
+      action: "verify",
     })
 
     if (!result.success) {

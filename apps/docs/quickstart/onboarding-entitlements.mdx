@@ -28,7 +28,7 @@ if (customer.plan === "PRO") { // <-- mapping to PRO plan means when the plan ch
 
 // with Unprice
 // Verify if the customer has access to the feature
-const { result, error } = await unprice.customers.can({
+const { result, error } = await unprice.customers.verify({
   customerId: customer.unpriceCustomerId,
   featureSlug: "tokens", // map your feature code
   metadata: {
@@ -89,7 +89,7 @@ console.log(result);
     See more [here](/libraries/ts/sdk/overview)
 
     ```ts
-    const { result, error } = await unprice.customers.can({
+    const { result, error } = await unprice.customers.verify({
       customerId: "cus_1234567890",
       featureSlug: "tokens",
       metadata: {

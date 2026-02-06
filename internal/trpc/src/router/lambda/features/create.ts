@@ -20,9 +20,7 @@ export const create = protectedProjectProcedure
       customerId: project.workspace.unPriceCustomerId,
       featureSlug: FEATURE_SLUGS.PLANS.SLUG,
       isMain: project.workspace.isMain,
-      metadata: {
-        action: "create",
-      },
+      action: "create",
     })
 
     if (!result.success) {
@@ -61,10 +59,8 @@ export const create = protectedProjectProcedure
             featureSlug: "plans",
             usage: 1,
             isMain: project.workspace.isMain,
-            metadata: {
-              action: "create",
-              module: "feature",
-            },
+            action: "create",
+            metadata: { module: "feature" },
           }),
         opts.ctx.analytics.ingestFeatures({
           id: featureId,

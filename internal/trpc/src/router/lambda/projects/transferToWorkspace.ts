@@ -31,9 +31,7 @@ export const transferToWorkspace = protectedWorkspaceProcedure
       customerId,
       featureSlug,
       isMain: workspace.isMain,
-      metadata: {
-        action: "transferToWorkspace",
-      },
+      action: "transferToWorkspace",
     })
 
     if (!result.success) {
@@ -88,9 +86,7 @@ export const transferToWorkspace = protectedWorkspaceProcedure
         customerId: targetWorkspace.unPriceCustomerId,
         featureSlug,
         isMain: targetWorkspace.isMain,
-        metadata: {
-          action: "transferToWorkspace",
-        },
+        action: "transferToWorkspace",
       })
     } catch (error) {
       const e = error as TRPCError

@@ -39,9 +39,7 @@ export const getSubscriptionsBySlug = protectedProjectProcedure
       customerId,
       featureSlug,
       isMain: workspace.isMain,
-      metadata: {
-        action: "getSubscriptionsBySlug",
-      },
+      action: "getSubscriptionsBySlug",
     })
 
     if (!result.success) {

@@ -96,9 +96,7 @@ export const create = protectedWorkspaceProcedure
           featureSlug,
           usage: 1,
           isMain: workspace.isMain,
-          metadata: {
-            action: "create",
-          },
+          action: "create",
         })
       )
     }

@@ -36,10 +36,8 @@ export const getVersionsBySlug = protectedProjectProcedure
     const result = await featureGuard({
       customerId,
       featureSlug,
-      metadata: {
-        action: "getVersionsBySlug",
-      },
       isMain: workspace.isMain,
+      action: "getVersionsBySlug",
     })
 
     if (!result.success) {
