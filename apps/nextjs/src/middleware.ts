@@ -49,17 +49,15 @@ export default auth((req) => {
 })
 
 export const config = {
-  // TODO: ignore public routes from here
   matcher: [
     /*
      * Match all paths except for:
      * 1. /api/ routes
      * 2. /_next/ (Next.js internals)
      * 3. /_proxy/ (special page for OG tags proxying)
-     * 4. /_static (inside /public)
-     * 5. /_vercel (Vercel internals)
-     * 6. Static files (e.g. /favicon.ico, /sitemap.xml, /robots.txt, etc.)
+     * 4. /_static, /_vercel (framework internals)
+     * 5. Static assets: any path ending with a file extension (served from public/)
      */
-    "/((?!api/|_next/|_proxy/|manifesto|_static|_vercel|[\\w-]+\\.\\w+).*)",
+    "/((?!api/|_next/|_proxy/|manifesto|_static|_vercel|.*\\.[a-zA-Z0-9]+$).*)",
   ],
 }

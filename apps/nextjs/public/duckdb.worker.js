@@ -12607,32 +12607,47 @@ function generateUUID() {
 }
 
 // src/workers/duckdb-types.ts
+var USAGE_EVENTS_COLUMNS = [
+  { name: "id", sqlType: "VARCHAR", jsonKey: "id" },
+  { name: "idempotence_key", sqlType: "VARCHAR", jsonKey: "idempotence_key" },
+  { name: "feature_slug", sqlType: "VARCHAR", jsonKey: "feature_slug" },
+  { name: "request_id", sqlType: "VARCHAR", jsonKey: "request_id" },
+  { name: "project_id", sqlType: "VARCHAR", jsonKey: "project_id" },
+  { name: "customer_id", sqlType: "VARCHAR", jsonKey: "customer_id" },
+  { name: "timestamp", sqlType: "BIGINT", jsonKey: "timestamp" },
+  { name: "usage", sqlType: "BIGINT", jsonKey: "usage" },
+  { name: "created_at", sqlType: "BIGINT", jsonKey: "created_at" },
+  { name: "deleted", sqlType: "BIGINT", jsonKey: "deleted" },
+  { name: "meta_id", sqlType: "BIGINT", jsonKey: "meta_id" },
+  { name: "region", sqlType: "VARCHAR", jsonKey: "region" },
+  { name: "action", sqlType: "VARCHAR", jsonKey: "action" },
+  { name: "key_id", sqlType: "VARCHAR", jsonKey: "key_id" }
+];
+var VERIFICATION_EVENTS_COLUMNS = [
+  { name: "project_id", sqlType: "VARCHAR", jsonKey: "project_id" },
+  { name: "denied_reason", sqlType: "VARCHAR", jsonKey: "denied_reason" },
+  { name: "allowed", sqlType: "BIGINT", jsonKey: "allowed" },
+  { name: "timestamp", sqlType: "BIGINT", jsonKey: "timestamp" },
+  { name: "created_at", sqlType: "BIGINT", jsonKey: "created_at" },
+  { name: "latency", sqlType: "DOUBLE", jsonKey: "latency" },
+  { name: "feature_slug", sqlType: "VARCHAR", jsonKey: "feature_slug" },
+  { name: "customer_id", sqlType: "VARCHAR", jsonKey: "customer_id" },
+  { name: "request_id", sqlType: "VARCHAR", jsonKey: "request_id" },
+  { name: "region", sqlType: "VARCHAR", jsonKey: "region" },
+  { name: "meta_id", sqlType: "BIGINT", jsonKey: "meta_id" },
+  { name: "action", sqlType: "VARCHAR", jsonKey: "action" },
+  { name: "key_id", sqlType: "VARCHAR", jsonKey: "key_id" }
+];
 var DATA_SOURCES = {
   usage_events: {
     id: "usage_events",
     tableName: "usage_events",
-    columns: [
-      { name: "id", sqlType: "VARCHAR", jsonKey: "id" },
-      { name: "tenantId", sqlType: "VARCHAR", jsonKey: "tenantId" },
-      { name: "timestamp", sqlType: "TIMESTAMP", jsonKey: "timestamp" },
-      { name: "eventType", sqlType: "VARCHAR", jsonKey: "eventType" },
-      { name: "resourceId", sqlType: "VARCHAR", jsonKey: "resourceId" },
-      { name: "quantity", sqlType: "DOUBLE", jsonKey: "quantity" },
-      { name: "metadata", sqlType: "JSON", jsonKey: "metadata" }
-    ]
+    columns: USAGE_EVENTS_COLUMNS
   },
   verification_events: {
     id: "verification_events",
     tableName: "verification_events",
-    columns: [
-      { name: "id", sqlType: "VARCHAR", jsonKey: "id" },
-      { name: "tenantId", sqlType: "VARCHAR", jsonKey: "tenantId" },
-      { name: "timestamp", sqlType: "TIMESTAMP", jsonKey: "timestamp" },
-      { name: "eventType", sqlType: "VARCHAR", jsonKey: "eventType" },
-      { name: "resourceId", sqlType: "VARCHAR", jsonKey: "resourceId" },
-      { name: "quantity", sqlType: "DOUBLE", jsonKey: "quantity" },
-      { name: "metadata", sqlType: "JSON", jsonKey: "metadata" }
-    ]
+    columns: VERIFICATION_EVENTS_COLUMNS
   }
 };
 var DATA_SOURCE_IDS = Object.keys(DATA_SOURCES);
@@ -12690,29 +12705,32 @@ function parseNdjsonRow(line, def) {
   }
 }
 var TABLE_PLACEHOLDER = "__TABLE__";
-var PREDEFINED_QUERY_TEMPLATES = {
+var TS_DAY = "strftime(epoch_ms(timestamp)::TIMESTAMP, '%Y-%m-%d')";
+var TS_HOUR = "strftime(epoch_ms(timestamp)::TIMESTAMP, '%Y-%m-%d %H:00')";
+var TS_MINUTE = "strftime(epoch_ms(timestamp)::TIMESTAMP, '%Y-%m-%d %H:%M')";
+var USAGE_QUERY_TEMPLATES = {
   totalEvents: `SELECT COUNT(*) as total_events FROM ${TABLE_PLACEHOLDER}`,
   eventsByType: `
     SELECT
-      eventType,
+      feature_slug,
       COUNT(*) as count,
-      SUM(quantity) as total_quantity
+      SUM(usage) as total_usage
     FROM ${TABLE_PLACEHOLDER}
-    GROUP BY eventType
+    GROUP BY feature_slug
     ORDER BY count DESC
   `,
   eventsByDay: `
     SELECT
-      strftime(timestamp, '%Y-%m-%d') as day,
+      ${TS_DAY} as day,
       COUNT(*) as count,
-      SUM(quantity) as total_quantity
+      SUM(usage) as total_usage
     FROM ${TABLE_PLACEHOLDER}
     GROUP BY day
     ORDER BY day DESC
   `,
   eventsByHour: `
     SELECT
-      strftime(timestamp, '%Y-%m-%d %H:00') as hour,
+      ${TS_HOUR} as hour,
       COUNT(*) as count
     FROM ${TABLE_PLACEHOLDER}
     GROUP BY hour
@@ -12721,7 +12739,7 @@ var PREDEFINED_QUERY_TEMPLATES = {
   `,
   eventsByMinute: `
     SELECT
-      strftime(timestamp, '%Y-%m-%d %H:%M') as minute,
+      ${TS_MINUTE} as minute,
       COUNT(*) as count
     FROM ${TABLE_PLACEHOLDER}
     GROUP BY minute
@@ -12729,24 +12747,24 @@ var PREDEFINED_QUERY_TEMPLATES = {
     LIMIT 60
   `,
   uniqueResources: `
-    SELECT COUNT(DISTINCT resourceId) as unique_resources FROM ${TABLE_PLACEHOLDER}
+    SELECT COUNT(DISTINCT customer_id) as unique_resources FROM ${TABLE_PLACEHOLDER}
   `,
   topResources: `
     SELECT
-      resourceId,
+      feature_slug,
       COUNT(*) as event_count,
-      SUM(quantity) as total_quantity
+      SUM(usage) as total_usage
     FROM ${TABLE_PLACEHOLDER}
-    GROUP BY resourceId
-    ORDER BY total_quantity DESC
+    GROUP BY feature_slug
+    ORDER BY total_usage DESC
     LIMIT 20
   `,
   quantityStats: `
     SELECT
-      MIN(quantity) as min_quantity,
-      MAX(quantity) as max_quantity,
-      AVG(quantity) as avg_quantity,
-      SUM(quantity) as total_quantity,
+      MIN(usage) as min_quantity,
+      MAX(usage) as max_quantity,
+      AVG(usage) as avg_quantity,
+      SUM(usage) as total_quantity,
       COUNT(*) as event_count
     FROM ${TABLE_PLACEHOLDER}
   `,
@@ -12756,8 +12774,82 @@ var PREDEFINED_QUERY_TEMPLATES = {
     LIMIT 100
   `
 };
+var VERIFICATION_QUERY_TEMPLATES = {
+  totalEvents: `SELECT COUNT(*) as total_events FROM ${TABLE_PLACEHOLDER}`,
+  eventsByType: `
+    SELECT
+      feature_slug,
+      COUNT(*) as count,
+      SUM(allowed) as allowed_count,
+      COUNT(*) - SUM(allowed) as denied_count
+    FROM ${TABLE_PLACEHOLDER}
+    GROUP BY feature_slug
+    ORDER BY count DESC
+  `,
+  eventsByDay: `
+    SELECT
+      ${TS_DAY} as day,
+      COUNT(*) as count,
+      SUM(allowed) as allowed_count
+    FROM ${TABLE_PLACEHOLDER}
+    GROUP BY day
+    ORDER BY day DESC
+  `,
+  eventsByHour: `
+    SELECT
+      ${TS_HOUR} as hour,
+      COUNT(*) as count
+    FROM ${TABLE_PLACEHOLDER}
+    GROUP BY hour
+    ORDER BY hour DESC
+    LIMIT 48
+  `,
+  eventsByMinute: `
+    SELECT
+      ${TS_MINUTE} as minute,
+      COUNT(*) as count
+    FROM ${TABLE_PLACEHOLDER}
+    GROUP BY minute
+    ORDER BY minute DESC
+    LIMIT 60
+  `,
+  uniqueResources: `
+    SELECT COUNT(DISTINCT customer_id) as unique_resources FROM ${TABLE_PLACEHOLDER}
+  `,
+  topResources: `
+    SELECT
+      feature_slug,
+      COUNT(*) as event_count,
+      SUM(allowed) as allowed_count,
+      AVG(latency) as avg_latency_ms
+    FROM ${TABLE_PLACEHOLDER}
+    GROUP BY feature_slug
+    ORDER BY event_count DESC
+    LIMIT 20
+  `,
+  quantityStats: `
+    SELECT
+      COUNT(*) as event_count,
+      SUM(allowed) as allowed_count,
+      AVG(latency) as avg_latency_ms,
+      MIN(latency) as min_latency_ms,
+      MAX(latency) as max_latency_ms
+    FROM ${TABLE_PLACEHOLDER}
+  `,
+  recentEvents: `
+    SELECT * FROM ${TABLE_PLACEHOLDER}
+    ORDER BY timestamp DESC
+    LIMIT 100
+  `
+};
+var PREDEFINED_QUERY_TEMPLATES = USAGE_QUERY_TEMPLATES;
+var QUERY_TEMPLATES_BY_SOURCE = {
+  usage_events: USAGE_QUERY_TEMPLATES,
+  verification_events: VERIFICATION_QUERY_TEMPLATES
+};
 function getPredefinedQuery(name, dataSourceId = "usage_events") {
-  const template = PREDEFINED_QUERY_TEMPLATES[name];
+  const templates = QUERY_TEMPLATES_BY_SOURCE[dataSourceId];
+  const template = templates[name];
   if (!template) return "";
   const tableName = DATA_SOURCES[dataSourceId].tableName;
   return template.replace(new RegExp(TABLE_PLACEHOLDER.replace(/\./g, "\\."), "g"), tableName);
@@ -12834,10 +12926,10 @@ var workerAPI = {
    */
   async init() {
     if (db) {
-      console.log("[DuckDB Worker] Already initialized");
+      console.info("[DuckDB Worker] Already initialized");
       return;
     }
-    console.log("[DuckDB Worker] Initializing...");
+    console.info("[DuckDB Worker] Initializing...");
     const bundle = await xe(DUCKDB_BUNDLES);
     const workerUrl = bundle.mainWorker;
     if (!workerUrl) {
@@ -12852,29 +12944,29 @@ var workerAPI = {
       const def = DATA_SOURCES[id];
       await conn.query(buildCreateTableSQL(def));
     }
-    console.log("[DuckDB Worker] Initialized successfully");
+    console.info("[DuckDB Worker] Initialized successfully");
   },
   /**
    * Load NDJSON files into DuckDB via streaming + batched inserts
-   * @param tenantId - Sent as X-Tenant-Id header so /api/dashboard/file returns 200
+   * @param projectId - Sent as X-Project-Id header so /api/dashboard/file returns 200
    * @param targetTable - Which event table to insert into (default: usage_events)
    */
-  async loadFiles(files, tenantId, targetTable = "usage_events") {
+  async loadFiles(files, projectId, targetTable = "usage_events") {
     if (!db || !conn) {
       throw new Error("DuckDB not initialized. Call init() first.");
     }
     const def = DATA_SOURCES[targetTable];
     let loaded = 0;
     let totalEvents = 0;
-    const headers = { "X-Tenant-Id": tenantId };
+    const headers = { "X-Project-Id": projectId };
     const loadedFiles = getLoadedSet(targetTable);
     for (const file of files) {
       if (loadedFiles.has(file.url)) {
-        console.log("[DuckDB Worker] Skipping already loaded:", file.url, targetTable);
+        console.info("[DuckDB Worker] Skipping already loaded:", file.url, targetTable);
         continue;
       }
       try {
-        console.log("[DuckDB Worker] Streaming:", file.url, "\u2192", def.tableName);
+        console.info("[DuckDB Worker] Streaming:", file.url, "\u2192", def.tableName);
         const response = await fetch(file.url, { headers });
         if (!response.ok) {
           console.warn("[DuckDB Worker] Failed to fetch:", file.url, response.status);
@@ -12901,7 +12993,7 @@ var workerAPI = {
         totalEvents += fileEventCount;
         loadedFiles.add(file.url);
         loaded++;
-        console.log(
+        console.info(
           `[DuckDB Worker] Loaded ${fileEventCount} events from ${file.url} into ${def.tableName}`
         );
       } catch (error) {
@@ -12966,7 +13058,7 @@ var workerAPI = {
       await conn.query(`DELETE FROM ${def.tableName}`);
       getLoadedSet(id).clear();
     }
-    console.log("[DuckDB Worker] Data cleared", table ?? "(all tables)");
+    console.info("[DuckDB Worker] Data cleared", table ?? "(all tables)");
   }
 };
 expose(workerAPI);

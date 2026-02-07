@@ -44,10 +44,12 @@ export interface DataSourceDef {
 /** Known event table / data source IDs. Add new ones when you add new event types. */
 export type DataSourceId = "usage_events" | "verification_events"
 
+// TODO: add metadata table and join it with usage and verification events
+
 /**
  * Usage events schema aligned with internal/analytics featureUsageSchemaV1.
  * NDJSON keys: id, idempotence_key, feature_slug, request_id, project_id, customer_id,
- * timestamp (unix ms), usage, created_at, deleted, meta_id, metadata, country, region, action, key_id.
+ * timestamp (unix ms), usage, created_at, deleted, meta_id, region, action, key_id.
  */
 const USAGE_EVENTS_COLUMNS: ColumnDef[] = [
   { name: "id", sqlType: "VARCHAR", jsonKey: "id" },
@@ -61,8 +63,6 @@ const USAGE_EVENTS_COLUMNS: ColumnDef[] = [
   { name: "created_at", sqlType: "BIGINT", jsonKey: "created_at" },
   { name: "deleted", sqlType: "BIGINT", jsonKey: "deleted" },
   { name: "meta_id", sqlType: "BIGINT", jsonKey: "meta_id" },
-  { name: "metadata", sqlType: "JSON", jsonKey: "metadata" },
-  { name: "country", sqlType: "VARCHAR", jsonKey: "country" },
   { name: "region", sqlType: "VARCHAR", jsonKey: "region" },
   { name: "action", sqlType: "VARCHAR", jsonKey: "action" },
   { name: "key_id", sqlType: "VARCHAR", jsonKey: "key_id" },
@@ -71,7 +71,7 @@ const USAGE_EVENTS_COLUMNS: ColumnDef[] = [
 /**
  * Verification events schema aligned with internal/analytics featureVerificationSchemaV1.
  * NDJSON keys: project_id, denied_reason, allowed, timestamp, created_at, latency,
- * feature_slug, customer_id, request_id, region, meta_id, metadata, country, action, key_id.
+ * feature_slug, customer_id, request_id, region, meta_id, action, key_id.
  */
 const VERIFICATION_EVENTS_COLUMNS: ColumnDef[] = [
   { name: "project_id", sqlType: "VARCHAR", jsonKey: "project_id" },
@@ -85,8 +85,6 @@ const VERIFICATION_EVENTS_COLUMNS: ColumnDef[] = [
   { name: "request_id", sqlType: "VARCHAR", jsonKey: "request_id" },
   { name: "region", sqlType: "VARCHAR", jsonKey: "region" },
   { name: "meta_id", sqlType: "BIGINT", jsonKey: "meta_id" },
-  { name: "metadata", sqlType: "JSON", jsonKey: "metadata" },
-  { name: "country", sqlType: "VARCHAR", jsonKey: "country" },
   { name: "action", sqlType: "VARCHAR", jsonKey: "action" },
   { name: "key_id", sqlType: "VARCHAR", jsonKey: "key_id" },
 ]

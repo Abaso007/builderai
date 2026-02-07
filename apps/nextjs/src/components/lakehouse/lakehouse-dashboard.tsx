@@ -7,19 +7,21 @@ import { useEffect, useState } from "react"
 import { useUsageDuckdb } from "~/hooks/use-usage-duckdb"
 
 export function LakehouseDashboard() {
+  // TOD: add projecthere?
   const { isReady, isLoading, runCustomQuery, loadedFileCount, totalEvents, error } =
     useUsageDuckdb("alksjda")
-  const [results, setResults] = useState<{ country: string; total_usage: number }[]>([])
+  const [results, setResults] = useState<{ action: string; total_events: number }[]>([])
   const [isQuerying, setIsQuerying] = useState(false)
 
   const runAnalysis = async () => {
     setIsQuerying(true)
     try {
       const res = await runCustomQuery(
-        "SELECT country, SUM(usage) as total_usage FROM usage_events GROUP BY country ORDER BY total_usage DESC"
+        "SELECT action, COUNT(*) as total_events FROM usage_events GROUP BY action ORDER BY total_events DESC"
       )
+
       if (res) {
-        setResults(res.rows as { country: string; total_usage: number }[])
+        setResults(res.rows as { action: string; total_events: number }[])
       }
     } catch (e) {
       console.error(e)
@@ -74,7 +76,7 @@ export function LakehouseDashboard() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Country</TableHead>
+                  <TableHead>Action</TableHead>
                   <TableHead className="text-right">Total Usage</TableHead>
                 </TableRow>
               </TableHeader>
@@ -90,9 +92,9 @@ export function LakehouseDashboard() {
                 ) : (
                   results.map((row, i) => (
                     <TableRow key={i.toString()}>
-                      <TableCell>{row.country || "Unknown"}</TableCell>
+                      <TableCell>{row.action || "Unknown"}</TableCell>
                       <TableCell className="text-right">
-                        {row.total_usage != null ? row.total_usage.toLocaleString() : "-"}
+                        {row.total_events != null ? row.total_events.toLocaleString() : "-"}
                       </TableCell>
                     </TableRow>
                   ))
