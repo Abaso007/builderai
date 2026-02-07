@@ -24,7 +24,7 @@ const BATCH_SIZE = 1000
 const METADATA_RETENTION_DAYS = 3
 const STATE_KEY_PREFIX = "state:"
 const SEEN_META_PREFIX = "seen_meta_"
-const ACTIVE_CUSTOMERS_KEY = "active_r2_customers"
+const ACTIVE_CUSTOMERS_KEY = "tracked_do_keys"
 const R2_MANIFEST_MAX_RETRIES = 5
 const R2_MANIFEST_RETRY_BASE_MS = 50
 
@@ -436,7 +436,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       const processed = await this.processMetadata(usageBatch.records, verificationBatch.records)
 
       // 3. Send to destinations in parallel (R2 is best-effort)
-      const [_r2, usageResult, verificationResult, _metaResult] = await Promise.all([
+      const [_r2Result, usageResult, verificationResult, _metaResult] = await Promise.all([
         this.flushToR2(processed).catch((err) => {
           this.logger.error("R2 flush failed (best-effort)", { error: this.errorMessage(err) })
           return { success: false }
@@ -865,13 +865,21 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   // R2 Lakehouse
   // ─────────────────────────────────────────────────────────────────────────────
 
-  private async getActiveR2Customers(): Promise<Set<string>> {
+  /**
+   * Retrieves the set of customer keys (project/customer) that this Durable Object
+   * has actively tracked/flushed data for. Used to determine scope for compaction.
+   */
+  private async getTrackedDoKeys(): Promise<Set<string>> {
     const list = (await this.storage.get<string[]>(ACTIVE_CUSTOMERS_KEY)) ?? []
     return new Set(list)
   }
 
-  private async addActiveR2Customers(keys: string[]): Promise<void> {
-    const active = await this.getActiveR2Customers()
+  /**
+   * Updates the set of tracked customer keys.
+   * Persisted in DO storage so the compaction job knows which manifests to check.
+   */
+  private async addTrackedDoKeys(keys: string[]): Promise<void> {
+    const active = await this.getTrackedDoKeys()
     let changed = false
     for (const key of keys) {
       if (!active.has(key)) {
@@ -884,6 +892,17 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     }
   }
 
+  /**
+   * Flushes processed usage, verification, and metadata records to R2.
+   *
+   * Strategy:
+   * 1. Write raw NDJSON files (immutable batches) for usage and verifications.
+   * 2. Update R2 manifests (usage/verification) using ETag CAS to point to new files.
+   * 3. Write raw metadata updates and update metadata manifest.
+   * 4. Update local state to track last flushed IDs (prevent double-flushing).
+   *
+   * @param processed The batch of processed records and metadata.
+   */
   private async flushToR2(processed: MetadataProcessingResult): Promise<{ success: boolean }> {
     if (!this.lakehouse) return { success: true }
 
@@ -1028,30 +1047,53 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       await Promise.all(manifestUpdates)
 
       if (activeCustomersToUpdate.length > 0) {
-        await this.addActiveR2Customers(activeCustomersToUpdate)
+        await this.addTrackedDoKeys(activeCustomersToUpdate)
       }
 
-      // Phase 3: Update customer metadata files (single file per customer, append-only)
+      // Phase 3: Update metadata
       if (processed.uniqueMetadata.length > 0) {
         const metadataByCustomer = this.groupByProjectCustomer(processed.uniqueMetadata)
         const metadataUpdates: Promise<void>[] = []
+        const metadataKeysToAdd: string[] = []
 
         for (const [key, entries] of metadataByCustomer) {
           const [projectId, customerId] = key.split("/") as [string, string]
+          metadataKeysToAdd.push(key)
+
+          const rawFileKey = this.getR2RawFileKey(projectId, customerId, now, "metadata")
+          const buffer = this.toNDJSON(
+            entries.map((e) => ({
+              meta_id: e.meta_id,
+              tags: e.tags,
+              timestamp: e.timestamp,
+            }))
+          )
+
           metadataUpdates.push(
-            this.updateR2CustomerMetadata(
-              projectId,
-              customerId,
-              entries.map((e) => ({
-                meta_id: e.meta_id,
-                tags: e.tags,
-                timestamp: e.timestamp,
-              }))
-            )
+            this.lakehouse
+              .put(rawFileKey, buffer, {
+                httpMetadata: { contentType: "application/x-ndjson" },
+              })
+              .then(() => {
+                // Update metadata manifest
+                return this.updateR2MetadataManifest(projectId, customerId, [
+                  {
+                    key: rawFileKey,
+                    day: dayString,
+                    minTs: Math.min(...entries.map((e) => e.timestamp)),
+                    maxTs: Math.max(...entries.map((e) => e.timestamp)),
+                    count: entries.length,
+                    bytes: buffer.length,
+                  },
+                ])
+              })
           )
         }
 
         await Promise.all(metadataUpdates)
+        if (metadataKeysToAdd.length > 0) {
+          await this.addTrackedDoKeys(metadataKeysToAdd)
+        }
       }
 
       // Update state with the latest IDs we successfully flushed
@@ -1111,23 +1153,32 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     return `${projectId}/${customerId}/${year}/${month}/${day}`
   }
 
+  /** Key for the Usage Manifest (one per customer) */
   private getR2UsageKey(projectId: string, customerId: string): string {
     return `${projectId}/${customerId}/usage_manifest.json`
   }
 
+  /** Key for the Verification Manifest (one per customer) */
   private getR2VerificationKey(projectId: string, customerId: string): string {
     return `${projectId}/${customerId}/verification_manifest.json`
   }
 
+  /** Key for the Metadata Manifest (one per customer) */
+  private getR2MetadataManifestKey(projectId: string, customerId: string): string {
+    return `${projectId}/${customerId}/metadata_manifest.json`
+  }
+
+  /** Key for the Master Metadata File (Dimension Table, one per customer) */
   private getR2MetadataKey(projectId: string, customerId: string): string {
     return `${projectId}/${customerId}/metadata.json`
   }
 
+  /** Key for a raw NDJSON file within a daily partition */
   private getR2RawFileKey(
     projectId: string,
     customerId: string,
     date: Date,
-    type: "usage" | "verification"
+    type: "usage" | "verification" | "metadata"
   ): string {
     const timestamp = date.getTime()
     return `${this.getR2DayPath(projectId, customerId, date)}/${type}_${timestamp}.ndjson`
@@ -1175,6 +1226,30 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     )
   }
 
+  /**
+   * Update metadata manifest with ETag CAS.
+   * Tracks all raw metadata files that need to be compacted into the master dimension table.
+   */
+  private async updateR2MetadataManifest(
+    projectId: string,
+    customerId: string,
+    newFiles: R2FileDescriptor[]
+  ): Promise<void> {
+    if (!this.lakehouse || newFiles.length === 0) return
+    await this.updateR2DataTypeManifest(
+      this.getR2MetadataManifestKey(projectId, customerId),
+      projectId,
+      customerId,
+      newFiles
+    )
+  }
+
+  // removed duplicate getR2MetadataManifestKey
+
+  /**
+   * Core helper to update any manifest file with ETag CAS.
+   * Handles creation if missing, appending new files, and optimistic locking.
+   */
   private async updateR2DataTypeManifest(
     manifestKey: string,
     projectId: string,
@@ -1362,12 +1437,14 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // Compaction
-  // ─────────────────────────────────────────────────────────────────────────────
-
+  /**
+   * Compaction Trigger
+   *
+   * Orchestrates the daily compaction process for all active customers tracked by this DO.
+   * Compaction merges many small raw NDJSON files into fewer, larger files to optimize read performance and reduce costs.
+   */
   async compact(): Promise<void> {
-    const active = await this.getActiveR2Customers()
+    const active = await this.getTrackedDoKeys()
     for (const key of active) {
       const [projectId, customerId] = key.split("/") as [string, string]
 
@@ -1376,9 +1453,23 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
 
       // Compact verifications
       await this.compactManifest(projectId, customerId, "verification")
+
+      // Compact metadata
+      await this.compactMetadata(projectId, customerId)
     }
   }
 
+  /**
+   * Compacts raw event files (usage/verification) for a specific customer into daily consolidated files.
+   *
+   * Process:
+   * 1. Reads the manifest to find days with raw files that haven't been compacted yet.
+   * 2. For each day, reads all raw files, merges them, and writes a single `compact_<type>.ndjson` file.
+   * 3. Updates the manifest to reference the new compact file and remove raw files.
+   * 4. Deletes the old raw files from R2.
+   *
+   * Note: Skips "today" to avoid contention with active writing.
+   */
   private async compactManifest(
     projectId: string,
     customerId: string,
@@ -1522,10 +1613,167 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     }
   }
 
+  /**
+   * Compacts metadata files into the master dimension table.
+   *
+   * Process:
+   * 1. Reads the metadata manifest to find pending raw metadata files.
+   * 2. Reads the current master `metadata.json` (Dimension Table).
+   * 3. Merges new entries into the master table, deduplicating by `meta_id`.
+   * 4. Writes the updated master table using ETag CAS.
+   * 5. Updates the manifest to remove processed files.
+   * 6. Deletes processed raw files.
+   */
+  private async compactMetadata(projectId: string, customerId: string): Promise<void> {
+    if (!this.lakehouse) return
+
+    const manifestKey = this.getR2MetadataManifestKey(projectId, customerId)
+    const masterKey = this.getR2MetadataKey(projectId, customerId)
+
+    for (let attempt = 0; attempt < R2_MANIFEST_MAX_RETRIES; attempt++) {
+      // 1. Read Manifest
+      const manifestObj = await this.lakehouse.get(manifestKey)
+      if (!manifestObj) return // No manifest means no new metadata files
+
+      const manifest = (await manifestObj.json()) as R2DataTypeManifest
+      const manifestEtag = manifestObj.etag
+
+      if (manifest.files.length === 0) return
+
+      // 2. Read Master File (if exists)
+      const masterObj = await this.lakehouse.get(masterKey)
+      let masterMetadata: R2CustomerMetadata
+      let masterEtag: string | undefined
+
+      if (masterObj) {
+        masterMetadata = (await masterObj.json()) as R2CustomerMetadata
+        masterEtag = masterObj.etag
+      } else {
+        masterMetadata = {
+          projectId,
+          customerId,
+          updatedAt: new Date().toISOString(),
+          entries: [],
+        }
+      }
+
+      // 3. Read All Raw Files
+      const newEntries: Array<{ meta_id: number; tags: string; timestamp: number }> = []
+      const filesProcessed: Set<string> = new Set()
+
+      for (const file of manifest.files) {
+        const fileObj = await this.lakehouse.get(file.key)
+        if (!fileObj) {
+          this.logger.warn(`Missing raw metadata file: ${file.key}`)
+          filesProcessed.add(file.key)
+          continue
+        }
+
+        const content = await fileObj.text()
+        const lines = content
+          .trim()
+          .split("\n")
+          .filter((l) => l.length > 0)
+
+        for (const line of lines) {
+          try {
+            const entry = JSON.parse(line)
+            newEntries.push(entry)
+          } catch (e) {
+            this.logger.warn(`Failed to parse metadata line in ${file.key}`, {
+              error: this.errorMessage(e),
+            })
+          }
+        }
+        filesProcessed.add(file.key)
+      }
+
+      // 4. Merge into Master (Deduplicate)
+      const existingMetaIds = new Set(masterMetadata.entries.map((e) => e.meta_id))
+      const now = new Date().toISOString()
+      let addedCount = 0
+
+      for (const entry of newEntries) {
+        if (!existingMetaIds.has(entry.meta_id)) {
+          masterMetadata.entries.push({
+            ...entry,
+            addedAt: now,
+          })
+          existingMetaIds.add(entry.meta_id)
+          addedCount++
+        }
+      }
+
+      // 5. Write Master File (CAS)
+      try {
+        if (addedCount > 0) {
+          masterMetadata.updatedAt = now
+          const content = JSON.stringify(masterMetadata, null, 2)
+          const httpMetadata = { contentType: "application/json" }
+
+          if (masterEtag) {
+            await this.lakehouse.put(masterKey, content, {
+              httpMetadata,
+              onlyIf: { etagMatches: masterEtag },
+            })
+          } else {
+            await this.lakehouse.put(masterKey, content, { httpMetadata })
+          }
+        }
+      } catch (error) {
+        if (attempt < R2_MANIFEST_MAX_RETRIES - 1) {
+          const backoffMs = R2_MANIFEST_RETRY_BASE_MS * 2 ** attempt
+          await new Promise((resolve) => setTimeout(resolve, backoffMs))
+          continue
+        }
+        this.logger.error(`Failed to update master metadata file: ${masterKey}`, {
+          error: this.errorMessage(error),
+        })
+        return
+      }
+
+      // 6. Update Manifest (Remove processed files) (CAS)
+      const newManifest: R2DataTypeManifest = {
+        ...manifest,
+        updatedAt: new Date().toISOString(),
+        files: manifest.files.filter((f) => !filesProcessed.has(f.key)),
+      }
+
+      try {
+        await this.lakehouse.put(manifestKey, JSON.stringify(newManifest, null, 2), {
+          httpMetadata: { contentType: "application/json" },
+          onlyIf: { etagMatches: manifestEtag },
+        })
+
+        // 7. Delete Raw Files
+        for (const key of filesProcessed) {
+          this.lakehouse.delete(key).catch((err) => {
+            this.logger.warn(`Failed to delete raw metadata file ${key}`, {
+              error: this.errorMessage(err),
+            })
+          })
+        }
+        return
+      } catch (error) {
+        if (attempt < R2_MANIFEST_MAX_RETRIES - 1) {
+          const backoffMs = R2_MANIFEST_RETRY_BASE_MS * 2 ** attempt
+          await new Promise((resolve) => setTimeout(resolve, backoffMs))
+          continue
+        }
+        this.logger.error(`Failed to update metadata manifest: ${manifestKey}`, {
+          error: this.errorMessage(error),
+        })
+      }
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────────────────────
   // Utilities
   // ─────────────────────────────────────────────────────────────────────────────
 
+  /**
+   * Helper to generate keys
+   */
   public makeKey(params: {
     customerId: string
     projectId: string

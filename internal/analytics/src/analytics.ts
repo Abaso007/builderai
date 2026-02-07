@@ -17,7 +17,6 @@ import {
   schemaPlanVersionFeature,
 } from "./validators"
 
-// TODO: create interface to handle multiple clients analytics
 export class Analytics {
   public readonly readClient: Tinybird | NoopTinybird
   public readonly writeClient: Tinybird | NoopTinybird

@@ -102,9 +102,7 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
     const usage = data ?? []
 
     // send analytics event for the unprice customer
-    c.executionCtx.waitUntil(
-      reportUsageEvents(c, { action: "getUsage", status: err ? "error" : "success" })
-    )
+    c.executionCtx.waitUntil(reportUsageEvents(c, {}, "get-usage"))
 
     // end the timer
     endTime(c, "getUsage")

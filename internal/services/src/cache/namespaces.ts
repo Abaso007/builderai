@@ -46,8 +46,11 @@ export type WorkspaceGuardCache = {
   member: User & { role: WorkspaceRole }
 }
 
+export type CustomersProjectCache = Pick<Customer, "id" | "name" | "email" | "projectId" | "isMain">
+
 export type CacheNamespaces = {
   apiKeyByHash: ApiKeyExtended | null
+  customersProject: CustomersProjectCache[] | null
   customerSubscription: SubscriptionCache | null
   customer: CustomerCache | null
   customerEntitlement: Entitlement | null

@@ -111,9 +111,7 @@ export const registerGetAnalyticsVerificationsV1 = (app: App) =>
     endTime(c, "getVerifications")
 
     // send analytics event for the unprice customer
-    c.executionCtx.waitUntil(
-      reportUsageEvents(c, { action: "getVerifications", status: err ? "error" : "success" })
-    )
+    c.executionCtx.waitUntil(reportUsageEvents(c, {}, "get-verifications"))
 
     return c.json(
       {

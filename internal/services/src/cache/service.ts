@@ -79,6 +79,10 @@ export class CacheService {
 
     this.cache = createCache({
       apiKeyByHash: new Namespace<CacheNamespaces["apiKeyByHash"]>(this.context, defaultOpts),
+      customersProject: new Namespace<CacheNamespaces["customersProject"]>(
+        this.context,
+        defaultOpts
+      ),
       customerEntitlement: new Namespace<CacheNamespaces["customerEntitlement"]>(this.context, {
         ...defaultOpts,
         fresh: 1000 * 60 * 60 * 24, // 24 hours

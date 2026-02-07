@@ -15,7 +15,7 @@ import type {
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger, WideEventHelpers } from "@unprice/logging"
 import { env } from "../../env"
-import type { CacheNamespaces, CustomerCache } from "../cache"
+import type { CacheNamespaces, CustomerCache, CustomersProjectCache } from "../cache"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
 import { PaymentProviderService } from "../payment-provider/service"
@@ -146,6 +146,95 @@ export class CustomerService {
     }
 
     return subscription as SubscriptionCache
+  }
+
+  /**
+   * Gets the customer data from the database
+   * @param customerId - Customer id
+   * @returns Customer data
+   */
+  private async getCustomersProjectData(projectId: string): Promise<CustomersProjectCache[]> {
+    const customers = await this.db.query.customers.findMany({
+      columns: {
+        id: true,
+        name: true,
+        email: true,
+        projectId: true,
+        isMain: true,
+      },
+      where: (customer, { eq }) => eq(customer.projectId, projectId),
+    })
+
+    if (!customers) {
+      return []
+    }
+
+    return customers
+  }
+
+  /**
+   * Gets the customer data from the database
+   * @param customerId - Customer id
+   * @param opts - Options
+   * @returns Customer data
+   */
+  public async getCustomersProject(
+    projectId: string,
+    opts?: {
+      skipCache: boolean
+    }
+  ): Promise<Result<CustomersProjectCache[], FetchError | UnPriceCustomerError>> {
+    if (opts?.skipCache) {
+      this.logger.debug("skipping cache for getCustomersProject", {
+        projectId,
+      })
+    }
+
+    const { val, err } = opts?.skipCache
+      ? await wrapResult(
+          this.getCustomersProjectData(projectId),
+          (err) =>
+            new FetchError({
+              message: `unable to query for getCustomersProjectData, ${err.message}`,
+              retry: false,
+            })
+        )
+      : await retry(
+          3,
+          async () =>
+            this.cache.customersProject.swr(projectId, () =>
+              this.getCustomersProjectData(projectId)
+            ),
+          (attempt, err) => {
+            this.logger.warn(
+              "Failed to fetch getCustomersProjectData data from cache, retrying...",
+              {
+                projectId: projectId,
+                attempt,
+                error: err.message,
+              }
+            )
+          }
+        )
+
+    if (err) {
+      this.logger.error("error getting getCustomersProjectData", {
+        error: err.message,
+      })
+
+      return Err(
+        new FetchError({
+          message: `unable to query db for getCustomersProjectData, ${err.message}`,
+          retry: false,
+        })
+      )
+    }
+
+    if (!val) {
+      return Ok([])
+    }
+
+    return Ok(val)
   }
 
   /**

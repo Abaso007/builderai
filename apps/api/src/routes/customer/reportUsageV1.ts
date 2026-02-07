@@ -119,7 +119,7 @@ export const registerReportUsageV1 = (app: App) =>
       performanceStart,
       // first-class analytics fields
       country: stats.country,
-      region: stats.region,
+      region: stats.colo,
       action: action,
       keyId: key.id,
       metadata: metadata ?? null,
@@ -129,9 +129,7 @@ export const registerReportUsageV1 = (app: App) =>
     endTime(c, "reportUsage")
 
     // send analytics event for the unprice customer
-    c.executionCtx.waitUntil(
-      reportUsageEvents(c, { action: "reportUsage", status: err ? "error" : "success" })
-    )
+    c.executionCtx.waitUntil(reportUsageEvents(c, {}, "report-usage"))
 
     if (err) {
       throw err

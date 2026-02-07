@@ -97,6 +97,14 @@ export function getVerificationManifestKey(projectId: string, customerId: string
 }
 
 /**
+ * R2 key for metadata manifest (per project + customer, written by DO provider)
+ * Path: {projectId}/{customerId}/metadata_manifest.json
+ */
+export function getMetadataManifestKey(projectId: string, customerId: string): string {
+  return `${projectId}/${customerId}/metadata_manifest.json`
+}
+
+/**
  * Validate that an R2 key belongs to a tenant
  */
 export function validateTenantKey(key: string, tenantId: string): boolean {

@@ -3979,10 +3979,10 @@ export interface operations {
             content: {
                 "application/json": {
                     /**
-                     * @description The customer ID (required; manifest is read once per customer and project)
+                     * @description The customer ID (optional; if not provided, all customers will be included)
                      * @example cus_1H7KQFLr7RepUyQBKdnvY
                      */
-                    customer_id: string;
+                    customer_id?: string;
                     /**
                      * @description The project ID (optional, only available for main projects)
                      * @example project_1H7KQFLr7RepUyQBKdnvY
@@ -4030,7 +4030,7 @@ export interface operations {
                                 key: string;
                                 day: string;
                                 /** @enum {string} */
-                                type: "raw" | "compact";
+                                type: "raw" | "compact" | "metadata";
                                 count: number;
                                 bytes: number;
                             }[];

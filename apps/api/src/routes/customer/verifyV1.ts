@@ -109,7 +109,7 @@ export const registerVerifyV1 = (app: App) =>
       timestamp: requestStartedAt,
       // first-class analytics fields
       country: stats.country,
-      region: stats.region,
+      region: stats.colo,
       action: action,
       keyId: key.id,
       metadata: metadata ?? null,
@@ -119,9 +119,7 @@ export const registerVerifyV1 = (app: App) =>
     endTime(c, "verify")
 
     // send analytics event for the unprice customer
-    c.executionCtx.waitUntil(
-      reportUsageEvents(c, { action: "verify", status: err ? "error" : "success" })
-    )
+    c.executionCtx.waitUntil(reportUsageEvents(c, {}, "verify"))
 
     if (err) {
       throw err
