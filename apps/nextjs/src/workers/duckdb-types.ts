@@ -42,9 +42,18 @@ export interface DataSourceDef {
 }
 
 /** Known event table / data source IDs. Add new ones when you add new event types. */
-export type DataSourceId = "usage_events" | "verification_events"
+export type DataSourceId = "usage_events" | "verification_events" | "metadata"
 
-// TODO: add metadata table and join it with usage and verification events
+/**
+ * Metadata dimension table: one row per unique meta_id with tags (JSON).
+ * Join with usage_events or verification_events on meta_id for bar charts by metadata.
+ * NDJSON from R2: meta_id, tags (JSON string), timestamp.
+ */
+const METADATA_COLUMNS: ColumnDef[] = [
+  { name: "meta_id", sqlType: "VARCHAR", jsonKey: "meta_id" },
+  { name: "tags", sqlType: "JSON", jsonKey: "tags" },
+  { name: "timestamp", sqlType: "BIGINT", jsonKey: "timestamp" },
+]
 
 /**
  * Usage events schema aligned with internal/analytics featureUsageSchemaV1.
@@ -62,7 +71,7 @@ const USAGE_EVENTS_COLUMNS: ColumnDef[] = [
   { name: "usage", sqlType: "BIGINT", jsonKey: "usage" },
   { name: "created_at", sqlType: "BIGINT", jsonKey: "created_at" },
   { name: "deleted", sqlType: "BIGINT", jsonKey: "deleted" },
-  { name: "meta_id", sqlType: "BIGINT", jsonKey: "meta_id" },
+  { name: "meta_id", sqlType: "VARCHAR", jsonKey: "meta_id" },
   { name: "region", sqlType: "VARCHAR", jsonKey: "region" },
   { name: "action", sqlType: "VARCHAR", jsonKey: "action" },
   { name: "key_id", sqlType: "VARCHAR", jsonKey: "key_id" },
@@ -84,7 +93,7 @@ const VERIFICATION_EVENTS_COLUMNS: ColumnDef[] = [
   { name: "customer_id", sqlType: "VARCHAR", jsonKey: "customer_id" },
   { name: "request_id", sqlType: "VARCHAR", jsonKey: "request_id" },
   { name: "region", sqlType: "VARCHAR", jsonKey: "region" },
-  { name: "meta_id", sqlType: "BIGINT", jsonKey: "meta_id" },
+  { name: "meta_id", sqlType: "VARCHAR", jsonKey: "meta_id" },
   { name: "action", sqlType: "VARCHAR", jsonKey: "action" },
   { name: "key_id", sqlType: "VARCHAR", jsonKey: "key_id" },
 ]
@@ -100,6 +109,11 @@ export const DATA_SOURCES: Record<DataSourceId, DataSourceDef> = {
     id: "verification_events",
     tableName: "verification_events",
     columns: VERIFICATION_EVENTS_COLUMNS,
+  },
+  metadata: {
+    id: "metadata",
+    tableName: "metadata",
+    columns: METADATA_COLUMNS,
   },
 }
 
@@ -352,6 +366,72 @@ const VERIFICATION_QUERY_TEMPLATES = {
   `,
 } as const
 
+/** Predefined queries for metadata (dimension table: meta_id, tags JSON, timestamp). Used for JOINs. */
+const METADATA_QUERY_TEMPLATES = {
+  totalEvents: `SELECT COUNT(*) as total_events FROM ${TABLE_PLACEHOLDER}`,
+
+  eventsByType: `
+    SELECT meta_id, COUNT(*) as count
+    FROM ${TABLE_PLACEHOLDER}
+    GROUP BY meta_id
+    ORDER BY count DESC
+    LIMIT 50
+  `,
+
+  eventsByDay: `
+    SELECT
+      strftime(epoch_ms(timestamp)::TIMESTAMP, '%Y-%m-%d') as day,
+      COUNT(*) as count
+    FROM ${TABLE_PLACEHOLDER}
+    GROUP BY day
+    ORDER BY day DESC
+  `,
+
+  eventsByHour: `
+    SELECT
+      strftime(epoch_ms(timestamp)::TIMESTAMP, '%Y-%m-%d %H:00') as hour,
+      COUNT(*) as count
+    FROM ${TABLE_PLACEHOLDER}
+    GROUP BY hour
+    ORDER BY hour DESC
+    LIMIT 48
+  `,
+
+  eventsByMinute: `
+    SELECT
+      strftime(epoch_ms(timestamp)::TIMESTAMP, '%Y-%m-%d %H:%M') as minute,
+      COUNT(*) as count
+    FROM ${TABLE_PLACEHOLDER}
+    GROUP BY minute
+    ORDER BY minute DESC
+    LIMIT 60
+  `,
+
+  uniqueResources: `SELECT COUNT(DISTINCT meta_id) as unique_resources FROM ${TABLE_PLACEHOLDER}`,
+
+  topResources: `
+    SELECT meta_id, COUNT(*) as event_count
+    FROM ${TABLE_PLACEHOLDER}
+    GROUP BY meta_id
+    ORDER BY event_count DESC
+    LIMIT 20
+  `,
+
+  quantityStats: `
+    SELECT
+      COUNT(*) as event_count,
+      MIN(timestamp) as min_ts,
+      MAX(timestamp) as max_ts
+    FROM ${TABLE_PLACEHOLDER}
+  `,
+
+  recentEvents: `
+    SELECT * FROM ${TABLE_PLACEHOLDER}
+    ORDER BY timestamp DESC
+    LIMIT 100
+  `,
+} as const
+
 const PREDEFINED_QUERY_TEMPLATES = USAGE_QUERY_TEMPLATES
 
 export type PredefinedQueryName = keyof typeof PREDEFINED_QUERY_TEMPLATES
@@ -359,6 +439,7 @@ export type PredefinedQueryName = keyof typeof PREDEFINED_QUERY_TEMPLATES
 const QUERY_TEMPLATES_BY_SOURCE: Record<DataSourceId, Record<PredefinedQueryName, string>> = {
   usage_events: USAGE_QUERY_TEMPLATES,
   verification_events: VERIFICATION_QUERY_TEMPLATES,
+  metadata: METADATA_QUERY_TEMPLATES,
 }
 
 /** Get SQL for a predefined query targeting the given data source (uses schema registry table name). */

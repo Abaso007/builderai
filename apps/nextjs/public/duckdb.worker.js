@@ -12607,6 +12607,11 @@ function generateUUID() {
 }
 
 // src/workers/duckdb-types.ts
+var METADATA_COLUMNS = [
+  { name: "meta_id", sqlType: "VARCHAR", jsonKey: "meta_id" },
+  { name: "tags", sqlType: "JSON", jsonKey: "tags" },
+  { name: "timestamp", sqlType: "BIGINT", jsonKey: "timestamp" }
+];
 var USAGE_EVENTS_COLUMNS = [
   { name: "id", sqlType: "VARCHAR", jsonKey: "id" },
   { name: "idempotence_key", sqlType: "VARCHAR", jsonKey: "idempotence_key" },
@@ -12618,7 +12623,7 @@ var USAGE_EVENTS_COLUMNS = [
   { name: "usage", sqlType: "BIGINT", jsonKey: "usage" },
   { name: "created_at", sqlType: "BIGINT", jsonKey: "created_at" },
   { name: "deleted", sqlType: "BIGINT", jsonKey: "deleted" },
-  { name: "meta_id", sqlType: "BIGINT", jsonKey: "meta_id" },
+  { name: "meta_id", sqlType: "VARCHAR", jsonKey: "meta_id" },
   { name: "region", sqlType: "VARCHAR", jsonKey: "region" },
   { name: "action", sqlType: "VARCHAR", jsonKey: "action" },
   { name: "key_id", sqlType: "VARCHAR", jsonKey: "key_id" }
@@ -12634,7 +12639,7 @@ var VERIFICATION_EVENTS_COLUMNS = [
   { name: "customer_id", sqlType: "VARCHAR", jsonKey: "customer_id" },
   { name: "request_id", sqlType: "VARCHAR", jsonKey: "request_id" },
   { name: "region", sqlType: "VARCHAR", jsonKey: "region" },
-  { name: "meta_id", sqlType: "BIGINT", jsonKey: "meta_id" },
+  { name: "meta_id", sqlType: "VARCHAR", jsonKey: "meta_id" },
   { name: "action", sqlType: "VARCHAR", jsonKey: "action" },
   { name: "key_id", sqlType: "VARCHAR", jsonKey: "key_id" }
 ];
@@ -12648,6 +12653,11 @@ var DATA_SOURCES = {
     id: "verification_events",
     tableName: "verification_events",
     columns: VERIFICATION_EVENTS_COLUMNS
+  },
+  metadata: {
+    id: "metadata",
+    tableName: "metadata",
+    columns: METADATA_COLUMNS
   }
 };
 var DATA_SOURCE_IDS = Object.keys(DATA_SOURCES);
@@ -12842,10 +12852,67 @@ var VERIFICATION_QUERY_TEMPLATES = {
     LIMIT 100
   `
 };
+var METADATA_QUERY_TEMPLATES = {
+  totalEvents: `SELECT COUNT(*) as total_events FROM ${TABLE_PLACEHOLDER}`,
+  eventsByType: `
+    SELECT meta_id, COUNT(*) as count
+    FROM ${TABLE_PLACEHOLDER}
+    GROUP BY meta_id
+    ORDER BY count DESC
+    LIMIT 50
+  `,
+  eventsByDay: `
+    SELECT
+      strftime(epoch_ms(timestamp)::TIMESTAMP, '%Y-%m-%d') as day,
+      COUNT(*) as count
+    FROM ${TABLE_PLACEHOLDER}
+    GROUP BY day
+    ORDER BY day DESC
+  `,
+  eventsByHour: `
+    SELECT
+      strftime(epoch_ms(timestamp)::TIMESTAMP, '%Y-%m-%d %H:00') as hour,
+      COUNT(*) as count
+    FROM ${TABLE_PLACEHOLDER}
+    GROUP BY hour
+    ORDER BY hour DESC
+    LIMIT 48
+  `,
+  eventsByMinute: `
+    SELECT
+      strftime(epoch_ms(timestamp)::TIMESTAMP, '%Y-%m-%d %H:%M') as minute,
+      COUNT(*) as count
+    FROM ${TABLE_PLACEHOLDER}
+    GROUP BY minute
+    ORDER BY minute DESC
+    LIMIT 60
+  `,
+  uniqueResources: `SELECT COUNT(DISTINCT meta_id) as unique_resources FROM ${TABLE_PLACEHOLDER}`,
+  topResources: `
+    SELECT meta_id, COUNT(*) as event_count
+    FROM ${TABLE_PLACEHOLDER}
+    GROUP BY meta_id
+    ORDER BY event_count DESC
+    LIMIT 20
+  `,
+  quantityStats: `
+    SELECT
+      COUNT(*) as event_count,
+      MIN(timestamp) as min_ts,
+      MAX(timestamp) as max_ts
+    FROM ${TABLE_PLACEHOLDER}
+  `,
+  recentEvents: `
+    SELECT * FROM ${TABLE_PLACEHOLDER}
+    ORDER BY timestamp DESC
+    LIMIT 100
+  `
+};
 var PREDEFINED_QUERY_TEMPLATES = USAGE_QUERY_TEMPLATES;
 var QUERY_TEMPLATES_BY_SOURCE = {
   usage_events: USAGE_QUERY_TEMPLATES,
-  verification_events: VERIFICATION_QUERY_TEMPLATES
+  verification_events: VERIFICATION_QUERY_TEMPLATES,
+  metadata: METADATA_QUERY_TEMPLATES
 };
 function getPredefinedQuery(name, dataSourceId = "usage_events") {
   const templates = QUERY_TEMPLATES_BY_SOURCE[dataSourceId];
@@ -13055,7 +13122,8 @@ var workerAPI = {
     const tablesToClear = table ? [table] : DATA_SOURCE_IDS;
     for (const id of tablesToClear) {
       const def = DATA_SOURCES[id];
-      await conn.query(`DELETE FROM ${def.tableName}`);
+      await conn.query(`DROP TABLE IF EXISTS ${def.tableName}`);
+      await conn.query(buildCreateTableSQL(def));
       getLoadedSet(id).clear();
     }
     console.info("[DuckDB Worker] Data cleared", table ?? "(all tables)");

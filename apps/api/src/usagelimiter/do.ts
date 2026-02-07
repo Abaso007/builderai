@@ -71,7 +71,7 @@ export class DurableObjectUsagelimiter extends Server {
     if (env.VERCEL_ENV === "development") {
       this.TTL_ANALYTICS = 1000 * 10 // 10 seconds
       this.SAMPLE_RATE = 1
-      this.COMPACTION_INTERVAL = 1000 * 10 // 10 seconds
+      this.COMPACTION_INTERVAL = 1000 * 60 // 1 minute
     }
 
     // set a revalidation period of 5 mins for preview
@@ -493,7 +493,7 @@ export class DurableObjectUsagelimiter extends Server {
     const flushSec = Math.min(Math.max(flushTime ?? this.TTL_ANALYTICS / 1000, 5), 30 * 60)
     const nextAlarm = now + flushSec * 1000
 
-    wideEventLogger.add("usagelimiter.next_alarm", nextAlarm)
+    wideEventLogger.add("usagelimiter.next_alarm", new Date(nextAlarm).toISOString())
 
     if (!alarm || nextAlarm < alarm) {
       this.ctx.storage.setAlarm(nextAlarm)
@@ -568,8 +568,8 @@ export class DurableObjectUsagelimiter extends Server {
       // Ensure we retry or wake up eventually if compaction failed
       const currentAlarm = await this.ctx.storage.getAlarm()
       if (!currentAlarm) {
-        // Retry in 1 hour if failed
-        this.ctx.storage.setAlarm(Date.now() + 60 * 60 * 1000)
+        // Retry in compaction interval
+        this.ctx.storage.setAlarm(Date.now() + this.COMPACTION_INTERVAL)
       }
     }
 

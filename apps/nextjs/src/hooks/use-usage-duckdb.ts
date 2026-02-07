@@ -9,6 +9,9 @@ import type {
   QueryResult,
 } from "../workers/duckdb-types"
 import { DATA_SOURCES, getPredefinedQuery } from "../workers/duckdb-types"
+
+/** File source from manifest: which table to load into. */
+export type FileSource = "usage" | "verification" | "metadata"
 import { useIntervalFilter } from "./use-filter"
 
 export type RangeType = "24h" | "7d" | "30d" | "90d"
@@ -17,7 +20,9 @@ interface ManifestFile {
   url: string
   key: string
   day: string
-  type: "raw" | "compact"
+  type: "raw" | "compact" | "metadata"
+  /** Which table to load into. Enables JOINs (e.g. usage_events + metadata). */
+  source?: FileSource
   count: number
   bytes: number
 }
@@ -153,20 +158,46 @@ export function useUsageDuckdb(
           return
         }
 
-        // Clear previous data for this table before loading new range
-        await workerRef.current!.clearData(dataSource)
+        // Clear all tables so usage, verification, and metadata stay in sync
+        await workerRef.current!.clearData()
 
-        // Load files into DuckDB (pass tenantId and target table)
-        const filesToLoad = manifestResult.files.map((f: ManifestFile) => ({
-          url: f.url,
-          key: f.key,
-        }))
-        const result = await workerRef.current!.loadFiles(filesToLoad, projectId, dataSource)
+        // Route files by source so we can JOIN usage_events with metadata later
+        const bySource = {
+          usage: [] as { url: string; key: string }[],
+          verification: [] as { url: string; key: string }[],
+          metadata: [] as { url: string; key: string }[],
+        }
+        for (const f of manifestResult.files as ManifestFile[]) {
+          const source = f.source ?? "usage"
+          const entry = { url: f.url, key: f.key }
+          if (source === "usage") bySource.usage.push(entry)
+          else if (source === "verification") bySource.verification.push(entry)
+          else bySource.metadata.push(entry)
+        }
 
-        console.info(`[useUsageDuckdb] Loaded ${result.loaded} files, ${result.totalEvents} events`)
+        const worker = workerRef.current!
+        const [usageRes, verificationRes, metadataRes] = await Promise.all([
+          bySource.usage.length > 0
+            ? worker.loadFiles(bySource.usage, projectId, "usage_events")
+            : Promise.resolve({ loaded: 0, totalEvents: 0 }),
+          bySource.verification.length > 0
+            ? worker.loadFiles(bySource.verification, projectId, "verification_events")
+            : Promise.resolve({ loaded: 0, totalEvents: 0 }),
+          bySource.metadata.length > 0
+            ? worker.loadFiles(bySource.metadata, projectId, "metadata")
+            : Promise.resolve({ loaded: 0, totalEvents: 0 }),
+        ])
 
-        setLoadedFileCount(result.loaded)
-        setTotalEvents(result.totalEvents)
+        const totalLoaded = usageRes.loaded + verificationRes.loaded + metadataRes.loaded
+        const totalEventsSum =
+          usageRes.totalEvents + verificationRes.totalEvents + metadataRes.totalEvents
+
+        console.info(
+          `[useUsageDuckdb] Loaded ${totalLoaded} files (usage: ${usageRes.loaded}, verification: ${verificationRes.loaded}, metadata: ${metadataRes.loaded}), ${totalEventsSum} events`
+        )
+
+        setLoadedFileCount(totalLoaded)
+        setTotalEvents(totalEventsSum)
         setIsReady(true)
       } catch (err) {
         console.error("[useUsageDuckdb] Load error:", err)
@@ -288,16 +319,16 @@ export function useUsageDuckdb(
   )
 
   /**
-   * Clear all loaded data
+   * Clear all loaded data (usage, verification, and metadata tables)
    */
   const clearData = useCallback(async () => {
     if (!workerRef.current) return
 
-    await workerRef.current.clearData(dataSource)
+    await workerRef.current.clearData()
     setLoadedFileCount(0)
     setTotalEvents(0)
     setIsReady(false)
-  }, [dataSource])
+  }, [])
 
   return {
     isInitializing,

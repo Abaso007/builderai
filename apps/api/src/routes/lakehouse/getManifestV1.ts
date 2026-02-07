@@ -35,11 +35,16 @@ export const dayManifestSchema = z.object({
   compact: compactFileDescriptorSchema.nullable(),
 })
 
+/** Source of the file: which table to load into (usage_events, verification_events, metadata). */
+export const fileSourceSchema = z.enum(["usage", "verification", "metadata"])
+
 export const fileDescriptorSchema = z.object({
   url: z.string(),
   key: z.string(),
   day: z.string(),
   type: z.enum(["raw", "compact", "metadata"]),
+  /** Which lakehouse table to load this file into. Enables JOINs (e.g. usage_events + metadata). */
+  source: fileSourceSchema,
   count: z.number(),
   bytes: z.number(),
 })
@@ -180,16 +185,25 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
       customerId: string
       updatedAt: string
       files: R2FileDescriptor[]
+      compacted?: R2FileDescriptor[]
     }
 
-    type FileWithType = { day: string; desc: R2FileDescriptor; type: "raw" | "metadata" }
+    type FileWithType = {
+      day: string
+      desc: R2FileDescriptor
+      type: "raw" | "compact" | "metadata"
+      source: "usage" | "verification" | "metadata"
+    }
     const allFiles: FileWithType[] = []
 
     for (const usageObj of usageObjs) {
       if (!usageObj) continue
       const usageManifest = await usageObj.json<R2DataTypeManifest>()
       for (const f of usageManifest.files ?? []) {
-        if (dateSet.has(f.day)) allFiles.push({ day: f.day, desc: f, type: "raw" })
+        if (dateSet.has(f.day)) allFiles.push({ day: f.day, desc: f, type: "raw", source: "usage" })
+      }
+      for (const f of usageManifest.compacted ?? []) {
+        if (dateSet.has(f.day)) allFiles.push({ day: f.day, desc: f, type: "compact", source: "usage" })
       }
     }
 
@@ -197,7 +211,10 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
       if (!verificationObj) continue
       const verificationManifest = await verificationObj.json<R2DataTypeManifest>()
       for (const f of verificationManifest.files ?? []) {
-        if (dateSet.has(f.day)) allFiles.push({ day: f.day, desc: f, type: "raw" })
+        if (dateSet.has(f.day)) allFiles.push({ day: f.day, desc: f, type: "raw", source: "verification" })
+      }
+      for (const f of verificationManifest.compacted ?? []) {
+        if (dateSet.has(f.day)) allFiles.push({ day: f.day, desc: f, type: "compact", source: "verification" })
       }
     }
 
@@ -205,40 +222,50 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
       if (!metadataObj) continue
       const metadataManifest = await metadataObj.json<R2DataTypeManifest>()
       for (const f of metadataManifest.files ?? []) {
-        if (dateSet.has(f.day)) allFiles.push({ day: f.day, desc: f, type: "metadata" })
+        if (dateSet.has(f.day)) allFiles.push({ day: f.day, desc: f, type: "metadata", source: "metadata" })
+      }
+      for (const f of metadataManifest.compacted ?? []) {
+        if (dateSet.has(f.day)) allFiles.push({ day: f.day, desc: f, type: "metadata", source: "metadata" })
       }
     }
 
     const API_URL = `${API_DOMAIN}v1/lakehouse/file`
 
-    const files: FileDescriptor[] = allFiles.map(({ day, desc, type }) => ({
+    const files: FileDescriptor[] = allFiles.map(({ day, desc, type, source }) => ({
       url: `${API_URL}?key=${encodeURIComponent(desc.key)}`,
       key: desc.key,
       day,
       type,
+      source,
       count: desc.count,
       bytes: desc.bytes,
     }))
 
-    const byDay = new Map<string, RawFileDescriptor[]>()
-    for (const d of dates) byDay.set(d, [])
+    const byDayRaw = new Map<string, RawFileDescriptor[]>()
+    const byDayCompact = new Map<string, CompactFileDescriptor>()
+    for (const d of dates) {
+      byDayRaw.set(d, [])
+    }
     for (const { day, desc, type } of allFiles) {
-      if (type !== "raw") continue
-      const raw: RawFileDescriptor = {
+      const descriptor = {
         key: desc.key,
         minTs: String(desc.minTs),
         maxTs: String(desc.maxTs),
         count: desc.count,
         bytes: desc.bytes,
       }
-      byDay.get(day)!.push(raw)
+      if (type === "raw") {
+        byDayRaw.get(day)!.push(descriptor)
+      } else if (type === "compact") {
+        byDayCompact.set(day, descriptor)
+      }
     }
 
     const days: DayManifest[] = dates.map((day) => ({
       day,
       updatedAt: new Date().toISOString(),
-      raw: byDay.get(day) ?? [],
-      compact: null,
+      raw: byDayRaw.get(day) ?? [],
+      compact: byDayCompact.get(day) ?? null,
     }))
 
     const response: ManifestResponse = {

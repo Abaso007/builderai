@@ -322,6 +322,31 @@ function getPayloadConfigFromPayload(config: ChartConfig, payload: unknown, key:
 }
 
 export {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Dot,
+  Label,
+  LabelList,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  PolarAngleAxis,
+  PolarGrid,
+  PolarRadiusAxis,
+  RadialBar,
+  RadialBarChart,
+  ReferenceLine,
+  Sector,
+  XAxis,
+  YAxis,
+} from "recharts"
+
+export {
   ChartContainer,
   ChartTooltip,
   ChartTooltipContent,

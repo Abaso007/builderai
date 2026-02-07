@@ -276,7 +276,8 @@ const workerAPI: DuckDBWorkerAPI = {
     const tablesToClear = table ? [table] : DATA_SOURCE_IDS
     for (const id of tablesToClear) {
       const def = DATA_SOURCES[id]
-      await conn.query(`DELETE FROM ${def.tableName}`)
+      await conn.query(`DROP TABLE IF EXISTS ${def.tableName}`)
+      await conn.query(buildCreateTableSQL(def))
       getLoadedSet(id).clear()
     }
 

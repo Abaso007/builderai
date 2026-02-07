@@ -24,6 +24,7 @@ const BATCH_SIZE = 1000
 const METADATA_RETENTION_DAYS = 3
 const STATE_KEY_PREFIX = "state:"
 const SEEN_META_PREFIX = "seen_meta_"
+const CURSOR_KEY = "cursor_state"
 const ACTIVE_CUSTOMERS_KEY = "tracked_do_keys"
 const R2_MANIFEST_MAX_RETRIES = 5
 const R2_MANIFEST_RETRY_BASE_MS = 50
@@ -49,19 +50,6 @@ interface R2DataTypeManifest {
   updatedAt: string // ISO timestamp
   files: R2FileDescriptor[]
   compacted?: R2FileDescriptor[]
-}
-
-/** Customer metadata file structure (append-only, dimension table) */
-interface R2CustomerMetadata {
-  projectId: string
-  customerId: string
-  updatedAt: string
-  entries: Array<{
-    meta_id: number
-    tags: string
-    timestamp: number
-    addedAt: string
-  }>
 }
 
 // Type guard for EntitlementState
@@ -156,6 +144,13 @@ interface MetadataProcessingResult {
   todayKey: string
 }
 
+interface CursorState {
+  lastTinybirdUsageId: string | null
+  lastR2UsageId: string | null
+  lastTinybirdVerificationId: number | null
+  lastR2VerificationId: number | null
+}
+
 /**
  * SQLite Storage Provider for Durable Objects
  *
@@ -178,8 +173,12 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   // Memoized entitlement states for fast lookups
   private stateCache = new Map<string, EntitlementState>()
   private initialized = false
-  private lastR2UsageId: string | null = null
-  private lastR2VerificationId: number | null = null
+  private cursors: CursorState = {
+    lastTinybirdUsageId: null,
+    lastR2UsageId: null,
+    lastTinybirdVerificationId: null,
+    lastR2VerificationId: null,
+  }
 
   // Lazily initialized xxhash instance (WASM module)
   private xxhashInstance: XXHashAPI | null = null
@@ -208,6 +207,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       try {
         await migrate(this.db, migrations)
         await this.loadStateCache()
+        await this.loadCursors()
         this.initialized = true
         return Ok(undefined)
       } catch (error) {
@@ -233,6 +233,17 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         this.stateCache.set(key, value)
       }
     }
+  }
+
+  private async loadCursors(): Promise<void> {
+    const stored = await this.storage.get<CursorState>(CURSOR_KEY)
+    if (stored) {
+      this.cursors = stored
+    }
+  }
+
+  private async saveCursors(): Promise<void> {
+    await this.storage.put(CURSOR_KEY, this.cursors)
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -435,32 +446,99 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       // 2. Process metadata (compute meta_id, extract unique metadata)
       const processed = await this.processMetadata(usageBatch.records, verificationBatch.records)
 
-      // 3. Send to destinations in parallel (R2 is best-effort)
-      const [_r2Result, usageResult, verificationResult, _metaResult] = await Promise.all([
+      // 3. Filter records for each destination based on cursors to avoid double counting
+      const usageForTinybird = processed.usageRecords.filter((r) => {
+        if (!this.cursors.lastTinybirdUsageId) return true
+        return r.record.id > this.cursors.lastTinybirdUsageId
+      })
+
+      const verificationForTinybird = processed.verificationRecords.filter((r) => {
+        if (this.cursors.lastTinybirdVerificationId === null) return true
+        return r.record.id > this.cursors.lastTinybirdVerificationId
+      })
+
+      // 4. Send to destinations in parallel
+      const [r2Result, usageResult, verificationResult, _metaResult] = await Promise.all([
         this.flushToR2(processed).catch((err) => {
           this.logger.error("R2 flush failed (best-effort)", { error: this.errorMessage(err) })
           return { success: false }
         }),
-        this.ingestUsageToTinybird(processed.usageRecords),
-        this.ingestVerificationsToTinybird(processed.verificationRecords),
+        this.ingestUsageToTinybird(usageForTinybird),
+        this.ingestVerificationsToTinybird(verificationForTinybird),
         this.ingestMetadataToTinybird(processed.uniqueMetadata),
       ])
 
-      // 4. Update seen metadata set
+      // 5. Update cursors based on successful uploads
+      let cursorsChanged = false
+
+      if (usageResult.success && usageForTinybird.length > 0) {
+        // Usage is DESC, so first record has highest ID
+        const maxId = usageForTinybird[0]?.record.id
+        if (
+          maxId &&
+          (!this.cursors.lastTinybirdUsageId || maxId > this.cursors.lastTinybirdUsageId)
+        ) {
+          this.cursors.lastTinybirdUsageId = maxId
+          cursorsChanged = true
+        }
+      }
+
+      if (verificationResult.success && verificationForTinybird.length > 0) {
+        // Verification is ASC, so last record has highest ID
+        const maxId = verificationForTinybird[verificationForTinybird.length - 1]?.record.id
+        if (
+          maxId !== undefined &&
+          (this.cursors.lastTinybirdVerificationId === null ||
+            maxId > this.cursors.lastTinybirdVerificationId)
+        ) {
+          this.cursors.lastTinybirdVerificationId = maxId
+          cursorsChanged = true
+        }
+      }
+
+      // R2 cursors are updated inside flushToR2, but we need to persist them
+      if (r2Result.success) {
+        cursorsChanged = true
+      }
+
+      if (cursorsChanged) {
+        await this.saveCursors()
+      }
+
+      // 6. Update seen metadata set
       if (processed.uniqueMetadata.length > 0) {
         await this.updateSeenMetaSet(processed.todayKey, processed.seenMetaSet)
       }
 
-      // 5. Delete successfully processed records
-      if (usageResult.success && usageBatch.firstId && usageBatch.lastId) {
-        await this.deleteUsageRecordsBatch(usageBatch.firstId, usageBatch.lastId)
+      // 7. Delete records that have been safely persisted to BOTH destinations
+      // For Usage (DESC): We can delete if both cursors have advanced past the batch
+      if (usageBatch.firstId && usageBatch.lastId) {
+        const tbSafe =
+          this.cursors.lastTinybirdUsageId !== null &&
+          this.cursors.lastTinybirdUsageId >= usageBatch.firstId
+        const r2Safe =
+          this.cursors.lastR2UsageId !== null && this.cursors.lastR2UsageId >= usageBatch.firstId
+
+        if (tbSafe && r2Safe) {
+          await this.deleteUsageRecordsBatch(usageBatch.firstId, usageBatch.lastId)
+        }
       }
 
-      if (verificationResult.success && verificationBatch.firstId && verificationBatch.lastId) {
-        await this.deleteVerificationRecordsBatch(
-          verificationBatch.firstId,
-          verificationBatch.lastId
-        )
+      // For Verification (ASC): We can delete if both cursors have advanced past the batch
+      if (verificationBatch.firstId !== null && verificationBatch.lastId !== null) {
+        const tbSafe =
+          this.cursors.lastTinybirdVerificationId !== null &&
+          this.cursors.lastTinybirdVerificationId >= verificationBatch.lastId
+        const r2Safe =
+          this.cursors.lastR2VerificationId !== null &&
+          this.cursors.lastR2VerificationId >= verificationBatch.lastId
+
+        if (tbSafe && r2Safe) {
+          await this.deleteVerificationRecordsBatch(
+            verificationBatch.firstId,
+            verificationBatch.lastId
+          )
+        }
       }
 
       return Ok({
@@ -511,10 +589,17 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         this.stateCache.clear()
         await this.storage.deleteAll()
         this.initialized = false
+        this.cursors = {
+          lastTinybirdUsageId: null,
+          lastR2UsageId: null,
+          lastTinybirdVerificationId: null,
+          lastR2VerificationId: null,
+        }
 
         // Reinitialize
         await migrate(this.db, migrations)
         await this.loadStateCache()
+        // No need to load cursors as we just reset them
         this.initialized = true
 
         return Ok(undefined)
@@ -904,19 +989,25 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
    * @param processed The batch of processed records and metadata.
    */
   private async flushToR2(processed: MetadataProcessingResult): Promise<{ success: boolean }> {
-    if (!this.lakehouse) return { success: true }
+    if (!this.lakehouse) {
+      this.logger.warn("R2 lakehouse not configured; skipping flush to R2", {
+        usageRecords: processed.usageRecords.length,
+        verificationRecords: processed.verificationRecords.length,
+      })
+      return { success: true }
+    }
 
     try {
       // Filter out usage records that have already been flushed to R2
       const newUsageRecords = processed.usageRecords.filter((p) => {
-        if (!this.lastR2UsageId) return true
-        return p.record.id > this.lastR2UsageId
+        if (!this.cursors.lastR2UsageId) return true
+        return p.record.id > this.cursors.lastR2UsageId
       })
 
       // Filter out verification records that have already been flushed to R2
       const newVerificationRecords = processed.verificationRecords.filter((p) => {
-        if (this.lastR2VerificationId === null) return true
-        return p.record.id > this.lastR2VerificationId
+        if (this.cursors.lastR2VerificationId === null) return true
+        return p.record.id > this.cursors.lastR2VerificationId
       })
 
       // If nothing new to flush, return early
@@ -947,10 +1038,28 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         return files
       }
 
-      // Phase 1: Write raw NDJSON files to R2
-      // Upload usage records grouped by project/customer
+      // Phase 1: Write raw NDJSON files to R2 (include meta_id so lakehouse can JOIN with metadata)
+      // Upload usage records grouped by project/customer; payload includes meta_id from processed records
       if (newUsageRecords.length > 0) {
-        const usageGroups = this.groupByProjectCustomer(newUsageRecords.map((p) => p.record))
+        const usagePayloads = newUsageRecords.map(
+          ({ record, metaId, region, action, keyId }) => ({
+            id: record.id,
+            idempotence_key: record.idempotence_key,
+            feature_slug: record.feature_slug,
+            request_id: record.request_id,
+            project_id: record.project_id,
+            customer_id: record.customer_id,
+            timestamp: record.timestamp,
+            usage: Number(record.usage ?? 0),
+            created_at: record.created_at,
+            deleted: record.deleted,
+            meta_id: String(metaId),
+            region: region ?? record.region ?? "UNK",
+            action: action ?? record.action ?? null,
+            key_id: keyId ?? record.key_id ?? null,
+          })
+        )
+        const usageGroups = this.groupByProjectCustomer(usagePayloads)
         const uploads: Promise<void>[] = []
 
         for (const [key, records] of usageGroups) {
@@ -958,12 +1067,10 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           const fileKey = this.getR2RawFileKey(projectId, customerId, now, "usage")
           const buffer = this.toNDJSON(records)
 
-          // Compute min/max timestamps
           const timestamps = records.map((r) => r.timestamp).sort((a, b) => a - b)
           const minTs = timestamps[0]!
           const maxTs = timestamps[timestamps.length - 1]!
 
-          // Track file descriptor for manifest update
           const customerFiles = getOrCreateCustomerFiles(projectId, customerId)
           customerFiles.usage.push({
             key: fileKey,
@@ -986,11 +1093,26 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         await Promise.all(uploads)
       }
 
-      // Upload verification records grouped by project/customer
+      // Upload verification records; payload includes meta_id from processed records
       if (newVerificationRecords.length > 0) {
-        const verificationGroups = this.groupByProjectCustomer(
-          newVerificationRecords.map((p) => p.record)
+        const verificationPayloads = newVerificationRecords.map(
+          ({ record, metaId, region, action, keyId }) => ({
+            project_id: record.project_id,
+            denied_reason: record.denied_reason ?? null,
+            allowed: record.allowed,
+            timestamp: record.timestamp,
+            created_at: record.created_at,
+            latency: record.latency ? Number(record.latency) : 0,
+            feature_slug: record.feature_slug,
+            customer_id: record.customer_id,
+            request_id: record.request_id,
+            region: region ?? record.region ?? "UNK",
+            meta_id: String(metaId),
+            action: action ?? record.action ?? null,
+            key_id: keyId ?? record.key_id ?? null,
+          })
         )
+        const verificationGroups = this.groupByProjectCustomer(verificationPayloads)
         const uploads: Promise<void>[] = []
 
         for (const [key, records] of verificationGroups) {
@@ -998,12 +1120,10 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           const fileKey = this.getR2RawFileKey(projectId, customerId, now, "verification")
           const buffer = this.toNDJSON(records)
 
-          // Compute min/max timestamps
           const timestamps = records.map((r) => r.timestamp).sort((a, b) => a - b)
           const minTs = timestamps[0]!
           const maxTs = timestamps[timestamps.length - 1]!
 
-          // Track file descriptor for manifest update
           const customerFiles = getOrCreateCustomerFiles(projectId, customerId)
           customerFiles.verifications.push({
             key: fileKey,
@@ -1069,10 +1189,18 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
             }))
           )
 
+          const minTs = Math.min(...entries.map((e) => e.timestamp))
+          const maxTs = Math.max(...entries.map((e) => e.timestamp))
+
           metadataUpdates.push(
             this.lakehouse
               .put(rawFileKey, buffer, {
                 httpMetadata: { contentType: "application/x-ndjson" },
+                customMetadata: {
+                  count: String(entries.length),
+                  minTs: String(minTs),
+                  maxTs: String(maxTs),
+                },
               })
               .then(() => {
                 // Update metadata manifest
@@ -1080,8 +1208,8 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
                   {
                     key: rawFileKey,
                     day: dayString,
-                    minTs: Math.min(...entries.map((e) => e.timestamp)),
-                    maxTs: Math.max(...entries.map((e) => e.timestamp)),
+                    minTs: minTs,
+                    maxTs: maxTs,
                     count: entries.length,
                     bytes: buffer.length,
                   },
@@ -1096,19 +1224,14 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         }
       }
 
-      // Update state with the latest IDs we successfully flushed
-      if (processed.usageRecords.length > 0) {
-        const firstRecord = processed.usageRecords[0]
-        if (firstRecord) {
-          this.lastR2UsageId = firstRecord.record.id
-        }
+      // Update state only with IDs we actually flushed (batch order: usage DESC, verification ASC)
+      if (newUsageRecords.length > 0) {
+        const lastFlushedUsage = newUsageRecords[0]!
+        this.cursors.lastR2UsageId = lastFlushedUsage.record.id
       }
-
-      if (processed.verificationRecords.length > 0) {
-        const lastRec = processed.verificationRecords[processed.verificationRecords.length - 1]
-        if (lastRec) {
-          this.lastR2VerificationId = lastRec.record.id
-        }
+      if (newVerificationRecords.length > 0) {
+        const lastFlushedVerification = newVerificationRecords[newVerificationRecords.length - 1]!
+        this.cursors.lastR2VerificationId = lastFlushedVerification.record.id
       }
 
       return { success: true }
@@ -1168,11 +1291,6 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     return `${projectId}/${customerId}/metadata_manifest.json`
   }
 
-  /** Key for the Master Metadata File (Dimension Table, one per customer) */
-  private getR2MetadataKey(projectId: string, customerId: string): string {
-    return `${projectId}/${customerId}/metadata.json`
-  }
-
   /** Key for a raw NDJSON file within a daily partition */
   private getR2RawFileKey(
     projectId: string,
@@ -1181,6 +1299,12 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     type: "usage" | "verification" | "metadata"
   ): string {
     const timestamp = date.getTime()
+    if (type === "metadata") {
+      const year = date.getUTCFullYear()
+      const month = String(date.getUTCMonth() + 1).padStart(2, "0")
+      const day = String(date.getUTCDate()).padStart(2, "0")
+      return `${projectId}/${customerId}/metadata/${year}/${month}/${day}/metadata_${timestamp}.ndjson`
+    }
     return `${this.getR2DayPath(projectId, customerId, date)}/${type}_${timestamp}.ndjson`
   }
 
@@ -1300,88 +1424,6 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         }
         return
       } catch (error) {
-        if (attempt < R2_MANIFEST_MAX_RETRIES - 1) {
-          const backoffMs = R2_MANIFEST_RETRY_BASE_MS * 2 ** attempt
-          await new Promise((resolve) => setTimeout(resolve, backoffMs))
-          continue
-        }
-        throw error
-      }
-    }
-  }
-
-  /**
-   * Update customer metadata file (append-only, single file per customer)
-   * Uses ETag CAS for concurrency safety
-   */
-  private async updateR2CustomerMetadata(
-    projectId: string,
-    customerId: string,
-    newEntries: Array<{ meta_id: number; tags: string; timestamp: number }>
-  ): Promise<void> {
-    if (!this.lakehouse || newEntries.length === 0) return
-
-    const metadataKey = this.getR2MetadataKey(projectId, customerId)
-
-    for (let attempt = 0; attempt < R2_MANIFEST_MAX_RETRIES; attempt++) {
-      // Read current metadata with ETag
-      const existing = await this.lakehouse.get(metadataKey)
-      let metadata: R2CustomerMetadata
-      let currentEtag: string | undefined
-
-      if (existing) {
-        metadata = (await existing.json()) as R2CustomerMetadata
-        currentEtag = existing.etag
-      } else {
-        metadata = {
-          projectId,
-          customerId,
-          updatedAt: new Date().toISOString(),
-          entries: [],
-        }
-      }
-
-      // Build set of existing meta_ids for deduplication
-      const existingMetaIds = new Set(metadata.entries.map((e) => e.meta_id))
-      const now = new Date().toISOString()
-
-      // Add only new entries
-      let addedCount = 0
-      for (const entry of newEntries) {
-        if (!existingMetaIds.has(entry.meta_id)) {
-          metadata.entries.push({
-            ...entry,
-            addedAt: now,
-          })
-          addedCount++
-        }
-      }
-
-      // If nothing new to add, we're done
-      if (addedCount === 0) {
-        return
-      }
-
-      metadata.updatedAt = now
-
-      // Write with ETag condition
-      try {
-        const content = JSON.stringify(metadata, null, 2)
-        const httpMetadata = { contentType: "application/json" }
-
-        if (currentEtag) {
-          // Conditional put with ETag match
-          await this.lakehouse.put(metadataKey, content, {
-            httpMetadata,
-            onlyIf: { etagMatches: currentEtag },
-          })
-        } else {
-          // New metadata file - no condition
-          await this.lakehouse.put(metadataKey, content, { httpMetadata })
-        }
-        return // Success
-      } catch (error) {
-        // ETag mismatch - retry with exponential backoff
         if (attempt < R2_MANIFEST_MAX_RETRIES - 1) {
           const backoffMs = R2_MANIFEST_RETRY_BASE_MS * 2 ** attempt
           await new Promise((resolve) => setTimeout(resolve, backoffMs))
@@ -1587,12 +1629,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         })
 
         // Delete raw files after successful manifest update
-        // We do this in background (no await) or strictly?
-        // User snippet does it after.
         for (const key of rawFilesToDelete) {
-          // Fire and forget delete to save time?
-          // Or await to ensure cleanliness?
-          // I'll await with catch.
           this.lakehouse.delete(key).catch((err) => {
             this.logger.warn(`Failed to delete raw file ${key}:`, { error: this.errorMessage(err) })
           })
@@ -1606,7 +1643,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           await new Promise((resolve) => setTimeout(resolve, backoffMs))
           continue
         }
-        this.logger.error(`Failed to update manifest after compaction: ${manifestKey}`, {
+        this.logger.error(`Failed to update metadata manifest after compaction: ${manifestKey}`, {
           error: this.errorMessage(error),
         })
       }
@@ -1614,129 +1651,128 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   }
 
   /**
-   * Compacts metadata files into the master dimension table.
+   * Compacts metadata files into single daily files using manifest.
    *
    * Process:
-   * 1. Reads the metadata manifest to find pending raw metadata files.
-   * 2. Reads the current master `metadata.json` (Dimension Table).
-   * 3. Merges new entries into the master table, deduplicating by `meta_id`.
-   * 4. Writes the updated master table using ETag CAS.
-   * 5. Updates the manifest to remove processed files.
-   * 6. Deletes processed raw files.
+   * 1. Read metadata manifest.
+   * 2. Find days with uncompacted raw files (excluding today).
+   * 3. For each day:
+   *    a. Read all raw files.
+   *    b. Merge (dedupe by meta_id).
+   *    c. Write compact file.
+   *    d. Update manifest (remove raw, add compact).
+   *    e. Delete raw files.
    */
   private async compactMetadata(projectId: string, customerId: string): Promise<void> {
     if (!this.lakehouse) return
 
     const manifestKey = this.getR2MetadataManifestKey(projectId, customerId)
-    const masterKey = this.getR2MetadataKey(projectId, customerId)
+    const today = new Date().toISOString().slice(0, 10)
 
     for (let attempt = 0; attempt < R2_MANIFEST_MAX_RETRIES; attempt++) {
-      // 1. Read Manifest
-      const manifestObj = await this.lakehouse.get(manifestKey)
-      if (!manifestObj) return // No manifest means no new metadata files
+      const obj = await this.lakehouse.get(manifestKey)
+      if (!obj) return
 
-      const manifest = (await manifestObj.json()) as R2DataTypeManifest
-      const manifestEtag = manifestObj.etag
+      const manifest = (await obj.json()) as R2DataTypeManifest
+      const manifestEtag = obj.etag
 
-      if (manifest.files.length === 0) return
-
-      // 2. Read Master File (if exists)
-      const masterObj = await this.lakehouse.get(masterKey)
-      let masterMetadata: R2CustomerMetadata
-      let masterEtag: string | undefined
-
-      if (masterObj) {
-        masterMetadata = (await masterObj.json()) as R2CustomerMetadata
-        masterEtag = masterObj.etag
-      } else {
-        masterMetadata = {
-          projectId,
-          customerId,
-          updatedAt: new Date().toISOString(),
-          entries: [],
+      // Group raw files by day
+      const filesByDay = new Map<string, R2FileDescriptor[]>()
+      for (const file of manifest.files) {
+        if (!filesByDay.has(file.day)) {
+          filesByDay.set(file.day, [])
         }
+        filesByDay.get(file.day)!.push(file)
       }
 
-      // 3. Read All Raw Files
-      const newEntries: Array<{ meta_id: number; tags: string; timestamp: number }> = []
-      const filesProcessed: Set<string> = new Set()
+      const compactedDays = new Set(manifest.compacted?.map((c) => c.day) ?? [])
+      const daysToCompact = Array.from(filesByDay.keys()).filter(
+        (day) => day !== today && !compactedDays.has(day)
+      )
 
-      for (const file of manifest.files) {
-        const fileObj = await this.lakehouse.get(file.key)
-        if (!fileObj) {
-          this.logger.warn(`Missing raw metadata file: ${file.key}`)
-          filesProcessed.add(file.key)
-          continue
+      if (daysToCompact.length === 0) return
+
+      const newCompactedFiles: R2FileDescriptor[] = []
+      const rawFilesToDelete: Set<string> = new Set()
+
+      for (const day of daysToCompact) {
+        const rawFiles = filesByDay.get(day)!
+        if (rawFiles.length === 0) continue
+
+        // Read all raw files
+        const allLines: string[] = []
+        let minTs: number | null = null
+        let maxTs: number | null = null
+
+        for (const rawFile of rawFiles) {
+          const fileObj = await this.lakehouse.get(rawFile.key)
+          if (!fileObj) {
+            this.logger.warn(`Missing raw metadata file during compaction: ${rawFile.key}`)
+            continue
+          }
+
+          const content = await fileObj.text()
+          const lines = content
+            .trim()
+            .split("\n")
+            .filter((l) => l.length > 0)
+          allLines.push(...lines)
+
+          if (minTs === null || rawFile.minTs < minTs) minTs = rawFile.minTs
+          if (maxTs === null || rawFile.maxTs > maxTs) maxTs = rawFile.maxTs
+          rawFilesToDelete.add(rawFile.key)
         }
 
-        const content = await fileObj.text()
-        const lines = content
-          .trim()
-          .split("\n")
-          .filter((l) => l.length > 0)
+        if (allLines.length === 0) continue
 
-        for (const line of lines) {
+        // Deduplication by meta_id
+        const uniqueLines = new Map<number, string>()
+        for (const line of allLines) {
           try {
             const entry = JSON.parse(line)
-            newEntries.push(entry)
-          } catch (e) {
-            this.logger.warn(`Failed to parse metadata line in ${file.key}`, {
-              error: this.errorMessage(e),
-            })
+            if (entry.meta_id) uniqueLines.set(entry.meta_id, line)
+          } catch {
+            // Ignore malformed lines
           }
         }
-        filesProcessed.add(file.key)
-      }
+        const count = uniqueLines.size
+        if (count === 0) continue
 
-      // 4. Merge into Master (Deduplicate)
-      const existingMetaIds = new Set(masterMetadata.entries.map((e) => e.meta_id))
-      const now = new Date().toISOString()
-      let addedCount = 0
+        const mergedContent = Array.from(uniqueLines.values()).join("\n")
+        const timestamp = Date.now()
+        // New file
+        const [y, m, d] = day.split("-")
+        const newKey = `${projectId}/${customerId}/metadata/${y}/${m}/${d}/compact_metadata_${timestamp}.ndjson`
 
-      for (const entry of newEntries) {
-        if (!existingMetaIds.has(entry.meta_id)) {
-          masterMetadata.entries.push({
-            ...entry,
-            addedAt: now,
-          })
-          existingMetaIds.add(entry.meta_id)
-          addedCount++
-        }
-      }
+        const compactBytes = new TextEncoder().encode(mergedContent)
 
-      // 5. Write Master File (CAS)
-      try {
-        if (addedCount > 0) {
-          masterMetadata.updatedAt = now
-          const content = JSON.stringify(masterMetadata, null, 2)
-          const httpMetadata = { contentType: "application/json" }
-
-          if (masterEtag) {
-            await this.lakehouse.put(masterKey, content, {
-              httpMetadata,
-              onlyIf: { etagMatches: masterEtag },
-            })
-          } else {
-            await this.lakehouse.put(masterKey, content, { httpMetadata })
-          }
-        }
-      } catch (error) {
-        if (attempt < R2_MANIFEST_MAX_RETRIES - 1) {
-          const backoffMs = R2_MANIFEST_RETRY_BASE_MS * 2 ** attempt
-          await new Promise((resolve) => setTimeout(resolve, backoffMs))
-          continue
-        }
-        this.logger.error(`Failed to update master metadata file: ${masterKey}`, {
-          error: this.errorMessage(error),
+        await this.lakehouse.put(newKey, compactBytes, {
+          httpMetadata: { contentType: "application/x-ndjson" },
+          customMetadata: {
+            count: String(count),
+            minTs: String(minTs),
+            maxTs: String(maxTs),
+          },
         })
-        return
+
+        newCompactedFiles.push({
+          key: newKey,
+          day,
+          minTs: minTs!,
+          maxTs: maxTs!,
+          count,
+          bytes: compactBytes.length,
+        })
       }
 
-      // 6. Update Manifest (Remove processed files) (CAS)
+      if (newCompactedFiles.length === 0) return
+
+      // Update manifest
       const newManifest: R2DataTypeManifest = {
         ...manifest,
         updatedAt: new Date().toISOString(),
-        files: manifest.files.filter((f) => !filesProcessed.has(f.key)),
+        files: manifest.files.filter((f) => !rawFilesToDelete.has(f.key)),
+        compacted: [...(manifest.compacted ?? []), ...newCompactedFiles],
       }
 
       try {
@@ -1745,22 +1781,24 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           onlyIf: { etagMatches: manifestEtag },
         })
 
-        // 7. Delete Raw Files
-        for (const key of filesProcessed) {
+        // Delete raw files
+        for (const key of rawFilesToDelete) {
           this.lakehouse.delete(key).catch((err) => {
-            this.logger.warn(`Failed to delete raw metadata file ${key}`, {
+            this.logger.warn(`Failed to delete raw metadata file ${key}:`, {
               error: this.errorMessage(err),
             })
           })
         }
-        return
+
+        return // Success
       } catch (error) {
+        // ETag mismatch, retry
         if (attempt < R2_MANIFEST_MAX_RETRIES - 1) {
           const backoffMs = R2_MANIFEST_RETRY_BASE_MS * 2 ** attempt
           await new Promise((resolve) => setTimeout(resolve, backoffMs))
           continue
         }
-        this.logger.error(`Failed to update metadata manifest: ${manifestKey}`, {
+        this.logger.error(`Failed to update metadata manifest after compaction: ${manifestKey}`, {
           error: this.errorMessage(error),
         })
       }

@@ -78,7 +78,7 @@ export const UsageLimiterSchema = z.object({
   operation: z.string().optional(),
   input: z.unknown().optional(),
   result: z.unknown().optional(),
-  next_alarm: z.number().optional(),
+  next_alarm: z.string().datetime().optional(),
 })
 
 export const EntitlementsSchema = z.object({
