@@ -37,7 +37,7 @@
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",
     "cmdk": "^0.2.1",
-    "lucide-react": "0.344.0",
+    "lucide-react": "0.544.0",
     "next-themes": "^0.2.1",
     "react-resizable-panels": "^2.0.12",
     "recharts": "^2.12.7",
@@ -124,7 +124,9 @@
   },
   "typesVersions": {
     "*": {
-      "*": ["src/*"]
+      "*": [
+        "src/*"
+      ]
     }
   }
 }

@@ -1,5 +1,5 @@
 import { IntervalFilter } from "~/components/analytics/interval-filter"
-import { LakehouseDashboard } from "~/components/lakehouse/lakehouse-dashboard"
+import { LakehouseDashboardSqlrooms } from "~/components/lakehouse/lakehouse-dashboard-sqlrooms"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 
 export default async function LakehousePage() {
@@ -9,7 +9,8 @@ export default async function LakehousePage() {
         <h1 className="font-bold text-2xl">Lakehouse Analytics</h1>
         <IntervalFilter className="ml-auto" />
       </div>
-      <LakehouseDashboard />
+      {/* <LakehouseDashboard /> */}
+      <LakehouseDashboardSqlrooms />
     </DashboardShell>
   )
 }
