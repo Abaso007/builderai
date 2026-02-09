@@ -11,10 +11,10 @@ import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import {
+  type LakehouseSource,
   getDateRangeUTC,
   getLakehouseRawPrefix,
   signLakehouseKey,
-  type LakehouseSource,
 } from "~/util/lakehouse"
 
 const fileDescriptorBaseSchema = z.object({
@@ -149,8 +149,7 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
 
     const dates = getDateRangeUTC(range)
     const rawByDay = new Map<string, RawFileDescriptor[]>()
-    const allFiles: Array<{ day: string; source: LakehouseSource; key: string; bytes: number }> =
-      []
+    const allFiles: Array<{ day: string; source: LakehouseSource; key: string; bytes: number }> = []
 
     const sources: LakehouseSource[] = ["usage", "verification", "metadata"]
 

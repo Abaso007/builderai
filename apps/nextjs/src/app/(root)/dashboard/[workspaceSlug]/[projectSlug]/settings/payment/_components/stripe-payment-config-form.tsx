@@ -121,8 +121,6 @@ export function StripePaymentConfigForm({
                     keyIv: "",
                     active: true,
                   })
-
-                  onSuccess?.("sandbox")
                   return
                 }
 
@@ -130,7 +128,7 @@ export function StripePaymentConfigForm({
               }}
               isDisabled={form.formState.isSubmitting}
               isSubmitting={form.formState.isSubmitting}
-              label="Skip"
+              label={isOnboarding ? "Use sandbox" : "Skip"}
             />
           )}
 

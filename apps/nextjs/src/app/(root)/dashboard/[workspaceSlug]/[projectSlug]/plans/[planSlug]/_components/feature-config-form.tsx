@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation"
 import { useEffect } from "react"
 
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { DOCS_DOMAIN } from "@unprice/config"
 import {
   FEATURE_TYPES,
   FEATURE_TYPES_MAPS,
@@ -27,6 +28,7 @@ import { Switch } from "@unprice/ui/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { cn } from "@unprice/ui/utils"
 import { SubmitButton } from "~/components/submit-button"
+import { SuperLink } from "~/components/super-link"
 import { useActiveFeature, useIsOnboarding, usePlanFeaturesList } from "~/hooks/use-features"
 import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
@@ -186,6 +188,13 @@ export function FeatureConfigForm({
             <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
               <div className="flex items-center gap-2">
                 <FormLabel className="font-semibold text-sm">Hide from Pricing Page</FormLabel>
+                <SuperLink
+                  href={`${DOCS_DOMAIN}/features/plans`}
+                  target="_blank"
+                  className="text-muted-foreground text-xs underline-offset-4 hover:underline"
+                >
+                  Learn more
+                </SuperLink>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <HelpCircle className="size-3.5 text-muted-foreground" />

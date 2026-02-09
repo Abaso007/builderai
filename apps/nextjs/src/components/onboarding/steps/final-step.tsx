@@ -18,7 +18,8 @@ export function FinalStep({ className }: React.ComponentProps<"div">) {
           You're good to go
         </Typography>
         <Typography variant="p" className="mb-8 w-[640px] max-w-[90vw] animate-title delay-300!">
-          Congratulations! You are already pricing like a pro, go ahead and explore the app.
+          Your dashboard is now seeded with usage and verification metrics from a test customer.
+          Connect a payment provider when you are ready to charge real customers.
         </Typography>
 
         <Button

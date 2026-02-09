@@ -1,3 +1,7 @@
+# Fixed project name so all worktrees/folders share the same containers.
+# Start compose from any repo path: the same db, redis, etc. are used and
+# exposed on localhost, so e.g. frontend-only in another folder can reach them.
+name: unprice
 
 services:
   db:

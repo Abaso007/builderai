@@ -7,7 +7,7 @@ import { StripePaymentConfigForm } from "~/app/(root)/dashboard/[workspaceSlug]/
 export function PaymentProviderStep({
   className,
 }: React.ComponentProps<"div"> & StepComponentProps) {
-  const { updateContext, next, skip } = useOnboarding()
+  const { updateContext, next } = useOnboarding()
 
   return (
     <div className={cn("flex max-w-md flex-col gap-6", className)}>
@@ -19,10 +19,12 @@ export function PaymentProviderStep({
               <GalleryVerticalEnd className="size-6" />
             </div>
           </a>
-          <h1 className="animate-content font-bold text-2xl delay-0!">Payment Provider</h1>
+          <h1 className="animate-content font-bold text-2xl delay-0!">
+            Connect a Payment Provider
+          </h1>
           <div className="animate-content text-center text-sm delay-0!">
-            Unprice will support multiple payment providers in the future. For now, we only support
-            Stripe. You can configure it later in the settings.
+            A payment provider is required to publish plans. Use the sandbox now, then connect your
+            real Stripe account when you are ready to go live.
           </div>
         </div>
         <div className="animate-content delay-200!">
@@ -44,8 +46,7 @@ export function PaymentProviderStep({
                   paymentProvider: "sandbox",
                 },
               })
-              // go to the next step
-              skip()
+              next()
             }}
           />
         </div>

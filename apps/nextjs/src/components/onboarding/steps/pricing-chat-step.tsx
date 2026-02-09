@@ -1224,7 +1224,7 @@ const ChatPanel = memo(function ChatPanel({
           <div>
             <h2 className="font-semibold text-background-textContrast">Pricing Assistant</h2>
             <p className="hidden text-background-text text-sm sm:block">
-              Let's publish your first pricing plan.
+              Publish your first plan, then we will seed usage and verification metrics.
             </p>
           </div>
         </div>
@@ -1370,7 +1370,8 @@ const WelcomeScreen = memo(function WelcomeScreen({
         Welcome to Pricing Assistant
       </h3>
       <p className="mx-auto max-w-md text-background-text text-sm">
-        Let's create your first pricing plan in {currency} and publish it to your customers.
+        Create a plan in {currency} and include at least one usage-based feature to unlock usage
+        metrics.
       </p>
       <div className="mt-6 space-y-2">
         {prompts.map((prompt) => (
