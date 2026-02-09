@@ -16,7 +16,76 @@ export NVM_DIR="$HOME/.nvm"
 # shellcheck disable=SC1090
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 
-echo "Starting up"
+# ---- Services: package names used by pnpm/turbo (aliases in parentheses)
+# nextjs (frontend), api, @unprice/auth-proxy (auth-proxy), @unprice/docs (docs)
+ALL_SERVICES="nextjs api @unprice/auth-proxy @unprice/docs"
+
+usage() {
+  echo "Usage: $0 [environment] [restart-tinybird] [services]"
+  echo ""
+  echo "  environment     dev (default) | preview"
+  echo "  restart-tinybird  true | false (default: false, dev only)"
+  echo "  services        Comma-separated list; omit or 'all' = all services."
+  echo "                  Options: nextjs, frontend, api, auth-proxy, docs"
+  echo ""
+  echo "Examples:"
+  echo "  $0                          # dev, all services"
+  echo "  $0 dev                      # dev, all services"
+  echo "  $0 dev false nextjs         # dev, Next.js only"
+  echo "  $0 dev false frontend,api   # dev, Next.js + API"
+  echo "  $0 preview '' nextjs,api    # preview, Next.js + API"
+  exit 0
+}
+
+# Parse arguments
+[ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] && usage
+MODE_ID=${1:-dev}
+RESTART_TINYBIRD=${2:-false}
+SERVICES_ARG=${3:-all}
+
+# Normalize service names to turbo package names; comma-separated -> space-separated list.
+# frontend -> nextjs; auth-proxy -> @unprice/auth-proxy; docs -> @unprice/docs
+normalize_services() {
+  local raw
+  raw=$(echo "$1" | tr '[:upper:]' '[:lower:]')
+  local out=""
+  local s
+  if [ "$raw" = "all" ] || [ -z "$raw" ]; then
+    echo "$ALL_SERVICES"
+    return
+  fi
+  # shellcheck disable=SC2086
+  for s in $(echo "$raw" | tr ',' ' '); do
+    s=$(echo "$s" | tr -d ' ')
+    [ -z "$s" ] && continue
+    case "$s" in
+      frontend) out="$out nextjs" ;;
+      nextjs)   out="$out nextjs" ;;
+      api)      out="$out api" ;;
+      auth-proxy) out="$out @unprice/auth-proxy" ;;
+      docs)     out="$out @unprice/docs" ;;
+      *)        echo "Unknown service: $s. Valid: nextjs, frontend, api, auth-proxy, docs" >&2; exit 1 ;;
+    esac
+  done
+  echo "$out" | xargs
+}
+
+SERVICES_NORMALIZED=$(normalize_services "$SERVICES_ARG")
+
+# Build turbo filter: --filter=pkg1 --filter=pkg2 ... (empty = run all via pnpm run dev)
+build_dev_filter() {
+  if [ "$SERVICES_ARG" = "all" ] || [ -z "$SERVICES_ARG" ]; then
+    return
+  fi
+  local filters=""
+  for pkg in $SERVICES_NORMALIZED; do
+    filters="$filters --filter=$pkg"
+  done
+  echo "$filters"
+}
+DEV_FILTER=$(build_dev_filter)
+
+echo "Starting up (env=$MODE_ID, services=${SERVICES_ARG:-all})"
 
 # lets check first that docker, tb cli and node are installed
 if ! command -v docker &> /dev/null; then
@@ -39,17 +108,18 @@ if ! command -v node &> /dev/null; then
   exit 1
 fi
 
-# start the docker compose services
+# Use a fixed project name so the same containers are used no matter which
+# folder/worktree you run from. Services are on localhost, so any app (e.g.
+# frontend-only in another folder) can use REDIS_URL, UNPRICE_API_URL, etc.
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-unprice}"
+
+# Start the docker compose services (or attach to existing ones if already up)
 docker-compose up -d
 
 # use the correct node version
 nvm use
 
 # TODO: add tmux to start the services in different panes
-
-# take the first parameter as the mode id if not provided, use dev
-MODE_ID=${1:-dev}
-RESTART_TINYBIRD=${2:-false}
 
 if [ "$MODE_ID" = "dev" ]; then
   # banner to show the user that we are using the preview environment
@@ -59,7 +129,8 @@ if [ "$MODE_ID" = "dev" ]; then
   echo "########################################################"
   echo ""
 
-  # override tinybird host
+  # All URLs target the host so they work from any folder/worktree (e.g. when
+  # only frontend runs here but docker-compose was started elsewhere).
   TB_HOST="http://localhost:7181"
   NODE_ENV="development"
   VERCEL_ENV="development"
@@ -131,7 +202,11 @@ if [ "$MODE_ID" = "dev" ]; then
   infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN=$TB_TOKEN TINYBIRD_URL=$TB_HOST REDIS_URL=$REDIS_URL REDIS_TOKEN=$REDIS_TOKEN AUTH_REDIRECT_PROXY_URL=$AUTH_REDIRECT_PROXY_URL UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG EMIT_METRICS_LOGS=$EMIT_METRICS_LOGS EMIT_ANALYTICS=$EMIT_ANALYTICS NODE_ENV=$NODE_ENV VERCEL_ENV=$VERCEL_ENV pnpm --filter db migrate:custom
 
   echo "Starting the application"
-  infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN=$TB_TOKEN TINYBIRD_URL=$TB_HOST REDIS_URL=$REDIS_URL REDIS_TOKEN=$REDIS_TOKEN AUTH_REDIRECT_PROXY_URL=$AUTH_REDIRECT_PROXY_URL UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG EMIT_METRICS_LOGS=$EMIT_METRICS_LOGS EMIT_ANALYTICS=$EMIT_ANALYTICS UPSTASH_REDIS_REST_URL=$UPSTASH_REDIS_REST_URL UPSTASH_REDIS_REST_TOKEN=$UPSTASH_REDIS_REST_TOKEN NODE_ENV=$NODE_ENV VERCEL_ENV=$VERCEL_ENV pnpm run dev
+  if [ -z "$DEV_FILTER" ]; then
+    infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN=$TB_TOKEN TINYBIRD_URL=$TB_HOST REDIS_URL=$REDIS_URL REDIS_TOKEN=$REDIS_TOKEN AUTH_REDIRECT_PROXY_URL=$AUTH_REDIRECT_PROXY_URL UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG EMIT_METRICS_LOGS=$EMIT_METRICS_LOGS EMIT_ANALYTICS=$EMIT_ANALYTICS UPSTASH_REDIS_REST_URL=$UPSTASH_REDIS_REST_URL UPSTASH_REDIS_REST_TOKEN=$UPSTASH_REDIS_REST_TOKEN NODE_ENV=$NODE_ENV VERCEL_ENV=$VERCEL_ENV pnpm run dev
+  else
+    infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN=$TB_TOKEN TINYBIRD_URL=$TB_HOST REDIS_URL=$REDIS_URL REDIS_TOKEN=$REDIS_TOKEN AUTH_REDIRECT_PROXY_URL=$AUTH_REDIRECT_PROXY_URL UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG EMIT_METRICS_LOGS=$EMIT_METRICS_LOGS EMIT_ANALYTICS=$EMIT_ANALYTICS UPSTASH_REDIS_REST_URL=$UPSTASH_REDIS_REST_URL UPSTASH_REDIS_REST_TOKEN=$UPSTASH_REDIS_REST_TOKEN NODE_ENV=$NODE_ENV VERCEL_ENV=$VERCEL_ENV pnpm turbo run dev --parallel $DEV_FILTER
+  fi
 
 elif [ "$MODE_ID" = "preview" ]; then
   # banner to show the user that we are using the preview environment
@@ -157,7 +232,11 @@ elif [ "$MODE_ID" = "preview" ]; then
   cd ../../
 
   # override the token in the env
-  infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN="$TB_ADMIN_TOKEN" NODE_ENV="$NODE_ENV" VERCEL_ENV="$VERCEL_ENV" TINYBIRD_URL="$TB_HOST" pnpm run dev
+  if [ -z "$DEV_FILTER" ]; then
+    infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN="$TB_ADMIN_TOKEN" NODE_ENV="$NODE_ENV" VERCEL_ENV="$VERCEL_ENV" TINYBIRD_URL="$TB_HOST" pnpm run dev
+  else
+    infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN="$TB_ADMIN_TOKEN" NODE_ENV="$NODE_ENV" VERCEL_ENV="$VERCEL_ENV" TINYBIRD_URL="$TB_HOST" pnpm turbo run dev --parallel $DEV_FILTER
+  fi
 else
   echo "Invalid mode: $MODE_ID"
   exit 1
