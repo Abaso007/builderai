@@ -1,22 +1,6 @@
 // Utility functions for the serverless lakehouse
 
 /**
- * Get today's date in YYYY-MM-DD format (UTC)
- */
-export function getTodayUTC(): string {
-  return new Date().toISOString().split("T")[0] ?? ""
-}
-
-/**
- * Get yesterday's date in YYYY-MM-DD format (UTC)
- */
-export function getYesterdayUTC(): string {
-  const d = new Date()
-  d.setUTCDate(d.getUTCDate() - 1)
-  return d.toISOString().split("T")[0] ?? ""
-}
-
-/**
  * Get a date N days ago in YYYY-MM-DD format (UTC)
  */
 export function getDaysAgoUTC(days: number): string {
@@ -54,88 +38,75 @@ export function dayToPathParts(day: string): { year: string; month: string; day:
 }
 
 /**
- * Generate R2 key for raw flush file
- * Path: raw/{tenantId}/{year}/{month}/{day}/flush={ulid}.ndjson
+ * Lakehouse source types
  */
-export function getRawFileKey(tenantId: string, day: string, ulid: string): string {
+export type LakehouseSource = "usage" | "verification" | "metadata"
+
+/**
+ * Prefix for raw NDJSON files (per project, per day, per source)
+ * Path: lakehouse/{projectId}/raw/{source}/{year}/{month}/{day}/
+ */
+export function getLakehouseRawPrefix(
+  projectId: string,
+  source: LakehouseSource,
+  day: string,
+  customerId?: string
+): string {
   const { year, month, day: d } = dayToPathParts(day)
-  return `raw/${tenantId}/${year}/${month}/${d}/flush=${ulid}.ndjson`
+  const base = `lakehouse/${projectId}/raw/${source}/${year}/${month}/${d}/`
+  return customerId ? `${base}customer=${customerId}/` : base
 }
 
 /**
- * Generate R2 key for compact file (one file per day in the same folder as flush files)
- * Path: raw/{tenantId}/{year}/{month}/{day}/compact.ndjson
+ * Key for a raw NDJSON file (immutable batch)
+ * Path: lakehouse/{projectId}/raw/{source}/{year}/{month}/{day}/part-{suffix}.ndjson
  */
-export function getCompactFileKey(tenantId: string, day: string): string {
-  const { year, month, day: d } = dayToPathParts(day)
-  return `raw/${tenantId}/${year}/${month}/${d}/compact.ndjson`
+export function getLakehouseRawKey(
+  projectId: string,
+  source: LakehouseSource,
+  day: string,
+  customerId: string,
+  suffix: string
+): string {
+  return `${getLakehouseRawPrefix(projectId, source, day, customerId)}part-${suffix}.ndjson`
 }
 
-/**
- * Generate R2 key for day manifest (legacy per-day layout)
- * Path: manifests/{tenantId}/{year}/{month}/{day}.json
- */
-export function getManifestKey(tenantId: string, day: string): string {
-  const { year, month, day: d } = dayToPathParts(day)
-  return `manifests/${tenantId}/${year}/${month}/${d}.json`
+function toBase64Url(bytes: Uint8Array): string {
+  let binary = ""
+  for (const b of bytes) {
+    binary += String.fromCharCode(b)
+  }
+  const base64 = btoa(binary)
+  return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "")
 }
 
-/**
- * R2 key for usage manifest (per project + customer, written by DO provider)
- * Path: {projectId}/{customerId}/usage_manifest.json
- */
-export function getUsageManifestKey(projectId: string, customerId: string): string {
-  return `${projectId}/${customerId}/usage_manifest.json`
-}
-
-/**
- * R2 key for verification manifest (per project + customer, written by DO provider)
- * Path: {projectId}/{customerId}/verification_manifest.json
- */
-export function getVerificationManifestKey(projectId: string, customerId: string): string {
-  return `${projectId}/${customerId}/verification_manifest.json`
-}
-
-/**
- * R2 key for metadata manifest (per project + customer, written by DO provider)
- * Path: {projectId}/{customerId}/metadata_manifest.json
- */
-export function getMetadataManifestKey(projectId: string, customerId: string): string {
-  return `${projectId}/${customerId}/metadata_manifest.json`
-}
-
-/**
- * Validate that an R2 key belongs to a tenant
- */
-export function validateTenantKey(key: string, tenantId: string): boolean {
-  // Must start with raw/{tenantId}/ or manifests/{tenantId}/
-  return key.startsWith(`raw/${tenantId}/`) || key.startsWith(`manifests/${tenantId}/`)
-}
-
-/**
- * Parse range string to number of days
- */
-export function parseRange(range: string): number {
-  if (range === "24h") return 1
-  const match = range.match(/^(\d+)d$/)
-  if (match) return Number.parseInt(match[1] ?? "7")
-  return 7 // default
-}
-
-/**
- * Hash a string using Web Crypto API (SHA-256, returns hex)
- */
-export async function hashString(str: string): Promise<string> {
+async function hmacSha256Base64Url(secret: string, message: string): Promise<string> {
   const encoder = new TextEncoder()
-  const data = encoder.encode(str)
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data)
-  const hashArray = Array.from(new Uint8Array(hashBuffer))
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("")
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  )
+  const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(message))
+  return toBase64Url(new Uint8Array(sig))
 }
 
-/**
- * Simple sleep utility
- */
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+export async function signLakehouseKey(
+  secret: string,
+  key: string,
+  exp: number
+): Promise<string> {
+  return hmacSha256Base64Url(secret, `${key}|${exp}`)
+}
+
+export async function verifyLakehouseSignature(params: {
+  secret: string
+  key: string
+  exp: number
+  sig: string
+}): Promise<boolean> {
+  const expected = await signLakehouseKey(params.secret, params.key, params.exp)
+  return expected === params.sig
 }

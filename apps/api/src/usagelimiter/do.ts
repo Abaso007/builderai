@@ -52,8 +52,6 @@ export class DurableObjectUsagelimiter extends Server {
   private LAST_BROADCAST_MSG = Date.now()
   // debounce delay for the broadcast events
   private readonly DEBOUNCE_DELAY = 1000 * 1 // 1 second (1 per second)
-  // compaction interval
-  private readonly COMPACTION_INTERVAL = 24 * 60 * 60 * 1000 // 1 day
   // sample rate for the wide event
   private SAMPLE_RATE = 0.1
 
@@ -71,14 +69,12 @@ export class DurableObjectUsagelimiter extends Server {
     if (env.VERCEL_ENV === "development") {
       this.TTL_ANALYTICS = 1000 * 10 // 10 seconds
       this.SAMPLE_RATE = 1
-      this.COMPACTION_INTERVAL = 1000 * 60 // 1 minute
     }
 
     // set a revalidation period of 5 mins for preview
     if (env.VERCEL_ENV === "preview") {
       this.TTL_ANALYTICS = 1000 * 60 // 1 minute
       this.SAMPLE_RATE = 0.1
-      this.COMPACTION_INTERVAL = 1000 * 60 * 10 // 10 minutes
     }
 
     const emitMetrics = env.EMIT_METRICS_LOGS.toString() === "true"
@@ -294,17 +290,6 @@ export class DurableObjectUsagelimiter extends Server {
       customerId: params.customerId,
       projectId: params.projectId,
     })
-  }
-
-  // compact the data
-  public async compact() {
-    try {
-      await this.storage.compact()
-    } catch (error) {
-      this.logger.error("Error during compaction", {
-        error: error instanceof Error ? error.message : "unknown",
-      })
-    }
   }
 
   // when connected through websocket we can broadcast events to the client
@@ -541,37 +526,6 @@ export class DurableObjectUsagelimiter extends Server {
     this.logger.debug("Triggering alarm flush")
     // flush the usage records
     await this.entitlementService.flush()
-
-    // compaction
-    try {
-      let lastCompaction = (await this.ctx.storage.get<number>("last_compaction")) ?? 0
-      const now = Date.now()
-
-      if (now - lastCompaction > this.COMPACTION_INTERVAL) {
-        this.logger.debug("Running daily compaction")
-        await this.storage.compact()
-        await this.ctx.storage.put("last_compaction", now)
-        lastCompaction = now
-      }
-
-      // Schedule next compaction if no closer alarm is set
-      const nextCompaction = lastCompaction + this.COMPACTION_INTERVAL
-      const currentAlarm = await this.ctx.storage.getAlarm()
-
-      if (!currentAlarm || nextCompaction < currentAlarm) {
-        this.ctx.storage.setAlarm(nextCompaction)
-      }
-    } catch (error) {
-      this.logger.error("Error during compaction", {
-        error: error instanceof Error ? error.message : "unknown",
-      })
-      // Ensure we retry or wake up eventually if compaction failed
-      const currentAlarm = await this.ctx.storage.getAlarm()
-      if (!currentAlarm) {
-        // Retry in compaction interval
-        this.ctx.storage.setAlarm(Date.now() + this.COMPACTION_INTERVAL)
-      }
-    }
 
     // flush the metrics and logs
     this.ctx.waitUntil(

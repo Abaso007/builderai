@@ -57,7 +57,7 @@ export function VerifyStep({ className }: React.ComponentProps<"div"> & StepComp
     setSelectedFeature(features[0]?.feature?.slug ?? "")
   }
 
-  const curlCommand = `curl -X POST ${API_DOMAIN}v1/customer/can \\
+  const curlCommand = `curl -X POST ${API_DOMAIN}v1/customer/verify \\
   -H "Authorization: Bearer ${apiKey}" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -81,7 +81,7 @@ export function VerifyStep({ className }: React.ComponentProps<"div"> & StepComp
     setIsLoading(true)
 
     try {
-      const response = await fetch(`${API_DOMAIN}v1/customer/can`, {
+      const response = await fetch(`${API_DOMAIN}v1/customer/verify`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,

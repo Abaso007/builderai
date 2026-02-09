@@ -9,7 +9,6 @@ export default async function LakehousePage() {
         <h1 className="font-bold text-2xl">Lakehouse Analytics</h1>
         <IntervalFilter className="ml-auto" />
       </div>
-      {/* <LakehouseDashboard /> */}
       <LakehouseDashboardSqlrooms />
     </DashboardShell>
   )

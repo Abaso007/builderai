@@ -33,7 +33,7 @@ export function useCustomerCan() {
 
   const mutation = useMutation({
     mutationFn: async (
-      data: paths["/v1/customer/can"]["post"]["requestBody"]["content"]["application/json"]
+      data: paths["/v1/customer/verify"]["post"]["requestBody"]["content"]["application/json"]
     ) => {
       const response = await client.customers.verify(data)
       if (response.error) {

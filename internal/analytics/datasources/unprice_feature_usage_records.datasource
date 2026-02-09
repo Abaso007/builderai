@@ -27,3 +27,6 @@ ENGINE_IS_DELETED deleted
 ENGINE_PARTITION_KEY toYYYYMM(fromUnixTimestamp64Milli(timestamp))
 ENGINE_SORTING_KEY project_id, customer_id, feature_slug, idempotence_key
 ENGINE_VER timestamp
+
+FORWARD_QUERY >
+    SELECT id, timestamp, feature_slug, customer_id, CAST(usage, 'Decimal64(4)') AS usage, request_id, idempotence_key, project_id, created_at, meta_id, deleted, defaultValueOfTypeName('LowCardinality(String)') AS country, defaultValueOfTypeName('LowCardinality(String)') AS region, defaultValueOfTypeName('LowCardinality(Nullable(String))') AS action, defaultValueOfTypeName('Nullable(String)') AS key_id

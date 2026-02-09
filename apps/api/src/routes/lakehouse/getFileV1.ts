@@ -2,19 +2,22 @@ import { createRoute } from "@hono/zod-openapi"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 
 import { z } from "zod"
+import { keyAuth } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { verifyLakehouseSignature } from "~/util/lakehouse"
 
 const tags = ["lakehouse"]
 
+import { env } from "cloudflare:workers"
 import type { z as zodZodOpenApi } from "@hono/zod-openapi"
 
 // biome-ignore lint/suspicious/noExplicitAny: <explanation>
 export function streamContent(schema: zodZodOpenApi.ZodType<any>, description: string) {
   return {
     content: {
-      // Use specific type for NDJSON or generic "application/octet-stream"
-      "application/x-ndjson": {
+      // Generic binary stream (NDJSON or Parquet)
+      "application/octet-stream": {
         schema,
       },
     },
@@ -28,6 +31,7 @@ export const route = createRoute({
   summary: "get lakehouse file",
   description: "Get lakehouse file for a given key",
   method: "get",
+  hide: env.NODE_ENV === "production",
   tags,
   request: {
     query: z.object({
@@ -35,6 +39,12 @@ export const route = createRoute({
         description: "The key of the file to get",
         example: "customer_123/2021/01/01/flush=123.ndjson",
       }),
+      exp: z.coerce
+        .number()
+        .int()
+        .optional()
+        .openapi({ description: "Signed URL expiry (epoch seconds)" }),
+      sig: z.string().optional().openapi({ description: "Signed URL signature" }),
     }),
   },
   responses: {
@@ -51,11 +61,35 @@ export const route = createRoute({
 
 // Handler returns raw Response for stream; @hono/zod-openapi types don't support binary/stream responses
 export const registerGetLakehouseFileV1 = (app: App) =>
-  // @ts-expect-error - stream/binary response: returning raw Response is correct; zod-openapi's RouteConfigToTypedResponse doesn't include Response
   app.openapi(route, async (c) => {
-    const { key } = c.req.valid("query")
+    const { key, exp, sig } = c.req.valid("query")
 
-    console.log("headers", c.req.raw.headers)
+    const authHeader = c.req.header("authorization")
+    if (authHeader) {
+      // Validate request and scope to project
+      const apiKey = await keyAuth(c)
+      const projectPrefix = `lakehouse/${apiKey.projectId}/`
+      if (!key.startsWith(projectPrefix)) {
+        return c.json({ error: "Forbidden" }, 403)
+      }
+    } else {
+      if (!exp || !sig) {
+        return c.json({ error: "Unauthorized" }, HttpStatusCodes.UNAUTHORIZED)
+      }
+      const now = Math.floor(Date.now() / 1000)
+      if (exp < now) {
+        return c.json({ error: "Expired" }, HttpStatusCodes.UNAUTHORIZED)
+      }
+      const ok = await verifyLakehouseSignature({
+        secret: c.env.AUTH_SECRET,
+        key,
+        exp,
+        sig,
+      })
+      if (!ok) {
+        return c.json({ error: "Unauthorized" }, HttpStatusCodes.UNAUTHORIZED)
+      }
+    }
 
     // Check If-None-Match for 304
     const ifNoneMatch = c.req.header("If-None-Match")
@@ -74,7 +108,11 @@ export const registerGetLakehouseFileV1 = (app: App) =>
 
     // Stream the file (return raw Response so type matches OpenAPI stream/binary and body is not JSON-serialized)
     const headers = new Headers()
-    headers.set("Content-Type", "application/x-ndjson")
+    const isParquet = key.endsWith(".parquet")
+    headers.set(
+      "Content-Type",
+      isParquet ? "application/vnd.apache.parquet" : "application/x-ndjson"
+    )
     headers.set("Content-Length", obj.size.toString())
     headers.set("ETag", `"${obj.etag}"`)
     headers.set("Cache-Control", "public, max-age=31536000, immutable")

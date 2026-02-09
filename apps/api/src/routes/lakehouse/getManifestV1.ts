@@ -12,9 +12,9 @@ import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import {
   getDateRangeUTC,
-  getMetadataManifestKey,
-  getUsageManifestKey,
-  getVerificationManifestKey,
+  getLakehouseRawPrefix,
+  signLakehouseKey,
+  type LakehouseSource,
 } from "~/util/lakehouse"
 
 const fileDescriptorBaseSchema = z.object({
@@ -73,17 +73,13 @@ export const route = createRoute({
   request: {
     body: jsonContentRequired(
       z.object({
-        customer_id: z
-          .string()
-          .openapi({
-            description:
-              "The customer ID (optional; if not provided, all customers will be included)",
-            example: "cus_1H7KQFLr7RepUyQBKdnvY",
-          })
-          .optional(),
-        project_id: z.string().openapi({
+        project_id: z.string().optional().openapi({
           description: "The project ID (optional, only available for main projects)",
           example: "project_1H7KQFLr7RepUyQBKdnvY",
+        }),
+        customer_id: z.string().optional().openapi({
+          description: "Filter to a single customer (optional)",
+          example: "cus_1H7KQFLr7RepUyQBKdnvY",
         }),
         range: analyticsIntervalSchema.openapi({
           description: "The range of the usage, last hour, day, week or month",
@@ -112,8 +108,7 @@ export type GetLakehouseManifestResponse = z.infer<
 >
 export const registerGetLakehouseManifestV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customer } = c.get("services")
-    const { customer_id: customerId, range, project_id: projectId } = c.req.valid("json")
+    const { range, project_id: projectId, customer_id: customerId } = c.req.valid("json")
 
     // validate the request
     const key = await keyAuth(c)
@@ -125,147 +120,81 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
 
     // main workspace can see all usage
     const isMain = key.project.workspace.isMain
-    const projectID = isMain ? (projectId ? projectId : key.projectId) : key.projectId
+    const projectID = isMain ? (projectId ?? key.projectId) : key.projectId
 
-    if (!isMain && projectID !== projectId) {
+    if (!isMain && projectId && projectID !== projectId) {
       throw new UnpriceApiError({
         code: "FORBIDDEN",
         message: "You are not allowed to access this app analytics.",
       })
     }
 
-    const dates = getDateRangeUTC(range)
-    const dateSet = new Set(dates)
-
-    const usageKeys: string[] = []
-    const verificationKeys: string[] = []
-    const metadataKeys: string[] = []
-
-    if (!customerId) {
-      const { val: customers, err } = await customer.getCustomersProject(projectID)
-
-      if (err) {
-        throw new UnpriceApiError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Error getting customers project",
-        })
-      }
-
-      customers.forEach((customer) => {
-        usageKeys.push(getUsageManifestKey(projectID, customer.id))
-        verificationKeys.push(getVerificationManifestKey(projectID, customer.id))
-        metadataKeys.push(getMetadataManifestKey(projectID, customer.id))
+    if (!c.env.LAKEHOUSE) {
+      throw new UnpriceApiError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Lakehouse storage not configured",
       })
-    } else {
-      usageKeys.push(getUsageManifestKey(projectID, customerId))
-      verificationKeys.push(getVerificationManifestKey(projectID, customerId))
-      metadataKeys.push(getMetadataManifestKey(projectID, customerId))
     }
 
-    const usagePromises = usageKeys.map((key) => c.env.LAKEHOUSE?.get(key))
-    const verificationPromises = verificationKeys.map((key) => c.env.LAKEHOUSE?.get(key))
-    const metadataPromises = metadataKeys.map((key) => c.env.LAKEHOUSE?.get(key))
-    const [usageObjs, verificationObjs, metadataObjs] = await Promise.all([
-      Promise.all(usagePromises),
-      Promise.all(verificationPromises),
-      Promise.all(metadataPromises),
-    ])
-
-    interface R2FileDescriptor {
-      key: string
-      day: string
-      minTs: number
-      maxTs: number
-      count: number
-      bytes: number
+    const listAll = async (prefix: string) => {
+      const objects: { key: string; size?: number }[] = []
+      let cursor: string | undefined = undefined
+      do {
+        const res = await c.env.LAKEHOUSE!.list({ prefix, cursor })
+        objects.push(...res.objects)
+        cursor = res.truncated ? res.cursor : undefined
+      } while (cursor)
+      return objects
     }
 
-    interface R2DataTypeManifest {
-      projectId: string
-      customerId: string
-      updatedAt: string
-      files: R2FileDescriptor[]
-      compacted?: R2FileDescriptor[]
-    }
+    const dates = getDateRangeUTC(range)
+    const rawByDay = new Map<string, RawFileDescriptor[]>()
+    const allFiles: Array<{ day: string; source: LakehouseSource; key: string; bytes: number }> =
+      []
 
-    type FileWithType = {
-      day: string
-      desc: R2FileDescriptor
-      type: "raw" | "compact" | "metadata"
-      source: "usage" | "verification" | "metadata"
-    }
-    const allFiles: FileWithType[] = []
+    const sources: LakehouseSource[] = ["usage", "verification", "metadata"]
 
-    for (const usageObj of usageObjs) {
-      if (!usageObj) continue
-      const usageManifest = await usageObj.json<R2DataTypeManifest>()
-      for (const f of usageManifest.files ?? []) {
-        if (dateSet.has(f.day)) allFiles.push({ day: f.day, desc: f, type: "raw", source: "usage" })
-      }
-      for (const f of usageManifest.compacted ?? []) {
-        if (dateSet.has(f.day)) allFiles.push({ day: f.day, desc: f, type: "compact", source: "usage" })
-      }
-    }
-
-    for (const verificationObj of verificationObjs) {
-      if (!verificationObj) continue
-      const verificationManifest = await verificationObj.json<R2DataTypeManifest>()
-      for (const f of verificationManifest.files ?? []) {
-        if (dateSet.has(f.day)) allFiles.push({ day: f.day, desc: f, type: "raw", source: "verification" })
-      }
-      for (const f of verificationManifest.compacted ?? []) {
-        if (dateSet.has(f.day)) allFiles.push({ day: f.day, desc: f, type: "compact", source: "verification" })
-      }
-    }
-
-    for (const metadataObj of metadataObjs) {
-      if (!metadataObj) continue
-      const metadataManifest = await metadataObj.json<R2DataTypeManifest>()
-      for (const f of metadataManifest.files ?? []) {
-        if (dateSet.has(f.day)) allFiles.push({ day: f.day, desc: f, type: "metadata", source: "metadata" })
-      }
-      for (const f of metadataManifest.compacted ?? []) {
-        if (dateSet.has(f.day)) allFiles.push({ day: f.day, desc: f, type: "metadata", source: "metadata" })
+    for (const day of dates) {
+      rawByDay.set(day, [])
+      for (const source of sources) {
+        const prefix = getLakehouseRawPrefix(projectID, source, day, customerId)
+        const objects = await listAll(prefix)
+        for (const obj of objects) {
+          const rawDesc: RawFileDescriptor = {
+            key: obj.key,
+            minTs: "0",
+            maxTs: "0",
+            count: 0,
+            bytes: obj.size ?? 0,
+          }
+          rawByDay.get(day)!.push(rawDesc)
+          allFiles.push({ day, source, key: obj.key, bytes: obj.size ?? 0 })
+        }
       }
     }
 
     const API_URL = `${API_DOMAIN}v1/lakehouse/file`
+    const exp = Math.floor(Date.now() / 1000) + 60 * 60 // 1 hour
 
-    const files: FileDescriptor[] = allFiles.map(({ day, desc, type, source }) => ({
-      url: `${API_URL}?key=${encodeURIComponent(desc.key)}`,
-      key: desc.key,
-      day,
-      type,
-      source,
-      count: desc.count,
-      bytes: desc.bytes,
-    }))
-
-    const byDayRaw = new Map<string, RawFileDescriptor[]>()
-    const byDayCompact = new Map<string, CompactFileDescriptor>()
-    for (const d of dates) {
-      byDayRaw.set(d, [])
-    }
-    for (const { day, desc, type } of allFiles) {
-      const descriptor = {
-        key: desc.key,
-        minTs: String(desc.minTs),
-        maxTs: String(desc.maxTs),
-        count: desc.count,
-        bytes: desc.bytes,
-      }
-      if (type === "raw") {
-        byDayRaw.get(day)!.push(descriptor)
-      } else if (type === "compact") {
-        byDayCompact.set(day, descriptor)
-      }
+    const files: FileDescriptor[] = []
+    for (const { day, source, key, bytes } of allFiles) {
+      const sig = await signLakehouseKey(c.env.AUTH_SECRET, key, exp)
+      files.push({
+        url: `${API_URL}?key=${encodeURIComponent(key)}&exp=${exp}&sig=${sig}`,
+        key,
+        day,
+        type: source === "metadata" ? "metadata" : "raw",
+        source,
+        count: 0,
+        bytes,
+      })
     }
 
     const days: DayManifest[] = dates.map((day) => ({
       day,
       updatedAt: new Date().toISOString(),
-      raw: byDayRaw.get(day) ?? [],
-      compact: byDayCompact.get(day) ?? null,
+      raw: rawByDay.get(day) ?? [],
+      compact: null,
     }))
 
     const response: ManifestResponse = {

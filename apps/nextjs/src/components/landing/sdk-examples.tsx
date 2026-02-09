@@ -172,7 +172,7 @@ const { result, error } = await unprice.plans.listPlanVersions({
   fetch: {
     verifyFeature:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/customer/can" +
+      "${baseUrl}/v1/customer/verify" +
       '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    featureSlug: "feature-1",\n  }),\n})',
     reportUsage:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +

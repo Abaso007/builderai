@@ -17,6 +17,7 @@ import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlit
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import xxhash, { type XXHashAPI } from "xxhash-wasm"
 import { type UsageRecord, type Verification, schema } from "~/db/types"
+import { getLakehouseRawKey } from "~/util/lakehouse"
 import migrations from "../../drizzle/migrations"
 
 // Constants
@@ -25,32 +26,6 @@ const METADATA_RETENTION_DAYS = 3
 const STATE_KEY_PREFIX = "state:"
 const SEEN_META_PREFIX = "seen_meta_"
 const CURSOR_KEY = "cursor_state"
-const ACTIVE_CUSTOMERS_KEY = "tracked_do_keys"
-const R2_MANIFEST_MAX_RETRIES = 5
-const R2_MANIFEST_RETRY_BASE_MS = 50
-
-// ─────────────────────────────────────────────────────────────────────────────
-// R2 Lakehouse Types
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Descriptor for a raw data file in R2 */
-interface R2FileDescriptor {
-  key: string
-  day: string // YYYY-MM-DD for filtering by date range
-  minTs: number // earliest timestamp in file
-  maxTs: number // latest timestamp in file
-  count: number // number of records
-  bytes: number // file size in bytes
-}
-
-/** Manifest for a single data type (usage or verification) - reduces race conditions under concurrency */
-interface R2DataTypeManifest {
-  projectId: string
-  customerId: string
-  updatedAt: string // ISO timestamp
-  files: R2FileDescriptor[]
-  compacted?: R2FileDescriptor[]
-}
 
 // Type guard for EntitlementState
 function isEntitlementState(value: unknown): value is EntitlementState {
@@ -812,6 +787,14 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       const quarantined = result?.quarantined_rows ?? 0
       const total = successful + quarantined
 
+      if (quarantined > 0) {
+        this.logger.warn("Tinybird usage rows quarantined", {
+          expected: records.length,
+          successful,
+          quarantined,
+        })
+      }
+
       if (total >= records.length) {
         return { success: true }
       }
@@ -861,6 +844,14 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       const quarantined = result?.quarantined_rows ?? 0
       const total = successful + quarantined
 
+      if (quarantined > 0) {
+        this.logger.warn("Tinybird verification rows quarantined", {
+          expected: records.length,
+          successful,
+          quarantined,
+        })
+      }
+
       if (total >= records.length) {
         return { success: true }
       }
@@ -899,6 +890,14 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       const successful = result?.successful_rows ?? 0
       const quarantined = result?.quarantined_rows ?? 0
       const total = successful + quarantined
+
+      if (quarantined > 0) {
+        this.logger.warn("Tinybird metadata rows quarantined", {
+          expected: metadata.length,
+          successful,
+          quarantined,
+        })
+      }
 
       if (total >= metadata.length) {
         return { success: true }
@@ -951,40 +950,12 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Retrieves the set of customer keys (project/customer) that this Durable Object
-   * has actively tracked/flushed data for. Used to determine scope for compaction.
-   */
-  private async getTrackedDoKeys(): Promise<Set<string>> {
-    const list = (await this.storage.get<string[]>(ACTIVE_CUSTOMERS_KEY)) ?? []
-    return new Set(list)
-  }
-
-  /**
-   * Updates the set of tracked customer keys.
-   * Persisted in DO storage so the compaction job knows which manifests to check.
-   */
-  private async addTrackedDoKeys(keys: string[]): Promise<void> {
-    const active = await this.getTrackedDoKeys()
-    let changed = false
-    for (const key of keys) {
-      if (!active.has(key)) {
-        active.add(key)
-        changed = true
-      }
-    }
-    if (changed) {
-      await this.storage.put(ACTIVE_CUSTOMERS_KEY, Array.from(active))
-    }
-  }
-
-  /**
    * Flushes processed usage, verification, and metadata records to R2.
    *
    * Strategy:
-   * 1. Write raw NDJSON files (immutable batches) for usage and verifications.
-   * 2. Update R2 manifests (usage/verification) using ETag CAS to point to new files.
-   * 3. Write raw metadata updates and update metadata manifest.
-   * 4. Update local state to track last flushed IDs (prevent double-flushing).
+   * 1. Write raw NDJSON files (immutable batches) for usage, verifications, and metadata.
+   * 2. Leave compaction/indexing to a separate lakehouse compactor endpoint.
+   * 3. Update local state to track last flushed IDs (prevent double-flushing).
    *
    * @param processed The batch of processed records and metadata.
    */
@@ -1021,28 +992,13 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
 
       const now = new Date()
       const dayString = now.toISOString().slice(0, 10) // YYYY-MM-DD
-
-      // Collect file descriptors grouped by project/customer for manifest updates
-      const filesByCustomer = new Map<
-        string,
-        { usage: R2FileDescriptor[]; verifications: R2FileDescriptor[] }
-      >()
-
-      const getOrCreateCustomerFiles = (projectId: string, customerId: string) => {
-        const key = `${projectId}/${customerId}`
-        let files = filesByCustomer.get(key)
-        if (!files) {
-          files = { usage: [], verifications: [] }
-          filesByCustomer.set(key, files)
-        }
-        return files
-      }
+      const uploads: Promise<void>[] = []
 
       // Phase 1: Write raw NDJSON files to R2 (include meta_id so lakehouse can JOIN with metadata)
       // Upload usage records grouped by project/customer; payload includes meta_id from processed records
       if (newUsageRecords.length > 0) {
         const usagePayloads = newUsageRecords.map(
-          ({ record, metaId, region, action, keyId }) => ({
+          ({ record, metaId, region, action, keyId, country }) => ({
             id: record.id,
             idempotence_key: record.idempotence_key,
             feature_slug: record.feature_slug,
@@ -1054,32 +1010,17 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
             created_at: record.created_at,
             deleted: record.deleted,
             meta_id: String(metaId),
+            country: country ?? record.country ?? "UNK",
             region: region ?? record.region ?? "UNK",
             action: action ?? record.action ?? null,
             key_id: keyId ?? record.key_id ?? null,
           })
         )
         const usageGroups = this.groupByProjectCustomer(usagePayloads)
-        const uploads: Promise<void>[] = []
-
         for (const [key, records] of usageGroups) {
           const [projectId, customerId] = key.split("/") as [string, string]
-          const fileKey = this.getR2RawFileKey(projectId, customerId, now, "usage")
+          const fileKey = this.getR2RawFileKey(projectId, customerId, dayString, now, "usage")
           const buffer = this.toNDJSON(records)
-
-          const timestamps = records.map((r) => r.timestamp).sort((a, b) => a - b)
-          const minTs = timestamps[0]!
-          const maxTs = timestamps[timestamps.length - 1]!
-
-          const customerFiles = getOrCreateCustomerFiles(projectId, customerId)
-          customerFiles.usage.push({
-            key: fileKey,
-            day: dayString,
-            minTs,
-            maxTs,
-            count: records.length,
-            bytes: buffer.length,
-          })
 
           uploads.push(
             this.lakehouse
@@ -1089,14 +1030,12 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
               .then(() => undefined)
           )
         }
-
-        await Promise.all(uploads)
       }
 
       // Upload verification records; payload includes meta_id from processed records
       if (newVerificationRecords.length > 0) {
         const verificationPayloads = newVerificationRecords.map(
-          ({ record, metaId, region, action, keyId }) => ({
+          ({ record, metaId, region, action, keyId, country }) => ({
             project_id: record.project_id,
             denied_reason: record.denied_reason ?? null,
             allowed: record.allowed,
@@ -1106,6 +1045,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
             feature_slug: record.feature_slug,
             customer_id: record.customer_id,
             request_id: record.request_id,
+            country: country ?? record.country ?? "UNK",
             region: region ?? record.region ?? "UNK",
             meta_id: String(metaId),
             action: action ?? record.action ?? null,
@@ -1113,26 +1053,10 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           })
         )
         const verificationGroups = this.groupByProjectCustomer(verificationPayloads)
-        const uploads: Promise<void>[] = []
-
         for (const [key, records] of verificationGroups) {
           const [projectId, customerId] = key.split("/") as [string, string]
-          const fileKey = this.getR2RawFileKey(projectId, customerId, now, "verification")
+          const fileKey = this.getR2RawFileKey(projectId, customerId, dayString, now, "verification")
           const buffer = this.toNDJSON(records)
-
-          const timestamps = records.map((r) => r.timestamp).sort((a, b) => a - b)
-          const minTs = timestamps[0]!
-          const maxTs = timestamps[timestamps.length - 1]!
-
-          const customerFiles = getOrCreateCustomerFiles(projectId, customerId)
-          customerFiles.verifications.push({
-            key: fileKey,
-            day: dayString,
-            minTs,
-            maxTs,
-            count: records.length,
-            bytes: buffer.length,
-          })
 
           uploads.push(
             this.lakehouse
@@ -1142,86 +1066,35 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
               .then(() => undefined)
           )
         }
-
-        await Promise.all(uploads)
       }
 
-      // Phase 2: Update per-type manifests with ETag CAS (separate usage/verification to reduce race conditions)
-      const manifestUpdates: Promise<void>[] = []
-      const activeCustomersToUpdate: string[] = []
-
-      for (const [key, files] of filesByCustomer) {
-        const [projectId, customerId] = key.split("/") as [string, string]
-        activeCustomersToUpdate.push(key)
-
-        if (files.usage.length > 0) {
-          manifestUpdates.push(this.updateR2UsageManifest(projectId, customerId, files.usage))
-        }
-        if (files.verifications.length > 0) {
-          manifestUpdates.push(
-            this.updateR2VerificationManifest(projectId, customerId, files.verifications)
-          )
-        }
-      }
-
-      await Promise.all(manifestUpdates)
-
-      if (activeCustomersToUpdate.length > 0) {
-        await this.addTrackedDoKeys(activeCustomersToUpdate)
-      }
-
-      // Phase 3: Update metadata
+      // Upload metadata (raw NDJSON)
       if (processed.uniqueMetadata.length > 0) {
         const metadataByCustomer = this.groupByProjectCustomer(processed.uniqueMetadata)
-        const metadataUpdates: Promise<void>[] = []
-        const metadataKeysToAdd: string[] = []
 
         for (const [key, entries] of metadataByCustomer) {
           const [projectId, customerId] = key.split("/") as [string, string]
-          metadataKeysToAdd.push(key)
-
-          const rawFileKey = this.getR2RawFileKey(projectId, customerId, now, "metadata")
+          const rawFileKey = this.getR2RawFileKey(projectId, customerId, dayString, now, "metadata")
           const buffer = this.toNDJSON(
             entries.map((e) => ({
-              meta_id: e.meta_id,
+              meta_id: String(e.meta_id),
               tags: e.tags,
               timestamp: e.timestamp,
             }))
           )
 
-          const minTs = Math.min(...entries.map((e) => e.timestamp))
-          const maxTs = Math.max(...entries.map((e) => e.timestamp))
-
-          metadataUpdates.push(
+          uploads.push(
             this.lakehouse
               .put(rawFileKey, buffer, {
                 httpMetadata: { contentType: "application/x-ndjson" },
-                customMetadata: {
-                  count: String(entries.length),
-                  minTs: String(minTs),
-                  maxTs: String(maxTs),
-                },
               })
-              .then(() => {
-                // Update metadata manifest
-                return this.updateR2MetadataManifest(projectId, customerId, [
-                  {
-                    key: rawFileKey,
-                    day: dayString,
-                    minTs: minTs,
-                    maxTs: maxTs,
-                    count: entries.length,
-                    bytes: buffer.length,
-                  },
-                ])
-              })
+              .then(() => undefined)
           )
         }
+      }
 
-        await Promise.all(metadataUpdates)
-        if (metadataKeysToAdd.length > 0) {
-          await this.addTrackedDoKeys(metadataKeysToAdd)
-        }
+      if (uploads.length > 0) {
+        await Promise.all(uploads)
       }
 
       // Update state only with IDs we actually flushed (batch order: usage DESC, verification ASC)
@@ -1269,169 +1142,17 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   // R2 Key Generation
   // ─────────────────────────────────────────────────────────────────────────────
 
-  private getR2DayPath(projectId: string, customerId: string, date: Date): string {
-    const year = date.getUTCFullYear()
-    const month = String(date.getUTCMonth() + 1).padStart(2, "0")
-    const day = String(date.getUTCDate()).padStart(2, "0")
-    return `${projectId}/${customerId}/${year}/${month}/${day}`
-  }
-
-  /** Key for the Usage Manifest (one per customer) */
-  private getR2UsageKey(projectId: string, customerId: string): string {
-    return `${projectId}/${customerId}/usage_manifest.json`
-  }
-
-  /** Key for the Verification Manifest (one per customer) */
-  private getR2VerificationKey(projectId: string, customerId: string): string {
-    return `${projectId}/${customerId}/verification_manifest.json`
-  }
-
-  /** Key for the Metadata Manifest (one per customer) */
-  private getR2MetadataManifestKey(projectId: string, customerId: string): string {
-    return `${projectId}/${customerId}/metadata_manifest.json`
-  }
-
-  /** Key for a raw NDJSON file within a daily partition */
+  /** Key for a raw NDJSON file within a daily partition (project-level lakehouse) */
   private getR2RawFileKey(
     projectId: string,
     customerId: string,
+    day: string,
     date: Date,
     type: "usage" | "verification" | "metadata"
   ): string {
     const timestamp = date.getTime()
-    if (type === "metadata") {
-      const year = date.getUTCFullYear()
-      const month = String(date.getUTCMonth() + 1).padStart(2, "0")
-      const day = String(date.getUTCDate()).padStart(2, "0")
-      return `${projectId}/${customerId}/metadata/${year}/${month}/${day}/metadata_${timestamp}.ndjson`
-    }
-    return `${this.getR2DayPath(projectId, customerId, date)}/${type}_${timestamp}.ndjson`
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // R2 Manifest Operations (ETag CAS)
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  /**
-   * Update usage manifest with ETag CAS for concurrency safety.
-   * Separate manifest per data type to reduce race conditions.
-   * Retries on ETag mismatch up to R2_MANIFEST_MAX_RETRIES times.
-   */
-  private async updateR2UsageManifest(
-    projectId: string,
-    customerId: string,
-    newFiles: R2FileDescriptor[]
-  ): Promise<void> {
-    if (!this.lakehouse || newFiles.length === 0) return
-    await this.updateR2DataTypeManifest(
-      this.getR2UsageKey(projectId, customerId),
-      projectId,
-      customerId,
-      newFiles
-    )
-  }
-
-  /**
-   * Update verification manifest with ETag CAS for concurrency safety.
-   * Separate manifest per data type to reduce race conditions.
-   * Retries on ETag mismatch up to R2_MANIFEST_MAX_RETRIES times.
-   */
-  private async updateR2VerificationManifest(
-    projectId: string,
-    customerId: string,
-    newFiles: R2FileDescriptor[]
-  ): Promise<void> {
-    if (!this.lakehouse || newFiles.length === 0) return
-    await this.updateR2DataTypeManifest(
-      this.getR2VerificationKey(projectId, customerId),
-      projectId,
-      customerId,
-      newFiles
-    )
-  }
-
-  /**
-   * Update metadata manifest with ETag CAS.
-   * Tracks all raw metadata files that need to be compacted into the master dimension table.
-   */
-  private async updateR2MetadataManifest(
-    projectId: string,
-    customerId: string,
-    newFiles: R2FileDescriptor[]
-  ): Promise<void> {
-    if (!this.lakehouse || newFiles.length === 0) return
-    await this.updateR2DataTypeManifest(
-      this.getR2MetadataManifestKey(projectId, customerId),
-      projectId,
-      customerId,
-      newFiles
-    )
-  }
-
-  // removed duplicate getR2MetadataManifestKey
-
-  /**
-   * Core helper to update any manifest file with ETag CAS.
-   * Handles creation if missing, appending new files, and optimistic locking.
-   */
-  private async updateR2DataTypeManifest(
-    manifestKey: string,
-    projectId: string,
-    customerId: string,
-    newFiles: R2FileDescriptor[]
-  ): Promise<void> {
-    for (let attempt = 0; attempt < R2_MANIFEST_MAX_RETRIES; attempt++) {
-      // Read current manifest with ETag
-      const existing = await this.lakehouse!.get(manifestKey)
-      let manifest: R2DataTypeManifest
-      let currentEtag: string | undefined
-
-      if (existing) {
-        manifest = (await existing.json()) as R2DataTypeManifest
-        currentEtag = existing.etag
-      } else {
-        manifest = {
-          projectId,
-          customerId,
-          updatedAt: new Date().toISOString(),
-          files: [],
-        }
-      }
-
-      const existingKeys = new Set(manifest.files.map((f) => f.key))
-      let addedCount = 0
-      for (const file of newFiles) {
-        if (!existingKeys.has(file.key)) {
-          manifest.files.push(file)
-          addedCount++
-        }
-      }
-
-      if (addedCount === 0) return
-
-      manifest.updatedAt = new Date().toISOString()
-
-      try {
-        const content = JSON.stringify(manifest, null, 2)
-        const httpMetadata = { contentType: "application/json" }
-        if (currentEtag) {
-          await this.lakehouse!.put(manifestKey, content, {
-            httpMetadata,
-            onlyIf: { etagMatches: currentEtag },
-          })
-        } else {
-          await this.lakehouse!.put(manifestKey, content, { httpMetadata })
-        }
-        return
-      } catch (error) {
-        if (attempt < R2_MANIFEST_MAX_RETRIES - 1) {
-          const backoffMs = R2_MANIFEST_RETRY_BASE_MS * 2 ** attempt
-          await new Promise((resolve) => setTimeout(resolve, backoffMs))
-          continue
-        }
-        throw error
-      }
-    }
+    const suffix = `${timestamp}-${customerId}`
+    return getLakehouseRawKey(projectId, type, day, customerId, suffix)
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1476,332 +1197,6 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       }
     } catch (error) {
       this.logger.error("Failed to rotate seen metadata", { error: this.errorMessage(error) })
-    }
-  }
-
-  /**
-   * Compaction Trigger
-   *
-   * Orchestrates the daily compaction process for all active customers tracked by this DO.
-   * Compaction merges many small raw NDJSON files into fewer, larger files to optimize read performance and reduce costs.
-   */
-  async compact(): Promise<void> {
-    const active = await this.getTrackedDoKeys()
-    for (const key of active) {
-      const [projectId, customerId] = key.split("/") as [string, string]
-
-      // Compact usage
-      await this.compactManifest(projectId, customerId, "usage")
-
-      // Compact verifications
-      await this.compactManifest(projectId, customerId, "verification")
-
-      // Compact metadata
-      await this.compactMetadata(projectId, customerId)
-    }
-  }
-
-  /**
-   * Compacts raw event files (usage/verification) for a specific customer into daily consolidated files.
-   *
-   * Process:
-   * 1. Reads the manifest to find days with raw files that haven't been compacted yet.
-   * 2. For each day, reads all raw files, merges them, and writes a single `compact_<type>.ndjson` file.
-   * 3. Updates the manifest to reference the new compact file and remove raw files.
-   * 4. Deletes the old raw files from R2.
-   *
-   * Note: Skips "today" to avoid contention with active writing.
-   */
-  private async compactManifest(
-    projectId: string,
-    customerId: string,
-    type: "usage" | "verification"
-  ): Promise<void> {
-    if (!this.lakehouse) return
-
-    const manifestKey =
-      type === "usage"
-        ? this.getR2UsageKey(projectId, customerId)
-        : this.getR2VerificationKey(projectId, customerId)
-
-    const today = new Date().toISOString().slice(0, 10)
-
-    // Retry loop for CAS
-    for (let attempt = 0; attempt < R2_MANIFEST_MAX_RETRIES; attempt++) {
-      const obj = await this.lakehouse.get(manifestKey)
-      if (!obj) return
-
-      const manifest = (await obj.json()) as R2DataTypeManifest
-      const manifestEtag = obj.etag
-
-      // Group raw files by day
-      const filesByDay = new Map<string, R2FileDescriptor[]>()
-      for (const file of manifest.files) {
-        if (!filesByDay.has(file.day)) {
-          filesByDay.set(file.day, [])
-        }
-        filesByDay.get(file.day)!.push(file)
-      }
-
-      const compactedDays = new Set(manifest.compacted?.map((c) => c.day) ?? [])
-      const daysToCompact = Array.from(filesByDay.keys()).filter(
-        (day) => day !== today && !compactedDays.has(day)
-      )
-
-      if (daysToCompact.length === 0) return
-
-      // Compact one day at a time (to avoid huge operations)
-      // We will update manifest after compacting ALL eligible days in this turn?
-      // Or one by one? One by one is safer but slower.
-      // Let's do all eligible days that we can process.
-      // Actually, let's just do one day to be safe with execution time, or maybe a few.
-      // For now, let's try to compact all pending days.
-
-      const newCompactedFiles: R2FileDescriptor[] = []
-      const rawFilesToDelete: Set<string> = new Set()
-
-      for (const day of daysToCompact) {
-        const rawFiles = filesByDay.get(day)!
-        if (rawFiles.length === 0) continue
-
-        // Read all raw files
-        const allLines: string[] = []
-        let minTs: number | null = null
-        let maxTs: number | null = null
-        let totalCount = 0
-
-        for (const rawFile of rawFiles) {
-          const fileObj = await this.lakehouse.get(rawFile.key)
-          if (!fileObj) {
-            this.logger.warn(`Missing raw file during compaction: ${rawFile.key}`)
-            continue
-          }
-
-          const content = await fileObj.text()
-          const lines = content
-            .trim()
-            .split("\n")
-            .filter((l) => l.length > 0)
-          allLines.push(...lines)
-
-          if (minTs === null || rawFile.minTs < minTs) minTs = rawFile.minTs
-          if (maxTs === null || rawFile.maxTs > maxTs) maxTs = rawFile.maxTs
-          totalCount += rawFile.count
-          rawFilesToDelete.add(rawFile.key)
-        }
-
-        if (allLines.length === 0) continue
-
-        // Write compact file
-        const date = new Date(day)
-        const compactKey = `${this.getR2DayPath(projectId, customerId, date)}/compact_${type}.ndjson`
-        const compactContent = `${allLines.join("\n")}\n`
-        const compactBytes = new TextEncoder().encode(compactContent)
-
-        await this.lakehouse.put(compactKey, compactBytes, {
-          httpMetadata: { contentType: "application/x-ndjson" },
-        })
-
-        newCompactedFiles.push({
-          key: compactKey,
-          day,
-          minTs: minTs!,
-          maxTs: maxTs!,
-          count: totalCount,
-          bytes: compactBytes.length,
-        })
-      }
-
-      if (newCompactedFiles.length === 0) return
-
-      // Update manifest
-      const newManifest: R2DataTypeManifest = {
-        ...manifest,
-        updatedAt: new Date().toISOString(),
-        files: manifest.files.filter((f) => !rawFilesToDelete.has(f.key)),
-        compacted: [...(manifest.compacted ?? []), ...newCompactedFiles],
-      }
-
-      try {
-        await this.lakehouse.put(manifestKey, JSON.stringify(newManifest, null, 2), {
-          httpMetadata: { contentType: "application/json" },
-          onlyIf: { etagMatches: manifestEtag },
-        })
-
-        // Delete raw files after successful manifest update
-        for (const key of rawFilesToDelete) {
-          this.lakehouse.delete(key).catch((err) => {
-            this.logger.warn(`Failed to delete raw file ${key}:`, { error: this.errorMessage(err) })
-          })
-        }
-
-        return // Success
-      } catch (error) {
-        // ETag mismatch, retry
-        if (attempt < R2_MANIFEST_MAX_RETRIES - 1) {
-          const backoffMs = R2_MANIFEST_RETRY_BASE_MS * 2 ** attempt
-          await new Promise((resolve) => setTimeout(resolve, backoffMs))
-          continue
-        }
-        this.logger.error(`Failed to update metadata manifest after compaction: ${manifestKey}`, {
-          error: this.errorMessage(error),
-        })
-      }
-    }
-  }
-
-  /**
-   * Compacts metadata files into single daily files using manifest.
-   *
-   * Process:
-   * 1. Read metadata manifest.
-   * 2. Find days with uncompacted raw files (excluding today).
-   * 3. For each day:
-   *    a. Read all raw files.
-   *    b. Merge (dedupe by meta_id).
-   *    c. Write compact file.
-   *    d. Update manifest (remove raw, add compact).
-   *    e. Delete raw files.
-   */
-  private async compactMetadata(projectId: string, customerId: string): Promise<void> {
-    if (!this.lakehouse) return
-
-    const manifestKey = this.getR2MetadataManifestKey(projectId, customerId)
-    const today = new Date().toISOString().slice(0, 10)
-
-    for (let attempt = 0; attempt < R2_MANIFEST_MAX_RETRIES; attempt++) {
-      const obj = await this.lakehouse.get(manifestKey)
-      if (!obj) return
-
-      const manifest = (await obj.json()) as R2DataTypeManifest
-      const manifestEtag = obj.etag
-
-      // Group raw files by day
-      const filesByDay = new Map<string, R2FileDescriptor[]>()
-      for (const file of manifest.files) {
-        if (!filesByDay.has(file.day)) {
-          filesByDay.set(file.day, [])
-        }
-        filesByDay.get(file.day)!.push(file)
-      }
-
-      const compactedDays = new Set(manifest.compacted?.map((c) => c.day) ?? [])
-      const daysToCompact = Array.from(filesByDay.keys()).filter(
-        (day) => day !== today && !compactedDays.has(day)
-      )
-
-      if (daysToCompact.length === 0) return
-
-      const newCompactedFiles: R2FileDescriptor[] = []
-      const rawFilesToDelete: Set<string> = new Set()
-
-      for (const day of daysToCompact) {
-        const rawFiles = filesByDay.get(day)!
-        if (rawFiles.length === 0) continue
-
-        // Read all raw files
-        const allLines: string[] = []
-        let minTs: number | null = null
-        let maxTs: number | null = null
-
-        for (const rawFile of rawFiles) {
-          const fileObj = await this.lakehouse.get(rawFile.key)
-          if (!fileObj) {
-            this.logger.warn(`Missing raw metadata file during compaction: ${rawFile.key}`)
-            continue
-          }
-
-          const content = await fileObj.text()
-          const lines = content
-            .trim()
-            .split("\n")
-            .filter((l) => l.length > 0)
-          allLines.push(...lines)
-
-          if (minTs === null || rawFile.minTs < minTs) minTs = rawFile.minTs
-          if (maxTs === null || rawFile.maxTs > maxTs) maxTs = rawFile.maxTs
-          rawFilesToDelete.add(rawFile.key)
-        }
-
-        if (allLines.length === 0) continue
-
-        // Deduplication by meta_id
-        const uniqueLines = new Map<number, string>()
-        for (const line of allLines) {
-          try {
-            const entry = JSON.parse(line)
-            if (entry.meta_id) uniqueLines.set(entry.meta_id, line)
-          } catch {
-            // Ignore malformed lines
-          }
-        }
-        const count = uniqueLines.size
-        if (count === 0) continue
-
-        const mergedContent = Array.from(uniqueLines.values()).join("\n")
-        const timestamp = Date.now()
-        // New file
-        const [y, m, d] = day.split("-")
-        const newKey = `${projectId}/${customerId}/metadata/${y}/${m}/${d}/compact_metadata_${timestamp}.ndjson`
-
-        const compactBytes = new TextEncoder().encode(mergedContent)
-
-        await this.lakehouse.put(newKey, compactBytes, {
-          httpMetadata: { contentType: "application/x-ndjson" },
-          customMetadata: {
-            count: String(count),
-            minTs: String(minTs),
-            maxTs: String(maxTs),
-          },
-        })
-
-        newCompactedFiles.push({
-          key: newKey,
-          day,
-          minTs: minTs!,
-          maxTs: maxTs!,
-          count,
-          bytes: compactBytes.length,
-        })
-      }
-
-      if (newCompactedFiles.length === 0) return
-
-      // Update manifest
-      const newManifest: R2DataTypeManifest = {
-        ...manifest,
-        updatedAt: new Date().toISOString(),
-        files: manifest.files.filter((f) => !rawFilesToDelete.has(f.key)),
-        compacted: [...(manifest.compacted ?? []), ...newCompactedFiles],
-      }
-
-      try {
-        await this.lakehouse.put(manifestKey, JSON.stringify(newManifest, null, 2), {
-          httpMetadata: { contentType: "application/json" },
-          onlyIf: { etagMatches: manifestEtag },
-        })
-
-        // Delete raw files
-        for (const key of rawFilesToDelete) {
-          this.lakehouse.delete(key).catch((err) => {
-            this.logger.warn(`Failed to delete raw metadata file ${key}:`, {
-              error: this.errorMessage(err),
-            })
-          })
-        }
-
-        return // Success
-      } catch (error) {
-        // ETag mismatch, retry
-        if (attempt < R2_MANIFEST_MAX_RETRIES - 1) {
-          const backoffMs = R2_MANIFEST_RETRY_BASE_MS * 2 ** attempt
-          await new Promise((resolve) => setTimeout(resolve, backoffMs))
-          continue
-        }
-        this.logger.error(`Failed to update metadata manifest after compaction: ${manifestKey}`, {
-          error: this.errorMessage(error),
-        })
-      }
     }
   }
 
