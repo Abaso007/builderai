@@ -1055,7 +1055,13 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         const verificationGroups = this.groupByProjectCustomer(verificationPayloads)
         for (const [key, records] of verificationGroups) {
           const [projectId, customerId] = key.split("/") as [string, string]
-          const fileKey = this.getR2RawFileKey(projectId, customerId, dayString, now, "verification")
+          const fileKey = this.getR2RawFileKey(
+            projectId,
+            customerId,
+            dayString,
+            now,
+            "verification"
+          )
           const buffer = this.toNDJSON(records)
 
           uploads.push(

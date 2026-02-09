@@ -93,11 +93,7 @@ async function hmacSha256Base64Url(secret: string, message: string): Promise<str
   return toBase64Url(new Uint8Array(sig))
 }
 
-export async function signLakehouseKey(
-  secret: string,
-  key: string,
-  exp: number
-): Promise<string> {
+export async function signLakehouseKey(secret: string, key: string, exp: number): Promise<string> {
   return hmacSha256Base64Url(secret, `${key}|${exp}`)
 }
 

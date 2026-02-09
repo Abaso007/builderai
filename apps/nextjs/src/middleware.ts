@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 
 import { auth } from "@unprice/auth/server"
 
-import { APP_DOMAIN, APP_HOSTNAMES } from "@unprice/config"
+import { APP_DOMAIN, isAppHostname } from "@unprice/config"
 import { getValidSubdomain, parse } from "~/lib/domains"
 import AppMiddleware from "~/middleware/app"
 import SitesMiddleware from "~/middleware/sites"
@@ -21,8 +21,8 @@ export default auth((req) => {
   //   return ApiMiddleware(req)
   // }
 
-  // 2. we validate app routes inside the dashboard
-  if (APP_HOSTNAMES.has(domain)) {
+  // 2. we validate app routes inside the dashboard (isAppHostname supports any app.localhost port in dev)
+  if (isAppHostname(domain)) {
     return AppMiddleware(req)
   }
 
