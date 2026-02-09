@@ -4,6 +4,7 @@ import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 import { AnalyticsCard } from "~/components/analytics/analytics-card"
 import { IntervalFilter } from "~/components/analytics/interval-filter"
+import { UsageChart } from "~/components/analytics/usage-chart"
 import { VerificationsChart } from "~/components/analytics/verifications-chart"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import { entitlementFlag } from "~/lib/flags"
@@ -79,8 +80,8 @@ export default async function DashboardOverview(props: {
         </Suspense>
         <AnalyticsCard
           className="w-full"
-          title="Value Realization"
-          description="Real-time insights into how users are experiencing your product value."
+          title="Value Metrics"
+          description="Real-time insights into how users are experiencing your product value metrics."
           defaultTab="verifications"
           tabs={[
             {
@@ -88,6 +89,12 @@ export default async function DashboardOverview(props: {
               label: "Verifications",
               description: `Value verification events for the ${interval.label}.`,
               chart: () => <VerificationsChart />,
+            },
+            {
+              id: "usage",
+              label: "Usage",
+              description: `Usage metrics for the ${interval.label}.`,
+              chart: () => <UsageChart />,
             },
           ]}
         />

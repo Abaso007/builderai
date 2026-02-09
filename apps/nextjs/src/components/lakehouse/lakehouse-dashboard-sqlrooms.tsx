@@ -301,6 +301,12 @@ function LakehouseDashboardInner() {
         const sourceFiles = files.filter((f) => f.source === source)
         if (sourceFiles.length === 0) return false
 
+        try {
+          await connector.query(`DROP TABLE IF EXISTS ${config.tableName}`)
+        } catch {
+          // Table might not exist
+        }
+
         // Load files into DuckDB
         for (let i = 0; i < sourceFiles.length; i++) {
           const file = sourceFiles[i]
