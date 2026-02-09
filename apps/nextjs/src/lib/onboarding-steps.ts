@@ -1,24 +1,18 @@
 import type { OnboardingStep } from "@onboardjs/react"
-import { ApiKeyStep } from "~/components/onboarding/steps/apikey-step"
-import { CreateCustomerStep } from "~/components/onboarding/steps/create-customer-step"
 import { FinalStep } from "~/components/onboarding/steps/final-step"
 import { PaymentProviderStep } from "~/components/onboarding/steps/payment-provider-step"
-import { PricingChat } from "~/components/onboarding/steps/pricing-chat-step"
 import { ProjectStep } from "~/components/onboarding/steps/project-step"
-import { ReportUsageStep } from "~/components/onboarding/steps/report-usage-step"
-import { VerifyStep } from "~/components/onboarding/steps/verify-step"
+import { SeedMetricsStep } from "~/components/onboarding/steps/seed-metrics-step"
+import { TemplatePlanStep } from "~/components/onboarding/steps/template-plan-step"
 import { WelcomeStep } from "~/components/onboarding/steps/welcome-step"
 
 // steps.tsx - export your step IDs
 export const STEP_IDS = [
   "welcome",
   "project",
-  "apikey",
   "payment-provider",
-  "pricing-chat",
-  "create-customer",
-  "report-usage",
-  "verify",
+  "template-plan",
+  "seed-metrics",
   "done",
 ] as const
 
@@ -31,38 +25,21 @@ export const steps: OnboardingStep[] = [
   {
     id: "project",
     component: ProjectStep,
-    nextStep: "apikey",
-  },
-  {
-    id: "apikey",
-    component: ApiKeyStep,
     nextStep: "payment-provider",
   },
   {
     id: "payment-provider",
     component: PaymentProviderStep,
-    nextStep: "pricing-chat",
-    isSkippable: true,
-    skipToStep: "pricing-chat",
+    nextStep: "template-plan",
   },
   {
-    id: "pricing-chat",
-    component: PricingChat,
-    nextStep: "create-customer",
+    id: "template-plan",
+    component: TemplatePlanStep,
+    nextStep: "seed-metrics",
   },
   {
-    id: "create-customer",
-    component: CreateCustomerStep,
-    nextStep: "report-usage",
-  },
-  {
-    id: "report-usage",
-    component: ReportUsageStep,
-    nextStep: "verify",
-  },
-  {
-    id: "verify",
-    component: VerifyStep,
+    id: "seed-metrics",
+    component: SeedMetricsStep,
     nextStep: "done",
   },
   {
