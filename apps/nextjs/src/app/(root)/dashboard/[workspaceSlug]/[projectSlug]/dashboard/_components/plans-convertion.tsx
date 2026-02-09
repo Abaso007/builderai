@@ -62,7 +62,7 @@ export function PlansConversion() {
       ["analytics", "getPlansConversion"],
       {
         input: {
-          intervalDays,
+          interval_days: intervalDays,
         },
         type: "query",
       },

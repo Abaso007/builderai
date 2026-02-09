@@ -1,16 +1,18 @@
 import { prepareInterval } from "@unprice/analytics"
+import { FEATURE_SLUGS } from "@unprice/config"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 import { AnalyticsCard } from "~/components/analytics/analytics-card"
 import { IntervalFilter } from "~/components/analytics/interval-filter"
-import { UsageChart } from "~/components/analytics/usage-chart"
 import { VerificationsChart } from "~/components/analytics/verifications-chart"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
+import { entitlementFlag } from "~/lib/flags"
 import { intervalParams } from "~/lib/searchParams"
 import { HydrateClient, batchPrefetch, trpc } from "~/trpc/server"
 import { ANALYTICS_STALE_TIME } from "~/trpc/shared"
-import { FeaturesStats, FeaturesStatsSkeleton } from "./_components/features-stats"
 import OverviewStats, { OverviewStatsSkeleton } from "./_components/overview-stats"
+import { PageVisits, PageVisitsSkeleton } from "./_components/page-visits"
+import { PlansConversion, PlansConversionSkeleton } from "./_components/plans-convertion"
 import TabsDashboard from "./_components/tabs-dashboard"
 
 export const dynamic = "force-dynamic"
@@ -21,6 +23,7 @@ export default async function DashboardOverview(props: {
 }) {
   const { projectSlug, workspaceSlug } = props.params
   const baseUrl = `/${workspaceSlug}/${projectSlug}`
+  const isPagesEnabled = await entitlementFlag(FEATURE_SLUGS.PAGES.SLUG)
   const filter = intervalParams(props.searchParams)
   const interval = prepareInterval(filter.intervalFilter)
 
@@ -28,22 +31,6 @@ export default async function DashboardOverview(props: {
     trpc.analytics.getOverviewStats.queryOptions(
       {
         interval: filter.intervalFilter,
-      },
-      {
-        staleTime: ANALYTICS_STALE_TIME,
-      }
-    ),
-    trpc.analytics.getFeatureHeatmap.queryOptions(
-      {
-        interval_days: interval.intervalDays,
-      },
-      {
-        staleTime: ANALYTICS_STALE_TIME,
-      }
-    ),
-    trpc.analytics.getFeaturesOverview.queryOptions(
-      {
-        interval_days: interval.intervalDays,
       },
       {
         staleTime: ANALYTICS_STALE_TIME,
@@ -57,14 +44,27 @@ export default async function DashboardOverview(props: {
         staleTime: ANALYTICS_STALE_TIME,
       }
     ),
-    trpc.analytics.getUsage.queryOptions(
-      {
-        interval_days: interval.intervalDays,
-      },
-      {
-        staleTime: ANALYTICS_STALE_TIME,
-      }
-    ),
+    ...(isPagesEnabled
+      ? [
+          trpc.analytics.getPlansConversion.queryOptions(
+            {
+              interval_days: interval.intervalDays,
+            },
+            {
+              staleTime: ANALYTICS_STALE_TIME,
+            }
+          ),
+          trpc.analytics.getPagesOverview.queryOptions(
+            {
+              interval_days: interval.intervalDays,
+              page_id: "all",
+            },
+            {
+              staleTime: ANALYTICS_STALE_TIME,
+            }
+          ),
+        ]
+      : []),
   ])
 
   return (
@@ -76,9 +76,6 @@ export default async function DashboardOverview(props: {
       <HydrateClient>
         <Suspense fallback={<OverviewStatsSkeleton isLoading={true} />}>
           <OverviewStats />
-        </Suspense>
-        <Suspense fallback={<FeaturesStatsSkeleton isLoading={true} />}>
-          <FeaturesStats />
         </Suspense>
         <AnalyticsCard
           className="w-full"
@@ -92,14 +89,18 @@ export default async function DashboardOverview(props: {
               description: `Value verification events for the ${interval.label}.`,
               chart: () => <VerificationsChart />,
             },
-            {
-              id: "usage",
-              label: "Usage",
-              description: `Metering and usage flow for the ${interval.label}.`,
-              chart: () => <UsageChart />,
-            },
           ]}
         />
+        {isPagesEnabled && (
+          <Suspense fallback={<PageVisitsSkeleton isLoading={true} isSelected={true} />}>
+            <PageVisits pageId="all" />
+          </Suspense>
+        )}
+        {isPagesEnabled && (
+          <Suspense fallback={<PlansConversionSkeleton />}>
+            <PlansConversion />
+          </Suspense>
+        )}
       </HydrateClient>
     </DashboardShell>
   )
