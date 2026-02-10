@@ -18,7 +18,7 @@ export function obs(): MiddlewareHandler<HonoEnv> {
       throw e
     } finally {
       const status = c.res.status
-      const duration = performance.now() - start
+      const duration = Date.now() - start
       c.res.headers.append("Unprice-Latency", `service=${duration}ms`)
       c.res.headers.append("Unprice-Version", c.env.VERSION)
 

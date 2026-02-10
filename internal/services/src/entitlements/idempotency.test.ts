@@ -207,7 +207,7 @@ describe("EntitlementService - Idempotency & Flush", () => {
         timestamp: clock.now() + i,
         requestId: `req_ver_${i}`,
         metadata: null,
-        performanceStart: performance.now(),
+        performanceStart: clock.now(),
       })
     }
 

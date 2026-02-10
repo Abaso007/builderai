@@ -442,7 +442,7 @@ export class DurableObjectUsagelimiter extends Server {
           deniedReason: "ENTITLEMENT_ERROR",
         }
       } finally {
-        wideEventLogger.add("request.duration", performance.now() - data.performanceStart)
+        wideEventLogger.add("request.duration", Date.now() - data.performanceStart)
         this.ctx.waitUntil(
           (async () => {
             try {
@@ -517,7 +517,7 @@ export class DurableObjectUsagelimiter extends Server {
         }
       } finally {
         data.performanceStart &&
-          wideEventLogger.add("request.duration", performance.now() - data.performanceStart)
+          wideEventLogger.add("request.duration", Date.now() - data.performanceStart)
 
         this.ctx.waitUntil(
           (async () => {

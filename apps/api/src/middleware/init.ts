@@ -59,7 +59,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       newId("request")
 
     const requestStartedAt = Date.now()
-    const performanceStart = performance.now()
+    const performanceStart = Date.now()
     // start a new timer
 
     c.set("isolateId", isolateId)
@@ -289,7 +289,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
 
       metrics.emit({
         metric: "metric.init",
-        duration: performance.now() - performanceStart,
+        duration: Date.now() - performanceStart,
       })
 
       await next()

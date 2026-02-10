@@ -177,7 +177,7 @@ describe("EntitlementService - verify", () => {
       timestamp: clock.now(),
       requestId: "req_1",
       metadata: null,
-      performanceStart: performance.now(),
+      performanceStart: clock.now(),
     })
 
     // Assertions
@@ -216,7 +216,7 @@ describe("EntitlementService - verify", () => {
       timestamp: clock.now(),
       requestId: "req_2",
       metadata: null,
-      performanceStart: performance.now(),
+      performanceStart: clock.now(),
     })
 
     expect(result.allowed).toBe(true)
@@ -264,7 +264,7 @@ describe("EntitlementService - verify", () => {
       timestamp: clock.now(),
       requestId: "req_3",
       metadata: null,
-      performanceStart: performance.now(),
+      performanceStart: clock.now(),
     })
 
     expect(result.allowed).toBe(false)
@@ -290,7 +290,7 @@ describe("EntitlementService - verify", () => {
       timestamp: clock.now(),
       requestId: "req_4",
       metadata: null,
-      performanceStart: performance.now(),
+      performanceStart: clock.now(),
     })
 
     expect(result.allowed).toBe(false)

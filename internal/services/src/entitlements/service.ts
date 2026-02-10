@@ -179,7 +179,7 @@ export class EntitlementService {
         state_found: false,
       })
 
-      const latency = performance.now() - params.performanceStart
+      const latency = Date.now() - params.performanceStart
       this.waitUntil(
         this.storage.insertVerification({
           customer_id: params.customerId,
@@ -220,7 +220,7 @@ export class EntitlementService {
     })
 
     if (err) {
-      const latency = performance.now() - params.performanceStart
+      const latency = Date.now() - params.performanceStart
       return {
         allowed: false,
         message: err.message,
@@ -232,7 +232,7 @@ export class EntitlementService {
 
     const usageMeter = this.getUsageMeter(validatedState)
     const verifyResult = usageMeter.verify(params.timestamp, params.usage)
-    const latency = performance.now() - params.performanceStart
+    const latency = Date.now() - params.performanceStart
 
     this.waitUntil(
       this.storage.insertVerification({
