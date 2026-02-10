@@ -165,7 +165,9 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
             count: 0,
             bytes: obj.size ?? 0,
           }
+
           rawByDay.get(day)!.push(rawDesc)
+
           allFiles.push({ day, source, key: obj.key, bytes: obj.size ?? 0 })
         }
       }
