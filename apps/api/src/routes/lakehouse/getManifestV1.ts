@@ -1,6 +1,5 @@
 import { createRoute } from "@hono/zod-openapi"
 import { analyticsIntervalSchema, prepareInterval } from "@unprice/analytics"
-import { API_DOMAIN } from "@unprice/config"
 import { startTime } from "hono/timing"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
@@ -172,7 +171,12 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
       }
     }
 
-    const API_URL = `${API_DOMAIN}v1/lakehouse/file`
+    // Derive from request so it works in Workers (preview/prod/localhost). Config uses process.env
+    // which is not set in Cloudflare Workers runtime — only c.env has VERCEL_ENV.
+    const host = c.req.header("x-forwarded-host") ?? c.req.header("host") ?? "api.unprice.dev"
+    const protocol =
+      c.req.header("x-forwarded-proto") ?? (host.includes("localhost") ? "http" : "https")
+    const API_URL = `${protocol}://${host}/v1/lakehouse/file`
     const exp = Math.floor(Date.now() / 1000) + 60 * 60 // 1 hour
 
     const files: FileDescriptor[] = []
