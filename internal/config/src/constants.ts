@@ -67,7 +67,7 @@ export const API_HOSTNAMES = new Set([
   `api.${MAIN_DOMAIN}`,
   `api.${env.NEXT_PUBLIC_APP_DOMAIN}`,
   // for preview deployments
-  `api-preview.${MAIN_DOMAIN}`,
+  `preview-api.${MAIN_DOMAIN}`,
   "localhost:8787",
 ])
 
@@ -75,7 +75,7 @@ export const API_DOMAIN =
   VERCEL_ENV === "production"
     ? `https://api.${MAIN_DOMAIN}/`
     : VERCEL_ENV === "preview"
-      ? `https://api-preview.${MAIN_DOMAIN}/`
+      ? `https://preview-api.${MAIN_DOMAIN}/`
       : "http://localhost:8787/"
 
 export const DOCS_DOMAIN =

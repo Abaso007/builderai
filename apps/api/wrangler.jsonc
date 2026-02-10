@@ -21,7 +21,8 @@
       "r2_buckets": [
         {
           "binding": "LAKEHOUSE",
-          "bucket_name": "unprice-lakehouse-prod"
+          "bucket_name": "unprice-lakehouse-prod",
+          "jurisdiction": "eu"
         }
       ],
       "unsafe": {
@@ -72,7 +73,8 @@
       "r2_buckets": [
         {
           "binding": "LAKEHOUSE",
-          "bucket_name": "unprice-lakehouse-preview"
+          "bucket_name": "unprice-lakehouse-preview",
+          "jurisdiction": "eu"
         }
       ],
       "unsafe": {
@@ -122,7 +124,8 @@
       "r2_buckets": [
         {
           "binding": "LAKEHOUSE",
-          "bucket_name": "unprice-lakehouse-dev"
+          "bucket_name": "unprice-lakehouse-dev",
+          "jurisdiction": "eu"
         }
       ],
       "unsafe": {
