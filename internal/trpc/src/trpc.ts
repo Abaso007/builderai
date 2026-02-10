@@ -259,8 +259,7 @@ export const createTRPCContext = async (opts: {
       host: opts.headers.get("host") ?? undefined,
       port: opts.headers.get("port") ?? undefined,
       protocol: opts.headers.get("protocol") ?? undefined,
-      headers: opts.headers.get("headers") ?? undefined,
-      query: opts.headers.get("query") ?? undefined,
+      query: opts.req?.nextUrl.search ? opts.req.nextUrl.search.replace(/^\?/, "") : undefined,
     },
     cloud: {
       platform: "vercel",

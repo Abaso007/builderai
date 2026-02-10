@@ -32,6 +32,81 @@ interface UsageLimiterConfig {
   colo: string
 }
 
+type UsageInputSummary = {
+  customerId: string
+  projectId: string
+  featureSlug: string
+  usage?: number
+  timestamp: number
+  flushTime?: number
+  sync?: boolean
+  action?: string
+  keyId?: string
+  country?: string
+  region?: string
+  metadataKeyCount?: number
+  metadataKeySample?: string
+}
+
+type UsageResultSummary = {
+  allowed: boolean
+  message?: string
+  deniedReason?: string
+  featureType?: string
+  cacheHit?: boolean
+  remaining?: number
+  limit?: number
+  usage?: number
+  cost?: number
+  latency?: number
+  notifiedOverLimit?: boolean
+  degraded?: boolean
+  degradedReason?: string
+}
+
+const METADATA_KEY_SAMPLE_LIMIT = 10
+
+const summarizeUsageInput = (data: VerifyRequest | ReportUsageRequest): UsageInputSummary => {
+  const metadataKeys = data.metadata ? Object.keys(data.metadata) : []
+  const metadataKeySample = metadataKeys.slice(0, METADATA_KEY_SAMPLE_LIMIT).join(",")
+
+  return {
+    customerId: data.customerId,
+    projectId: data.projectId,
+    featureSlug: data.featureSlug,
+    usage: data.usage,
+    timestamp: data.timestamp,
+    flushTime: data.flushTime,
+    sync: "sync" in data ? data.sync : undefined,
+    action: data.action,
+    keyId: data.keyId,
+    country: data.country,
+    region: data.region,
+    metadataKeyCount: metadataKeys.length || undefined,
+    metadataKeySample: metadataKeySample || undefined,
+  }
+}
+
+const summarizeUsageResult = (
+  result: VerificationResult | ReportUsageResult
+): UsageResultSummary => {
+  return {
+    allowed: result.allowed,
+    message: result.message,
+    deniedReason: result.deniedReason,
+    featureType: "featureType" in result ? result.featureType : undefined,
+    cacheHit: result.cacheHit,
+    remaining: result.remaining,
+    limit: result.limit,
+    usage: result.usage,
+    cost: result.cost,
+    latency: "latency" in result ? result.latency : undefined,
+    notifiedOverLimit: "notifiedOverLimit" in result ? result.notifiedOverLimit : undefined,
+    degraded: result.degraded,
+    degradedReason: result.degradedReason,
+  }
+}
+
 // This durable object takes care of handling the usage of every feature per customer.
 // It is used to validate the usage of a feature and to report the usage to tinybird.
 // think of it as a queue that will be flushed to the db periodically
@@ -350,10 +425,10 @@ export class DurableObjectUsagelimiter extends Server {
           region: this.metrics.getColo(),
         })
         wideEventLogger.add("usagelimiter.operation", "verify")
-        wideEventLogger.add("usagelimiter.input", data)
+        wideEventLogger.add("usagelimiter.input", summarizeUsageInput(data))
         // All logic handled internally!
         const result = await this.entitlementService.verify(data)
-        wideEventLogger.add("usagelimiter.result", result)
+        wideEventLogger.add("usagelimiter.result", summarizeUsageResult(result))
         // Set alarm to flush buffers
         await this.ensureAlarmIsSet(wideEventLogger, data.flushTime)
 
@@ -424,10 +499,10 @@ export class DurableObjectUsagelimiter extends Server {
           region: this.metrics.getColo(),
         })
         wideEventLogger.add("usagelimiter.operation", "reportUsage")
-        wideEventLogger.add("usagelimiter.input", data)
+        wideEventLogger.add("usagelimiter.input", summarizeUsageInput(data))
 
         const result = await this.entitlementService.reportUsage(data)
-        wideEventLogger.add("usagelimiter.result", result)
+        wideEventLogger.add("usagelimiter.result", summarizeUsageResult(result))
         // Set alarm to flush buffers
         await this.ensureAlarmIsSet(wideEventLogger, data.flushTime)
 
