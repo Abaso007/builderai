@@ -416,8 +416,11 @@ function LakehouseDashboardInner() {
 
       // Auto-execute default query after loading if we have usage
       if (tablesLoaded.includes("usage")) {
-        setSqlQuery(DEFAULT_QUERY)
-        setExecutedQuery(DEFAULT_QUERY)
+        const initialQuery = tablesLoaded.includes("metadata")
+          ? PREDEFINED_QUERIES.allUsage.query
+          : PREDEFINED_QUERIES.usageByFeature.query
+        setSqlQuery(initialQuery)
+        setExecutedQuery(initialQuery)
       } else if (tablesLoaded.includes("verifications")) {
         setSqlQuery(PREDEFINED_QUERIES.verificationByFeature.query)
       } else if (tablesLoaded.includes("metadata")) {
@@ -515,11 +518,12 @@ function LakehouseDashboardInner() {
   }, [sqlQuery, requiredTables, loadedTables])
 
   const getFallbackQuery = useCallback(() => {
-    if (hasUsage) return PREDEFINED_QUERIES.allUsage.query
+    if (hasUsage && hasMetadata) return PREDEFINED_QUERIES.allUsage.query
+    if (hasUsage) return PREDEFINED_QUERIES.usageByFeature.query
     if (hasVerification) return PREDEFINED_QUERIES.verificationByFeature.query
     if (hasMetadata) return PREDEFINED_QUERIES.metadataRaw.query
     return ""
-  }, [hasUsage, hasVerification, hasMetadata])
+  }, [hasUsage, hasMetadata, hasVerification])
 
   useEffect(() => {
     if (!tableReady) return
