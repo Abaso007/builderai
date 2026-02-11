@@ -83,6 +83,7 @@ export class LogdrainMetrics implements Metrics {
       colo: this.colo,
       country: this.country,
       continent: this.continent,
+      "log.type": "metric",
     } as Fields)
   }
 

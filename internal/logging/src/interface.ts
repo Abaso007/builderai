@@ -1,9 +1,14 @@
 import type { ErrorSchema } from "@unprice/logs"
 import type { z } from "zod"
 
+export type LogType = "metric" | "normal" | "wide_event"
+
 export type Fields = {
   error?: z.infer<typeof ErrorSchema> | string
   service?: string
+  "service.name"?: string
+  "service.environment"?: string
+  "log.type"?: LogType
   [field: string]: unknown
 }
 

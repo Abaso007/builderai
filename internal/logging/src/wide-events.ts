@@ -200,6 +200,7 @@ export class WideEventLogger {
   run<T>(fn: () => T): T {
     const ctx: EventContext = {
       attributes: new Map([
+        ["log.type", "wide_event"],
         ["service.name", this.config["service.name"]],
         ["service.version", this.config["service.version"]],
         ["service.environment", this.config["service.environment"]],

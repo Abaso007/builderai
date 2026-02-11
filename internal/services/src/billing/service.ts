@@ -164,6 +164,20 @@ export class BillingService {
         staleTakeoverMs: 120_000,
         ownerStaleMs: ttlMs,
       })
+      this.wideEventHelpers?.addLock({
+        type: "normal",
+        resource: "subscription",
+        action: "acquire",
+        acquired,
+        ttl_ms: ttlMs,
+      })
+      if (!acquired) {
+        this.logger.warn("subscription lock acquire returned false; lock may be held", {
+          subscriptionId,
+          projectId,
+          ttlMs,
+        })
+      }
       if (!acquired) throw new UnPriceBillingError({ message: "SUBSCRIPTION_BUSY" })
     }
 
@@ -179,6 +193,14 @@ export class BillingService {
             if (stopped) return
             const elapsed = Date.now() - startedAt
             if (elapsed > maxHoldMs) {
+              this.wideEventHelpers?.addLock({
+                type: "normal",
+                resource: "subscription",
+                action: "heartbeat_stopped",
+                acquired: false,
+                ttl_ms: ttlMs,
+                max_hold_ms: maxHoldMs,
+              })
               this.logger.warn("subscription lock heartbeat maxHoldMs reached; stopping renew", {
                 subscriptionId,
                 projectId,
@@ -192,12 +214,26 @@ export class BillingService {
             try {
               const ok = await lock.extend({ ttlMs })
               if (!ok) {
+                this.wideEventHelpers?.addLock({
+                  type: "normal",
+                  resource: "subscription",
+                  action: "extend",
+                  acquired: false,
+                  ttl_ms: ttlMs,
+                })
                 this.logger.warn("subscription lock extend returned false; lock may be lost", {
                   subscriptionId,
                   projectId,
                 })
               }
             } catch (e) {
+              this.wideEventHelpers?.addLock({
+                type: "normal",
+                resource: "subscription",
+                action: "extend_error",
+                acquired: false,
+                ttl_ms: ttlMs,
+              })
               this.logger.error("subscription lock heartbeat extend failed", {
                 error: e instanceof Error ? e.message : String(e),
                 subscriptionId,

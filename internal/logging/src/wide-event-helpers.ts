@@ -2,6 +2,7 @@ import type {
   BusinessSchema,
   CustomerSchema,
   EntitlementsSchema,
+  LockSchema,
   WideEventAttributes,
   WideEventKey,
 } from "@unprice/logs"
@@ -28,6 +29,12 @@ export interface WideEventHelpers {
    * @param context - Cloud-related attributes
    */
   addCloud(context: z.infer<typeof CloudSchema>): void
+
+  /**
+   * Add lock context to the wide event.
+   * @param context - Lock-related attributes
+   */
+  addLock(context: z.infer<typeof LockSchema>): void
 
   /**
    * Add business context to the wide event.
@@ -133,6 +140,11 @@ export function createWideEventHelpers(
     addCloud(context: z.infer<typeof CloudSchema>): void {
       if (!logger) return
       logger.addMany({ cloud: context })
+    },
+
+    addLock(context: z.infer<typeof LockSchema>): void {
+      if (!logger) return
+      logger.addMany({ lock: context })
     },
 
     addBusiness(context: z.infer<typeof BusinessSchema>): void {
