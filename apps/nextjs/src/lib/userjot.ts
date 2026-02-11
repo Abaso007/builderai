@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto"
 import { env } from "~/env"
 
 export function getUserJotToken(userId: string) {
-  const secret = env.USERJOT_SECRET
+  const secret = env.USERJOT_SECRET?.trim()
 
   if (!secret) {
     return undefined

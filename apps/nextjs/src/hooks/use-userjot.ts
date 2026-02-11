@@ -83,9 +83,12 @@ export function useUserJot() {
 
   const identify = useCallback((user: UserJotUser | null) => {
     if (user && window.uj) {
-      // Debug log for production (remove once fixed)
       if (process.env.NODE_ENV === "production" && !user.signature) {
-        console.error("UserJot Error: Missing signature for user", user.id)
+        console.error(
+          "UserJot Error: Missing signature for user identify in production. Check USERJOT_SECRET.",
+          user.id
+        )
+        return
       }
       window.uj.identify(user)
     }
