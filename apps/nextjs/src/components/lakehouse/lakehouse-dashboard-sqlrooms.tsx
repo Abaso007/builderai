@@ -336,6 +336,17 @@ function LakehouseDashboardInner() {
         return `read_ndjson_auto('${url}', ignore_errors := true, maximum_object_size := 33554432, auto_detect := true)`
       }
 
+      // Normalize schema for sources that can drift across files (JSON vs string, etc.)
+      const buildSourceSelect = (source: TableSource, readExpr: string) => {
+        if (source !== "verification") {
+          return `SELECT * FROM ${readExpr}`
+        }
+
+        return `SELECT
+  * REPLACE (CAST(denied_reason AS VARCHAR) AS denied_reason)
+FROM ${readExpr}`
+      }
+
       // Helper function to load files for a specific source into a table
       const loadTableFromSource = async (source: TableSource, files: ManifestFile[]) => {
         const config = TABLE_CONFIG[source]
@@ -354,10 +365,11 @@ function LakehouseDashboardInner() {
           if (!file) continue
 
           const readExpr = buildReadFn(file.url)
+          const sourceSelect = buildSourceSelect(source, readExpr)
           const sql =
             i === 0
-              ? `CREATE TABLE ${config.tableName} AS SELECT * FROM ${readExpr}`
-              : `INSERT INTO ${config.tableName} SELECT * FROM ${readExpr}`
+              ? `CREATE TABLE ${config.tableName} AS ${sourceSelect}`
+              : `INSERT INTO ${config.tableName} ${sourceSelect}`
 
           await connector.query(sql)
         }
