@@ -8,6 +8,7 @@ import {
   createWideEventHelpers,
   createWideEventLogger,
 } from "@unprice/logging"
+import { shouldEmitLogsToBackend, shouldEmitMetrics } from "@unprice/logging/env"
 import { ApiKeysService } from "@unprice/services/apikey"
 import { CacheService } from "@unprice/services/cache"
 import { CustomerService } from "@unprice/services/customers"
@@ -68,16 +69,17 @@ export function init(): MiddlewareHandler<HonoEnv> {
     c.set("requestStartedAt", requestStartedAt)
     c.set("performanceStart", performanceStart)
 
-    const emitMetrics = c.env.EMIT_METRICS_LOGS.toString() === "true"
+    const emitLogsToBackend = shouldEmitLogsToBackend(c.env)
+    const emitMetrics = shouldEmitMetrics(c.env)
 
-    const logger = emitMetrics
+    const logger = emitLogsToBackend
       ? new AxiomLogger({
           apiKey: c.env.AXIOM_API_TOKEN,
           dataset: c.env.AXIOM_DATASET,
           requestId,
           environment: c.env.NODE_ENV,
           service: "api",
-          logLevel: c.env.VERCEL_ENV === "production" ? "warn" : "info",
+          logLevel: c.env.APP_ENV === "production" ? "warn" : "info",
           defaultFields: {
             path: c.req.path,
             version: c.env.VERSION,
@@ -87,7 +89,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
           requestId,
           environment: c.env.NODE_ENV,
           service: "api",
-          logLevel: c.env.VERCEL_ENV === "production" ? "warn" : "info",
+          logLevel: c.env.APP_ENV === "production" ? "warn" : "info",
           defaultFields: {
             path: c.req.path,
             version: c.env.VERSION,
@@ -167,7 +169,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
     })
 
     const analytics = new Analytics({
-      emit: c.env.EMIT_ANALYTICS.toString() === "true",
+      emit: true,
       tinybirdToken: c.env.TINYBIRD_TOKEN,
       tinybirdUrl: c.env.TINYBIRD_URL,
       logger,

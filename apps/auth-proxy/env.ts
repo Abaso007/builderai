@@ -4,7 +4,7 @@ import { z } from "zod"
 export const env = createEnv({
   shared: {
     NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
-    VERCEL_ENV: z.enum(["development", "preview", "production"]).default("development"),
+    APP_ENV: z.enum(["development", "preview", "production"]).default("development"),
   },
   server: {
     AUTH_REDIRECT_PROXY_URL: z.string().min(1),

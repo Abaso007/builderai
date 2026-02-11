@@ -1,4 +1,4 @@
-name: Deploy API Staging
+name: Deploy API
 on:
   workflow_call:
     secrets:
@@ -106,10 +106,8 @@ jobs:
           vars: |
             VERSION
             NODE_ENV
-            EMIT_METRICS_LOGS
             DRIZZLE_LOG
-            VERCEL_ENV
-            EMIT_ANALYTICS
+            APP_ENV
         env:
           CLOUDFLARE_API_TOKEN: ${{ env.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ZONE_ID: ${{ env.CLOUDFLARE_ZONE_ID }}
@@ -119,12 +117,10 @@ jobs:
           AUTH_SECRET: ${{ env.AUTH_SECRET }}
           # we are passing the preview database url to the deploy action
           DATABASE_URL: ${{ steps.db-url.outputs.out || env.DATABASE_URL }}
-          EMIT_METRICS_LOGS: ${{ env.EMIT_METRICS_LOGS }}
-          EMIT_ANALYTICS: ${{ env.EMIT_ANALYTICS }}
           VERSION: ${{ env.VERSION }}
           NODE_ENV: ${{ env.NODE_ENV }}
           DRIZZLE_LOG: ${{ env.DRIZZLE_LOG }}
-          VERCEL_ENV: ${{ env.VERCEL_ENV }}
+          APP_ENV: ${{ env.APP_ENV }}
           ENCRYPTION_KEY: ${{ env.ENCRYPTION_KEY }}
           DATABASE_READ1_URL: ${{ env.DATABASE_READ1_URL || '' }}
           DATABASE_READ2_URL: ${{ env.DATABASE_READ2_URL || '' }}

@@ -77,7 +77,7 @@ jobs:
           pnpm generate
           pnpm migrate:custom
         env:
-          VERCEL_ENV: preview
+          APP_ENV: preview
           NODE_ENV: production
           DRIZZLE_LOG: "false"
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
@@ -212,7 +212,7 @@ jobs:
           vercel-org-id: ${{ env.VERCEL_ORG_ID}}  #Required
           vercel-project-id: ${{ env.VERCEL_PROJECT_AUTH_UNPRICE_ID }} #Required
           # auth proxy is always prod because it doesn't change anything
-          vercel-args: '--prod --env VERCEL_ENV=production --env NODE_ENV=production --build-env NODE_ENV=production'
+          vercel-args: '--prod --env APP_ENV=production --env NODE_ENV=production --build-env NODE_ENV=production'
           working-directory: ./
 
   deploy-app-preview-vercel:
@@ -279,7 +279,7 @@ jobs:
           vercel-org-id: ${{ env.VERCEL_ORG_ID}}  #Required
           vercel-project-id: ${{ env.VERCEL_PROJECT_UNPRICE_ID}} #Required
           working-directory: ./
-          vercel-args: '--env VERCEL_ENV=${{ env.VERCEL_ENV }} --env NODE_ENV=${{ env.NODE_ENV }} --env DATABASE_URL=${{ steps.db-url.outputs.out }} --env NEXT_PUBLIC_APP_DOMAIN=pr-${{ github.event.number }}-unprice.vercel.app --env NEXT_PUBLIC_VERCEL_ENV=${{ env.VERCEL_ENV }} --build-env VERCEL_ENV=${{ env.VERCEL_ENV }} --build-env NODE_ENV=${{ env.NODE_ENV }} --build-env DATABASE_URL=${{ steps.db-url.outputs.out }} --build-env NEXT_PUBLIC_APP_DOMAIN=pr-${{ github.event.number }}-unprice.vercel.app --build-env NEXT_PUBLIC_VERCEL_ENV=${{ env.VERCEL_ENV }}'
+          vercel-args: '--env APP_ENV=${{ env.APP_ENV }} --env NODE_ENV=${{ env.NODE_ENV }} --env DATABASE_URL=${{ steps.db-url.outputs.out }} --env NEXT_PUBLIC_APP_DOMAIN=pr-${{ github.event.number }}-unprice.vercel.app --env NEXT_PUBLIC_APP_ENV=${{ env.APP_ENV }} --build-env APP_ENV=${{ env.APP_ENV }} --build-env NODE_ENV=${{ env.NODE_ENV }} --build-env DATABASE_URL=${{ steps.db-url.outputs.out }} --build-env NEXT_PUBLIC_APP_DOMAIN=pr-${{ github.event.number }}-unprice.vercel.app --build-env NEXT_PUBLIC_APP_ENV=${{ env.APP_ENV }}'
           alias-domains: |
             pr-${{ github.event.number }}-unprice.vercel.app
             app-pr-${{ github.event.number }}-unprice.vercel.app

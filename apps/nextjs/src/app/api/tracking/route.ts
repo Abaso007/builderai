@@ -50,7 +50,7 @@ const trackPageHit = async (
       return "Bot detected"
     }
 
-    const ip = env.VERCEL_ENV === "production" ? ipAddress(req) : LOCALHOST_IP
+    const ip = env.APP_ENV === "production" ? ipAddress(req) : LOCALHOST_IP
 
     // get continent, region & geolocation data
     // interesting, geolocation().region is Vercel's edge region – NOT the actual region

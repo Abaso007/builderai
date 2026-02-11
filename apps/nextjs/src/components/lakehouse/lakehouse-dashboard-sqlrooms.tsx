@@ -52,6 +52,7 @@ interface ManifestFile {
   source?: "usage" | "verification" | "metadata"
   count: number
   bytes: number
+  etag?: string
 }
 
 // ============================================================================
@@ -227,6 +228,7 @@ function LakehouseDashboardInner() {
   const [manualQueryError, setManualQueryError] = useState<string | null>(null)
   const [loadedFileCount, setLoadedFileCount] = useState(0)
   const [loadedTables, setLoadedTables] = useState<string[]>([])
+  const loadedManifestFingerprintRef = useRef<string | null>(null)
   const resultsRef = useRef<HTMLDivElement | null>(null)
   const sqlShellRef = useRef<HTMLDivElement | null>(null)
   const pendingScrollRef = useRef(false)
@@ -274,8 +276,22 @@ function LakehouseDashboardInner() {
       const manifestResult = typedUrls.result?.manifest
 
       if (!manifestResult?.files?.length) {
+        loadedManifestFingerprintRef.current = null
         setLoadedFileCount(0)
         setLoadedTables([])
+        setIsLoadingData(false)
+        return
+      }
+
+      const manifestFingerprint = manifestResult.files
+        .map((file) => `${file.source ?? "usage"}|${file.key}|${file.etag ?? ""}|${file.bytes}`)
+        .sort()
+        .join("\n")
+      if (
+        loadedManifestFingerprintRef.current === manifestFingerprint &&
+        loadedTables.length > 0 &&
+        loadedFileCount > 0
+      ) {
         setIsLoadingData(false)
         return
       }
@@ -369,6 +385,7 @@ function LakehouseDashboardInner() {
       }
 
       await refreshTableSchemas()
+      loadedManifestFingerprintRef.current = manifestFingerprint
       setLoadedFileCount(totalFiles)
       setLoadedTables(tablesLoaded)
 
@@ -389,7 +406,7 @@ function LakehouseDashboardInner() {
     } finally {
       setIsLoadingData(false)
     }
-  }, [urlsData, getConnector, refreshTableSchemas])
+  }, [urlsData, getConnector, refreshTableSchemas, loadedTables.length, loadedFileCount])
 
   // Load data when URLs change
   useEffect(() => {
@@ -400,6 +417,7 @@ function LakehouseDashboardInner() {
 
   // Reset state when interval changes to force reload
   useEffect(() => {
+    loadedManifestFingerprintRef.current = null
     setLoadedTables([])
     setLoadedFileCount(0)
     setExecutedQuery(null)

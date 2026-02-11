@@ -46,6 +46,7 @@ export const fileDescriptorSchema = z.object({
   source: fileSourceSchema,
   count: z.number(),
   bytes: z.number(),
+  etag: z.string().optional(),
 })
 
 export const manifestResponseSchema = z.object({
@@ -61,6 +62,7 @@ export type FileDescriptor = z.infer<typeof fileDescriptorSchema>
 export type ManifestResponse = z.infer<typeof manifestResponseSchema>
 
 const tags = ["lakehouse"]
+const SIGNED_URL_TTL_SECONDS = 60 * 60 * 24 // 24 hours
 
 export const route = createRoute({
   path: "/v1/lakehouse/manifest",
@@ -136,7 +138,7 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
     }
 
     const listAll = async (prefix: string) => {
-      const objects: { key: string; size?: number }[] = []
+      const objects: { key: string; size?: number; etag?: string; uploaded?: Date }[] = []
       let cursor: string | undefined = undefined
       do {
         const res = await c.env.LAKEHOUSE!.list({ prefix, cursor })
@@ -148,12 +150,20 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
 
     const dates = getDateRangeUTC(range)
     const rawByDay = new Map<string, RawFileDescriptor[]>()
-    const allFiles: Array<{ day: string; source: LakehouseSource; key: string; bytes: number }> = []
+    const dayLatestUploadedAtMs = new Map<string, number>()
+    const allFiles: Array<{
+      day: string
+      source: LakehouseSource
+      key: string
+      bytes: number
+      etag?: string
+    }> = []
 
     const sources: LakehouseSource[] = ["usage", "verification", "metadata"]
 
     for (const day of dates) {
       rawByDay.set(day, [])
+      dayLatestUploadedAtMs.set(day, 0)
       for (const source of sources) {
         const prefix = getLakehouseRawPrefix(projectID, source, day, customerId)
         const objects = await listAll(prefix)
@@ -168,36 +178,46 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
 
           rawByDay.get(day)!.push(rawDesc)
 
-          allFiles.push({ day, source, key: obj.key, bytes: obj.size ?? 0 })
+          allFiles.push({ day, source, key: obj.key, bytes: obj.size ?? 0, etag: obj.etag })
+          const uploadedAtMs = obj.uploaded ? new Date(obj.uploaded).getTime() : 0
+          const currentLatest = dayLatestUploadedAtMs.get(day) ?? 0
+          dayLatestUploadedAtMs.set(day, Math.max(currentLatest, uploadedAtMs))
         }
       }
     }
+    allFiles.sort((a, b) => a.key.localeCompare(b.key))
 
     // Derive from request so it works in Workers (preview/prod/localhost). Config uses process.env
-    // which is not set in Cloudflare Workers runtime — only c.env has VERCEL_ENV.
+    // which is not set in Cloudflare Workers runtime — only c.env has APP_ENV.
     const host = c.req.header("x-forwarded-host") ?? c.req.header("host") ?? "api.unprice.dev"
     const protocol =
       c.req.header("x-forwarded-proto") ?? (host.includes("localhost") ? "http" : "https")
     const API_URL = `${protocol}://${host}/v1/lakehouse/file`
-    const exp = Math.floor(Date.now() / 1000) + 60 * 60 // 1 hour
+    const nowEpochSeconds = Math.floor(Date.now() / 1000)
+    const exp = (Math.floor(nowEpochSeconds / SIGNED_URL_TTL_SECONDS) + 1) * SIGNED_URL_TTL_SECONDS
 
     const files: FileDescriptor[] = []
-    for (const { day, source, key, bytes } of allFiles) {
+    for (const { day, source, key, bytes, etag } of allFiles) {
       const sig = await signLakehouseKey(c.env.AUTH_SECRET, key, exp)
+      const versionQuery = etag ? `&v=${encodeURIComponent(etag)}` : ""
       files.push({
-        url: `${API_URL}?key=${encodeURIComponent(key)}&exp=${exp}&sig=${sig}`,
+        url: `${API_URL}?key=${encodeURIComponent(key)}&exp=${exp}&sig=${sig}${versionQuery}`,
         key,
         day,
         type: source === "metadata" ? "metadata" : "raw",
         source,
         count: 0,
         bytes,
+        etag,
       })
     }
 
     const days: DayManifest[] = dates.map((day) => ({
       day,
-      updatedAt: new Date().toISOString(),
+      updatedAt:
+        dayLatestUploadedAtMs.get(day) && (dayLatestUploadedAtMs.get(day) ?? 0) > 0
+          ? new Date(dayLatestUploadedAtMs.get(day) ?? 0).toISOString()
+          : `${day}T00:00:00.000Z`,
       raw: rawByDay.get(day) ?? [],
       compact: null,
     }))
@@ -212,6 +232,9 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
       {
         manifest: response,
       },
-      HttpStatusCodes.OK
+      HttpStatusCodes.OK,
+      {
+        "Cache-Control": "private, max-age=60, stale-while-revalidate=300",
+      }
     )
   })

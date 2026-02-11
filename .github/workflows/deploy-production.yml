@@ -51,7 +51,7 @@ jobs:
         run: |
           pnpm migrate:custom
         env:
-          VERCEL_ENV: production
+          APP_ENV: production
           NODE_ENV: production
           DRIZZLE_LOG: "false"
           DATABASE_URL: ${{ env.DATABASE_URL }}
@@ -127,7 +127,7 @@ jobs:
           vercel-org-id: ${{ env.VERCEL_ORG_ID}}  #Required
           vercel-project-id: ${{ env.VERCEL_PROJECT_AUTH_UNPRICE_ID }} #Required
           # always prod because the auth proxy link has to be stable
-          vercel-args: '--env VERCEL_ENV=production --env NODE_ENV=production --prod --build-env VERCEL_ENV=production --build-env NODE_ENV=production'
+          vercel-args: '--env APP_ENV=production --env NODE_ENV=production --prod --build-env APP_ENV=production --build-env NODE_ENV=production'
           working-directory: ./
 
   deploy-production:
@@ -177,7 +177,7 @@ jobs:
           vercel-org-id: ${{ env.VERCEL_ORG_ID}}  #Required
           vercel-project-id: ${{ env.VERCEL_PROJECT_UNPRICE_ID}} #Required
           working-directory: ./
-          vercel-args: '--prod --env NEXT_PUBLIC_APP_DOMAIN=unprice.dev --env NEXT_PUBLIC_VERCEL_ENV=production --build-env NEXT_PUBLIC_APP_DOMAIN=unprice.dev --build-env NEXT_PUBLIC_VERCEL_ENV=production'
+          vercel-args: '--prod --env NEXT_PUBLIC_APP_DOMAIN=unprice.dev --env NEXT_PUBLIC_APP_ENV=production --build-env NEXT_PUBLIC_APP_DOMAIN=unprice.dev --build-env NEXT_PUBLIC_APP_ENV=production'
           alias-domains: |
             unprice.vercel.app
 

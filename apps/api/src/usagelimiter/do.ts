@@ -19,6 +19,7 @@ import {
   createWideEventHelpers,
   createWideEventLogger,
 } from "@unprice/logging"
+import { shouldEmitLogsToBackend, shouldEmitMetrics } from "@unprice/logging/env"
 import { CacheService } from "@unprice/services/cache"
 import type { DenyReason } from "@unprice/services/customers"
 import { EntitlementService } from "@unprice/services/entitlements"
@@ -141,25 +142,26 @@ export class DurableObjectUsagelimiter extends Server {
     this._env = env
 
     // set a revalidation period of 5 secs for development
-    if (env.VERCEL_ENV === "development") {
+    if (env.APP_ENV === "development") {
       this.TTL_ANALYTICS = 1000 * 10 // 10 seconds
       this.SAMPLE_RATE = 1
     }
 
     // set a revalidation period of 5 mins for preview
-    if (env.VERCEL_ENV === "preview") {
+    if (env.APP_ENV === "preview") {
       this.TTL_ANALYTICS = 1000 * 60 // 1 minute
       this.SAMPLE_RATE = 0.1
     }
 
-    const emitMetrics = env.EMIT_METRICS_LOGS.toString() === "true"
+    const emitLogsToBackend = shouldEmitLogsToBackend(env)
+    const emitMetrics = shouldEmitMetrics(env)
 
-    this.logger = emitMetrics
+    this.logger = emitLogsToBackend
       ? new AxiomLogger({
           apiKey: env.AXIOM_API_TOKEN,
           dataset: env.AXIOM_DATASET,
           requestId: this.ctx.id.toString(),
-          logLevel: env.VERCEL_ENV === "production" ? "warn" : "info",
+          logLevel: env.APP_ENV === "production" ? "warn" : "info",
           environment: env.NODE_ENV,
           service: "usagelimiter",
           defaultFields: {
@@ -171,7 +173,7 @@ export class DurableObjectUsagelimiter extends Server {
           requestId: this.ctx.id.toString(),
           service: "usagelimiter",
           environment: env.NODE_ENV,
-          logLevel: env.VERCEL_ENV === "production" ? "warn" : "info",
+          logLevel: env.APP_ENV === "production" ? "warn" : "info",
           defaultFields: {
             durableObjectId: this.ctx.id.toString(),
             version: this._env.VERSION,
@@ -240,7 +242,7 @@ export class DurableObjectUsagelimiter extends Server {
       state: this.ctx,
       logger: this.logger,
       analytics: new Analytics({
-        emit: env.EMIT_ANALYTICS.toString() === "true",
+        emit: true,
         tinybirdToken: env.TINYBIRD_TOKEN,
         tinybirdUrl: env.TINYBIRD_URL,
         logger: this.logger,
@@ -273,7 +275,7 @@ export class DurableObjectUsagelimiter extends Server {
       storage: this.storage,
       logger: this.logger,
       analytics: new Analytics({
-        emit: env.EMIT_ANALYTICS.toString() === "true",
+        emit: true,
         tinybirdToken: env.TINYBIRD_TOKEN,
         tinybirdUrl: env.TINYBIRD_URL,
         logger: this.logger,

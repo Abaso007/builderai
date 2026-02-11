@@ -101,9 +101,22 @@ export const registerGetLakehouseFileV1 = (app: App) =>
       return c.json({ error: "File not found" }, 404)
     }
 
+    const cacheControl = authHeader
+      ? "private, max-age=0, must-revalidate"
+      : "public, max-age=31536000, immutable"
+    const quotedEtag = obj.etag ? `"${obj.etag}"` : undefined
+
     // Check for 304 Not Modified
-    if (ifNoneMatch && obj.etag && ifNoneMatch === `"${obj.etag}"`) {
-      return new Response(null, { status: 304 })
+    if (ifNoneMatch && quotedEtag) {
+      const requestEtags = ifNoneMatch.split(",").map((value) => value.trim())
+      const isNotModified = requestEtags.includes("*") || requestEtags.includes(quotedEtag)
+      if (isNotModified) {
+        const headers = new Headers()
+        headers.set("ETag", quotedEtag)
+        headers.set("Cache-Control", cacheControl)
+        headers.set("Vary", "Authorization")
+        return new Response(null, { status: 304, headers })
+      }
     }
 
     // Stream the file (return raw Response so type matches OpenAPI stream/binary and body is not JSON-serialized)
@@ -114,8 +127,11 @@ export const registerGetLakehouseFileV1 = (app: App) =>
       isParquet ? "application/vnd.apache.parquet" : "application/x-ndjson"
     )
     headers.set("Content-Length", obj.size.toString())
-    headers.set("ETag", `"${obj.etag}"`)
-    headers.set("Cache-Control", "public, max-age=31536000, immutable")
+    if (quotedEtag) {
+      headers.set("ETag", quotedEtag)
+    }
+    headers.set("Cache-Control", cacheControl)
+    headers.set("Vary", "Authorization")
 
     return new Response(obj.body, { status: HttpStatusCodes.OK, headers })
   })

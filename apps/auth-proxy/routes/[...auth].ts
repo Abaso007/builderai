@@ -9,7 +9,7 @@ import { env } from "../env"
 export default eventHandler((event) =>
   Auth(toWebRequest(event), {
     secret: env.AUTH_SECRET,
-    trustHost: Boolean(env.VERCEL_ENV) || env.NODE_ENV === "development",
+    trustHost: Boolean(env.APP_ENV) || env.NODE_ENV === "development",
     redirectProxyUrl: env.AUTH_REDIRECT_PROXY_URL,
     basePath: "/auth",
     providers: [

@@ -104,7 +104,7 @@ export class UsageLimiterService implements UsageLimiter {
   // kid of hard to reach the limit as cloudflare can hit others isolates
   // but just in case we limit it to 1000 entries
   private updateCache(key: string, result: VerificationResult) {
-    if (env.VERCEL_ENV === "production" && !result.allowed) {
+    if (env.APP_ENV === "production" && !result.allowed) {
       // enforce max size - remove oldest entry if at limit
       if (this.hashCache.size >= 1000) {
         // remove first (oldest) entry
@@ -205,7 +205,7 @@ export class UsageLimiterService implements UsageLimiter {
     const parsedCached = cached ? (JSON.parse(cached) as VerificationResult) : undefined
 
     // if we hit the same isolate we can return the cached result, only for request that are denied.
-    if (parsedCached && parsedCached.allowed === false && env.VERCEL_ENV === "production") {
+    if (parsedCached && parsedCached.allowed === false && env.APP_ENV === "production") {
       return Ok({ ...parsedCached, cacheHit: true })
     }
 
@@ -294,7 +294,7 @@ export class UsageLimiterService implements UsageLimiter {
   ): Promise<Result<ReportUsageResult, FetchError | UnPriceCustomerError>> {
     // in dev we use the idempotence key and timestamp to deduplicate reuse the same key for the same request
     const idempotentKey =
-      env.VERCEL_ENV === "production"
+      env.APP_ENV === "production"
         ? `${data.idempotenceKey}`
         : `${data.idempotenceKey}:${data.timestamp}`
 

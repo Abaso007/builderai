@@ -13,7 +13,7 @@ export function newApp() {
   })
 
   // TODO: rename vercel env to env (it's funny using it in cloudflare workers)
-  if (env.VERCEL_ENV !== "production") {
+  if (env.APP_ENV !== "production") {
     app.use(prettyJSON())
   }
 
@@ -47,7 +47,7 @@ export function newApp() {
       version: "1.0.0",
     },
     servers:
-      env.VERCEL_ENV === "production"
+      env.APP_ENV === "production"
         ? [
             {
               url: "https://api.unprice.dev",

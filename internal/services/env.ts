@@ -6,7 +6,7 @@ import { z } from "zod"
 export const env = createEnv({
   shared: {
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-    VERCEL_ENV: z.enum(["development", "preview", "production"]).default("development"),
+    APP_ENV: z.enum(["development", "preview", "production"]).default("development"),
   },
   server: {
     ENCRYPTION_KEY: z.string().min(1),

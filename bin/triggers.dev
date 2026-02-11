@@ -60,7 +60,7 @@ if [ "$MODE_ID" = "dev" ]; then
   # override tinybird host
   TB_HOST="http://localhost:7181"
   NODE_ENV="development"
-  VERCEL_ENV="development"
+  APP_ENV="development"
   # REDIS_URL="http://localhost:8079"
   AUTH_REDIRECT_PROXY_URL="http://localhost:3100/auth"
   # REDIS_TOKEN="example_token"
@@ -69,8 +69,6 @@ if [ "$MODE_ID" = "dev" ]; then
   # INFO: Replace with local key
   UNPRICE_API_KEY="unprice_dev_1234567890"
   DRIZZLE_LOG="false"
-  EMIT_METRICS_LOGS="false"
-  EMIT_ANALYTICS="true"
   UPSTASH_REDIS_REST_URL="http://localhost:8079"
   UPSTASH_REDIS_REST_TOKEN="unprice"
 
@@ -125,10 +123,10 @@ if [ "$MODE_ID" = "dev" ]; then
   cd ../../
 
   echo "Applying migrations"
-  infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN=$TB_TOKEN TINYBIRD_URL=$TB_HOST AUTH_REDIRECT_PROXY_URL=$AUTH_REDIRECT_PROXY_URL UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY DRIZZLE_LOG=$DRIZZLE_LOG EMIT_METRICS_LOGS=$EMIT_METRICS_LOGS EMIT_ANALYTICS=$EMIT_ANALYTICS NODE_ENV=$NODE_ENV VERCEL_ENV=$VERCEL_ENV pnpm --filter db migrate:custom
+  infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN=$TB_TOKEN TINYBIRD_URL=$TB_HOST AUTH_REDIRECT_PROXY_URL=$AUTH_REDIRECT_PROXY_URL UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY DRIZZLE_LOG=$DRIZZLE_LOG NODE_ENV=$NODE_ENV APP_ENV=$APP_ENV pnpm --filter db migrate:custom
 
   echo "Starting the application"
-  infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN=$TB_TOKEN TINYBIRD_URL=$TB_HOST AUTH_REDIRECT_PROXY_URL=$AUTH_REDIRECT_PROXY_URL UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY DRIZZLE_LOG=$DRIZZLE_LOG EMIT_METRICS_LOGS=$EMIT_METRICS_LOGS EMIT_ANALYTICS=$EMIT_ANALYTICS UPSTASH_REDIS_REST_URL=$UPSTASH_REDIS_REST_URL UPSTASH_REDIS_REST_TOKEN=$UPSTASH_REDIS_REST_TOKEN NODE_ENV=$NODE_ENV VERCEL_ENV=$VERCEL_ENV pnpm --filter jobs run dev:trigger
+  infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN=$TB_TOKEN TINYBIRD_URL=$TB_HOST AUTH_REDIRECT_PROXY_URL=$AUTH_REDIRECT_PROXY_URL UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY DRIZZLE_LOG=$DRIZZLE_LOG UPSTASH_REDIS_REST_URL=$UPSTASH_REDIS_REST_URL UPSTASH_REDIS_REST_TOKEN=$UPSTASH_REDIS_REST_TOKEN NODE_ENV=$NODE_ENV APP_ENV=$APP_ENV pnpm --filter jobs run dev:trigger
 
 elif [ "$MODE_ID" = "preview" ]; then
   # banner to show the user that we are using the preview environment
@@ -143,7 +141,7 @@ elif [ "$MODE_ID" = "preview" ]; then
   # get the admin token from infisical
   TB_ADMIN_TOKEN=$(infisical secrets get TB_ADMIN_TOKEN --env=preview --path=/ci --raw-value)
   NODE_ENV="production"
-  VERCEL_ENV="preview"
+  APP_ENV="preview"
 
   # curl -X GET -H "Authorization: Bearer $TB_TOKEN" "http://localhost:7181/v0/pipes"
   cd internal/analytics
@@ -154,7 +152,7 @@ elif [ "$MODE_ID" = "preview" ]; then
   cd ../../
 
   # override the token in the env
-  infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN="$TB_ADMIN_TOKEN" NODE_ENV="$NODE_ENV" VERCEL_ENV="$VERCEL_ENV" TINYBIRD_URL="$TB_HOST" pnpm run dev
+  infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN="$TB_ADMIN_TOKEN" NODE_ENV="$NODE_ENV" APP_ENV="$APP_ENV" TINYBIRD_URL="$TB_HOST" pnpm run dev
 else
   echo "Invalid mode: $MODE_ID"
   exit 1

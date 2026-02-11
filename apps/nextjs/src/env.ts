@@ -9,7 +9,7 @@ export const env = createEnv({
   shared: {
     VERCEL: z.enum(["1", "0"]).default("0"),
     NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
-    VERCEL_ENV: z.enum(["development", "preview", "production"]).default("development"),
+    APP_ENV: z.enum(["development", "preview", "production"]).default("development"),
   },
   server: {
     VERCEL_PROJECT_UNPRICE_ID: z.string(),

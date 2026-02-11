@@ -11,11 +11,11 @@ import { db } from "./db"
 import { env } from "./env"
 import { createUser } from "./utils"
 
-const useSecureCookies = env.VERCEL_ENV === "production"
+const useSecureCookies = env.APP_ENV === "production"
 const log = console // TODO: create a logger for this
 
 export const authConfig: NextAuthConfig = {
-  trustHost: Boolean(env.VERCEL_ENV) || env.NODE_ENV === "development",
+  trustHost: Boolean(env.APP_ENV) || env.NODE_ENV === "development",
   logger: {
     debug: (message, metadata) => log.debug(message, { metadata }),
     error: (error) => log.error(error),

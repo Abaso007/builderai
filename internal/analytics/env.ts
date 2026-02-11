@@ -5,7 +5,7 @@ import * as z from "zod"
 export const env = createEnv({
   shared: {
     NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
-    VERCEL_ENV: z.enum(["development", "preview", "production"]).default("development"),
+    APP_ENV: z.enum(["development", "preview", "production"]).default("development"),
   },
   server: {
     TINYBIRD_TOKEN: z.string(),
@@ -13,14 +13,6 @@ export const env = createEnv({
     R2_ACCESS_KEY_ID: z.string().optional(),
     R2_SECRET_ACCESS_KEY: z.string().optional(),
     R2_ACCOUNT_ID: z.string().optional(),
-    EMIT_ANALYTICS: z
-      .string()
-      .optional()
-      .default("true")
-      .transform((v) => {
-        return v === "true"
-      })
-      .pipe(z.boolean()),
   },
   runtimeEnv: process.env,
   skipValidation: !!process.env.SKIP_ENV_VALIDATION || process.env.npm_lifecycle_event === "lint",
