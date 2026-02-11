@@ -21,7 +21,7 @@ import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { useIntervalFilter } from "~/hooks/use-filter"
 import { useQueryInvalidation } from "~/hooks/use-query-invalidation"
 import { useTRPC } from "~/trpc/client"
-import { ANALYTICS_STALE_TIME } from "~/trpc/shared"
+import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
 
 type FeatureUsageEvent = Awaited<ReturnType<Analytics["getFeatureHeatmap"]>>["data"][number]
 
@@ -84,7 +84,7 @@ export function FeatureUsageHeatmapContent() {
         interval_days: intervalFilter.intervalDays,
       },
       {
-        staleTime: ANALYTICS_STALE_TIME,
+        ...ANALYTICS_CONFIG_REALTIME,
       }
     )
   )

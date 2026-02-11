@@ -20,7 +20,7 @@ import { SuperLink } from "~/components/super-link"
 import { useIntervalFilter, usePageFilter } from "~/hooks/use-filter"
 import { useQueryInvalidation } from "~/hooks/use-query-invalidation"
 import { useTRPC } from "~/trpc/client"
-import { ANALYTICS_STALE_TIME } from "~/trpc/shared"
+import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
 
 const chartConfig = {
   desktop_visits: {
@@ -131,7 +131,7 @@ export function PageVisits({ pageId }: { pageId?: string } = {}) {
       },
       {
         enabled: isSelected,
-        staleTime: ANALYTICS_STALE_TIME,
+        ...ANALYTICS_CONFIG_REALTIME,
       }
     )
   )

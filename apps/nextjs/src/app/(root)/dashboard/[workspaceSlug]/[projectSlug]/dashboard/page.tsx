@@ -10,7 +10,7 @@ import { DashboardShell } from "~/components/layout/dashboard-shell"
 import { entitlementFlag } from "~/lib/flags"
 import { intervalParams } from "~/lib/searchParams"
 import { HydrateClient, batchPrefetch, trpc } from "~/trpc/server"
-import { ANALYTICS_STALE_TIME } from "~/trpc/shared"
+import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
 import OverviewStats, { OverviewStatsSkeleton } from "./_components/overview-stats"
 import { PageVisits, PageVisitsSkeleton } from "./_components/page-visits"
 import { PlansConversion, PlansConversionSkeleton } from "./_components/plans-convertion"
@@ -34,7 +34,7 @@ export default async function DashboardOverview(props: {
         interval: filter.intervalFilter,
       },
       {
-        staleTime: ANALYTICS_STALE_TIME,
+        ...ANALYTICS_CONFIG_REALTIME,
       }
     ),
     trpc.analytics.getVerifications.queryOptions(
@@ -42,7 +42,7 @@ export default async function DashboardOverview(props: {
         interval_days: interval.intervalDays,
       },
       {
-        staleTime: ANALYTICS_STALE_TIME,
+        ...ANALYTICS_CONFIG_REALTIME,
       }
     ),
     ...(isPagesEnabled
@@ -52,7 +52,7 @@ export default async function DashboardOverview(props: {
               interval_days: interval.intervalDays,
             },
             {
-              staleTime: ANALYTICS_STALE_TIME,
+              ...ANALYTICS_CONFIG_REALTIME,
             }
           ),
           trpc.analytics.getPagesOverview.queryOptions(
@@ -61,7 +61,7 @@ export default async function DashboardOverview(props: {
               page_id: "all",
             },
             {
-              staleTime: ANALYTICS_STALE_TIME,
+              ...ANALYTICS_CONFIG_REALTIME,
             }
           ),
         ]

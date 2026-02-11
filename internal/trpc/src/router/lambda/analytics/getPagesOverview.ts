@@ -21,30 +21,24 @@ export const getPagesOverview = protectedProjectProcedure
     }
 
     if (withAllPage) {
-      const cacheKey = `${project_id}:all:${interval_days}`
-      const result = await opts.ctx.cache.getPagesOverview.swr(cacheKey, async () => {
-        const result = await opts.ctx.analytics
+      try {
+        const data = await opts.ctx.analytics
           .getPagesOverview({
             interval_days,
             project_id,
           })
           .then((res) => res.data)
 
-        return result
-      })
-
-      if (result.err) {
-        opts.ctx.logger.error(result.err.message, {
+        return { data: data ?? [] }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to fetch pages overview"
+        opts.ctx.logger.error(message, {
           project_id,
           interval_days,
         })
 
-        return { data: [], error: result.err.message }
+        return { data: [], error: message }
       }
-
-      const data = result.val ?? []
-
-      return { data }
     }
 
     const page = await opts.ctx.db.query.pages.findFirst({
@@ -55,9 +49,8 @@ export const getPagesOverview = protectedProjectProcedure
       return { data: [], error: "Page not found" }
     }
 
-    const cacheKey = `${project_id}:${page.id}:${interval_days}`
-    const result = await opts.ctx.cache.getPagesOverview.swr(cacheKey, async () => {
-      const result = await opts.ctx.analytics
+    try {
+      const data = await opts.ctx.analytics
         .getPagesOverview({
           page_id: page.id,
           interval_days,
@@ -65,19 +58,14 @@ export const getPagesOverview = protectedProjectProcedure
         })
         .then((res) => res.data)
 
-      return result
-    })
-
-    if (result.err) {
-      opts.ctx.logger.error(result.err.message, {
+      return { data: data ?? [] }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to fetch pages overview"
+      opts.ctx.logger.error(message, {
         project_id,
         interval_days,
       })
 
-      return { data: [], error: result.err.message }
+      return { data: [], error: message }
     }
-
-    const data = result.val ?? []
-
-    return { data }
   })

@@ -24,8 +24,7 @@ export const getOverviewStats = protectedProjectProcedure
     const interval = opts.input.interval
     const preparedInterval = prepareInterval(interval)
 
-    const cacheKey = `${project_id}:${preparedInterval.start}:${preparedInterval.end}`
-    const result = await opts.ctx.cache.getOverviewStats.swr(cacheKey, async () => {
+    try {
       const data = await opts.ctx.db.query.subscriptions.findMany({
         where: (table, { eq }) => eq(table.projectId, project_id),
         columns: {
@@ -125,19 +124,14 @@ export const getOverviewStats = protectedProjectProcedure
       const displayAmount = toDecimal(total, ({ value }) => Number(value))
       stats.totalRevenue.total = displayAmount
 
-      return stats
-    })
-
-    if (result.err) {
-      opts.ctx.logger.error(result.err.message, {
+      return { stats }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to fetch overview stats"
+      opts.ctx.logger.error(message, {
         project_id,
         interval,
       })
 
-      return { stats: {}, error: result.err.message }
+      return { stats: {}, error: message }
     }
-
-    const stats = result.val ?? {}
-
-    return { stats }
   })

@@ -5,7 +5,7 @@ import { IntervalFilter } from "~/components/analytics/interval-filter"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import { intervalParams } from "~/lib/searchParams"
 import { HydrateClient, batchPrefetch, trpc } from "~/trpc/server"
-import { ANALYTICS_STALE_TIME } from "~/trpc/shared"
+import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
 import { LatencyTable, LatencyTableSkeleton } from "../_components/latency-table"
 import TabsDashboard from "../_components/tabs-dashboard"
 
@@ -27,7 +27,7 @@ export default async function DashboardLatency(props: {
         interval_days: interval.intervalDays,
       },
       {
-        staleTime: ANALYTICS_STALE_TIME,
+        ...ANALYTICS_CONFIG_REALTIME,
       }
     ),
   ])

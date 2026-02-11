@@ -7,7 +7,7 @@ import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
 import { useIntervalFilter } from "~/hooks/use-filter"
 import { useQueryInvalidation } from "~/hooks/use-query-invalidation"
 import { useTRPC } from "~/trpc/client"
-import { ANALYTICS_STALE_TIME } from "~/trpc/shared"
+import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
 import { columns } from "./plans/columns"
 
 export function PlansConversionSkeleton() {
@@ -48,7 +48,7 @@ export function PlansConversion() {
         interval_days: intervalFilter.intervalDays,
       },
       {
-        staleTime: ANALYTICS_STALE_TIME,
+        ...ANALYTICS_CONFIG_REALTIME,
       }
     )
   )

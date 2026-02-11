@@ -21,8 +21,7 @@ export const getPlansStats = protectedProjectProcedure
     const interval = opts.input.interval
     const preparedInterval = prepareInterval(interval)
 
-    const cacheKey = `${project_id}:${preparedInterval.start}:${preparedInterval.end}`
-    const result = await opts.ctx.cache.getPlansStats.swr(cacheKey, async () => {
+    try {
       // for now I want to get:
       // - total plans
       // - total subscriptions
@@ -126,19 +125,14 @@ export const getPlansStats = protectedProjectProcedure
         },
       }
 
-      return stats
-    })
-
-    if (result.err) {
-      opts.ctx.logger.error(result.err.message, {
+      return { stats }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to fetch plans stats"
+      opts.ctx.logger.error(message, {
         project_id,
         interval,
       })
 
-      return { stats: {}, error: result.err.message }
+      return { stats: {}, error: message }
     }
-
-    const stats = result.val ?? {}
-
-    return { stats }
   })

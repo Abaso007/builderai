@@ -15,10 +15,8 @@ export const getVerificationRegions = protectedProjectProcedure
     const timezone = opts.ctx.project.timezone
     const input = opts.input
 
-    const cacheKey = `${project_id}:${input.region}:${timezone}:${input.interval_days}`
-
-    const result = await opts.ctx.cache.getVerificationRegions.swr(cacheKey, async () => {
-      const result = await opts.ctx.analytics
+    try {
+      const verifications = await opts.ctx.analytics
         .getFeaturesVerificationRegions({
           project_id,
           timezone,
@@ -27,20 +25,16 @@ export const getVerificationRegions = protectedProjectProcedure
         })
         .then((res) => res.data)
 
-      return result
-    })
-
-    if (result.err) {
-      opts.ctx.logger.error(result.err.message, {
+      return { verifications: verifications ?? [] }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to fetch verification regions"
+      opts.ctx.logger.error(message, {
         project_id,
         region: input.region,
         interval_days: input.interval_days,
       })
 
-      return { verifications: [], error: result.err.message }
+      return { verifications: [], error: message }
     }
-
-    const verifications = result.val ?? []
-
-    return { verifications }
   })

@@ -28,9 +28,8 @@ export const getCountryVisits = protectedProjectProcedure
       return { data: [], error: "Page not found" }
     }
 
-    const cacheKey = `${project_id}:${page.id}:${interval_days}`
-    const result = await opts.ctx.cache.pageCountryVisits.swr(cacheKey, async () => {
-      const result = await opts.ctx.analytics
+    try {
+      const data = await opts.ctx.analytics
         .getCountryVisits({
           page_id: page.id,
           interval_days,
@@ -38,19 +37,14 @@ export const getCountryVisits = protectedProjectProcedure
         })
         .then((res) => res.data)
 
-      return result
-    })
-
-    if (result.err) {
-      opts.ctx.logger.error(result.err.message, {
+      return { data: data ?? [] }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to fetch country visits"
+      opts.ctx.logger.error(message, {
         project_id,
         interval_days,
       })
 
-      return { data: [], error: result.err.message }
+      return { data: [], error: message }
     }
-
-    const data = result.val ?? []
-
-    return { data }
   })

@@ -236,6 +236,7 @@ export class Analytics {
       opts: {
         retries: 3,
         timeout: 5000, // 5 seconds
+        cache: "no-store",
       },
     })
   }
@@ -258,6 +259,7 @@ export class Analytics {
       opts: {
         retries: 3,
         timeout: 5000, // 5 seconds
+        cache: "no-store",
       },
     })
   }

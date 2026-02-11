@@ -17,7 +17,7 @@ import { useMemo } from "react"
 import { useIntervalFilter, usePageFilter } from "~/hooks/use-filter"
 import { useQueryInvalidation } from "~/hooks/use-query-invalidation"
 import { useTRPC } from "~/trpc/client"
-import { ANALYTICS_STALE_TIME } from "~/trpc/shared"
+import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
 
 const chartConfig = {
   browser: {
@@ -87,7 +87,7 @@ export function Browsers() {
       },
       {
         enabled: pageFilter.isSelected,
-        staleTime: ANALYTICS_STALE_TIME,
+        ...ANALYTICS_CONFIG_REALTIME,
       }
     )
   )
