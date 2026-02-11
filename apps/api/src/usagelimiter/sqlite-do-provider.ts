@@ -26,6 +26,15 @@ const METADATA_RETENTION_DAYS = 3
 const STATE_KEY_PREFIX = "state:"
 const SEEN_META_PREFIX = "seen_meta_"
 const CURSOR_KEY = "cursor_state"
+const INTERNAL_METADATA_KEYS = new Set([
+  "cost",
+  "rate",
+  "rate_amount",
+  "rate_currency",
+  "rate_unit_size",
+  "usage",
+  "remaining",
+])
 
 // Type guard for EntitlementState
 function isEntitlementState(value: unknown): value is EntitlementState {
@@ -646,7 +655,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     // Process usage records
     const processedUsage: ProcessedUsageRecord[] = []
     for (const record of usageRecords) {
-      const metadata = this.parseMetadata(record.metadata)
+      const metadata = this.extractTagMetadata(this.parseMetadata(record.metadata))
       const { hash, json } = await this.computeMetaId(metadata)
       const metaId = Number(hash)
       const metaIdKey = hash.toString() // string key for Set deduplication
@@ -677,7 +686,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     // Process verifications
     const processedVerifications: ProcessedVerificationRecord[] = []
     for (const record of verifications) {
-      const metadata = this.parseMetadata(record.metadata)
+      const metadata = this.extractTagMetadata(this.parseMetadata(record.metadata))
       const { hash, json } = await this.computeMetaId(metadata)
       const metaId = Number(hash)
       const metaIdKey = hash.toString() // string key for Set deduplication
@@ -720,6 +729,17 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     } catch {
       return null
     }
+  }
+
+  private extractTagMetadata(
+    metadata: Record<string, unknown> | null
+  ): Record<string, unknown> | null {
+    if (!metadata) return null
+
+    const tagEntries = Object.entries(metadata).filter(([key]) => !INTERNAL_METADATA_KEYS.has(key))
+    if (tagEntries.length === 0) return null
+
+    return Object.fromEntries(tagEntries)
   }
 
   private async computeMetaId(

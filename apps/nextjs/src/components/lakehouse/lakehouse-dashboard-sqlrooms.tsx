@@ -63,11 +63,23 @@ const PREDEFINED_QUERIES = {
   allUsage: {
     label: "Usage (raw + tags)",
     description: "All usage events with metadata tags",
-    query: `SELECT
+    query: `WITH metadata_dedup AS (
+  SELECT
+    CAST(meta_id AS VARCHAR) AS meta_id,
+    project_id,
+    customer_id,
+    MIN(tags) AS tags
+  FROM metadata
+  GROUP BY 1, 2, 3
+)
+SELECT
   u.*,
   m.tags as metadata_tags
 FROM usage u
-LEFT JOIN metadata m ON u.meta_id = CAST(m.meta_id AS VARCHAR)
+LEFT JOIN metadata_dedup m
+  ON CAST(u.meta_id AS VARCHAR) = m.meta_id
+  AND u.project_id = m.project_id
+  AND u.customer_id = m.customer_id
 WHERE u.deleted = 0
 LIMIT 500`,
   },
@@ -158,10 +170,22 @@ ORDER BY avg_latency DESC`,
   usageByTagKey: {
     label: "Usage by Tag Key",
     description: "Which metadata tags show up most",
-    query: `WITH joined AS (
+    query: `WITH metadata_dedup AS (
+  SELECT
+    CAST(meta_id AS VARCHAR) AS meta_id,
+    project_id,
+    customer_id,
+    MIN(tags) AS tags
+  FROM metadata
+  GROUP BY 1, 2, 3
+),
+joined AS (
   SELECT u.id, m.tags
   FROM usage u
-  LEFT JOIN metadata m ON u.meta_id = m.meta_id
+  LEFT JOIN metadata_dedup m
+    ON CAST(u.meta_id AS VARCHAR) = m.meta_id
+    AND u.project_id = m.project_id
+    AND u.customer_id = m.customer_id
   WHERE u.deleted = 0 AND m.tags IS NOT NULL
 ),
 tags AS (
@@ -170,6 +194,7 @@ tags AS (
 )
 SELECT tag, COUNT(*) AS events
 FROM tags
+WHERE tag NOT IN ('cost', 'rate', 'rate_amount', 'rate_currency', 'rate_unit_size', 'usage', 'remaining')
 GROUP BY tag
 ORDER BY events DESC`,
   },
@@ -541,11 +566,35 @@ FROM verifications`
   MAX(timestamp) AS latest_metadata_ts
 FROM metadata`
 
-  const metadataCoverageQuery = `SELECT
-  COUNT(*) AS total,
-  COUNT(m.meta_id) AS with_meta
+  const metadataCoverageQuery = `WITH metadata_dedup AS (
+  SELECT
+    CAST(meta_id AS VARCHAR) AS meta_id,
+    project_id,
+    customer_id,
+    MIN(tags) AS tags
+  FROM metadata
+  GROUP BY 1, 2, 3
+),
+metadata_user_tags AS (
+  SELECT
+    meta_id,
+    project_id,
+    customer_id
+  FROM metadata_dedup
+  WHERE EXISTS (
+    SELECT 1
+    FROM unnest(json_keys(tags)) AS t(tag)
+    WHERE t.tag NOT IN ('cost', 'rate', 'rate_amount', 'rate_currency', 'rate_unit_size', 'usage', 'remaining')
+  )
+)
+SELECT
+  COUNT(DISTINCT u.id) AS total,
+  COUNT(DISTINCT CASE WHEN m.meta_id IS NOT NULL THEN u.id END) AS with_meta
 FROM usage u
-LEFT JOIN metadata m ON u.meta_id = m.meta_id
+LEFT JOIN metadata_user_tags m
+  ON CAST(u.meta_id AS VARCHAR) = m.meta_id
+  AND u.project_id = m.project_id
+  AND u.customer_id = m.customer_id
 WHERE u.deleted = 0`
 
   const usageTrendQuery = `WITH base AS (
@@ -583,10 +632,22 @@ FROM base
 GROUP BY minute
 ORDER BY minute`
 
-  const topTagsQuery = `WITH joined AS (
+  const topTagsQuery = `WITH metadata_dedup AS (
+  SELECT
+    CAST(meta_id AS VARCHAR) AS meta_id,
+    project_id,
+    customer_id,
+    MIN(tags) AS tags
+  FROM metadata
+  GROUP BY 1, 2, 3
+),
+joined AS (
   SELECT u.id, m.tags
   FROM usage u
-  LEFT JOIN metadata m ON u.meta_id = m.meta_id
+  LEFT JOIN metadata_dedup m
+    ON CAST(u.meta_id AS VARCHAR) = m.meta_id
+    AND u.project_id = m.project_id
+    AND u.customer_id = m.customer_id
   WHERE u.deleted = 0 AND m.tags IS NOT NULL
 ),
 tags AS (
@@ -595,6 +656,7 @@ tags AS (
 )
 SELECT tag, COUNT(*) AS events
 FROM tags
+WHERE tag NOT IN ('cost', 'rate', 'rate_amount', 'rate_currency', 'rate_unit_size', 'usage', 'remaining')
 GROUP BY tag
 ORDER BY events DESC
 LIMIT 10`
