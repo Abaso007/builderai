@@ -25,6 +25,7 @@ const compactionResultSchema = z.object({
       files: z.number(),
       lines: z.number(),
       bytes: z.number(),
+      invalidLines: z.number(),
     })
   ),
   error: z.string().optional(),

@@ -101,9 +101,12 @@ export const registerGetLakehouseFileV1 = (app: App) =>
       return c.json({ error: "File not found" }, 404)
     }
 
+    const isCompactedKey = key.includes("/compacted/")
     const cacheControl = authHeader
       ? "private, max-age=0, must-revalidate"
-      : "public, max-age=31536000, immutable"
+      : isCompactedKey
+        ? "public, max-age=31536000, immutable"
+        : "public, max-age=3600, immutable"
     const quotedEtag = obj.etag ? `"${obj.etag}"` : undefined
 
     // Check for 304 Not Modified

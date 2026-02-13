@@ -50,6 +50,7 @@ export const fileDescriptorSchema = z.object({
   count: z.number(),
   bytes: z.number(),
   etag: z.string().optional(),
+  immutable: z.boolean().default(false),
 })
 
 export const manifestResponseSchema = z.object({
@@ -162,6 +163,7 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
       bytes: number
       etag?: string
       type: "raw" | "compact" | "metadata"
+      immutable: boolean
     }> = []
 
     const sources: LakehouseSource[] = ["usage", "verification", "metadata"]
@@ -179,24 +181,38 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
         ])
         const allCompactedObjects = [...compactedObjects, ...legacyCompactedObjects]
 
-        for (const obj of allCompactedObjects) {
+        if (allCompactedObjects.length > 0) {
+          const latestCompacted = allCompactedObjects.slice().sort((a, b) => {
+            const aUploaded = a.uploaded ? new Date(a.uploaded).getTime() : 0
+            const bUploaded = b.uploaded ? new Date(b.uploaded).getTime() : 0
+            if (aUploaded !== bUploaded) return bUploaded - aUploaded
+            return b.key.localeCompare(a.key)
+          })[0]
+
+          if (!latestCompacted) {
+            continue
+          }
+
           const compactDesc: CompactFileDescriptor = {
-            key: obj.key,
+            key: latestCompacted.key,
             minTs: "0",
             maxTs: "0",
             count: 0,
-            bytes: obj.size ?? 0,
+            bytes: latestCompacted.size ?? 0,
           }
           compactByDay.set(day, compactDesc)
           allFiles.push({
             day,
             source,
-            key: obj.key,
-            bytes: obj.size ?? 0,
-            etag: obj.etag,
+            key: latestCompacted.key,
+            bytes: latestCompacted.size ?? 0,
+            etag: latestCompacted.etag,
             type: "compact",
+            immutable: true,
           })
-          const uploadedAtMs = obj.uploaded ? new Date(obj.uploaded).getTime() : 0
+          const uploadedAtMs = latestCompacted.uploaded
+            ? new Date(latestCompacted.uploaded).getTime()
+            : 0
           const currentLatest = dayLatestUploadedAtMs.get(day) ?? 0
           dayLatestUploadedAtMs.set(day, Math.max(currentLatest, uploadedAtMs))
         }
@@ -224,6 +240,7 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
             bytes: obj.size ?? 0,
             etag: obj.etag,
             type: source === "metadata" ? "metadata" : "raw",
+            immutable: true,
           })
           const uploadedAtMs = obj.uploaded ? new Date(obj.uploaded).getTime() : 0
           const currentLatest = dayLatestUploadedAtMs.get(day) ?? 0
@@ -243,7 +260,7 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
     const exp = (Math.floor(nowEpochSeconds / SIGNED_URL_TTL_SECONDS) + 1) * SIGNED_URL_TTL_SECONDS
 
     const files: FileDescriptor[] = []
-    for (const { day, source, key, bytes, etag, type } of allFiles) {
+    for (const { day, source, key, bytes, etag, type, immutable } of allFiles) {
       const sig = await signLakehouseKey(c.env.AUTH_SECRET, key, exp)
       const versionQuery = etag ? `&v=${encodeURIComponent(etag)}` : ""
       files.push({
@@ -255,6 +272,7 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
         count: 0,
         bytes,
         etag,
+        immutable,
       })
     }
 

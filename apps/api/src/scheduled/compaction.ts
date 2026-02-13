@@ -12,6 +12,16 @@ const COMPACTION_DELAY_DAYS = 1
 const SOURCES: LakehouseSource[] = ["usage", "verification", "metadata"]
 const R2_BATCH_DELETE_LIMIT = 1000
 
+class CompactWriteError extends Error {
+  public readonly kind: "invalid" | "empty"
+
+  constructor(kind: "invalid" | "empty", message: string) {
+    super(message)
+    this.name = "CompactWriteError"
+    this.kind = kind
+  }
+}
+
 async function listAllObjects(
   bucket: R2Bucket,
   prefix: string
@@ -30,65 +40,171 @@ async function listAllObjects(
   return objects
 }
 
+async function* streamNdjsonLines(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let carry = ""
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) {
+        break
+      }
+
+      const chunk = decoder.decode(value, { stream: true })
+
+      if (!chunk) {
+        continue
+      }
+
+      const combined = `${carry}${chunk}`
+      const lines = combined.split("\n")
+      carry = lines.pop() ?? ""
+
+      for (const line of lines) {
+        yield line.endsWith("\r") ? line.slice(0, -1) : line
+      }
+    }
+
+    const remaining = decoder.decode()
+    carry = remaining.length > 0 ? `${carry}${remaining}` : carry
+
+    if (carry) {
+      yield carry.endsWith("\r") ? carry.slice(0, -1) : carry
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+function createCompactStream(
+  bucket: R2Bucket,
+  sourceKeys: string[],
+  counters: {
+    count: number
+    invalidLines: number
+    bytes: number
+  }
+): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder()
+
+  return new ReadableStream({
+    async start(controller) {
+      try {
+        let hasInvalidLines = false
+
+        for (const key of sourceKeys) {
+          const obj = await bucket.get(key)
+          if (!obj?.body) {
+            continue
+          }
+
+          for await (const line of streamNdjsonLines(obj.body)) {
+            const trimmed = line.trim()
+            if (!trimmed) {
+              continue
+            }
+
+            if (hasInvalidLines) {
+              try {
+                JSON.parse(trimmed)
+              } catch {
+                counters.invalidLines += 1
+              }
+
+              continue
+            }
+
+            try {
+              JSON.parse(trimmed)
+            } catch {
+              counters.invalidLines += 1
+              hasInvalidLines = true
+              continue
+            }
+
+            counters.count += 1
+
+            const output = encoder.encode(`${trimmed}\n`)
+            counters.bytes += output.byteLength
+            controller.enqueue(output)
+          }
+        }
+
+        if (counters.invalidLines > 0) {
+          throw new CompactWriteError("invalid", "NDJSON validation failed")
+        }
+
+        if (counters.count === 0) {
+          throw new CompactWriteError("empty", "No valid NDJSON records found")
+        }
+
+        controller.close()
+      } catch (error) {
+        controller.error(error)
+      }
+    },
+  })
+}
+
 async function compactFiles(
   bucket: R2Bucket,
   sourceKeys: string[],
   targetKey: string
-): Promise<{ count: number; bytes: number; written: boolean }> {
+): Promise<{ count: number; bytes: number; written: boolean; invalidLines: number }> {
   if (sourceKeys.length === 0) {
-    return { count: 0, bytes: 0, written: false }
+    return { count: 0, bytes: 0, written: false, invalidLines: 0 }
   }
 
-  const chunks: Uint8Array[] = []
-  let lineCount = 0
+  const counters = {
+    count: 0,
+    invalidLines: 0,
+    bytes: 0,
+  }
+  const resultStream = createCompactStream(bucket, sourceKeys, counters)
 
-  for (const key of sourceKeys) {
-    const obj = await bucket.get(key)
-    if (!obj?.body) continue
+  try {
+    const putResult = await bucket.put(targetKey, resultStream, {
+      onlyIf: { etagDoesNotMatch: "*" },
+      httpMetadata: {
+        contentType: "application/x-ndjson",
+      },
+      customMetadata: {
+        compactedAt: new Date().toISOString(),
+        sourceFileCount: sourceKeys.length.toString(),
+        lineCount: counters.count.toString(),
+        invalidLineCount: counters.invalidLines.toString(),
+      },
+    })
 
-    const reader = obj.body.getReader()
-    let buffer = ""
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      const text = new TextDecoder().decode(value)
-      buffer += text
-
-      const lines = buffer.split("\n")
-      buffer = lines.pop() || ""
-      lineCount += lines.filter((l) => l.trim()).length
-
-      chunks.push(value)
+    return {
+      count: counters.count,
+      bytes: counters.bytes,
+      written: putResult !== null,
+      invalidLines: counters.invalidLines,
+    }
+  } catch (error) {
+    if (error instanceof CompactWriteError && error.kind === "invalid") {
+      return {
+        count: counters.count,
+        bytes: 0,
+        written: false,
+        invalidLines: counters.invalidLines,
+      }
     }
 
-    if (buffer.trim()) {
-      lineCount++
+    if (error instanceof CompactWriteError && error.kind === "empty") {
+      return {
+        count: 0,
+        bytes: 0,
+        written: false,
+        invalidLines: 0,
+      }
     }
+
+    throw error
   }
-
-  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0)
-  const result = new Uint8Array(totalLength)
-  let offset = 0
-  for (const chunk of chunks) {
-    result.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-
-  const putResult = await bucket.put(targetKey, result, {
-    onlyIf: { etagDoesNotMatch: "*" },
-    httpMetadata: {
-      contentType: "application/x-ndjson",
-    },
-    customMetadata: {
-      compactedAt: new Date().toISOString(),
-      sourceFileCount: sourceKeys.length.toString(),
-      lineCount: lineCount.toString(),
-    },
-  })
-
-  return { count: lineCount, bytes: totalLength, written: putResult !== null }
 }
 
 async function deleteSourceFiles(bucket: R2Bucket, keys: string[]): Promise<void> {
@@ -104,7 +220,14 @@ async function compactDaySource(
   source: LakehouseSource,
   day: string,
   shouldDeleteSourceFiles: boolean
-): Promise<{ compacted: boolean; skipped: boolean; files: number; lines: number; bytes: number }> {
+): Promise<{
+  compacted: boolean
+  skipped: boolean
+  files: number
+  lines: number
+  bytes: number
+  invalidLines: number
+}> {
   const prefix = getLakehouseRawPrefix(projectId, source, day)
   const legacyPrefix = getLakehouseLegacyRawPrefix(projectId, source, day)
   const [objects, legacyObjects] = await Promise.all([
@@ -114,7 +237,7 @@ async function compactDaySource(
   const allObjects = [...objects, ...legacyObjects]
 
   if (allObjects.length === 0) {
-    return { compacted: false, skipped: false, files: 0, lines: 0, bytes: 0 }
+    return { compacted: false, skipped: false, files: 0, lines: 0, bytes: 0, invalidLines: 0 }
   }
 
   allObjects.sort((a, b) => a.key.localeCompare(b.key))
@@ -122,17 +245,31 @@ async function compactDaySource(
   const sourceKeys = allObjects.map((o) => o.key)
   const targetKey = getLakehouseCompactedKey(projectId, source, day)
 
-  const { count, bytes, written } = await compactFiles(bucket, sourceKeys, targetKey)
+  const { count, bytes, written, invalidLines } = await compactFiles(bucket, sourceKeys, targetKey)
 
   if (!written) {
-    return { compacted: false, skipped: true, files: 0, lines: 0, bytes: 0 }
+    return {
+      compacted: false,
+      skipped: true,
+      files: sourceKeys.length,
+      lines: 0,
+      bytes: 0,
+      invalidLines,
+    }
   }
 
   if (shouldDeleteSourceFiles && count > 0) {
     await deleteSourceFiles(bucket, sourceKeys)
   }
 
-  return { compacted: true, skipped: false, files: sourceKeys.length, lines: count, bytes }
+  return {
+    compacted: true,
+    skipped: false,
+    files: sourceKeys.length,
+    lines: count,
+    bytes,
+    invalidLines,
+  }
 }
 
 async function getAllProjectIds(bucket: R2Bucket): Promise<string[]> {
@@ -162,6 +299,7 @@ export interface CompactionResult {
     files: number
     lines: number
     bytes: number
+    invalidLines: number
   }>
   error?: string
 }

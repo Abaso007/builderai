@@ -53,6 +53,7 @@ interface ManifestFile {
   count: number
   bytes: number
   etag?: string
+  immutable?: boolean
 }
 
 // ============================================================================
@@ -308,7 +309,28 @@ function LakehouseDashboardInner() {
         return
       }
 
-      const manifestFingerprint = manifestResult.files
+      const manifestFiles = manifestResult.files ?? []
+      const groupedFiles = new Map<string, ManifestFile[]>()
+      for (const file of manifestFiles) {
+        const source = file.source ?? "usage"
+        const key = `${file.day}|${source}`
+        const group = groupedFiles.get(key)
+        if (group) {
+          group.push(file)
+        } else {
+          groupedFiles.set(key, [file])
+        }
+      }
+
+      const selectedFiles = Array.from(groupedFiles.values()).flatMap((group) => {
+        const compacted = group.filter((file) => file.type === "compact")
+        if (compacted.length > 0) {
+          return compacted
+        }
+        return group
+      })
+
+      const manifestFingerprint = selectedFiles
         .map((file) => `${file.source ?? "usage"}|${file.key}|${file.etag ?? ""}|${file.bytes}`)
         .sort()
         .join("\n")
@@ -324,16 +346,35 @@ function LakehouseDashboardInner() {
       const connector = await getConnector()
 
       // Helper function to build read function with options
-      const buildReadFn = (url: string) => {
-        const isParquet = url.includes(".parquet")
-        if (isParquet) {
-          return `read_parquet('${url}')`
+      const buildReadExpr = (files: ManifestFile[]) => {
+        const escapeSqlString = (value: string) => value.replaceAll("'", "''")
+        const toSqlArray = (urls: string[]) =>
+          `[${urls.map((url) => `'${escapeSqlString(url)}'`).join(", ")}]`
+
+        const parquetUrls = files
+          .filter((file) => file.url.includes(".parquet"))
+          .map((file) => file.url)
+        const ndjsonUrls = files
+          .filter((file) => !file.url.includes(".parquet"))
+          .map((file) => file.url)
+
+        const reads: string[] = []
+
+        if (parquetUrls.length > 0) {
+          reads.push(`SELECT * FROM read_parquet(${toSqlArray(parquetUrls)}, union_by_name = true)`)
         }
 
-        // For NDJSON, add options to handle large integers and schema differences
-        // - columns: force meta_id to be string to avoid INT64 overflow
-        // - auto_detect: keep true so other columns are still inferred
-        return `read_ndjson_auto('${url}', ignore_errors := true, maximum_object_size := 33554432, auto_detect := true)`
+        if (ndjsonUrls.length > 0) {
+          reads.push(
+            `SELECT * FROM read_ndjson_auto(${toSqlArray(ndjsonUrls)}, ignore_errors := false, maximum_object_size := 33554432, auto_detect := true)`
+          )
+        }
+
+        if (reads.length === 1) {
+          return reads[0] ?? "SELECT 1 WHERE false"
+        }
+
+        return reads.join(" UNION ALL ")
       }
 
       // Normalize schema for sources that can drift across files (JSON vs string, etc.)
@@ -350,7 +391,9 @@ FROM ${readExpr}`
       // Helper function to load files for a specific source into a table
       const loadTableFromSource = async (source: TableSource, files: ManifestFile[]) => {
         const config = TABLE_CONFIG[source]
-        const sourceFiles = files.filter((f) => f.source === source)
+        const sourceFiles = files.filter((f) =>
+          source === "usage" ? !f.source || f.source === source : f.source === source
+        )
         if (sourceFiles.length === 0) return false
 
         try {
@@ -359,20 +402,9 @@ FROM ${readExpr}`
           // Table might not exist
         }
 
-        // Load files into DuckDB
-        for (let i = 0; i < sourceFiles.length; i++) {
-          const file = sourceFiles[i]
-          if (!file) continue
-
-          const readExpr = buildReadFn(file.url)
-          const sourceSelect = buildSourceSelect(source, readExpr)
-          const sql =
-            i === 0
-              ? `CREATE TABLE ${config.tableName} AS ${sourceSelect}`
-              : `INSERT INTO ${config.tableName} ${sourceSelect}`
-
-          await connector.query(sql)
-        }
+        const readExpr = buildReadExpr(sourceFiles)
+        const sourceSelect = buildSourceSelect(source, `(${readExpr})`)
+        await connector.query(`CREATE TABLE ${config.tableName} AS ${sourceSelect}`)
 
         return true
       }
@@ -381,44 +413,21 @@ FROM ${readExpr}`
       const tablesLoaded: string[] = []
       let totalFiles = 0
 
-      // Load usage events (files without source or with source="usage")
-      const usageFiles = manifestResult.files.filter((f) => !f.source || f.source === "usage")
-      if (usageFiles.length > 0) {
-        // Drop existing table
-        try {
-          await connector.query("DROP TABLE IF EXISTS usage")
-          await connector.query("DROP TABLE IF EXISTS metadata")
-          await connector.query("DROP TABLE IF EXISTS verifications")
-        } catch {
-          // Table might not exist
-        }
-
-        for (let i = 0; i < usageFiles.length; i++) {
-          const file = usageFiles[i]
-          if (!file) continue
-
-          const readExpr = buildReadFn(file.url)
-          const sql =
-            i === 0
-              ? `CREATE TABLE usage AS SELECT * FROM ${readExpr}`
-              : `INSERT INTO usage SELECT * FROM ${readExpr}`
-
-          await connector.query(sql)
-        }
+      if (await loadTableFromSource("usage", selectedFiles)) {
         tablesLoaded.push("usage")
-        totalFiles += usageFiles.length
+        totalFiles += selectedFiles.filter((f) => !f.source || f.source === "usage").length
       }
 
       // Load verifications
-      if (await loadTableFromSource("verification", manifestResult.files)) {
+      if (await loadTableFromSource("verification", selectedFiles)) {
         tablesLoaded.push("verifications")
-        totalFiles += manifestResult.files.filter((f) => f.source === "verification").length
+        totalFiles += selectedFiles.filter((f) => f.source === "verification").length
       }
 
       // Load metadata
-      if (await loadTableFromSource("metadata", manifestResult.files)) {
+      if (await loadTableFromSource("metadata", selectedFiles)) {
         tablesLoaded.push("metadata")
-        totalFiles += manifestResult.files.filter((f) => f.source === "metadata").length
+        totalFiles += selectedFiles.filter((f) => f.source === "metadata").length
       }
 
       await refreshTableSchemas()
