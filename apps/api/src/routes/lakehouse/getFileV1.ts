@@ -68,8 +68,12 @@ export const registerGetLakehouseFileV1 = (app: App) =>
     if (authHeader) {
       // Validate request and scope to project
       const apiKey = await keyAuth(c)
-      const projectPrefix = `lakehouse/${apiKey.projectId}/`
-      if (!key.startsWith(projectPrefix)) {
+      const allowedPrefixes = [
+        `lakehouse/raw/${apiKey.projectId}/`,
+        `lakehouse/compacted/${apiKey.projectId}/`,
+        `lakehouse/index/${apiKey.projectId}/`,
+      ]
+      if (!allowedPrefixes.some((p) => key.startsWith(p))) {
         return c.json({ error: "Forbidden" }, 403)
       }
     } else {
@@ -101,7 +105,7 @@ export const registerGetLakehouseFileV1 = (app: App) =>
       return c.json({ error: "File not found" }, 404)
     }
 
-    const isCompactedKey = key.includes("/compacted/")
+    const isCompactedKey = key.startsWith("lakehouse/compacted/")
     const cacheControl = authHeader
       ? "private, max-age=0, must-revalidate"
       : isCompactedKey

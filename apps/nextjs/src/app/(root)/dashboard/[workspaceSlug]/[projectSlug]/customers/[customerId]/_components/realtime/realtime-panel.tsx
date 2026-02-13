@@ -10,12 +10,11 @@ import {
   ChartTooltipContent,
 } from "@unprice/ui/chart"
 import { ScrollArea } from "@unprice/ui/scroll-area"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 import { usePartySocket } from "partysocket/react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
-
-type WindowSeconds = 300 | 3600 | 86400 | 604800
+import { RealtimeIntervalFilter } from "~/components/analytics/realtime-interval-filter"
+import { useRealtimeIntervalFilter } from "~/hooks/use-filter"
 
 type Metrics = {
   usageCount: number
@@ -71,7 +70,7 @@ export function RealtimePanel(props: {
   runtimeEnv: string
 }) {
   const { customerId, projectId, sessionToken, runtimeEnv } = props
-  const [windowSeconds, setWindowSeconds] = useState<WindowSeconds>(300)
+  const [windowSeconds] = useRealtimeIntervalFilter()
   const [metrics, setMetrics] = useState<Metrics | null>(null)
   const [events, setEvents] = useState<RealtimeEvent[]>([])
   const lastSnapshotRequestedAtRef = useRef(0)
@@ -183,28 +182,48 @@ export function RealtimePanel(props: {
     }))
   }, [metrics?.verificationSeries])
 
+  const successRate = useMemo(() => {
+    if (!metrics || metrics.verificationCount === 0) {
+      return null
+    }
+
+    return Math.min(100, Math.max(0, (metrics.allowedCount / metrics.verificationCount) * 100))
+  }, [metrics?.verificationCount, metrics?.allowedCount])
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
         <h3 className="font-medium text-sm">Usage and verification history</h3>
-        <Select
-          value={String(windowSeconds)}
-          onValueChange={(value) => {
-            if (value === "300" || value === "3600" || value === "86400" || value === "604800") {
-              setWindowSeconds(Number(value) as WindowSeconds)
-            }
-          }}
-        >
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Window" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="300">Last 5 minutes</SelectItem>
-            <SelectItem value="3600">Last 60 minutes</SelectItem>
-            <SelectItem value="86400">Last 1 day</SelectItem>
-            <SelectItem value="604800">Last 7 days</SelectItem>
-          </SelectContent>
-        </Select>
+        <RealtimeIntervalFilter className="w-60" />
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Allowed</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="font-semibold text-2xl">{metrics?.allowedCount ?? 0}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Denied</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="font-semibold text-2xl">{metrics?.deniedCount ?? 0}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Success rate</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="font-semibold text-2xl">
+              {successRate === null ? "—" : `${successRate.toFixed(1)}%`}
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">

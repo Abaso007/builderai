@@ -351,12 +351,12 @@ async function compactDaySource(
 async function getAllProjectIds(bucket: R2Bucket): Promise<string[]> {
   const projectIds = new Set<string>()
 
-  const res = await bucket.list({ prefix: "lakehouse/", delimiter: "/" })
+  const res = await bucket.list({ prefix: "lakehouse/raw/", delimiter: "/" })
 
   for (const prefix of res.delimitedPrefixes) {
     const parts = prefix.split("/")
-    if (parts.length >= 2 && parts[1]) {
-      projectIds.add(parts[1])
+    if (parts.length >= 3 && parts[2]) {
+      projectIds.add(parts[2])
     }
   }
 

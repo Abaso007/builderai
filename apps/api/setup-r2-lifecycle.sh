@@ -43,6 +43,8 @@ echo "Applying lifecycle rules to bucket: $BUCKET"
 echo "Using config: $LIFECYCLE_FILE"
 echo ""
 
+# Run from script dir so npx finds wrangler in apps/api/node_modules
+cd "$SCRIPT_DIR"
 npx wrangler r2 bucket lifecycle set "$BUCKET" --file "$LIFECYCLE_FILE"
 
 echo ""

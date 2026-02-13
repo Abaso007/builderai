@@ -100,10 +100,6 @@ export const route = createRoute({
           description: "The project ID (optional, only available for main projects)",
           example: "project_1H7KQFLr7RepUyQBKdnvY",
         }),
-        customer_id: z.string().optional().openapi({
-          description: "Filter to a single customer (optional)",
-          example: "cus_1H7KQFLr7RepUyQBKdnvY",
-        }),
         range: analyticsIntervalSchema.openapi({
           description: "The range of the usage, last hour, day, week or month",
           example: "24h",
@@ -131,7 +127,7 @@ export type GetLakehouseManifestResponse = z.infer<
 >
 export const registerGetLakehouseManifestV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { range, project_id: projectId, customer_id: customerId } = c.req.valid("json")
+    const { range, project_id: projectId } = c.req.valid("json")
 
     // validate the request
     const key = await keyAuth(c)
@@ -197,13 +193,6 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
       return null
     }
 
-    const matchesCustomerFilter = (rawKey: string): boolean => {
-      if (!customerId) {
-        return true
-      }
-      return rawKey.includes(`/customer=${customerId}/`)
-    }
-
     const dates = getDateRangeUTC(range)
     const rawByDay = new Map<string, RawFileDescriptor[]>()
     const compactByDay = new Map<string, CompactFileDescriptor | null>()
@@ -266,10 +255,6 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
           }
 
           for (const raw of indexed.raw) {
-            if (!matchesCustomerFilter(raw.key)) {
-              continue
-            }
-
             if (markerRawKeySet?.has(raw.key)) {
               continue
             }
@@ -347,8 +332,8 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
           dayLatestUploadedAtMs.set(day, Math.max(currentLatest, uploadedAtMs))
         }
 
-        const prefix = getLakehouseRawPrefix(projectID, source, day, customerId)
-        const legacyPrefix = getLakehouseLegacyRawPrefix(projectID, source, day, customerId)
+        const prefix = getLakehouseRawPrefix(projectID, source, day)
+        const legacyPrefix = getLakehouseLegacyRawPrefix(projectID, source, day)
         const [objects, legacyObjects] = await Promise.all([listAll(prefix), listAll(legacyPrefix)])
         const allRawObjects = [...objects, ...legacyObjects]
         const discoveredRaw = [] as Array<{

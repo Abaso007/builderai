@@ -45,7 +45,8 @@ export type LakehouseSource = "usage" | "verification" | "metadata"
 /**
  * Prefix for raw NDJSON files (per project, per day, per source)
  * Uses Hive-style partitioning: year=YYYY/month=MM/day=DD/customer=ID
- * Path: lakehouse/{projectId}/raw/{source}/year={year}/month={month}/day={day}/
+ * Path: lakehouse/raw/{projectId}/{source}/year={year}/month={month}/day={day}/
+ * (raw/ first so R2 lifecycle can target prefix lakehouse/raw/ for 7-day expiry)
  */
 export function getLakehouseRawPrefix(
   projectId: string,
@@ -54,13 +55,13 @@ export function getLakehouseRawPrefix(
   customerId?: string
 ): string {
   const { year, month, day: d } = dayToPathParts(day)
-  const base = `lakehouse/${projectId}/raw/${source}/year=${year}/month=${month}/day=${d}/`
+  const base = `lakehouse/raw/${projectId}/${source}/year=${year}/month=${month}/day=${d}/`
   return customerId ? `${base}customer=${customerId}/` : base
 }
 
 /**
  * Key for a raw NDJSON file (immutable batch)
- * Path: lakehouse/{projectId}/raw/{source}/{year}/{month}/{day}/part-{suffix}.ndjson
+ * Path: lakehouse/raw/{projectId}/{source}/{year}/{month}/{day}/part-{suffix}.ndjson
  */
 export function getLakehouseRawKey(
   projectId: string,
@@ -75,7 +76,7 @@ export function getLakehouseRawKey(
 /**
  * Prefix for compacted NDJSON files (per project, per day, per source)
  * Uses Hive-style partitioning: year=YYYY/month=MM/day=DD
- * Path: lakehouse/{projectId}/compacted/{source}/year={year}/month={month}/day={day}/
+ * Path: lakehouse/compacted/{projectId}/{source}/year={year}/month={month}/day={day}/
  */
 export function getLakehouseCompactedPrefix(
   projectId: string,
@@ -83,12 +84,12 @@ export function getLakehouseCompactedPrefix(
   day: string
 ): string {
   const { year, month, day: d } = dayToPathParts(day)
-  return `lakehouse/${projectId}/compacted/${source}/year=${year}/month=${month}/day=${d}/`
+  return `lakehouse/compacted/${projectId}/${source}/year=${year}/month=${month}/day=${d}/`
 }
 
 /**
  * Key for a compacted NDJSON file (daily compaction result)
- * Path: lakehouse/{projectId}/compacted/{source}/{year}/{month}/{day}/data.ndjson
+ * Path: lakehouse/compacted/{projectId}/{source}/{year}/{month}/{day}/data.ndjson
  */
 export function getLakehouseCompactedKey(
   projectId: string,
@@ -113,7 +114,7 @@ export function getLakehouseLegacyRawPrefix(
   customerId?: string
 ): string {
   const { year, month, day: d } = dayToPathParts(day)
-  const base = `lakehouse/${projectId}/raw/${source}/${year}/${month}/${d}/`
+  const base = `lakehouse/raw/${projectId}/${source}/${year}/${month}/${d}/`
   return customerId ? `${base}customer=${customerId}/` : base
 }
 
@@ -123,7 +124,7 @@ export function getLakehouseLegacyCompactedPrefix(
   day: string
 ): string {
   const { year, month, day: d } = dayToPathParts(day)
-  return `lakehouse/${projectId}/compacted/${source}/${year}/${month}/${d}/`
+  return `lakehouse/compacted/${projectId}/${source}/${year}/${month}/${d}/`
 }
 
 export function getLakehouseLegacyCompactionMarkerKey(
@@ -140,7 +141,7 @@ export function getLakehouseIndexKey(
   day: string
 ): string {
   const { year, month, day: d } = dayToPathParts(day)
-  return `lakehouse/${projectId}/index/year=${year}/month=${month}/day=${d}/${source}.json`
+  return `lakehouse/index/${projectId}/year=${year}/month=${month}/day=${d}/${source}.json`
 }
 
 function toBase64Url(bytes: Uint8Array): string {
