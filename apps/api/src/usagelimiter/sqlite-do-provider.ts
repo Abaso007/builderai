@@ -77,49 +77,26 @@ interface TinybirdUsagePayload {
   id: string
   timestamp: number
   usage: number
-  meta_id: number
   deleted: number
   project_id: string
   customer_id: string
   feature_slug: string
-  request_id: string
   created_at: number
   idempotence_key: string
-  // first-class analytics columns
-  country: string
-  region: string
-  action: string | undefined
-  key_id: string | undefined
   // schema evolution tracking
   schema_version: number
 }
 
 interface TinybirdVerificationPayload {
   timestamp: number
-  meta_id: number
   latency: number
   denied_reason: string | undefined
   allowed: number
   project_id: string
   customer_id: string
   feature_slug: string
-  request_id: string
   created_at: number
   region: string
-  // first-class analytics columns
-  country: string
-  action: string | undefined
-  key_id: string | undefined
-  // schema evolution tracking
-  schema_version: number
-}
-
-interface TinybirdMetadataPayload {
-  timestamp: number
-  project_id: string
-  customer_id: string
-  meta_id: number
-  tags: string
   // schema evolution tracking
   schema_version: number
 }
@@ -491,14 +468,13 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       })
 
       // 4. Send to destinations in parallel
-      const [r2Result, usageResult, verificationResult, _metaResult] = await Promise.all([
+      const [r2Result, usageResult, verificationResult] = await Promise.all([
         this.flushToR2(processed).catch((err) => {
           this.logger.error("R2 flush failed (best-effort)", { error: this.errorMessage(err) })
           return { success: false }
         }),
         this.ingestUsageToTinybird(usageForTinybird),
         this.ingestVerificationsToTinybird(verificationForTinybird),
-        this.ingestMetadataToTinybird(processed.uniqueMetadata),
       ])
 
       // 5. Update cursors based on successful uploads
@@ -830,26 +806,18 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     if (records.length === 0) return { success: true }
 
     try {
-      const payload: TinybirdUsagePayload[] = records.map(
-        ({ record, metaId, country, region, action, keyId }) => ({
-          id: record.id,
-          timestamp: record.timestamp,
-          usage: Number(record.usage ?? 0),
-          meta_id: metaId,
-          deleted: record.deleted,
-          project_id: record.project_id,
-          customer_id: record.customer_id,
-          feature_slug: record.feature_slug,
-          request_id: record.request_id,
-          created_at: record.created_at,
-          idempotence_key: record.idempotence_key,
-          country,
-          region,
-          action,
-          key_id: keyId,
-          schema_version: SCHEMA_VERSION,
-        })
-      )
+      const payload: TinybirdUsagePayload[] = records.map(({ record }) => ({
+        id: record.id,
+        timestamp: record.timestamp,
+        usage: Number(record.usage ?? 0),
+        deleted: record.deleted,
+        project_id: record.project_id,
+        customer_id: record.customer_id,
+        feature_slug: record.feature_slug,
+        created_at: record.created_at,
+        idempotence_key: record.idempotence_key,
+        schema_version: SCHEMA_VERSION,
+      }))
 
       const result = await this.analytics.ingestFeaturesUsage(payload)
 
@@ -888,25 +856,18 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     if (records.length === 0) return { success: true }
 
     try {
-      const payload: TinybirdVerificationPayload[] = records.map(
-        ({ record, metaId, region, country, action, keyId }) => ({
-          timestamp: record.timestamp,
-          meta_id: metaId,
-          latency: record.latency ? Number(record.latency) : 0,
-          denied_reason: record.denied_reason ?? undefined,
-          allowed: record.allowed,
-          project_id: record.project_id,
-          customer_id: record.customer_id,
-          feature_slug: record.feature_slug,
-          request_id: record.request_id,
-          created_at: record.created_at,
-          region,
-          country,
-          action,
-          key_id: keyId,
-          schema_version: SCHEMA_VERSION,
-        })
-      )
+      const payload: TinybirdVerificationPayload[] = records.map(({ record, region }) => ({
+        timestamp: record.timestamp,
+        latency: record.latency ? Number(record.latency) : 0,
+        denied_reason: record.denied_reason ?? undefined,
+        allowed: record.allowed,
+        project_id: record.project_id,
+        customer_id: record.customer_id,
+        feature_slug: record.feature_slug,
+        created_at: record.created_at,
+        region,
+        schema_version: SCHEMA_VERSION,
+      }))
 
       const result = await this.analytics.ingestFeaturesVerification(payload)
 
@@ -935,54 +896,6 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       return { success: false }
     } catch (error) {
       this.logger.error("Failed to ingest verifications to Tinybird", {
-        error: this.errorMessage(error),
-      })
-      return { success: false }
-    }
-  }
-
-  private async ingestMetadataToTinybird(
-    metadata: AnalyticsFeatureMetadata[]
-  ): Promise<{ success: boolean }> {
-    if (metadata.length === 0) return { success: true }
-
-    try {
-      const payload: TinybirdMetadataPayload[] = metadata.map((m) => ({
-        timestamp: m.timestamp,
-        project_id: m.project_id,
-        customer_id: m.customer_id,
-        meta_id: m.meta_id,
-        tags: m.tags,
-        schema_version: SCHEMA_VERSION,
-      }))
-
-      const result = await this.analytics.ingestMetadata(payload)
-
-      // Verify all rows were processed
-      const successful = result?.successful_rows ?? 0
-      const quarantined = result?.quarantined_rows ?? 0
-      const total = successful + quarantined
-
-      if (quarantined > 0) {
-        this.logger.warn("Tinybird metadata rows quarantined", {
-          expected: metadata.length,
-          successful,
-          quarantined,
-        })
-      }
-
-      if (total >= metadata.length) {
-        return { success: true }
-      }
-
-      this.logger.warn("Tinybird metadata ingestion incomplete", {
-        expected: metadata.length,
-        successful,
-        quarantined,
-      })
-      return { success: false }
-    } catch (error) {
-      this.logger.error("Failed to ingest metadata to Tinybird", {
         error: this.errorMessage(error),
       })
       return { success: false }

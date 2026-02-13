@@ -623,6 +623,29 @@ export class EntitlementService {
     })
 
     const cacheKey = `${projectId}:${customerId}`
+    let activeSubscriptionState: boolean | null = null
+
+    const hasActiveSubscription = async () => {
+      if (activeSubscriptionState !== null) {
+        return activeSubscriptionState
+      }
+
+      const [subscription] = await this.db
+        .select({ id: subscriptions.id })
+        .from(subscriptions)
+        .where(
+          and(
+            eq(subscriptions.customerId, customerId),
+            eq(subscriptions.projectId, projectId),
+            eq(subscriptions.active, true)
+          )
+        )
+        .limit(1)
+
+      activeSubscriptionState = Boolean(subscription)
+
+      return activeSubscriptionState
+    }
 
     // first try to get the entitlement from cache, if not found try to get it from DO,
     const { val, err } = opts?.skipCache
@@ -676,7 +699,11 @@ export class EntitlementService {
         : await this.cache.negativeEntitlements.get(negativeCacheKey)
 
       if (isNegative) {
-        return Ok([])
+        const activeSubscription = await hasActiveSubscription()
+
+        if (!activeSubscription) {
+          return Ok([])
+        }
       }
 
       const computeResult = await this.grantsManager.computeGrantsForCustomer({
@@ -695,7 +722,11 @@ export class EntitlementService {
       this.waitUntil(this.cache.customerEntitlements.set(cacheKey, entitlements))
 
       if (entitlements.length === 0) {
-        this.waitUntil(this.cache.negativeEntitlements.set(negativeCacheKey, true))
+        const activeSubscription = await hasActiveSubscription()
+
+        if (!activeSubscription) {
+          this.waitUntil(this.cache.negativeEntitlements.set(negativeCacheKey, true))
+        }
       }
     }
 

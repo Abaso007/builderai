@@ -1366,11 +1366,13 @@ export class CustomerService {
           throw err
         }
 
+        const phaseTimestamp = Date.now()
+
         // create the phase
         const { err: createPhaseErr, val: newPhase } = await subscriptionService.createPhase({
           input: {
             planVersionId: planVersion.id,
-            startAt: Date.now(),
+            startAt: phaseTimestamp,
             config: config,
             paymentMethodRequired: planVersion.paymentMethodRequired,
             customerId: newCustomer.id,
@@ -1378,7 +1380,7 @@ export class CustomerService {
           },
           projectId: projectId,
           db: trx,
-          now: Date.now(),
+          now: phaseTimestamp,
         })
 
         if (createPhaseErr) {

@@ -452,6 +452,12 @@ export class WideEventLogger {
 
     try {
       const shouldSample = this.shouldSample()
+
+      // only sample in production
+      if (this.config["service.environment"] !== "production") {
+        return
+      }
+
       if (shouldSample) {
         const status = (this.get("request.status") as number) || 200
         if (status >= 400) {

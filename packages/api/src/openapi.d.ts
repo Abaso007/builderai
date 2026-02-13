@@ -4172,11 +4172,6 @@ export interface operations {
                      */
                     project_id?: string;
                     /**
-                     * @description Filter to a single customer (optional)
-                     * @example cus_1H7KQFLr7RepUyQBKdnvY
-                     */
-                    customer_id?: string;
-                    /**
                      * @description The range of the usage, last hour, day, week or month
                      * @example 24h
                      * @enum {string}

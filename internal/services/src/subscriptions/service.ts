@@ -294,6 +294,7 @@ export class SubscriptionService {
     const activePhase = subscriptionWithPhases.phases.find((p) => {
       return p.startAt <= now && (p.endAt ?? Number.POSITIVE_INFINITY) >= now
     })
+    const isFirstPhase = subscriptionWithPhases.phases.length === 0
 
     if (activePhase?.planVersionId === planVersionId) {
       return Err(
@@ -543,14 +544,15 @@ export class SubscriptionService {
           })
         )
 
-        // reset entitlements for the customer
-        // TODO: change this when implementing webhooks service + qstash
-        this.waitUntil(
-          unprice.customers.resetEntitlements({
-            customerId: subscriptionWithPhases.customerId,
-            projectId,
-          })
-        )
+        if (!isFirstPhase) {
+          // TODO: change this when implementing webhooks service + qstash
+          this.waitUntil(
+            unprice.customers.resetEntitlements({
+              customerId: subscriptionWithPhases.customerId,
+              projectId,
+            })
+          )
+        }
       }
 
       return Ok(phase)
@@ -566,7 +568,7 @@ export class SubscriptionService {
       //     subscriptionId,
       //   },
       // })
-      env.NODE_ENV !== "test"
+      !["test"].includes(env.NODE_ENV)
         ? this.billingService.generateBillingPeriods({
             subscriptionId,
             projectId,

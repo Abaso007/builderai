@@ -1,4 +1,5 @@
 import { createRoute } from "@hono/zod-openapi"
+import { endTime, startTime } from "hono/timing"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 
@@ -62,35 +63,39 @@ export const registerSignUpV1 = (app: App) =>
     // validate the request
     const key = await keyAuth(c)
 
+    startTime(c, "customerSignUp")
+
     // get payment methods from service
-    const result = await customer.signUp({
-      input: {
-        name,
-        timezone,
-        defaultCurrency,
-        email,
-        planVersionId,
-        planSlug,
-        successUrl,
-        cancelUrl,
-        config,
-        externalId,
-        billingInterval,
-        sessionId,
-        // TODO: this can bloat storage, we should only store the necessary metadata
-        metadata: {
-          ...metadata,
-          // analytics
-          colo: stats.colo,
-          country: stats.country,
-          city: stats.city,
-          isEUCountry: stats.isEUCountry,
-          region: stats.region,
-          continent: stats.continent,
+    const result = await customer
+      .signUp({
+        input: {
+          name,
+          timezone,
+          defaultCurrency,
+          email,
+          planVersionId,
+          planSlug,
+          successUrl,
+          cancelUrl,
+          config,
+          externalId,
+          billingInterval,
+          sessionId,
+          // TODO: this can bloat storage, we should only store the necessary metadata
+          metadata: {
+            ...metadata,
+            // analytics
+            colo: stats.colo,
+            country: stats.country,
+            city: stats.city,
+            isEUCountry: stats.isEUCountry,
+            region: stats.region,
+            continent: stats.continent,
+          },
         },
-      },
-      projectId: key.projectId,
-    })
+        projectId: key.projectId,
+      })
+      .finally(() => endTime(c, "customerSignUp"))
 
     if (result.err) {
       throw result.err

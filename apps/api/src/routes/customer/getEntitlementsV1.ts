@@ -44,6 +44,7 @@ export const registerGetEntitlementsV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customerId } = c.req.valid("param")
     const { usagelimiter } = c.get("services")
+    const requestStartedAt = c.get("requestStartedAt")
 
     // validate the request
     const key = await keyAuth(c)
@@ -57,7 +58,7 @@ export const registerGetEntitlementsV1 = (app: App) =>
     const { err, val: result } = await usagelimiter.getActiveEntitlements({
       customerId,
       projectId,
-      now: Date.now(),
+      now: requestStartedAt,
     })
 
     // end the timer
