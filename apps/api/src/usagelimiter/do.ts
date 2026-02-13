@@ -133,6 +133,16 @@ export class DurableObjectUsagelimiter extends Server {
   private SAMPLE_RATE = 0.1
   private readonly FLUSH_SEC_MIN = 5
   private readonly FLUSH_SEC_MAX = 30 * 60
+  private readonly ADAPTIVE_PROFILE_ALPHA = 0.2
+  private readonly SLO_PENDING_WARN = 5000
+  private readonly SLO_PENDING_ERROR = 20000
+  private readonly SLO_OLDEST_AGE_WARN_SEC = 120
+  private readonly SLO_OLDEST_AGE_ERROR_SEC = 600
+  private adaptiveProfile = {
+    emaPendingTotal: 0,
+    emaOldestAgeSeconds: 0,
+    samples: 0,
+  }
 
   // hibernate the do when no websocket nor connections are active
   static options = {
@@ -595,6 +605,10 @@ export class DurableObjectUsagelimiter extends Server {
     const adaptiveFlushSec = this.getAdaptiveFlushSeconds(pressure, fallbackFlushSec)
     const nextAlarm = now + adaptiveFlushSec * 1000
 
+    if (pressure) {
+      this.emitFlushPressureSlo("schedule", pressure)
+    }
+
     wideEventLogger.add("usagelimiter.next_alarm", new Date(nextAlarm).toISOString())
     if (!alarm || nextAlarm < alarm) {
       this.ctx.storage.setAlarm(nextAlarm)
@@ -616,25 +630,85 @@ export class DurableObjectUsagelimiter extends Server {
       return fallbackFlushSec
     }
 
+    this.updateAdaptiveProfile(pressure)
+
+    const effectivePending = Math.max(
+      pressure.pendingTotalRecords,
+      Math.round(this.adaptiveProfile.emaPendingTotal)
+    )
+    const effectiveOldestAgeSeconds = Math.max(
+      pressure.oldestPendingAgeSeconds,
+      Math.round(this.adaptiveProfile.emaOldestAgeSeconds)
+    )
+
     let adaptive = fallbackFlushSec
 
-    if (pressure.pendingTotalRecords >= 20000) {
+    if (effectivePending >= 20000) {
       adaptive = Math.min(adaptive, 5)
-    } else if (pressure.pendingTotalRecords >= 10000) {
+    } else if (effectivePending >= 10000) {
       adaptive = Math.min(adaptive, 10)
-    } else if (pressure.pendingTotalRecords >= 5000) {
+    } else if (effectivePending >= 5000) {
       adaptive = Math.min(adaptive, 15)
-    } else if (pressure.pendingTotalRecords >= 2000) {
+    } else if (effectivePending >= 2000) {
       adaptive = Math.min(adaptive, 30)
-    } else if (pressure.pendingTotalRecords >= 500) {
+    } else if (effectivePending >= 500) {
       adaptive = Math.min(adaptive, 45)
     }
 
-    if (pressure.oldestPendingAgeSeconds >= 5 * 60) {
+    if (effectiveOldestAgeSeconds >= 5 * 60) {
       adaptive = Math.min(adaptive, 10)
     }
 
     return Math.min(Math.max(adaptive, this.FLUSH_SEC_MIN), this.FLUSH_SEC_MAX)
+  }
+
+  private updateAdaptiveProfile(pressure: FlushPressureStats): void {
+    if (this.adaptiveProfile.samples === 0) {
+      this.adaptiveProfile.emaPendingTotal = pressure.pendingTotalRecords
+      this.adaptiveProfile.emaOldestAgeSeconds = pressure.oldestPendingAgeSeconds
+      this.adaptiveProfile.samples = 1
+      return
+    }
+
+    const alpha = this.ADAPTIVE_PROFILE_ALPHA
+    this.adaptiveProfile.emaPendingTotal =
+      alpha * pressure.pendingTotalRecords + (1 - alpha) * this.adaptiveProfile.emaPendingTotal
+    this.adaptiveProfile.emaOldestAgeSeconds =
+      alpha * pressure.oldestPendingAgeSeconds +
+      (1 - alpha) * this.adaptiveProfile.emaOldestAgeSeconds
+    this.adaptiveProfile.samples += 1
+  }
+
+  private emitFlushPressureSlo(phase: "schedule" | "alarm", pressure: FlushPressureStats): void {
+    const fields = {
+      phase,
+      pendingTotalRecords: pressure.pendingTotalRecords,
+      pendingUsageRecords: pressure.pendingUsageRecords,
+      pendingVerificationRecords: pressure.pendingVerificationRecords,
+      oldestPendingAgeSeconds: pressure.oldestPendingAgeSeconds,
+      oldestPendingTimestamp: pressure.oldestPendingTimestamp,
+      emaPendingTotal: Math.round(this.adaptiveProfile.emaPendingTotal),
+      emaOldestAgeSeconds: Math.round(this.adaptiveProfile.emaOldestAgeSeconds),
+      profileSamples: this.adaptiveProfile.samples,
+    }
+
+    if (
+      pressure.pendingTotalRecords >= this.SLO_PENDING_ERROR ||
+      pressure.oldestPendingAgeSeconds >= this.SLO_OLDEST_AGE_ERROR_SEC
+    ) {
+      this.logger.error("Flush pressure SLO breached", fields)
+      return
+    }
+
+    if (
+      pressure.pendingTotalRecords >= this.SLO_PENDING_WARN ||
+      pressure.oldestPendingAgeSeconds >= this.SLO_OLDEST_AGE_WARN_SEC
+    ) {
+      this.logger.warn("Flush pressure SLO near breach", fields)
+      return
+    }
+
+    this.logger.info("Flush pressure SLO healthy", fields)
   }
 
   private async getFlushPressureSafe(): Promise<FlushPressureStats | null> {
@@ -717,7 +791,11 @@ export class DurableObjectUsagelimiter extends Server {
   async onAlarm(): Promise<void> {
     this.logger.debug("Triggering alarm flush")
     // flush the usage records
-    await this.entitlementService.flush()
+    const flushResult = await this.entitlementService.flush()
+
+    if (flushResult.err) {
+      this.logger.error("Alarm flush failed", { error: flushResult.err.message })
+    }
 
     const pressure = await this.getFlushPressureSafe()
 
@@ -725,6 +803,7 @@ export class DurableObjectUsagelimiter extends Server {
       const now = Date.now()
       const adaptiveFlushSec = this.getAdaptiveFlushSeconds(pressure, this.TTL_ANALYTICS / 1000)
       this.ctx.storage.setAlarm(now + adaptiveFlushSec * 1000)
+      this.emitFlushPressureSlo("alarm", pressure)
 
       this.logger.info("Scheduled follow-up flush under pressure", {
         pendingTotalRecords: pressure.pendingTotalRecords,

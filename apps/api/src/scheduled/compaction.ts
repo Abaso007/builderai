@@ -4,13 +4,30 @@ import {
   type LakehouseSource,
   getDaysAgoUTC,
   getLakehouseCompactedKey,
+  getLakehouseCompactionMarkerKey,
   getLakehouseLegacyRawPrefix,
   getLakehouseRawPrefix,
 } from "~/util/lakehouse"
+import {
+  type LakehouseDaySourceIndex,
+  applyCompactionToIndex,
+  updateLakehouseIndex,
+} from "~/util/lakehouse-index"
 
 const COMPACTION_DELAY_DAYS = 1
+const RAW_FALLBACK_RETENTION_DAYS = 7
 const SOURCES: LakehouseSource[] = ["usage", "verification", "metadata"]
 const R2_BATCH_DELETE_LIMIT = 1000
+
+interface RawCompactionMarker {
+  version: 1
+  projectId: string
+  source: LakehouseSource
+  day: string
+  compactedKey: string
+  sourceKeys: string[]
+  compactedAt: string
+}
 
 class CompactWriteError extends Error {
   public readonly kind: "empty"
@@ -188,6 +205,59 @@ async function deleteSourceFiles(bucket: R2Bucket, keys: string[]): Promise<void
   }
 }
 
+async function writeCompactionMarker(params: {
+  bucket: R2Bucket
+  projectId: string
+  source: LakehouseSource
+  day: string
+  compactedKey: string
+  sourceKeys: string[]
+}): Promise<void> {
+  const markerKey = getLakehouseCompactionMarkerKey(params.projectId, params.source, params.day)
+  const marker: RawCompactionMarker = {
+    version: 1,
+    projectId: params.projectId,
+    source: params.source,
+    day: params.day,
+    compactedKey: params.compactedKey,
+    sourceKeys: params.sourceKeys,
+    compactedAt: new Date().toISOString(),
+  }
+
+  await params.bucket.put(markerKey, JSON.stringify(marker), {
+    httpMetadata: {
+      contentType: "application/json",
+    },
+  })
+}
+
+async function applyRawLifecycleFromMarker(params: {
+  bucket: R2Bucket
+  projectId: string
+  source: LakehouseSource
+  day: string
+}): Promise<void> {
+  const markerKey = getLakehouseCompactionMarkerKey(params.projectId, params.source, params.day)
+  const markerObj = await params.bucket.get(markerKey)
+  if (!markerObj) {
+    return
+  }
+
+  const markerJson = await markerObj.text()
+  let marker: RawCompactionMarker
+  try {
+    marker = JSON.parse(markerJson) as RawCompactionMarker
+  } catch {
+    return
+  }
+
+  if (!Array.isArray(marker.sourceKeys) || marker.sourceKeys.length === 0) {
+    return
+  }
+
+  await deleteSourceFiles(params.bucket, marker.sourceKeys)
+}
+
 async function compactDaySource(
   bucket: R2Bucket,
   projectId: string,
@@ -221,6 +291,17 @@ async function compactDaySource(
 
   const { count, bytes, written, invalidLines } = await compactFiles(bucket, sourceKeys, targetKey)
 
+  if (count > 0) {
+    await writeCompactionMarker({
+      bucket,
+      projectId,
+      source,
+      day,
+      compactedKey: targetKey,
+      sourceKeys,
+    })
+  }
+
   if (!written) {
     return {
       compacted: false,
@@ -230,6 +311,27 @@ async function compactDaySource(
       bytes: 0,
       invalidLines,
     }
+  }
+
+  const indexUpdated = await updateLakehouseIndex({
+    bucket,
+    projectId,
+    source,
+    day,
+    mutate: (current: LakehouseDaySourceIndex) =>
+      applyCompactionToIndex({
+        current,
+        compact: {
+          key: targetKey,
+          bytes,
+          uploadedAt: new Date().toISOString(),
+        },
+        consumedRawKeys: sourceKeys,
+      }),
+  })
+
+  if (!indexUpdated) {
+    throw new Error(`Failed to update index for ${projectId}/${source}/${day}`)
   }
 
   if (shouldDeleteSourceFiles && count > 0) {
@@ -296,6 +398,7 @@ export async function handleCompactionForDay(
   }
 
   const results: CompactionResult["results"] = []
+  const rawLifecycleDay = getDaysAgoUTC(RAW_FALLBACK_RETENTION_DAYS + 1)
 
   try {
     const projectIds = await getAllProjectIds(bucket)
@@ -308,6 +411,13 @@ export async function handleCompactionForDay(
           projectId,
           source,
           ...result,
+        })
+
+        await applyRawLifecycleFromMarker({
+          bucket,
+          projectId,
+          source,
+          day: rawLifecycleDay,
         })
       }
     }
@@ -331,7 +441,7 @@ export async function handleCompactionForDay(
 
 export async function handleCompaction(env: Env): Promise<CompactionResult> {
   const day = getDaysAgoUTC(COMPACTION_DELAY_DAYS)
-  return handleCompactionForDay(env, day, true)
+  return handleCompactionForDay(env, day, false)
 }
 
 export async function scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext) {

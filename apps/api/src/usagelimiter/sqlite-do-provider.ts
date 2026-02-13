@@ -18,6 +18,11 @@ import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import xxhash, { type XXHashAPI } from "xxhash-wasm"
 import { type UsageRecord, type Verification, schema } from "~/db/types"
 import { getLakehouseRawKey } from "~/util/lakehouse"
+import {
+  type LakehouseDaySourceIndex,
+  addRawEntry,
+  updateLakehouseIndex,
+} from "~/util/lakehouse-index"
 import migrations from "../../drizzle/migrations"
 
 // Constants
@@ -1061,6 +1066,18 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       const dayString = now.toISOString().slice(0, 10) // YYYY-MM-DD
       const uploads: Promise<void>[] = []
 
+      const indexUpdates: Array<{
+        projectId: string
+        source: "usage" | "verification" | "metadata"
+        day: string
+        entry: {
+          key: string
+          bytes: number
+          etag?: string
+          uploadedAt: string
+        }
+      }> = []
+
       // Phase 1: Write raw NDJSON files to R2 (include meta_id so lakehouse can JOIN with metadata)
       // Upload usage records grouped by project/customer; payload includes meta_id from processed records
       if (newUsageRecords.length > 0) {
@@ -1095,7 +1112,19 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
               .put(fileKey, buffer, {
                 httpMetadata: { contentType: "application/x-ndjson" },
               })
-              .then(() => undefined)
+              .then((result) => {
+                indexUpdates.push({
+                  projectId,
+                  source: "usage",
+                  day: dayString,
+                  entry: {
+                    key: fileKey,
+                    bytes: buffer.byteLength,
+                    etag: result?.etag,
+                    uploadedAt: now.toISOString(),
+                  },
+                })
+              })
           )
         }
       }
@@ -1138,7 +1167,19 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
               .put(fileKey, buffer, {
                 httpMetadata: { contentType: "application/x-ndjson" },
               })
-              .then(() => undefined)
+              .then((result) => {
+                indexUpdates.push({
+                  projectId,
+                  source: "verification",
+                  day: dayString,
+                  entry: {
+                    key: fileKey,
+                    bytes: buffer.byteLength,
+                    etag: result?.etag,
+                    uploadedAt: now.toISOString(),
+                  },
+                })
+              })
           )
         }
       }
@@ -1164,13 +1205,45 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
               .put(rawFileKey, buffer, {
                 httpMetadata: { contentType: "application/x-ndjson" },
               })
-              .then(() => undefined)
+              .then((result) => {
+                indexUpdates.push({
+                  projectId,
+                  source: "metadata",
+                  day: dayString,
+                  entry: {
+                    key: rawFileKey,
+                    bytes: buffer.byteLength,
+                    etag: result?.etag,
+                    uploadedAt: now.toISOString(),
+                  },
+                })
+              })
           )
         }
       }
 
       if (uploads.length > 0) {
         await Promise.all(uploads)
+      }
+
+      if (indexUpdates.length > 0) {
+        await Promise.all(
+          indexUpdates.map(async (update) => {
+            const ok = await updateLakehouseIndex({
+              bucket: this.lakehouse!,
+              projectId: update.projectId,
+              source: update.source,
+              day: update.day,
+              mutate: (current: LakehouseDaySourceIndex) => addRawEntry(current, update.entry),
+            })
+
+            if (!ok) {
+              throw new Error(
+                `Failed to update lakehouse index after retries for ${update.projectId}/${update.source}/${update.day}`
+              )
+            }
+          })
+        )
       }
 
       // Update state only with IDs we actually flushed (batch order: usage DESC, verification ASC)

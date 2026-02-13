@@ -13,11 +13,29 @@ import {
   type LakehouseSource,
   getDateRangeUTC,
   getLakehouseCompactedPrefix,
+  getLakehouseCompactionMarkerKey,
   getLakehouseLegacyCompactedPrefix,
+  getLakehouseLegacyCompactionMarkerKey,
   getLakehouseLegacyRawPrefix,
   getLakehouseRawPrefix,
   signLakehouseKey,
 } from "~/util/lakehouse"
+import {
+  type LakehouseDaySourceIndex,
+  addRawEntry,
+  readLakehouseIndex,
+  updateLakehouseIndex,
+} from "~/util/lakehouse-index"
+
+interface RawCompactionMarker {
+  version: 1
+  projectId: string
+  source: LakehouseSource
+  day: string
+  compactedKey: string
+  sourceKeys: string[]
+  compactedAt: string
+}
 
 const fileDescriptorBaseSchema = z.object({
   key: z.string(),
@@ -152,6 +170,40 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
       return objects
     }
 
+    const loadCompactionMarker = async (
+      projectId: string,
+      source: LakehouseSource,
+      day: string
+    ): Promise<RawCompactionMarker | null> => {
+      const markerKeys = [
+        getLakehouseCompactionMarkerKey(projectId, source, day),
+        getLakehouseLegacyCompactionMarkerKey(projectId, source, day),
+      ]
+
+      for (const markerKey of markerKeys) {
+        const markerObj = await c.env.LAKEHOUSE!.get(markerKey)
+        if (!markerObj) {
+          continue
+        }
+
+        try {
+          const parsed = JSON.parse(await markerObj.text()) as RawCompactionMarker
+          if (Array.isArray(parsed.sourceKeys)) {
+            return parsed
+          }
+        } catch {}
+      }
+
+      return null
+    }
+
+    const matchesCustomerFilter = (rawKey: string): boolean => {
+      if (!customerId) {
+        return true
+      }
+      return rawKey.includes(`/customer=${customerId}/`)
+    }
+
     const dates = getDateRangeUTC(range)
     const rawByDay = new Map<string, RawFileDescriptor[]>()
     const compactByDay = new Map<string, CompactFileDescriptor | null>()
@@ -173,6 +225,82 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
       compactByDay.set(day, null)
       dayLatestUploadedAtMs.set(day, 0)
       for (const source of sources) {
+        const indexed = await readLakehouseIndex({
+          bucket: c.env.LAKEHOUSE!,
+          projectId: projectID,
+          source,
+          day,
+        })
+
+        if (indexed) {
+          const marker = indexed.compact ? await loadCompactionMarker(projectID, source, day) : null
+          const markerRawKeySet =
+            marker && indexed.compact && marker.compactedKey === indexed.compact.key
+              ? new Set(marker.sourceKeys)
+              : null
+
+          if (indexed.compact) {
+            const compactDesc: CompactFileDescriptor = {
+              key: indexed.compact.key,
+              minTs: "0",
+              maxTs: "0",
+              count: 0,
+              bytes: indexed.compact.bytes,
+            }
+            compactByDay.set(day, compactDesc)
+            allFiles.push({
+              day,
+              source,
+              key: indexed.compact.key,
+              bytes: indexed.compact.bytes,
+              etag: indexed.compact.etag,
+              type: "compact",
+              immutable: true,
+            })
+            const compactUploadedAtMs = Date.parse(indexed.compact.uploadedAt)
+            const currentLatest = dayLatestUploadedAtMs.get(day) ?? 0
+            dayLatestUploadedAtMs.set(
+              day,
+              Math.max(currentLatest, Number.isNaN(compactUploadedAtMs) ? 0 : compactUploadedAtMs)
+            )
+          }
+
+          for (const raw of indexed.raw) {
+            if (!matchesCustomerFilter(raw.key)) {
+              continue
+            }
+
+            if (markerRawKeySet?.has(raw.key)) {
+              continue
+            }
+            rawByDay.get(day)!.push({
+              key: raw.key,
+              minTs: "0",
+              maxTs: "0",
+              count: 0,
+              bytes: raw.bytes,
+            })
+
+            allFiles.push({
+              day,
+              source,
+              key: raw.key,
+              bytes: raw.bytes,
+              etag: raw.etag,
+              type: source === "metadata" ? "metadata" : "raw",
+              immutable: true,
+            })
+            const rawUploadedAtMs = Date.parse(raw.uploadedAt)
+            const currentLatest = dayLatestUploadedAtMs.get(day) ?? 0
+            dayLatestUploadedAtMs.set(
+              day,
+              Math.max(currentLatest, Number.isNaN(rawUploadedAtMs) ? 0 : rawUploadedAtMs)
+            )
+          }
+
+          continue
+        }
+
         const compactedPrefix = getLakehouseCompactedPrefix(projectID, source, day)
         const legacyCompactedPrefix = getLakehouseLegacyCompactedPrefix(projectID, source, day)
         const [compactedObjects, legacyCompactedObjects] = await Promise.all([
@@ -180,27 +308,29 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
           listAll(legacyCompactedPrefix),
         ])
         const allCompactedObjects = [...compactedObjects, ...legacyCompactedObjects]
+        const compactedKeySet = new Set(allCompactedObjects.map((obj) => obj.key))
+        const marker = await loadCompactionMarker(projectID, source, day)
+        const markerRawKeySet =
+          marker && compactedKeySet.has(marker.compactedKey) ? new Set(marker.sourceKeys) : null
 
-        if (allCompactedObjects.length > 0) {
-          const latestCompacted = allCompactedObjects.slice().sort((a, b) => {
-            const aUploaded = a.uploaded ? new Date(a.uploaded).getTime() : 0
-            const bUploaded = b.uploaded ? new Date(b.uploaded).getTime() : 0
-            if (aUploaded !== bUploaded) return bUploaded - aUploaded
-            return b.key.localeCompare(a.key)
-          })[0]
+        const latestCompacted =
+          allCompactedObjects.length > 0
+            ? allCompactedObjects.slice().sort((a, b) => {
+                const aUploaded = a.uploaded ? new Date(a.uploaded).getTime() : 0
+                const bUploaded = b.uploaded ? new Date(b.uploaded).getTime() : 0
+                if (aUploaded !== bUploaded) return bUploaded - aUploaded
+                return b.key.localeCompare(a.key)
+              })[0]
+            : undefined
 
-          if (!latestCompacted) {
-            continue
-          }
-
-          const compactDesc: CompactFileDescriptor = {
+        if (latestCompacted) {
+          compactByDay.set(day, {
             key: latestCompacted.key,
             minTs: "0",
             maxTs: "0",
             count: 0,
             bytes: latestCompacted.size ?? 0,
-          }
-          compactByDay.set(day, compactDesc)
+          })
           allFiles.push({
             day,
             source,
@@ -221,17 +351,25 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
         const legacyPrefix = getLakehouseLegacyRawPrefix(projectID, source, day, customerId)
         const [objects, legacyObjects] = await Promise.all([listAll(prefix), listAll(legacyPrefix)])
         const allRawObjects = [...objects, ...legacyObjects]
+        const discoveredRaw = [] as Array<{
+          key: string
+          bytes: number
+          etag?: string
+          uploadedAt: string
+        }>
 
         for (const obj of allRawObjects) {
-          const rawDesc: RawFileDescriptor = {
+          if (markerRawKeySet?.has(obj.key)) {
+            continue
+          }
+
+          rawByDay.get(day)!.push({
             key: obj.key,
             minTs: "0",
             maxTs: "0",
             count: 0,
             bytes: obj.size ?? 0,
-          }
-
-          rawByDay.get(day)!.push(rawDesc)
+          })
 
           allFiles.push({
             day,
@@ -242,10 +380,43 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
             type: source === "metadata" ? "metadata" : "raw",
             immutable: true,
           })
+          const uploadedAt = obj.uploaded
+            ? new Date(obj.uploaded).toISOString()
+            : new Date(0).toISOString()
+          discoveredRaw.push({
+            key: obj.key,
+            bytes: obj.size ?? 0,
+            etag: obj.etag,
+            uploadedAt,
+          })
           const uploadedAtMs = obj.uploaded ? new Date(obj.uploaded).getTime() : 0
           const currentLatest = dayLatestUploadedAtMs.get(day) ?? 0
           dayLatestUploadedAtMs.set(day, Math.max(currentLatest, uploadedAtMs))
         }
+
+        await updateLakehouseIndex({
+          bucket: c.env.LAKEHOUSE!,
+          projectId: projectID,
+          source,
+          day,
+          mutate: (current: LakehouseDaySourceIndex) => {
+            let next = { ...current, compact: current.compact, raw: current.raw.slice() }
+            for (const raw of discoveredRaw) {
+              next = addRawEntry(next, raw)
+            }
+            if (latestCompacted) {
+              next.compact = {
+                key: latestCompacted.key,
+                bytes: latestCompacted.size ?? 0,
+                etag: latestCompacted.etag,
+                uploadedAt: latestCompacted.uploaded
+                  ? new Date(latestCompacted.uploaded).toISOString()
+                  : new Date().toISOString(),
+              }
+            }
+            return next
+          },
+        })
       }
     }
     allFiles.sort((a, b) => a.key.localeCompare(b.key))

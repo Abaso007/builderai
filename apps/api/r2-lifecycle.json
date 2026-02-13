@@ -7,7 +7,7 @@
         "Prefix": "lakehouse/"
       },
       "Expiration": {
-        "Days": 1
+        "Days": 7
       },
       "NoncurrentVersionExpiration": {
         "NoncurrentDays": 1

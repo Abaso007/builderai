@@ -98,6 +98,14 @@ export function getLakehouseCompactedKey(
   return `${getLakehouseCompactedPrefix(projectId, source, day)}data.ndjson`
 }
 
+export function getLakehouseCompactionMarkerKey(
+  projectId: string,
+  source: LakehouseSource,
+  day: string
+): string {
+  return `${getLakehouseCompactedPrefix(projectId, source, day)}_raw-consumed.json`
+}
+
 export function getLakehouseLegacyRawPrefix(
   projectId: string,
   source: LakehouseSource,
@@ -116,6 +124,23 @@ export function getLakehouseLegacyCompactedPrefix(
 ): string {
   const { year, month, day: d } = dayToPathParts(day)
   return `lakehouse/${projectId}/compacted/${source}/${year}/${month}/${d}/`
+}
+
+export function getLakehouseLegacyCompactionMarkerKey(
+  projectId: string,
+  source: LakehouseSource,
+  day: string
+): string {
+  return `${getLakehouseLegacyCompactedPrefix(projectId, source, day)}_raw-consumed.json`
+}
+
+export function getLakehouseIndexKey(
+  projectId: string,
+  source: LakehouseSource,
+  day: string
+): string {
+  const { year, month, day: d } = dayToPathParts(day)
+  return `lakehouse/${projectId}/index/year=${year}/month=${month}/day=${d}/${source}.json`
 }
 
 function toBase64Url(bytes: Uint8Array): string {

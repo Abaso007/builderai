@@ -586,8 +586,10 @@ export class EntitlementService {
   public async flush(): Promise<
     Result<void, UnPriceEntitlementError | UnPriceEntitlementStorageError>
   > {
-    // flush the usage records
-    await this.storage.flush()
+    const result = await this.storage.flush()
+    if (result.err) {
+      return Err(result.err)
+    }
     return Ok(undefined)
   }
 
