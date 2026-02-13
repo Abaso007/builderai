@@ -1,0 +1,34 @@
+{
+  "Rules": [
+    {
+      "ID": "delete-raw-after-compaction",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "lakehouse/"
+      },
+      "Expiration": {
+        "Days": 7
+      },
+      "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 1
+      }
+    },
+    {
+      "ID": "delete-compacted-after-retention",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "lakehouse/"
+      },
+      "Expiration": {
+        "Days": 90
+      }
+    },
+    {
+      "ID": "abort-incomplete-multipart",
+      "Status": "Enabled",
+      "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 7
+      }
+    }
+  ]
+}

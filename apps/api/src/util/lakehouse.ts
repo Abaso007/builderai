@@ -71,6 +71,31 @@ export function getLakehouseRawKey(
   return `${getLakehouseRawPrefix(projectId, source, day, customerId)}part-${suffix}.ndjson`
 }
 
+/**
+ * Prefix for compacted NDJSON files (per project, per day, per source)
+ * Path: lakehouse/{projectId}/compacted/{source}/{year}/{month}/{day}/
+ */
+export function getLakehouseCompactedPrefix(
+  projectId: string,
+  source: LakehouseSource,
+  day: string
+): string {
+  const { year, month, day: d } = dayToPathParts(day)
+  return `lakehouse/${projectId}/compacted/${source}/${year}/${month}/${d}/`
+}
+
+/**
+ * Key for a compacted NDJSON file (daily compaction result)
+ * Path: lakehouse/{projectId}/compacted/{source}/{year}/{month}/{day}/data.ndjson
+ */
+export function getLakehouseCompactedKey(
+  projectId: string,
+  source: LakehouseSource,
+  day: string
+): string {
+  return `${getLakehouseCompactedPrefix(projectId, source, day)}data.ndjson`
+}
+
 function toBase64Url(bytes: Uint8Array): string {
   let binary = ""
   for (const b of bytes) {

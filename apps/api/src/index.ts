@@ -8,6 +8,7 @@ import serveEmojiFavicon from "stoker/middlewares/serve-emoji-favicon"
 
 export { DurableObjectUsagelimiter } from "~/usagelimiter/do"
 export { DurableObjectProject } from "~/project/do"
+export { scheduled } from "~/scheduled/compaction"
 
 import { registerReportUsageV1 } from "~/routes/customer/reportUsageV1"
 import { registerCreatePaymentMethodV1 } from "./routes/customer/createPaymentMethodV1"
@@ -18,6 +19,7 @@ import { registerGetUsageV1 } from "./routes/customer/getUsageV1"
 import { registerResetEntitlementsV1 } from "./routes/customer/resetEntitlementsV1"
 import { registerSignUpV1 } from "./routes/customer/signUpV1"
 import { registerVerifyV1 } from "./routes/customer/verifyV1"
+import { registerCompactV1 } from "./routes/lakehouse/compactV1"
 import { registerGetLakehouseFileV1 } from "./routes/lakehouse/getFileV1"
 import { registerGetLakehouseManifestV1 } from "./routes/lakehouse/getManifestV1"
 import { registerStripeSetupV1 } from "./routes/paymentProvider/stripeSetupV1"
@@ -112,8 +114,11 @@ registerStripeSetupV1(app)
 // Analytics routes
 registerGetAnalyticsUsageV1(app)
 registerGetAnalyticsVerificationsV1(app)
+
+// Lakehouse routes
 registerGetLakehouseFileV1(app)
 registerGetLakehouseManifestV1(app)
+registerCompactV1(app)
 
 // Export handler
 const handler = {

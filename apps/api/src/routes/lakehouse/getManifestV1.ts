@@ -12,6 +12,7 @@ import type { App } from "~/hono/app"
 import {
   type LakehouseSource,
   getDateRangeUTC,
+  getLakehouseCompactedPrefix,
   getLakehouseRawPrefix,
   signLakehouseKey,
 } from "~/util/lakehouse"
@@ -150,6 +151,7 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
 
     const dates = getDateRangeUTC(range)
     const rawByDay = new Map<string, RawFileDescriptor[]>()
+    const compactByDay = new Map<string, CompactFileDescriptor | null>()
     const dayLatestUploadedAtMs = new Map<string, number>()
     const allFiles: Array<{
       day: string
@@ -157,14 +159,41 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
       key: string
       bytes: number
       etag?: string
+      type: "raw" | "compact" | "metadata"
     }> = []
 
     const sources: LakehouseSource[] = ["usage", "verification", "metadata"]
 
     for (const day of dates) {
       rawByDay.set(day, [])
+      compactByDay.set(day, null)
       dayLatestUploadedAtMs.set(day, 0)
       for (const source of sources) {
+        const compactedPrefix = getLakehouseCompactedPrefix(projectID, source, day)
+        const compactedObjects = await listAll(compactedPrefix)
+
+        for (const obj of compactedObjects) {
+          const compactDesc: CompactFileDescriptor = {
+            key: obj.key,
+            minTs: "0",
+            maxTs: "0",
+            count: 0,
+            bytes: obj.size ?? 0,
+          }
+          compactByDay.set(day, compactDesc)
+          allFiles.push({
+            day,
+            source,
+            key: obj.key,
+            bytes: obj.size ?? 0,
+            etag: obj.etag,
+            type: "compact",
+          })
+          const uploadedAtMs = obj.uploaded ? new Date(obj.uploaded).getTime() : 0
+          const currentLatest = dayLatestUploadedAtMs.get(day) ?? 0
+          dayLatestUploadedAtMs.set(day, Math.max(currentLatest, uploadedAtMs))
+        }
+
         const prefix = getLakehouseRawPrefix(projectID, source, day, customerId)
         const objects = await listAll(prefix)
         for (const obj of objects) {
@@ -178,7 +207,14 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
 
           rawByDay.get(day)!.push(rawDesc)
 
-          allFiles.push({ day, source, key: obj.key, bytes: obj.size ?? 0, etag: obj.etag })
+          allFiles.push({
+            day,
+            source,
+            key: obj.key,
+            bytes: obj.size ?? 0,
+            etag: obj.etag,
+            type: source === "metadata" ? "metadata" : "raw",
+          })
           const uploadedAtMs = obj.uploaded ? new Date(obj.uploaded).getTime() : 0
           const currentLatest = dayLatestUploadedAtMs.get(day) ?? 0
           dayLatestUploadedAtMs.set(day, Math.max(currentLatest, uploadedAtMs))
@@ -197,14 +233,14 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
     const exp = (Math.floor(nowEpochSeconds / SIGNED_URL_TTL_SECONDS) + 1) * SIGNED_URL_TTL_SECONDS
 
     const files: FileDescriptor[] = []
-    for (const { day, source, key, bytes, etag } of allFiles) {
+    for (const { day, source, key, bytes, etag, type } of allFiles) {
       const sig = await signLakehouseKey(c.env.AUTH_SECRET, key, exp)
       const versionQuery = etag ? `&v=${encodeURIComponent(etag)}` : ""
       files.push({
         url: `${API_URL}?key=${encodeURIComponent(key)}&exp=${exp}&sig=${sig}${versionQuery}`,
         key,
         day,
-        type: source === "metadata" ? "metadata" : "raw",
+        type,
         source,
         count: 0,
         bytes,
@@ -219,7 +255,7 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
           ? new Date(dayLatestUploadedAtMs.get(day) ?? 0).toISOString()
           : `${day}T00:00:00.000Z`,
       raw: rawByDay.get(day) ?? [],
-      compact: null,
+      compact: compactByDay.get(day) ?? null,
     }))
 
     const response: ManifestResponse = {
