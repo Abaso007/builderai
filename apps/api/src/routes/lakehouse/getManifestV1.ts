@@ -13,6 +13,8 @@ import {
   type LakehouseSource,
   getDateRangeUTC,
   getLakehouseCompactedPrefix,
+  getLakehouseLegacyCompactedPrefix,
+  getLakehouseLegacyRawPrefix,
   getLakehouseRawPrefix,
   signLakehouseKey,
 } from "~/util/lakehouse"
@@ -170,9 +172,14 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
       dayLatestUploadedAtMs.set(day, 0)
       for (const source of sources) {
         const compactedPrefix = getLakehouseCompactedPrefix(projectID, source, day)
-        const compactedObjects = await listAll(compactedPrefix)
+        const legacyCompactedPrefix = getLakehouseLegacyCompactedPrefix(projectID, source, day)
+        const [compactedObjects, legacyCompactedObjects] = await Promise.all([
+          listAll(compactedPrefix),
+          listAll(legacyCompactedPrefix),
+        ])
+        const allCompactedObjects = [...compactedObjects, ...legacyCompactedObjects]
 
-        for (const obj of compactedObjects) {
+        for (const obj of allCompactedObjects) {
           const compactDesc: CompactFileDescriptor = {
             key: obj.key,
             minTs: "0",
@@ -195,8 +202,11 @@ export const registerGetLakehouseManifestV1 = (app: App) =>
         }
 
         const prefix = getLakehouseRawPrefix(projectID, source, day, customerId)
-        const objects = await listAll(prefix)
-        for (const obj of objects) {
+        const legacyPrefix = getLakehouseLegacyRawPrefix(projectID, source, day, customerId)
+        const [objects, legacyObjects] = await Promise.all([listAll(prefix), listAll(legacyPrefix)])
+        const allRawObjects = [...objects, ...legacyObjects]
+
+        for (const obj of allRawObjects) {
           const rawDesc: RawFileDescriptor = {
             key: obj.key,
             minTs: "0",

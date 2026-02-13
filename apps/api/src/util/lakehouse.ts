@@ -44,7 +44,8 @@ export type LakehouseSource = "usage" | "verification" | "metadata"
 
 /**
  * Prefix for raw NDJSON files (per project, per day, per source)
- * Path: lakehouse/{projectId}/raw/{source}/{year}/{month}/{day}/
+ * Uses Hive-style partitioning: year=YYYY/month=MM/day=DD/customer=ID
+ * Path: lakehouse/{projectId}/raw/{source}/year={year}/month={month}/day={day}/
  */
 export function getLakehouseRawPrefix(
   projectId: string,
@@ -53,7 +54,7 @@ export function getLakehouseRawPrefix(
   customerId?: string
 ): string {
   const { year, month, day: d } = dayToPathParts(day)
-  const base = `lakehouse/${projectId}/raw/${source}/${year}/${month}/${d}/`
+  const base = `lakehouse/${projectId}/raw/${source}/year=${year}/month=${month}/day=${d}/`
   return customerId ? `${base}customer=${customerId}/` : base
 }
 
@@ -73,7 +74,8 @@ export function getLakehouseRawKey(
 
 /**
  * Prefix for compacted NDJSON files (per project, per day, per source)
- * Path: lakehouse/{projectId}/compacted/{source}/{year}/{month}/{day}/
+ * Uses Hive-style partitioning: year=YYYY/month=MM/day=DD
+ * Path: lakehouse/{projectId}/compacted/{source}/year={year}/month={month}/day={day}/
  */
 export function getLakehouseCompactedPrefix(
   projectId: string,
@@ -81,7 +83,7 @@ export function getLakehouseCompactedPrefix(
   day: string
 ): string {
   const { year, month, day: d } = dayToPathParts(day)
-  return `lakehouse/${projectId}/compacted/${source}/${year}/${month}/${d}/`
+  return `lakehouse/${projectId}/compacted/${source}/year=${year}/month=${month}/day=${d}/`
 }
 
 /**
@@ -94,6 +96,26 @@ export function getLakehouseCompactedKey(
   day: string
 ): string {
   return `${getLakehouseCompactedPrefix(projectId, source, day)}data.ndjson`
+}
+
+export function getLakehouseLegacyRawPrefix(
+  projectId: string,
+  source: LakehouseSource,
+  day: string,
+  customerId?: string
+): string {
+  const { year, month, day: d } = dayToPathParts(day)
+  const base = `lakehouse/${projectId}/raw/${source}/${year}/${month}/${d}/`
+  return customerId ? `${base}customer=${customerId}/` : base
+}
+
+export function getLakehouseLegacyCompactedPrefix(
+  projectId: string,
+  source: LakehouseSource,
+  day: string
+): string {
+  const { year, month, day: d } = dayToPathParts(day)
+  return `lakehouse/${projectId}/compacted/${source}/${year}/${month}/${d}/`
 }
 
 function toBase64Url(bytes: Uint8Array): string {

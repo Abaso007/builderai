@@ -23,6 +23,15 @@ import migrations from "../../drizzle/migrations"
 // Constants
 const BATCH_SIZE = 1000
 const METADATA_RETENTION_DAYS = 3
+const WINDOW_5_MIN = 300
+const WINDOW_60_MIN = 3600
+const WINDOW_1_DAY = 86400
+const WINDOW_7_DAYS = 604800
+const MINUTE_BUCKET_SECONDS = 60
+const HOUR_BUCKET_SECONDS = 3600
+const AGGREGATE_BUCKETS = [MINUTE_BUCKET_SECONDS, HOUR_BUCKET_SECONDS] as const
+const MINUTE_AGGREGATE_RETENTION_SECONDS = WINDOW_1_DAY * 2
+const HOUR_AGGREGATE_RETENTION_SECONDS = WINDOW_7_DAYS * 4
 const STATE_KEY_PREFIX = "state:"
 const SEEN_META_PREFIX = "seen_meta_"
 const CURSOR_KEY = "cursor_state"
@@ -54,6 +63,10 @@ interface BatchResult<T, ID> {
   lastId: ID | null
 }
 
+// Schema version for event evolution tracking
+// Increment when making breaking changes to event structure
+const SCHEMA_VERSION = 1
+
 // Tinybird ingestion payload types (what analytics.ingest* methods expect)
 interface TinybirdUsagePayload {
   id: string
@@ -72,6 +85,8 @@ interface TinybirdUsagePayload {
   region: string
   action: string | undefined
   key_id: string | undefined
+  // schema evolution tracking
+  schema_version: number
 }
 
 interface TinybirdVerificationPayload {
@@ -90,6 +105,8 @@ interface TinybirdVerificationPayload {
   country: string
   action: string | undefined
   key_id: string | undefined
+  // schema evolution tracking
+  schema_version: number
 }
 
 interface TinybirdMetadataPayload {
@@ -98,6 +115,8 @@ interface TinybirdMetadataPayload {
   customer_id: string
   meta_id: number
   tags: string
+  // schema evolution tracking
+  schema_version: number
 }
 
 // Processed record with metadata for internal use
@@ -349,7 +368,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     try {
       this.assertInitialized()
 
-      await this.db
+      const inserted = await this.db
         .insert(schema.usageRecords)
         .values({
           id: record.id,
@@ -370,6 +389,17 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           key_id: record.key_id ?? null,
         })
         .onConflictDoNothing()
+        .returning({ id: schema.usageRecords.id })
+
+      if (inserted.length === 0) {
+        return Ok(undefined)
+      }
+
+      await this.updateUsageAggregates({
+        timestamp: record.timestamp,
+        featureSlug: record.feature_slug,
+        usage: Number(record.usage ?? 0),
+      })
 
       return Ok(undefined)
     } catch (error) {
@@ -399,6 +429,12 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         region: record.region ?? "UNK",
         action: record.action ?? null,
         key_id: record.key_id ?? null,
+      })
+
+      await this.updateVerificationAggregates({
+        timestamp: record.timestamp,
+        featureSlug: record.feature_slug,
+        allowed: record.allowed,
       })
 
       return Ok(undefined)
@@ -524,6 +560,8 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           )
         }
       }
+
+      await this.pruneAggregateBuckets(Date.now())
 
       return Ok({
         usage: { count: usageBatch.records.length, lastId: usageBatch.lastId },
@@ -792,11 +830,11 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           request_id: record.request_id,
           created_at: record.created_at,
           idempotence_key: record.idempotence_key,
-          // first-class analytics columns
           country,
           region,
           action,
           key_id: keyId,
+          schema_version: SCHEMA_VERSION,
         })
       )
 
@@ -850,10 +888,10 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           request_id: record.request_id,
           created_at: record.created_at,
           region,
-          // first-class analytics columns
           country,
           action,
           key_id: keyId,
+          schema_version: SCHEMA_VERSION,
         })
       )
 
@@ -902,6 +940,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         customer_id: m.customer_id,
         meta_id: m.meta_id,
         tags: m.tags,
+        schema_version: SCHEMA_VERSION,
       }))
 
       const result = await this.analytics.ingestMetadata(payload)
@@ -1034,6 +1073,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
             region: region ?? record.region ?? "UNK",
             action: action ?? record.action ?? null,
             key_id: keyId ?? record.key_id ?? null,
+            schema_version: SCHEMA_VERSION,
           })
         )
         const usageGroups = this.groupByProjectCustomer(usagePayloads)
@@ -1070,6 +1110,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
             meta_id: String(metaId),
             action: action ?? record.action ?? null,
             key_id: keyId ?? record.key_id ?? null,
+            schema_version: SCHEMA_VERSION,
           })
         )
         const verificationGroups = this.groupByProjectCustomer(verificationPayloads)
@@ -1106,6 +1147,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
               meta_id: String(e.meta_id),
               tags: e.tags,
               timestamp: e.timestamp,
+              schema_version: SCHEMA_VERSION,
             }))
           )
 
@@ -1224,6 +1266,300 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     } catch (error) {
       this.logger.error("Failed to rotate seen metadata", { error: this.errorMessage(error) })
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Buffer Stats (Real-time Metrics)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Returns aggregated statistics for unflushed records in the DO SQLite buffer.
+   * This is used for real-time metrics without querying Tinybird.
+   *
+   * Returns counts and aggregations of pending usage/verification records that
+   * haven't been flushed to Tinybird/R2 yet (typically seconds to minutes old).
+   */
+  async getBufferStats(windowSeconds = WINDOW_60_MIN): Promise<
+    Result<
+      {
+        usageCount: number
+        verificationCount: number
+        totalUsage: number
+        allowedCount: number
+        deniedCount: number
+        bucketSizeSeconds: number
+        featureStats: Array<{
+          featureSlug: string
+          usageCount: number
+          verificationCount: number
+          totalUsage: number
+        }>
+        usageSeries: Array<{
+          bucketStart: number
+          usageCount: number
+          totalUsage: number
+        }>
+        verificationSeries: Array<{
+          bucketStart: number
+          verificationCount: number
+          allowedCount: number
+          deniedCount: number
+        }>
+        oldestTimestamp: number | null
+        newestTimestamp: number | null
+      },
+      UnPriceEntitlementStorageError
+    >
+  > {
+    try {
+      this.assertInitialized()
+
+      const normalizedWindowSeconds =
+        windowSeconds === WINDOW_5_MIN ||
+        windowSeconds === WINDOW_60_MIN ||
+        windowSeconds === WINDOW_1_DAY ||
+        windowSeconds === WINDOW_7_DAYS
+          ? windowSeconds
+          : WINDOW_60_MIN
+
+      const selectedBucketSizeSeconds =
+        normalizedWindowSeconds <= WINDOW_60_MIN ? MINUTE_BUCKET_SECONDS : HOUR_BUCKET_SECONDS
+      const windowStart = Date.now() - normalizedWindowSeconds * 1000
+
+      const usageSeries = await this.db
+        .select({
+          bucketStart: schema.usageAggregates.bucket_start,
+          usageCount: sql<number>`sum(${schema.usageAggregates.usage_count})`,
+          totalUsage: sql<number>`coalesce(sum(cast(${schema.usageAggregates.total_usage} as real)), 0)`,
+        })
+        .from(schema.usageAggregates)
+        .where(
+          sql`${schema.usageAggregates.bucket_size_seconds} = ${selectedBucketSizeSeconds} AND ${schema.usageAggregates.bucket_start} >= ${windowStart}`
+        )
+        .groupBy(schema.usageAggregates.bucket_start)
+        .orderBy(schema.usageAggregates.bucket_start)
+
+      const verificationSeries = await this.db
+        .select({
+          bucketStart: schema.verificationAggregates.bucket_start,
+          verificationCount: sql<number>`sum(${schema.verificationAggregates.verification_count})`,
+          allowedCount: sql<number>`sum(${schema.verificationAggregates.allowed_count})`,
+          deniedCount: sql<number>`sum(${schema.verificationAggregates.denied_count})`,
+        })
+        .from(schema.verificationAggregates)
+        .where(
+          sql`${schema.verificationAggregates.bucket_size_seconds} = ${selectedBucketSizeSeconds} AND ${schema.verificationAggregates.bucket_start} >= ${windowStart}`
+        )
+        .groupBy(schema.verificationAggregates.bucket_start)
+        .orderBy(schema.verificationAggregates.bucket_start)
+
+      const usageStatsByFeature = await this.db
+        .select({
+          featureSlug: schema.usageAggregates.feature_slug,
+          usageCount: sql<number>`sum(${schema.usageAggregates.usage_count})`,
+          totalUsage: sql<number>`coalesce(sum(cast(${schema.usageAggregates.total_usage} as real)), 0)`,
+        })
+        .from(schema.usageAggregates)
+        .where(
+          sql`${schema.usageAggregates.bucket_size_seconds} = ${selectedBucketSizeSeconds} AND ${schema.usageAggregates.bucket_start} >= ${windowStart}`
+        )
+        .groupBy(schema.usageAggregates.feature_slug)
+
+      const verificationStatsByFeature = await this.db
+        .select({
+          featureSlug: schema.verificationAggregates.feature_slug,
+          verificationCount: sql<number>`sum(${schema.verificationAggregates.verification_count})`,
+          allowedCount: sql<number>`sum(${schema.verificationAggregates.allowed_count})`,
+          deniedCount: sql<number>`sum(${schema.verificationAggregates.denied_count})`,
+        })
+        .from(schema.verificationAggregates)
+        .where(
+          sql`${schema.verificationAggregates.bucket_size_seconds} = ${selectedBucketSizeSeconds} AND ${schema.verificationAggregates.bucket_start} >= ${windowStart}`
+        )
+        .groupBy(schema.verificationAggregates.feature_slug)
+
+      // Combine stats by feature
+      const featureMap = new Map<
+        string,
+        {
+          featureSlug: string
+          usageCount: number
+          verificationCount: number
+          totalUsage: number
+        }
+      >()
+
+      let totalUsageCount = 0
+      let totalUsageSum = 0
+      let totalVerificationCount = 0
+      let totalAllowed = 0
+      let totalDenied = 0
+      let oldestTimestamp: number | null = null
+      let newestTimestamp: number | null = null
+
+      for (const stat of usageStatsByFeature) {
+        totalUsageCount += stat.usageCount
+        totalUsageSum += stat.totalUsage
+
+        featureMap.set(stat.featureSlug, {
+          featureSlug: stat.featureSlug,
+          usageCount: stat.usageCount,
+          verificationCount: 0,
+          totalUsage: stat.totalUsage,
+        })
+      }
+
+      for (const stat of verificationStatsByFeature) {
+        totalVerificationCount += stat.verificationCount
+        totalAllowed += stat.allowedCount ?? 0
+        totalDenied += stat.deniedCount ?? 0
+
+        const existing = featureMap.get(stat.featureSlug)
+        if (existing) {
+          existing.verificationCount = stat.verificationCount
+        } else {
+          featureMap.set(stat.featureSlug, {
+            featureSlug: stat.featureSlug,
+            usageCount: 0,
+            verificationCount: stat.verificationCount,
+            totalUsage: 0,
+          })
+        }
+      }
+
+      const usageOldest = usageSeries[0]?.bucketStart ?? null
+      const verificationOldest = verificationSeries[0]?.bucketStart ?? null
+      const usageNewest = usageSeries[usageSeries.length - 1]?.bucketStart ?? null
+      const verificationNewest =
+        verificationSeries[verificationSeries.length - 1]?.bucketStart ?? null
+
+      oldestTimestamp =
+        usageOldest === null
+          ? verificationOldest
+          : verificationOldest === null
+            ? usageOldest
+            : Math.min(usageOldest, verificationOldest)
+
+      newestTimestamp =
+        usageNewest === null
+          ? verificationNewest
+          : verificationNewest === null
+            ? usageNewest
+            : Math.max(usageNewest, verificationNewest)
+
+      return Ok({
+        usageCount: totalUsageCount,
+        verificationCount: totalVerificationCount,
+        totalUsage: totalUsageSum,
+        allowedCount: totalAllowed,
+        deniedCount: totalDenied,
+        bucketSizeSeconds: selectedBucketSizeSeconds,
+        featureStats: Array.from(featureMap.values()),
+        usageSeries,
+        verificationSeries,
+        oldestTimestamp,
+        newestTimestamp,
+      })
+    } catch (error) {
+      return this.logAndError("getBufferStats", error)
+    }
+  }
+
+  private async updateUsageAggregates(data: {
+    timestamp: number
+    featureSlug: string
+    usage: number
+  }): Promise<void> {
+    const now = Date.now()
+
+    for (const bucketSizeSeconds of AGGREGATE_BUCKETS) {
+      const bucketStart = this.getBucketStart(data.timestamp, bucketSizeSeconds)
+
+      await this.db
+        .insert(schema.usageAggregates)
+        .values({
+          bucket_start: bucketStart,
+          bucket_size_seconds: bucketSizeSeconds,
+          feature_slug: data.featureSlug,
+          usage_count: 1,
+          total_usage: String(data.usage),
+          updated_at: now,
+        })
+        .onConflictDoUpdate({
+          target: [
+            schema.usageAggregates.bucket_start,
+            schema.usageAggregates.bucket_size_seconds,
+            schema.usageAggregates.feature_slug,
+          ],
+          set: {
+            usage_count: sql`${schema.usageAggregates.usage_count} + 1`,
+            total_usage: sql`cast(${schema.usageAggregates.total_usage} as real) + ${data.usage}`,
+            updated_at: now,
+          },
+        })
+    }
+  }
+
+  private async updateVerificationAggregates(data: {
+    timestamp: number
+    featureSlug: string
+    allowed: number
+  }): Promise<void> {
+    const now = Date.now()
+    const allowedDelta = data.allowed === 1 ? 1 : 0
+    const deniedDelta = data.allowed === 1 ? 0 : 1
+
+    for (const bucketSizeSeconds of AGGREGATE_BUCKETS) {
+      const bucketStart = this.getBucketStart(data.timestamp, bucketSizeSeconds)
+
+      await this.db
+        .insert(schema.verificationAggregates)
+        .values({
+          bucket_start: bucketStart,
+          bucket_size_seconds: bucketSizeSeconds,
+          feature_slug: data.featureSlug,
+          verification_count: 1,
+          allowed_count: allowedDelta,
+          denied_count: deniedDelta,
+          updated_at: now,
+        })
+        .onConflictDoUpdate({
+          target: [
+            schema.verificationAggregates.bucket_start,
+            schema.verificationAggregates.bucket_size_seconds,
+            schema.verificationAggregates.feature_slug,
+          ],
+          set: {
+            verification_count: sql`${schema.verificationAggregates.verification_count} + 1`,
+            allowed_count: sql`${schema.verificationAggregates.allowed_count} + ${allowedDelta}`,
+            denied_count: sql`${schema.verificationAggregates.denied_count} + ${deniedDelta}`,
+            updated_at: now,
+          },
+        })
+    }
+  }
+
+  private getBucketStart(timestamp: number, bucketSizeSeconds: number): number {
+    const bucketSizeMs = bucketSizeSeconds * 1000
+    return Math.floor(timestamp / bucketSizeMs) * bucketSizeMs
+  }
+
+  private async pruneAggregateBuckets(nowMs: number): Promise<void> {
+    const minuteCutoff = nowMs - MINUTE_AGGREGATE_RETENTION_SECONDS * 1000
+    const hourCutoff = nowMs - HOUR_AGGREGATE_RETENTION_SECONDS * 1000
+
+    await Promise.all([
+      this.db
+        .delete(schema.usageAggregates)
+        .where(
+          sql`(${schema.usageAggregates.bucket_size_seconds} = ${MINUTE_BUCKET_SECONDS} AND ${schema.usageAggregates.bucket_start} < ${minuteCutoff}) OR (${schema.usageAggregates.bucket_size_seconds} = ${HOUR_BUCKET_SECONDS} AND ${schema.usageAggregates.bucket_start} < ${hourCutoff})`
+        ),
+      this.db
+        .delete(schema.verificationAggregates)
+        .where(
+          sql`(${schema.verificationAggregates.bucket_size_seconds} = ${MINUTE_BUCKET_SECONDS} AND ${schema.verificationAggregates.bucket_start} < ${minuteCutoff}) OR (${schema.verificationAggregates.bucket_size_seconds} = ${HOUR_BUCKET_SECONDS} AND ${schema.verificationAggregates.bucket_start} < ${hourCutoff})`
+        ),
+    ])
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

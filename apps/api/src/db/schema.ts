@@ -1,4 +1,12 @@
-import { index, integer, numeric, sqliteTableCreator, text, unique } from "drizzle-orm/sqlite-core"
+import {
+  index,
+  integer,
+  numeric,
+  primaryKey,
+  sqliteTableCreator,
+  text,
+  unique,
+} from "drizzle-orm/sqlite-core"
 
 export const version = "usagelimiter_v1"
 
@@ -70,4 +78,41 @@ export const verifications = pgTableProject(
     key_id: text(),
   },
   (table) => [index("verifications_feature_idx").on(table.feature_slug)]
+)
+
+export const usageAggregates = pgTableProject(
+  "usage_aggregates",
+  {
+    bucket_start: integer().notNull(),
+    bucket_size_seconds: integer().notNull(),
+    feature_slug: text().notNull(),
+    usage_count: integer().notNull().default(0),
+    total_usage: numeric().notNull().default("0"),
+    updated_at: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.bucket_start, table.bucket_size_seconds, table.feature_slug],
+    }),
+    index("usage_aggregates_bucket_idx").on(table.bucket_size_seconds, table.bucket_start),
+  ]
+)
+
+export const verificationAggregates = pgTableProject(
+  "verification_aggregates",
+  {
+    bucket_start: integer().notNull(),
+    bucket_size_seconds: integer().notNull(),
+    feature_slug: text().notNull(),
+    verification_count: integer().notNull().default(0),
+    allowed_count: integer().notNull().default(0),
+    denied_count: integer().notNull().default(0),
+    updated_at: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.bucket_start, table.bucket_size_seconds, table.feature_slug],
+    }),
+    index("verification_aggregates_bucket_idx").on(table.bucket_size_seconds, table.bucket_start),
+  ]
 )

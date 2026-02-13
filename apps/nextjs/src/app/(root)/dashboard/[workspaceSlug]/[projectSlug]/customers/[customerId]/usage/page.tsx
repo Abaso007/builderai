@@ -1,22 +1,19 @@
-import { SUBSCRIPTION_STATUS } from "@unprice/db/utils"
 import { Button } from "@unprice/ui/button"
 import { Separator } from "@unprice/ui/separator"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
 import { Typography } from "@unprice/ui/typography"
 import { Code, Plus } from "lucide-react"
+import { cookies } from "next/headers"
 import { notFound } from "next/navigation"
-import { Suspense } from "react"
 import { CodeApiSheet } from "~/components/code-api-sheet"
-import { DataTable } from "~/components/data-table/data-table"
-import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 import { SuperLink } from "~/components/super-link"
 import { api } from "~/trpc/server"
 import { CustomerActions } from "../../_components/customers/customer-actions"
-import { columns } from "../../_components/subscriptions/table-subscriptions/columns"
+import { RealtimePanel } from "../_components/realtime/realtime-panel"
 
-export default async function CustomerPage({
+export default async function CustomerUsagePage({
   params,
 }: {
   params: {
@@ -35,6 +32,10 @@ export default async function CustomerPage({
   if (!customer) {
     notFound()
   }
+
+  const sessionCookieName =
+    process.env.NODE_ENV === "production" ? "__Secure-authjs.session-token" : "authjs.session-token"
+  const sessionToken = cookies().get(sessionCookieName)?.value ?? ""
 
   return (
     <DashboardShell
@@ -73,62 +74,31 @@ export default async function CustomerPage({
     >
       <TabNavigation>
         <div className="flex items-center">
-          <TabNavigationLink asChild active>
+          <TabNavigationLink asChild>
             <SuperLink href={`${baseUrl}`}>Subscriptions</SuperLink>
           </TabNavigationLink>
           <TabNavigationLink asChild>
             <SuperLink href={`${baseUrl}/invoices`}>Invoices</SuperLink>
           </TabNavigationLink>
-          <TabNavigationLink asChild>
+          <TabNavigationLink active asChild>
             <SuperLink href={`${baseUrl}/usage`}>Usage</SuperLink>
           </TabNavigationLink>
         </div>
       </TabNavigation>
-      <div className="mt-4">
-        <div className="flex flex-col px-1 py-4">
+
+      <div className="mt-4 space-y-4">
+        <div className="flex flex-col px-1 py-2">
           <Typography variant="p" affects="removePaddingMargin">
-            All subscriptions of this customer
+            Live usage and verification metrics from Durable Object aggregates
           </Typography>
         </div>
-        <Suspense
-          fallback={
-            <DataTableSkeleton
-              columnCount={11}
-              searchableColumnCount={1}
-              filterableColumnCount={2}
-              cellWidths={[
-                "10rem",
-                "40rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "8rem",
-              ]}
-            />
-          }
-        >
-          <DataTable
-            columns={columns}
-            data={customer.subscriptions}
-            filterOptions={{
-              filterBy: "customerId",
-              filterColumns: true,
-              filterDateRange: true,
-              filterServerSide: false,
-              filterSelectors: {
-                status: SUBSCRIPTION_STATUS.map((value) => ({
-                  value: value,
-                  label: value,
-                })),
-              },
-            }}
-          />
-        </Suspense>
+
+        <RealtimePanel
+          customerId={customer.id}
+          projectId={customer.projectId}
+          sessionToken={sessionToken}
+          runtimeEnv={process.env.NODE_ENV ?? "development"}
+        />
       </div>
     </DashboardShell>
   )

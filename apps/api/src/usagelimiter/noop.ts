@@ -10,7 +10,12 @@ import type { CurrentUsage } from "@unprice/db/validators"
 import { type BaseError, Ok, type Result } from "@unprice/error"
 import type { WideEventHelpers } from "@unprice/logging"
 import type { CacheNamespaces } from "@unprice/services/cache"
-import type { GetEntitlementsRequest, GetUsageRequest, UsageLimiter } from "./interface"
+import type {
+  BufferMetricsResponse,
+  GetEntitlementsRequest,
+  GetUsageRequest,
+  UsageLimiter,
+} from "./interface"
 
 export class NoopUsageLimiter implements UsageLimiter {
   public setWideEventHelpers(_wideEventHelpers?: WideEventHelpers): void {
@@ -94,5 +99,25 @@ export class NoopUsageLimiter implements UsageLimiter {
       renewalDate: undefined,
       daysRemaining: undefined,
     } as unknown as CurrentUsage)
+  }
+
+  public async getBufferMetrics(_data: {
+    customerId: string
+    projectId: string
+    windowSeconds?: 300 | 3600 | 86400 | 604800
+  }): Promise<Result<BufferMetricsResponse, BaseError>> {
+    return Ok({
+      usageCount: 0,
+      verificationCount: 0,
+      totalUsage: 0,
+      allowedCount: 0,
+      deniedCount: 0,
+      bucketSizeSeconds: 300,
+      featureStats: [],
+      usageSeries: [],
+      verificationSeries: [],
+      oldestTimestamp: null,
+      newestTimestamp: null,
+    })
   }
 }

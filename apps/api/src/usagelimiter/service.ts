@@ -23,7 +23,12 @@ import {
 import type { Metrics } from "@unprice/services/metrics"
 import type { DurableObjectProject } from "~/project/do"
 import type { DurableObjectUsagelimiter } from "./do"
-import type { GetEntitlementsRequest, GetUsageRequest, UsageLimiter } from "./interface"
+import type {
+  BufferMetricsResponse,
+  GetEntitlementsRequest,
+  GetUsageRequest,
+  UsageLimiter,
+} from "./interface"
 
 // you would understand entitlements service if you think about it as feature flag system
 // it's totally separated from billing system and you can give entitlements to customers
@@ -428,5 +433,58 @@ export class UsageLimiterService implements UsageLimiter {
     const result = await durableObject.getCurrentUsage(data)
 
     return result
+  }
+
+  public async getBufferMetrics(data: {
+    customerId: string
+    projectId: string
+    windowSeconds?: 300 | 3600 | 86400 | 604800
+  }): Promise<Result<BufferMetricsResponse, FetchError | BaseError>> {
+    const durableObject = this.getStub(
+      this.getDurableObjectCustomerId(data.customerId, data.projectId)
+    )
+
+    try {
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(
+          () => reject(new Error("DO.getBufferMetrics timed out")),
+          UsageLimiterService.DO_TIMEOUT_MS
+        )
+      })
+
+      const result = await Promise.race([
+        durableObject.getBufferMetrics({ windowSeconds: data.windowSeconds }),
+        timeoutPromise,
+      ])
+
+      if (result.err) {
+        return Err(result.err)
+      }
+
+      return Ok(result.val)
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+
+      this.logger.error("DO unavailable for getBufferMetrics", {
+        customerId: data.customerId,
+        projectId: data.projectId,
+        error: errorMessage,
+        operation: "getBufferMetrics",
+      })
+
+      return Err(
+        new FetchError({
+          message: `Buffer metrics temporarily unavailable: ${errorMessage}`,
+          retry: true,
+          context: {
+            url: "durable-object://usagelimiter/getBufferMetrics",
+            method: "RPC",
+            customerId: data.customerId,
+            projectId: data.projectId,
+            reason: "DO_UNAVAILABLE",
+          },
+        })
+      )
+    }
   }
 }

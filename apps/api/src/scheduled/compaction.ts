@@ -1,20 +1,16 @@
 import { ConsoleLogger } from "@unprice/logging"
 import type { Env } from "~/env"
-import { type LakehouseSource, dayToPathParts, getDaysAgoUTC } from "~/util/lakehouse"
+import {
+  type LakehouseSource,
+  getDaysAgoUTC,
+  getLakehouseCompactedKey,
+  getLakehouseLegacyRawPrefix,
+  getLakehouseRawPrefix,
+} from "~/util/lakehouse"
 
 const COMPACTION_DELAY_DAYS = 1
 const SOURCES: LakehouseSource[] = ["usage", "verification", "metadata"]
 const R2_BATCH_DELETE_LIMIT = 1000
-
-function getRawPrefix(projectId: string, source: LakehouseSource, day: string): string {
-  const { year, month, day: d } = dayToPathParts(day)
-  return `lakehouse/${projectId}/raw/${source}/${year}/${month}/${d}/`
-}
-
-function getCompactedKey(projectId: string, source: LakehouseSource, day: string): string {
-  const { year, month, day: d } = dayToPathParts(day)
-  return `lakehouse/${projectId}/compacted/${source}/${year}/${month}/${d}/data.ndjson`
-}
 
 async function listAllObjects(
   bucket: R2Bucket,
@@ -109,17 +105,22 @@ async function compactDaySource(
   day: string,
   shouldDeleteSourceFiles: boolean
 ): Promise<{ compacted: boolean; skipped: boolean; files: number; lines: number; bytes: number }> {
-  const prefix = getRawPrefix(projectId, source, day)
-  const objects = await listAllObjects(bucket, prefix)
+  const prefix = getLakehouseRawPrefix(projectId, source, day)
+  const legacyPrefix = getLakehouseLegacyRawPrefix(projectId, source, day)
+  const [objects, legacyObjects] = await Promise.all([
+    listAllObjects(bucket, prefix),
+    listAllObjects(bucket, legacyPrefix),
+  ])
+  const allObjects = [...objects, ...legacyObjects]
 
-  if (objects.length === 0) {
+  if (allObjects.length === 0) {
     return { compacted: false, skipped: false, files: 0, lines: 0, bytes: 0 }
   }
 
-  objects.sort((a, b) => a.key.localeCompare(b.key))
+  allObjects.sort((a, b) => a.key.localeCompare(b.key))
 
-  const sourceKeys = objects.map((o) => o.key)
-  const targetKey = getCompactedKey(projectId, source, day)
+  const sourceKeys = allObjects.map((o) => o.key)
+  const targetKey = getLakehouseCompactedKey(projectId, source, day)
 
   const { count, bytes, written } = await compactFiles(bucket, sourceKeys, targetKey)
 

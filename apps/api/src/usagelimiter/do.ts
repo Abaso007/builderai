@@ -26,6 +26,7 @@ import { EntitlementService } from "@unprice/services/entitlements"
 import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/metrics"
 import { type Connection, Server } from "partyserver"
 import type { Env } from "~/env"
+import type { BufferMetricsResponse } from "./interface"
 import { SqliteDOStorageProvider } from "./sqlite-do-provider"
 
 // colo never change after the object is created
@@ -369,6 +370,12 @@ export class DurableObjectUsagelimiter extends Server {
     })
   }
 
+  public async getBufferMetrics(data?: {
+    windowSeconds?: 300 | 3600 | 86400 | 604800
+  }): Promise<Result<BufferMetricsResponse, BaseError>> {
+    return await this.storage.getBufferStats(data?.windowSeconds)
+  }
+
   // when connected through websocket we can broadcast events to the client
   // realtime events are used to debug events in dashboard
   async broadcastEvents(data: {
@@ -378,7 +385,7 @@ export class DurableObjectUsagelimiter extends Server {
     usage?: number
     limit?: number
     notifyUsage?: boolean
-    type: "can" | "reportUsage"
+    type: "verify" | "reportUsage"
     success: boolean
   }) {
     const now = Date.now()
@@ -433,6 +440,18 @@ export class DurableObjectUsagelimiter extends Server {
         wideEventLogger.add("usagelimiter.result", summarizeUsageResult(result))
         // Set alarm to flush buffers
         await this.ensureAlarmIsSet(wideEventLogger, data.flushTime)
+
+        this.ctx.waitUntil(
+          this.broadcastEvents({
+            customerId: data.customerId,
+            featureSlug: data.featureSlug,
+            type: "verify",
+            success: result.allowed,
+            deniedReason: result.deniedReason as DenyReason | undefined,
+            usage: result.usage,
+            limit: result.limit,
+          })
+        )
 
         return result
       } catch (error) {
@@ -507,6 +526,18 @@ export class DurableObjectUsagelimiter extends Server {
         wideEventLogger.add("usagelimiter.result", summarizeUsageResult(result))
         // Set alarm to flush buffers
         await this.ensureAlarmIsSet(wideEventLogger, data.flushTime)
+
+        this.ctx.waitUntil(
+          this.broadcastEvents({
+            customerId: data.customerId,
+            featureSlug: data.featureSlug,
+            type: "reportUsage",
+            success: result.allowed,
+            deniedReason: result.deniedReason as DenyReason | undefined,
+            usage: result.usage,
+            limit: result.limit,
+          })
+        )
 
         return result
       } catch (error) {
@@ -594,8 +625,39 @@ export class DurableObjectUsagelimiter extends Server {
   }
 
   // websocket message handler
-  async onMessage(_conn: Connection, message: string) {
-    this.logger.debug(`onMessage ${message}`)
+  async onMessage(conn: Connection, message: string) {
+    try {
+      const parsed = JSON.parse(message) as {
+        type?: "snapshot_request"
+        windowSeconds?: 300 | 3600 | 86400 | 604800
+      }
+
+      if (parsed.type === "snapshot_request") {
+        const { err, val } = await this.getBufferMetrics({
+          windowSeconds: parsed.windowSeconds,
+        })
+
+        if (err) {
+          conn.send(
+            JSON.stringify({
+              type: "snapshot_error",
+              message: err.message,
+            })
+          )
+          return
+        }
+
+        conn.send(
+          JSON.stringify({
+            type: "snapshot",
+            metrics: val,
+            source: "durable_object",
+          })
+        )
+      }
+    } catch {
+      this.logger.debug(`onMessage ${message}`)
+    }
   }
 
   // when the alarm is triggered

@@ -33,6 +33,7 @@ import { getToken } from "@auth/core/jwt"
 import { ConsoleLogger } from "@unprice/logging"
 import { timing } from "hono/timing"
 import { obs } from "~/middleware/obs"
+import { registerGetRealtimeUsageV1 } from "./routes/analitycs/getRealtimeUsageV1"
 import { registerGetAnalyticsUsageV1 } from "./routes/analitycs/getUsageV1"
 import { registerGetAnalyticsVerificationsV1 } from "./routes/analitycs/getVerificationsV1"
 import { registerUpdateACLV1 } from "./routes/customer/updateACLV1"
@@ -114,6 +115,7 @@ registerStripeSetupV1(app)
 // Analytics routes
 registerGetAnalyticsUsageV1(app)
 registerGetAnalyticsVerificationsV1(app)
+registerGetRealtimeUsageV1(app)
 
 // Lakehouse routes
 registerGetLakehouseFileV1(app)

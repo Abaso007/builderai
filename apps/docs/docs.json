@@ -55,7 +55,8 @@
                   "concepts/pricing/plans",
                   "concepts/pricing/feature-types",
                   "concepts/pricing/usage-metering",
-                  "concepts/pricing/entitlements"
+                  "concepts/pricing/entitlements",
+                  "concepts/pricing/schema-evolution"
                 ]
               }
             ]

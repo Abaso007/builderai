@@ -26,6 +26,49 @@ export const getUsageRequestSchema = z.object({
 
 export type GetUsageRequest = z.infer<typeof getUsageRequestSchema>
 
+export const bufferMetricsResponseSchema = z.object({
+  usageCount: z.number(),
+  verificationCount: z.number(),
+  totalUsage: z.number(),
+  allowedCount: z.number(),
+  deniedCount: z.number(),
+  bucketSizeSeconds: z.number(),
+  featureStats: z.array(
+    z.object({
+      featureSlug: z.string(),
+      usageCount: z.number(),
+      verificationCount: z.number(),
+      totalUsage: z.number(),
+    })
+  ),
+  usageSeries: z.array(
+    z.object({
+      bucketStart: z.number(),
+      usageCount: z.number(),
+      totalUsage: z.number(),
+    })
+  ),
+  verificationSeries: z.array(
+    z.object({
+      bucketStart: z.number(),
+      verificationCount: z.number(),
+      allowedCount: z.number(),
+      deniedCount: z.number(),
+    })
+  ),
+  oldestTimestamp: z.number().nullable(),
+  newestTimestamp: z.number().nullable(),
+})
+
+export const bufferMetricsWindowSecondsSchema = z.union([
+  z.literal(300),
+  z.literal(3600),
+  z.literal(86400),
+  z.literal(604800),
+])
+
+export type BufferMetricsResponse = z.infer<typeof bufferMetricsResponseSchema>
+
 export interface UsageLimiter {
   /**
    * Verify a request
@@ -79,4 +122,14 @@ export interface UsageLimiter {
     projectId: string
     updates: Partial<NonNullable<CacheNamespaces["accessControlList"]>>
   }): Promise<void>
+
+  /**
+   * Get real-time buffer metrics from the Durable Object
+   * Returns unflushed usage/verification records for real-time dashboards
+   */
+  getBufferMetrics(data: {
+    customerId: string
+    projectId: string
+    windowSeconds?: z.infer<typeof bufferMetricsWindowSecondsSchema>
+  }): Promise<Result<BufferMetricsResponse, BaseError>>
 }
