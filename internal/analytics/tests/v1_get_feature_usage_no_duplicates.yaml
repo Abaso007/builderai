@@ -1,5 +1,16 @@
 - name: deduplicates_usage
   description: Verifies that usage records with same idempotence_key are deduplicated
-  parameters: project_id=p1&customer_id=c1&feature_slugs=f1&start=1709251000000&end=1709251300000
+  parameters: project_id=p1&customer_id=c1&feature_slugs=f1&start=1767225500000&end=1767225900000
   expected_result: |
     {"project_id":"p1","customer_id":"c1","feature_slug":"f1","count":1,"sum":10,"max":10,"last_during_period":10}
+
+- name: keeps_latest_value_per_idempotence_key
+  description: Verifies latest version wins when the same idempotence key is updated
+  parameters: project_id=p1&customer_id=c1&feature_slugs=f4&start=1767225500000&end=1767225900000
+  expected_result: |
+    {"project_id":"p1","customer_id":"c1","feature_slug":"f4","count":1,"sum":3,"max":3,"last_during_period":3}
+
+- name: excludes_soft_deleted_latest_records
+  description: Verifies rows are excluded when latest version for a key is marked deleted
+  parameters: project_id=p1&customer_id=c1&feature_slugs=f5&start=1767225500000&end=1767225900000
+  expected_result: |

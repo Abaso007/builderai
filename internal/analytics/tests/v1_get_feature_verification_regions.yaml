@@ -1,0 +1,5 @@
+- name: returns_regions_from_materialized_views
+  description: Verifies region metrics are served from aggregated verification views
+  parameters: project_id=p1&interval_days=5000&timezone=UTC&region=MAD
+  expected_result: |
+    {"date":"2026-01-01T00:00:00.000+0000","region":"MAD","count":1,"p50_latency":12.34,"p95_latency":12.34,"p99_latency":12.34}

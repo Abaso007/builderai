@@ -15,3 +15,4 @@ SCHEMA >
 ENGINE MergeTree
 ENGINE_PARTITION_KEY toYYYYMM(timestamp)
 ENGINE_SORTING_KEY project_id, customer_id, meta_id
+ENGINE_TTL toDateTime(timestamp) + INTERVAL 30 DAY

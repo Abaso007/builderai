@@ -11,16 +11,12 @@ SCHEMA >
     `feature_slug` LowCardinality(String) `json:$.feature_slug`,
     `customer_id` String `json:$.customer_id`,
     `latency` Float32 `json:$.latency`,
-    `request_id` String `json:$.request_id`,
     `project_id` String `json:$.project_id`,
     `denied_reason` LowCardinality(Nullable(String)) `json:$.denied_reason`,
     `allowed` UInt8 `json:$.allowed`,
-    `region` LowCardinality(String) `json:$.region` DEFAULT 'UNK',
-    `meta_id` UInt64 `json:$.meta_id` DEFAULT 0,
-    `country` LowCardinality(String) `json:$.country` DEFAULT 'UNK',
-    `action` LowCardinality(Nullable(String)) `json:$.action`,
-    `key_id` Nullable(String) `json:$.key_id`
+    `region` LowCardinality(String) `json:$.region` DEFAULT 'UNK'
 
 ENGINE MergeTree
 ENGINE_PARTITION_KEY toYYYYMM(fromUnixTimestamp64Milli(timestamp, 'UTC'))
 ENGINE_SORTING_KEY project_id, customer_id, feature_slug, timestamp
+ENGINE_TTL toDateTime(fromUnixTimestamp64Milli(timestamp, 'UTC')) + INTERVAL 90 DAY

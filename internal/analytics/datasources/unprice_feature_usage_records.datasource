@@ -11,22 +11,17 @@ SCHEMA >
     `feature_slug` LowCardinality(String) `json:$.feature_slug`,
     `customer_id` String `json:$.customer_id`,
     `usage` Decimal64(4) `json:$.usage`,
-    `request_id` String `json:$.request_id`,
     `idempotence_key` String `json:$.idempotence_key`,
     `project_id` String `json:$.project_id`,
     `created_at` Int64 `json:$.created_at`,
-    `meta_id` UInt64 `json:$.meta_id` DEFAULT 0,
-    `deleted` UInt8 `json:$.deleted` DEFAULT 0,
-    `country` LowCardinality(String) `json:$.country` DEFAULT 'UNK',
-    `region` LowCardinality(String) `json:$.region` DEFAULT 'UNK',
-    `action` LowCardinality(Nullable(String)) `json:$.action`,
-    `key_id` Nullable(String) `json:$.key_id`
+    `deleted` UInt8 `json:$.deleted` DEFAULT 0
 
 ENGINE ReplacingMergeTree
 ENGINE_IS_DELETED deleted
 ENGINE_PARTITION_KEY toYYYYMM(fromUnixTimestamp64Milli(timestamp))
 ENGINE_SORTING_KEY project_id, customer_id, feature_slug, idempotence_key
 ENGINE_VER timestamp
+ENGINE_TTL toDateTime(fromUnixTimestamp64Milli(timestamp)) + INTERVAL 90 DAY
 
 FORWARD_QUERY >
-    SELECT id, timestamp, feature_slug, customer_id, CAST(usage, 'Decimal64(4)') AS usage, request_id, idempotence_key, project_id, created_at, meta_id, deleted, defaultValueOfTypeName('LowCardinality(String)') AS country, defaultValueOfTypeName('LowCardinality(String)') AS region, defaultValueOfTypeName('LowCardinality(Nullable(String))') AS action, defaultValueOfTypeName('Nullable(String)') AS key_id
+    SELECT id, timestamp, feature_slug, customer_id, CAST(usage, 'Decimal64(4)') AS usage, idempotence_key, project_id, created_at, deleted

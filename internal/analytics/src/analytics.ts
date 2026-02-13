@@ -7,7 +7,6 @@ import {
   type AnalyticsEventAction,
   analyticsEventSchema,
   auditLogSchemaV1,
-  featureMetadataSchemaV1,
   featureUsageSchemaV1,
   featureVerificationSchemaV1,
   pageEventSchema,
@@ -90,19 +89,17 @@ export class Analytics {
     })
   }
 
-  public get ingestMetadata() {
-    return this.writeClient.buildIngestEndpoint({
-      datasource: "unprice_feature_metadata",
-      event: featureMetadataSchemaV1,
-      // we need to wait for the ingestion to be done before returning
-      wait: true,
-    })
-  }
-
   public get ingestFeaturesVerification() {
     return this.writeClient.buildIngestEndpoint({
       datasource: "unprice_feature_verifications",
-      event: featureVerificationSchemaV1,
+      event: featureVerificationSchemaV1.omit({
+        request_id: true,
+        meta_id: true,
+        metadata: true,
+        country: true,
+        action: true,
+        key_id: true,
+      }),
       // we need to wait for the ingestion to be done before returning
       wait: true,
     })
@@ -111,7 +108,15 @@ export class Analytics {
   public get ingestFeaturesUsage() {
     return this.writeClient.buildIngestEndpoint({
       datasource: "unprice_feature_usage_records",
-      event: featureUsageSchemaV1,
+      event: featureUsageSchemaV1.omit({
+        request_id: true,
+        meta_id: true,
+        metadata: true,
+        country: true,
+        region: true,
+        action: true,
+        key_id: true,
+      }),
       // we need to wait for the ingestion to be done before returning
       wait: true,
     })
@@ -537,9 +542,6 @@ export class Analytics {
       return Ok([])
     }
 
-    // we use the same endpoint for billing usage as it's the
-    // more accurate one because it's using FINAL in ClickHouse queries
-    // to merge data parts at query time to resolve updates and deletions
     const totalPeriodUsages = await this.getBillingUsage({
       customer_id: customerId,
       project_id: projectId,

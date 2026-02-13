@@ -4,7 +4,7 @@ TAGS "usage, billing"
 
 DESCRIPTION >
     Get feature usage metrics for a given project and customer, with deduplication support.
-    Using FINAL in ClickHouse queries forces the database to merge data parts at query time to resolve updates and deletions.
+    Deduplicates with argMax by idempotence_key to avoid FINAL query-time merges.
 
 NODE feature_usage_no_duplicates_node
 SQL >
@@ -16,15 +16,36 @@ SQL >
         count() AS count,
         sum(usage) AS sum,
         max(usage) AS max,
-        argMax(usage, timestamp) AS last_during_period
-    FROM unprice_feature_usage_records FINAL
-    WHERE
-        project_id = {{ String(project_id) }}
-        AND customer_id = {{ String(customer_id) }}
-        {% if defined(feature_slugs) %}
-            AND feature_slug IN {{ Array(feature_slugs, 'String') }}
-        {% end %}
-        AND timestamp >= {{ Int64(start) }} AND timestamp < {{ Int64(end) }}
+        argMax(usage, ts_latest) AS last_during_period
+    FROM (
+        SELECT
+            project_id,
+            customer_id,
+            feature_slug,
+            idempotence_key,
+            tupleElement(latest, 1) AS usage,
+            tupleElement(latest, 2) AS deleted,
+            tupleElement(latest, 3) AS ts_latest
+        FROM (
+            SELECT
+                project_id,
+                customer_id,
+                feature_slug,
+                idempotence_key,
+                argMax(tuple(usage, deleted, timestamp), timestamp) AS latest
+            FROM unprice_feature_usage_records
+            WHERE
+                project_id = {{ String(project_id) }}
+                AND customer_id = {{ String(customer_id) }}
+                {% if defined(feature_slugs) %}
+                    AND feature_slug IN {{ Array(feature_slugs, 'String') }}
+                {% end %}
+                AND timestamp >= {{ Int64(start) }} AND timestamp < {{ Int64(end) }}
+            GROUP BY project_id, customer_id, feature_slug, idempotence_key
+        )
+        WHERE
+            tupleElement(latest, 2) = 0
+    )
     GROUP BY project_id, customer_id, feature_slug
 
 TYPE endpoint
