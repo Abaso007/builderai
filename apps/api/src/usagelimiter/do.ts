@@ -27,7 +27,7 @@ import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/me
 import { type Connection, Server } from "partyserver"
 import type { Env } from "~/env"
 import type { BufferMetricsResponse } from "./interface"
-import { SqliteDOStorageProvider } from "./sqlite-do-provider"
+import { type FlushPressureStats, SqliteDOStorageProvider } from "./sqlite-do-provider"
 
 // colo never change after the object is created
 interface UsageLimiterConfig {
@@ -131,6 +131,8 @@ export class DurableObjectUsagelimiter extends Server {
   private readonly DEBOUNCE_DELAY = 1000 * 1 // 1 second (1 per second)
   // sample rate for the wide event
   private SAMPLE_RATE = 0.1
+  private readonly FLUSH_SEC_MIN = 5
+  private readonly FLUSH_SEC_MAX = 30 * 60
 
   // hibernate the do when no websocket nor connections are active
   static options = {
@@ -582,15 +584,66 @@ export class DurableObjectUsagelimiter extends Server {
     const alarm = await this.ctx.storage.getAlarm()
     const now = Date.now()
 
-    // min 5s, max 30m
-    const flushSec = Math.min(Math.max(flushTime ?? this.TTL_ANALYTICS / 1000, 5), 30 * 60)
-    const nextAlarm = now + flushSec * 1000
+    const fallbackFlushSec = this.normalizeFlushSeconds(flushTime)
+
+    if (alarm && alarm <= now + fallbackFlushSec * 1000) {
+      wideEventLogger.add("usagelimiter.next_alarm", new Date(alarm).toISOString())
+      return
+    }
+
+    const pressure = await this.getFlushPressureSafe()
+    const adaptiveFlushSec = this.getAdaptiveFlushSeconds(pressure, fallbackFlushSec)
+    const nextAlarm = now + adaptiveFlushSec * 1000
 
     wideEventLogger.add("usagelimiter.next_alarm", new Date(nextAlarm).toISOString())
-
     if (!alarm || nextAlarm < alarm) {
       this.ctx.storage.setAlarm(nextAlarm)
     }
+  }
+
+  private normalizeFlushSeconds(flushTime?: number): number {
+    return Math.min(
+      Math.max(flushTime ?? this.TTL_ANALYTICS / 1000, this.FLUSH_SEC_MIN),
+      this.FLUSH_SEC_MAX
+    )
+  }
+
+  private getAdaptiveFlushSeconds(
+    pressure: FlushPressureStats | null,
+    fallbackFlushSec: number
+  ): number {
+    if (!pressure) {
+      return fallbackFlushSec
+    }
+
+    let adaptive = fallbackFlushSec
+
+    if (pressure.pendingTotalRecords >= 20000) {
+      adaptive = Math.min(adaptive, 5)
+    } else if (pressure.pendingTotalRecords >= 10000) {
+      adaptive = Math.min(adaptive, 10)
+    } else if (pressure.pendingTotalRecords >= 5000) {
+      adaptive = Math.min(adaptive, 15)
+    } else if (pressure.pendingTotalRecords >= 2000) {
+      adaptive = Math.min(adaptive, 30)
+    } else if (pressure.pendingTotalRecords >= 500) {
+      adaptive = Math.min(adaptive, 45)
+    }
+
+    if (pressure.oldestPendingAgeSeconds >= 5 * 60) {
+      adaptive = Math.min(adaptive, 10)
+    }
+
+    return Math.min(Math.max(adaptive, this.FLUSH_SEC_MIN), this.FLUSH_SEC_MAX)
+  }
+
+  private async getFlushPressureSafe(): Promise<FlushPressureStats | null> {
+    const { err, val } = await this.storage.getFlushPressure()
+    if (err) {
+      this.logger.warn("Unable to read flush pressure", { error: err.message })
+      return null
+    }
+    return val
   }
 
   // websocket events handlers
@@ -665,6 +718,20 @@ export class DurableObjectUsagelimiter extends Server {
     this.logger.debug("Triggering alarm flush")
     // flush the usage records
     await this.entitlementService.flush()
+
+    const pressure = await this.getFlushPressureSafe()
+
+    if (pressure && pressure.pendingTotalRecords > 0) {
+      const now = Date.now()
+      const adaptiveFlushSec = this.getAdaptiveFlushSeconds(pressure, this.TTL_ANALYTICS / 1000)
+      this.ctx.storage.setAlarm(now + adaptiveFlushSec * 1000)
+
+      this.logger.info("Scheduled follow-up flush under pressure", {
+        pendingTotalRecords: pressure.pendingTotalRecords,
+        oldestPendingAgeSeconds: pressure.oldestPendingAgeSeconds,
+        nextFlushSeconds: adaptiveFlushSec,
+      })
+    }
 
     // flush the metrics and logs
     this.ctx.waitUntil(

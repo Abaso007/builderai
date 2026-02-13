@@ -154,6 +154,14 @@ interface CursorState {
   lastR2VerificationId: number | null
 }
 
+export interface FlushPressureStats {
+  pendingUsageRecords: number
+  pendingVerificationRecords: number
+  pendingTotalRecords: number
+  oldestPendingTimestamp: number | null
+  oldestPendingAgeSeconds: number
+}
+
 /**
  * SQLite Storage Provider for Durable Objects
  *
@@ -1271,6 +1279,55 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   // ─────────────────────────────────────────────────────────────────────────────
   // Buffer Stats (Real-time Metrics)
   // ─────────────────────────────────────────────────────────────────────────────
+
+  async getFlushPressure(): Promise<Result<FlushPressureStats, UnPriceEntitlementStorageError>> {
+    try {
+      this.assertInitialized()
+
+      const [usageStats, verificationStats] = await Promise.all([
+        this.db
+          .select({
+            count: sql<number>`count(*)`,
+            oldestTimestamp: sql<number | null>`min(${schema.usageRecords.timestamp})`,
+          })
+          .from(schema.usageRecords),
+        this.db
+          .select({
+            count: sql<number>`count(*)`,
+            oldestTimestamp: sql<number | null>`min(${schema.verifications.timestamp})`,
+          })
+          .from(schema.verifications),
+      ])
+
+      const pendingUsageRecords = usageStats[0]?.count ?? 0
+      const pendingVerificationRecords = verificationStats[0]?.count ?? 0
+      const pendingTotalRecords = pendingUsageRecords + pendingVerificationRecords
+
+      const usageOldest = usageStats[0]?.oldestTimestamp ?? null
+      const verificationOldest = verificationStats[0]?.oldestTimestamp ?? null
+
+      const oldestPendingTimestamp =
+        usageOldest === null
+          ? verificationOldest
+          : verificationOldest === null
+            ? usageOldest
+            : Math.min(usageOldest, verificationOldest)
+
+      const oldestPendingAgeSeconds = oldestPendingTimestamp
+        ? Math.max(0, Math.floor((Date.now() - oldestPendingTimestamp) / 1000))
+        : 0
+
+      return Ok({
+        pendingUsageRecords,
+        pendingVerificationRecords,
+        pendingTotalRecords,
+        oldestPendingTimestamp,
+        oldestPendingAgeSeconds,
+      })
+    } catch (error) {
+      return this.logAndError("getFlushPressure", error)
+    }
+  }
 
   /**
    * Returns aggregated statistics for unflushed records in the DO SQLite buffer.

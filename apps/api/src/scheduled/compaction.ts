@@ -13,9 +13,9 @@ const SOURCES: LakehouseSource[] = ["usage", "verification", "metadata"]
 const R2_BATCH_DELETE_LIMIT = 1000
 
 class CompactWriteError extends Error {
-  public readonly kind: "invalid" | "empty"
+  public readonly kind: "empty"
 
-  constructor(kind: "invalid" | "empty", message: string) {
+  constructor(kind: "empty", message: string) {
     super(message)
     this.name = "CompactWriteError"
     this.kind = kind
@@ -92,8 +92,6 @@ function createCompactStream(
   return new ReadableStream({
     async start(controller) {
       try {
-        let hasInvalidLines = false
-
         for (const key of sourceKeys) {
           const obj = await bucket.get(key)
           if (!obj?.body) {
@@ -106,21 +104,10 @@ function createCompactStream(
               continue
             }
 
-            if (hasInvalidLines) {
-              try {
-                JSON.parse(trimmed)
-              } catch {
-                counters.invalidLines += 1
-              }
-
-              continue
-            }
-
             try {
               JSON.parse(trimmed)
             } catch {
               counters.invalidLines += 1
-              hasInvalidLines = true
               continue
             }
 
@@ -130,10 +117,6 @@ function createCompactStream(
             counters.bytes += output.byteLength
             controller.enqueue(output)
           }
-        }
-
-        if (counters.invalidLines > 0) {
-          throw new CompactWriteError("invalid", "NDJSON validation failed")
         }
 
         if (counters.count === 0) {
@@ -185,15 +168,6 @@ async function compactFiles(
       invalidLines: counters.invalidLines,
     }
   } catch (error) {
-    if (error instanceof CompactWriteError && error.kind === "invalid") {
-      return {
-        count: counters.count,
-        bytes: 0,
-        written: false,
-        invalidLines: counters.invalidLines,
-      }
-    }
-
     if (error instanceof CompactWriteError && error.kind === "empty") {
       return {
         count: 0,

@@ -201,6 +201,20 @@ export class UsageLimiterService implements UsageLimiter {
     }
   }
 
+  private shouldRunProbabilisticVerify(data: VerifyRequest): boolean {
+    const sampleRate = env.APP_ENV === "production" ? 0.05 : 1
+    if (sampleRate <= 0) return false
+
+    const seed = `${data.projectId}:${data.customerId}:${data.featureSlug}:${data.requestId}`
+    let hash = 0
+    for (let i = 0; i < seed.length; i += 1) {
+      hash = (hash * 31 + seed.charCodeAt(i)) >>> 0
+    }
+
+    const percentile = (hash % 10000) / 10000
+    return percentile < sampleRate
+  }
+
   public async verify(
     data: VerifyRequest
   ): Promise<Result<VerificationResult, FetchError | UnPriceCustomerError>> {
@@ -276,6 +290,22 @@ export class UsageLimiterService implements UsageLimiter {
             "DO_UNAVAILABLE_USING_DISTRIBUTED_CACHE"
           )
         )
+      }
+
+      if ((data.usage ?? 0) > 0 && this.shouldRunProbabilisticVerify(data)) {
+        this.logger.warn("Running probabilistic degraded verify", {
+          customerId: data.customerId,
+          featureSlug: data.featureSlug,
+          projectId: data.projectId,
+        })
+
+        const probabilistic = await this.entitlementService.verify(data)
+
+        return Ok({
+          ...probabilistic,
+          degraded: true,
+          degradedReason: "DO_UNAVAILABLE_PROBABILISTIC_VERIFY",
+        })
       }
 
       // 3. No cached state available - fail open with warning

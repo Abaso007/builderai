@@ -12,7 +12,7 @@ import {
 import { ScrollArea } from "@unprice/ui/scroll-area"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 import { usePartySocket } from "partysocket/react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
 type WindowSeconds = 300 | 3600 | 86400 | 604800
@@ -74,6 +74,7 @@ export function RealtimePanel(props: {
   const [windowSeconds, setWindowSeconds] = useState<WindowSeconds>(300)
   const [metrics, setMetrics] = useState<Metrics | null>(null)
   const [events, setEvents] = useState<RealtimeEvent[]>([])
+  const lastSnapshotRequestedAtRef = useRef(0)
 
   const roomName = `${runtimeEnv}:${projectId}:${customerId}`
 
@@ -127,12 +128,18 @@ export function RealtimePanel(props: {
           ...prev.slice(0, 29),
         ])
 
-        socket?.send(
-          JSON.stringify({
-            type: "snapshot_request",
-            windowSeconds,
-          })
-        )
+        if (socket?.readyState === WebSocket.OPEN) {
+          const now = Date.now()
+          if (now - lastSnapshotRequestedAtRef.current >= 1500) {
+            lastSnapshotRequestedAtRef.current = now
+            socket.send(
+              JSON.stringify({
+                type: "snapshot_request",
+                windowSeconds,
+              })
+            )
+          }
+        }
       } catch {
         return
       }
@@ -141,6 +148,7 @@ export function RealtimePanel(props: {
 
   useEffect(() => {
     if (socket?.readyState === WebSocket.OPEN) {
+      lastSnapshotRequestedAtRef.current = Date.now()
       socket.send(
         JSON.stringify({
           type: "snapshot_request",

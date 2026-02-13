@@ -2,12 +2,12 @@
   "Rules": [
     {
       "ID": "delete-raw-after-compaction",
-      "Status": "Enabled",
+      "Status": "Disabled",
       "Filter": {
         "Prefix": "lakehouse/"
       },
       "Expiration": {
-        "Days": 7
+        "Days": 1
       },
       "NoncurrentVersionExpiration": {
         "NoncurrentDays": 1
@@ -20,7 +20,7 @@
         "Prefix": "lakehouse/"
       },
       "Expiration": {
-        "Days": 90
+        "Days": 365
       }
     },
     {

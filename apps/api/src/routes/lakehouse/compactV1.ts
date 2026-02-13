@@ -50,9 +50,9 @@ export const route = createRoute({
             description: "Day to compact in YYYY-MM-DD format",
             example: "2026-02-12",
           }),
-        delete_source_files: z.boolean().default(false).openapi({
+        delete_source_files: z.boolean().default(true).openapi({
           description: "Whether to delete raw files after successful compaction",
-          example: false,
+          example: true,
         }),
       }),
       "Body of the request for manual compaction"
