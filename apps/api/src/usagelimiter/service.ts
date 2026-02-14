@@ -129,7 +129,7 @@ export class UsageLimiterService implements UsageLimiter {
     locationHint?: DurableObjectLocationHint
   ): DurableObjectStub<DurableObjectUsagelimiter> {
     // jurisdiction is only available in production
-    if (this.stats.isEUCountry && env.NODE_ENV === "production") {
+    if (this.stats.isEUCountry && env.APP_ENV === "production") {
       const euSubnamespace = this.namespace.jurisdiction("eu")
       const euStub = euSubnamespace.get(euSubnamespace.idFromName(name), {
         locationHint,
@@ -146,7 +146,7 @@ export class UsageLimiterService implements UsageLimiter {
   private getDurableObjectCustomerId(customerId: string, projectId: string): string {
     // later on we can shard this by customer and feature slug if needed
     // preview environments copy production data so we need to differentiate between them
-    return `${env.NODE_ENV}:${projectId}:${customerId}`
+    return `${env.APP_ENV}:${projectId}:${customerId}`
   }
 
   // Timeout for DO calls before falling back to cached state
@@ -218,7 +218,7 @@ export class UsageLimiterService implements UsageLimiter {
   public async verify(
     data: VerifyRequest
   ): Promise<Result<VerificationResult, FetchError | UnPriceCustomerError>> {
-    const key = `verify:${env.NODE_ENV}:${data.projectId}:${data.customerId}:${data.featureSlug}:`
+    const key = `verify:${env.APP_ENV}:${data.projectId}:${data.customerId}:${data.featureSlug}:`
     const cached = this.hashCache.get(key)
 
     const parsedCached = cached ? (JSON.parse(cached) as VerificationResult) : undefined

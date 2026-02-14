@@ -1,7 +1,9 @@
 "use client"
 
 import { API_DOMAIN } from "@unprice/config"
+import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
+import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import {
   type ChartConfig,
@@ -9,11 +11,28 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@unprice/ui/chart"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@unprice/ui/dialog"
 import { ScrollArea } from "@unprice/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { cn } from "@unprice/ui/utils"
 import { AnimatePresence, motion } from "framer-motion"
-import { Activity, BarChart2, CircleHelp, Clock, Shield, ShieldCheck, Zap } from "lucide-react"
+import {
+  Activity,
+  BarChart2,
+  CircleHelp,
+  Clock,
+  Settings,
+  Shield,
+  ShieldCheck,
+  Zap,
+} from "lucide-react"
 import { usePartySocket } from "partysocket/react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
@@ -63,6 +82,16 @@ type RealtimeEvent = {
   deniedReason?: string
 }
 
+type PlanVersionFeature =
+  RouterOutputs["planVersions"]["getById"]["planVersion"]["planFeatures"][number]
+
+type CycleFeatureUsageRow = {
+  featureSlug: string
+  currentUsage: number
+  limitType: "hard" | "soft" | "none"
+  featureType: "flat" | "tiered" | "usage" | "package"
+}
+
 const usageChartConfig = {
   totalUsage: { label: "Usage", color: "var(--chart-4)" },
 } satisfies ChartConfig
@@ -97,6 +126,13 @@ function InfoTooltip({ content }: { content: string }) {
   )
 }
 
+function formatCompactNumber(value: number): string {
+  return new Intl.NumberFormat([], {
+    notation: value >= 10_000 ? "compact" : "standard",
+    maximumFractionDigits: value >= 10_000 ? 1 : 0,
+  }).format(value)
+}
+
 export function RealtimePanel(props: {
   customerId: string
   projectId: string
@@ -106,6 +142,10 @@ export function RealtimePanel(props: {
   currentCycleStartAt?: number | null
   currentCycleEndAt?: number | null
   cycleTimezone?: string | null
+  entitlementSlugs?: string[]
+  cycleFeatureUsageRows?: CycleFeatureUsageRow[]
+  currentPhaseBillingPeriod?: string | null
+  planVersionFeatures?: PlanVersionFeature[]
 }) {
   const {
     customerId,
@@ -116,11 +156,21 @@ export function RealtimePanel(props: {
     currentCycleStartAt,
     currentCycleEndAt,
     cycleTimezone,
+    entitlementSlugs = [],
+    cycleFeatureUsageRows = [],
+    currentPhaseBillingPeriod,
+    planVersionFeatures = [],
   } = props
   const [windowSeconds] = useRealtimeIntervalFilter()
   const [metrics, setMetrics] = useState<Metrics | null>(null)
   const [events, setEvents] = useState<RealtimeEvent[]>([])
+  const [browserTimezone, setBrowserTimezone] = useState<string | null>(null)
   const lastSnapshotRequestedAtRef = useRef(0)
+
+  useEffect(() => {
+    const resolvedTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    setBrowserTimezone(resolvedTimeZone || null)
+  }, [])
 
   const roomName = `${runtimeEnv}:${projectId}:${customerId}`
 
@@ -330,57 +380,94 @@ export function RealtimePanel(props: {
     return Math.min(100, Math.max(0, (metrics.allowedCount / metrics.verificationCount) * 100))
   }, [metrics?.verificationCount, metrics?.allowedCount])
 
-  const topFeatures = useMemo(() => {
-    return [...(metrics?.featureStats ?? [])]
-      .sort(
-        (a, b) =>
-          b.usageCount + b.verificationCount - (a.usageCount + a.verificationCount) ||
-          b.totalUsage - a.totalUsage
-      )
-      .slice(0, 5)
+  const featureStatsBySlug = useMemo(() => {
+    return new Map((metrics?.featureStats ?? []).map((feature) => [feature.featureSlug, feature]))
   }, [metrics?.featureStats])
 
-  const visibleFeatureActivityTotal = useMemo(() => {
-    return topFeatures.reduce(
-      (total, feature) => total + feature.usageCount + feature.verificationCount,
-      0
+  const planVersionFeaturesBySlug = useMemo(() => {
+    return new Map(planVersionFeatures.map((feature) => [feature.feature.slug, feature]))
+  }, [planVersionFeatures])
+
+  const cycleFeatureUsageBySlug = useMemo(() => {
+    return new Map(cycleFeatureUsageRows.map((feature) => [feature.featureSlug, feature]))
+  }, [cycleFeatureUsageRows])
+
+  const entitlementRows = useMemo(() => {
+    const uniqueSlugs = Array.from(
+      new Set(entitlementSlugs.filter((featureSlug) => featureSlug.trim().length > 0))
     )
-  }, [topFeatures])
+
+    return uniqueSlugs.map((featureSlug) => {
+      const featureStats = featureStatsBySlug.get(featureSlug)
+      const planVersionFeature = planVersionFeaturesBySlug.get(featureSlug)
+      const cycleFeatureUsage = cycleFeatureUsageBySlug.get(featureSlug)
+
+      return {
+        featureSlug,
+        usageCount: featureStats?.usageCount ?? 0,
+        verificationCount: featureStats?.verificationCount ?? 0,
+        totalUsage: featureStats?.totalUsage ?? 0,
+        cycleUsage: cycleFeatureUsage?.currentUsage ?? null,
+        cycleLimitType: cycleFeatureUsage?.limitType,
+        cycleFeatureType: cycleFeatureUsage?.featureType,
+        limit: planVersionFeature?.limit ?? null,
+        planVersionFeature,
+      }
+    })
+  }, [entitlementSlugs, featureStatsBySlug, planVersionFeaturesBySlug, cycleFeatureUsageBySlug])
+
+  const maxVisibleEntitlementUsage = useMemo(() => {
+    return entitlementRows.reduce((maxUsage, entitlement) => {
+      return Math.max(maxUsage, entitlement.cycleUsage ?? entitlement.totalUsage)
+    }, 0)
+  }, [entitlementRows])
+
+  const formatDateForTimezone = (value: number, timeZone?: string | null) => {
+    const date = new Date(value)
+
+    try {
+      return new Intl.DateTimeFormat([], {
+        month: "short",
+        day: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: timeZone ?? undefined,
+      }).format(date)
+    } catch {
+      return new Intl.DateTimeFormat([], {
+        month: "short",
+        day: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(date)
+    }
+  }
 
   const cyclePeriodLabel = useMemo(() => {
     if (!currentCycleStartAt) {
       return "No active cycle"
     }
 
-    const formatCycleDate = (value: number) => {
-      const date = new Date(value)
+    if (!currentCycleEndAt) {
+      return `${formatDateForTimezone(currentCycleStartAt, cycleTimezone)} → Ongoing`
+    }
 
-      try {
-        return new Intl.DateTimeFormat([], {
-          month: "short",
-          day: "2-digit",
-          year: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-          timeZone: cycleTimezone ?? undefined,
-        }).format(date)
-      } catch {
-        return new Intl.DateTimeFormat([], {
-          month: "short",
-          day: "2-digit",
-          year: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-        }).format(date)
-      }
+    return `${formatDateForTimezone(currentCycleStartAt, cycleTimezone)} → ${formatDateForTimezone(currentCycleEndAt, cycleTimezone)}`
+  }, [currentCycleStartAt, currentCycleEndAt, cycleTimezone])
+
+  const browserCyclePeriodLabel = useMemo(() => {
+    if (!currentCycleStartAt || !browserTimezone) {
+      return null
     }
 
     if (!currentCycleEndAt) {
-      return `${formatCycleDate(currentCycleStartAt)} - Ongoing`
+      return `${formatDateForTimezone(currentCycleStartAt, browserTimezone)} → Ongoing`
     }
 
-    return `${formatCycleDate(currentCycleStartAt)} - ${formatCycleDate(currentCycleEndAt)}`
-  }, [currentCycleStartAt, currentCycleEndAt, cycleTimezone])
+    return `${formatDateForTimezone(currentCycleStartAt, browserTimezone)} → ${formatDateForTimezone(currentCycleEndAt, browserTimezone)}`
+  }, [currentCycleStartAt, currentCycleEndAt, browserTimezone])
 
   const bucketLabel =
     chartBucketSizeSeconds % 3600 === 0
@@ -415,15 +502,44 @@ export function RealtimePanel(props: {
       <div className="grid gap-4 lg:grid-cols-[1.25fr_2fr]">
         <Card className="border-muted/60 bg-gradient-to-br from-background to-muted/30">
           <CardHeader className="pb-0" />
-          <CardContent className="grid gap-3 sm:grid-cols-2">
+          <CardContent className="grid gap-3 sm:grid-cols-3">
             <div>
               <p className="text-muted-foreground text-xs">Current plan</p>
               <p className="font-semibold text-base">{currentPlanSlug ?? "No active plan"}</p>
             </div>
             <div>
-              <p className="text-muted-foreground text-xs">Current billing period</p>
-              <p className="font-medium text-sm">{cyclePeriodLabel}</p>
+              <p className="flex items-center gap-1 text-muted-foreground text-xs">
+                Current billing period
+                {browserCyclePeriodLabel && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        className="text-muted-foreground transition-colors hover:text-foreground"
+                        aria-label="Show billing period in browser timezone"
+                      >
+                        <CircleHelp className="h-3.5 w-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[320px] text-xs">
+                      <p>{browserCyclePeriodLabel}</p>
+                      {browserTimezone && (
+                        <p className="mt-1 text-muted-foreground">
+                          Browser timezone: {browserTimezone}
+                        </p>
+                      )}
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+              </p>
+              <div className="flex items-center pt-1.5">
+                <p className="font-medium text-xs">{cyclePeriodLabel}</p>
+              </div>
               {cycleTimezone && <p className="text-muted-foreground text-xs">{cycleTimezone}</p>}
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Billing cycle</p>
+              <p className="font-medium text-sm">{currentPhaseBillingPeriod ?? "Unavailable"}</p>
             </div>
           </CardContent>
         </Card>
@@ -601,61 +717,185 @@ export function RealtimePanel(props: {
         </Card>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="border-muted/60 lg:col-span-1">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+        <Card className="border-muted/60 lg:w-[32%] lg:flex-none">
           <CardHeader>
-            <CardTitle className="text-base">Top Features</CardTitle>
-            <CardDescription>
-              Share within top 5 features (usage events + verifications)
-            </CardDescription>
+            <CardTitle className="text-base">Entitlements</CardTitle>
+            <CardDescription>Usage and verification by entitlement</CardDescription>
           </CardHeader>
           <CardContent>
-            {topFeatures.length === 0 ? (
+            {entitlementRows.length === 0 ? (
               <div className="flex h-[200px] items-center justify-center text-muted-foreground text-sm">
-                No feature activity yet
+                No active entitlements
               </div>
             ) : (
               <div className="space-y-4">
-                {topFeatures.map((feature, index) => (
-                  <div key={feature.featureSlug} className="space-y-1.5">
-                    {(() => {
-                      const featureActivity = feature.usageCount + feature.verificationCount
-                      const activityShare =
-                        visibleFeatureActivityTotal > 0
-                          ? (featureActivity / visibleFeatureActivityTotal) * 100
-                          : 0
+                {entitlementRows.map((entitlement, index) => {
+                  const featureType =
+                    entitlement.planVersionFeature?.featureType ?? entitlement.cycleFeatureType
+                  const isFlatFeature = featureType === "flat"
+                  const limitValue =
+                    typeof entitlement.limit === "number" && entitlement.limit > 0
+                      ? entitlement.limit
+                      : null
+                  const hasLimit = limitValue !== null
+                  const usageValue = entitlement.cycleUsage ?? entitlement.totalUsage
+                  const overageStrategy =
+                    entitlement.planVersionFeature?.metadata?.overageStrategy ?? "none"
+                  const effectiveLimitType =
+                    entitlement.cycleLimitType ??
+                    (hasLimit ? (overageStrategy === "none" ? "hard" : "soft") : "none")
+                  const allowsOverage = effectiveLimitType !== "hard"
 
-                      return (
-                        <>
-                          <div className="flex items-center justify-between text-sm">
-                            <span className="font-medium">{feature.featureSlug}</span>
-                            <span className="text-muted-foreground text-xs">
-                              {featureActivity} activity · {activityShare.toFixed(1)}%
-                            </span>
-                          </div>
-                          <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                            <div
-                              className="h-full"
-                              style={{
-                                backgroundColor: `var(--chart-${(index % 5) + 1})`,
-                                width: `${activityShare}%`,
-                              }}
-                            />
-                          </div>
-                          <p className="text-muted-foreground text-xs">
-                            usage {feature.usageCount} + verifications {feature.verificationCount}
-                          </p>
-                        </>
-                      )
-                    })()}
-                  </div>
-                ))}
+                  let usageReference = 1
+                  if (limitValue !== null) {
+                    usageReference = limitValue
+                  } else if (maxVisibleEntitlementUsage > 0) {
+                    usageReference = maxVisibleEntitlementUsage
+                  }
+
+                  const rawUsagePercent = isFlatFeature ? 100 : (usageValue / usageReference) * 100
+                  const usageProgressPercent = isFlatFeature
+                    ? 100
+                    : Math.min(100, Math.max(rawUsagePercent, 0))
+                  const overagePercent =
+                    !isFlatFeature && hasLimit && allowsOverage
+                      ? Math.min(100, Math.max(rawUsagePercent - 100, 0))
+                      : 0
+
+                  const usageStatusText = isFlatFeature
+                    ? "Flat feature"
+                    : hasLimit
+                      ? `${rawUsagePercent.toFixed(1)}% of limit`
+                      : "No limit"
+
+                  const usageBarColor = isFlatFeature
+                    ? "hsl(var(--muted-foreground) / 0.35)"
+                    : hasLimit && rawUsagePercent > 100
+                      ? allowsOverage
+                        ? "hsl(var(--chart-5))"
+                        : "hsl(var(--destructive))"
+                      : `var(--chart-${(index % 5) + 1})`
+
+                  const usageSummaryText = isFlatFeature
+                    ? `Flat feature · ${formatCompactNumber(entitlement.verificationCount)} verifications`
+                    : `${formatCompactNumber(usageValue)} used · ${usageStatusText}`
+
+                  return (
+                    <div key={entitlement.featureSlug} className="space-y-1.5">
+                      <div className="flex items-center justify-between text-sm">
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <span className="truncate font-medium">{entitlement.featureSlug}</span>
+                          {entitlement.planVersionFeature && (
+                            <Dialog>
+                              <DialogTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="link"
+                                  size="icon"
+                                  className="size-4 text-muted-foreground hover:text-foreground"
+                                >
+                                  <Settings className="size-3.5" />
+                                  <span className="sr-only">View entitlement configuration</span>
+                                </Button>
+                              </DialogTrigger>
+                              <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-[620px]">
+                                <DialogHeader>
+                                  <DialogTitle>
+                                    Entitlement: {entitlement.planVersionFeature.feature.title}
+                                  </DialogTitle>
+                                  <DialogDescription>
+                                    {entitlement.planVersionFeature.feature.description ??
+                                      "Plan version configuration for this entitlement."}
+                                  </DialogDescription>
+                                </DialogHeader>
+
+                                <div className="space-y-4">
+                                  <div className="grid grid-cols-2 gap-3 text-sm">
+                                    <div>
+                                      <p className="text-muted-foreground text-xs">Feature type</p>
+                                      <p className="font-medium">
+                                        {entitlement.planVersionFeature.featureType}
+                                      </p>
+                                    </div>
+                                    <div>
+                                      <p className="text-muted-foreground text-xs">Limit</p>
+                                      <p className="font-medium">
+                                        {typeof entitlement.planVersionFeature.limit === "number"
+                                          ? formatCompactNumber(
+                                              entitlement.planVersionFeature.limit
+                                            )
+                                          : "No limit"}
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <p className="text-muted-foreground text-xs">
+                                      Configuration JSON
+                                    </p>
+                                    <pre className="overflow-x-auto rounded-md border bg-muted/30 p-3 font-mono text-xs">
+                                      {JSON.stringify(
+                                        entitlement.planVersionFeature.config,
+                                        null,
+                                        2
+                                      )}
+                                    </pre>
+                                  </div>
+
+                                  {entitlement.planVersionFeature.resetConfig && (
+                                    <div className="space-y-1">
+                                      <p className="text-muted-foreground text-xs">Reset config</p>
+                                      <pre className="overflow-x-auto rounded-md border bg-muted/30 p-3 font-mono text-xs">
+                                        {JSON.stringify(
+                                          entitlement.planVersionFeature.resetConfig,
+                                          null,
+                                          2
+                                        )}
+                                      </pre>
+                                    </div>
+                                  )}
+                                </div>
+                              </DialogContent>
+                            </Dialog>
+                          )}
+                        </div>
+                        <span className="text-muted-foreground text-xs">{usageSummaryText}</span>
+                      </div>
+                      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full"
+                          style={{
+                            backgroundColor: usageBarColor,
+                            width: `${usageProgressPercent}%`,
+                          }}
+                        />
+                        {overagePercent > 0 && (
+                          <div
+                            className="absolute inset-y-0 right-0 bg-amber-500/40"
+                            style={{ width: `${overagePercent}%` }}
+                          />
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between text-muted-foreground text-xs">
+                        <span>
+                          {isFlatFeature
+                            ? `flat feature · verifications ${entitlement.verificationCount}`
+                            : `usage events ${entitlement.usageCount} · verifications ${entitlement.verificationCount}`}
+                        </span>
+                        {!isFlatFeature && typeof entitlement.limit === "number" && (
+                          <span>limit {formatCompactNumber(entitlement.limit)}</span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             )}
           </CardContent>
         </Card>
 
-        <Card className="flex flex-col border-muted/60 lg:col-span-2">
+        <Card className="min-w-0 border-muted/60 lg:w-[68%]">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <div>
@@ -667,9 +907,9 @@ export function RealtimePanel(props: {
               </Badge>
             </div>
           </CardHeader>
-          <CardContent className="flex-1 p-0">
+          <CardContent className="px-4 pt-0 pb-4">
             {events.length === 0 ? (
-              <EmptyPlaceholder className="m-4 h-[240px] w-auto border border-dashed">
+              <EmptyPlaceholder className="h-[240px] w-auto border border-dashed">
                 <EmptyPlaceholder.Icon>
                   <BarChart2 className="h-8 w-8 opacity-30" />
                 </EmptyPlaceholder.Icon>
@@ -679,7 +919,10 @@ export function RealtimePanel(props: {
                 </EmptyPlaceholder.Description>
               </EmptyPlaceholder>
             ) : (
-              <ScrollArea className="h-[320px]">
+              <ScrollArea
+                className="h-[460px] [&_[data-radix-scroll-area-scrollbar]]:hidden"
+                hideScrollBar
+              >
                 <AnimatePresence initial={false}>
                   {events.map((event) => {
                     const detailParts: string[] = []
@@ -717,7 +960,7 @@ export function RealtimePanel(props: {
                         exit={{ opacity: 0, y: -8 }}
                         transition={{ duration: 0.18 }}
                         layout="position"
-                        className="flex items-center justify-between border-b px-4 py-2.5 hover:bg-muted/40"
+                        className="flex items-center justify-between border-b px-5 py-3.5 hover:bg-muted/40"
                         style={{ borderColor: "hsl(var(--border) / 0.6)" }}
                       >
                         <div className="flex min-w-0 items-center gap-2.5">

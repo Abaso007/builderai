@@ -1,6 +1,7 @@
 "use client"
 
 import { useSuspenseQuery } from "@tanstack/react-query"
+import { cn } from "@unprice/ui/utils"
 import { Activity, DollarSign, Users } from "lucide-react"
 import StatsCards, { StatsSkeleton } from "~/components/analytics/stats-cards"
 import { useIntervalFilter } from "~/hooks/use-filter"
@@ -14,40 +15,37 @@ export const iconsOverviewStats = {
 }
 
 export const OverviewStatsSkeleton = ({ isLoading }: { isLoading?: boolean }) => {
+  const skeletonStats = [
+    { title: "Total Revenue" },
+    { title: "New Signups" },
+    { title: "New Subscriptions" },
+    { title: "New Customers" },
+  ]
+
   return (
-    <StatsSkeleton
-      stats={Object.entries({
-        totalRevenue: {
-          title: "Total Revenue",
-        },
-        newSignups: {
-          title: "New Signups",
-        },
-        newSubscriptions: {
-          title: "New Subscriptions",
-        },
-        newCustomers: {
-          title: "New Customers",
-        },
-      }).map(([key]) => {
-        return {
-          title: key,
-        }
-      })}
-      isLoading={isLoading}
-    />
+    <div className="min-h-[170px]">
+      <StatsSkeleton stats={skeletonStats} isLoading={isLoading} />
+    </div>
   )
 }
 
 const OverviewStats = () => {
   const trpc = useTRPC()
   const [interval] = useIntervalFilter()
-  const { data: stats, isLoading } = useSuspenseQuery(
-    trpc.analytics.getOverviewStats.queryOptions({ interval: interval.name })
+  const { data: stats, isFetching } = useSuspenseQuery(
+    trpc.analytics.getOverviewStats.queryOptions(
+      { interval: interval.name },
+      {
+        placeholderData: (previousData) => previousData,
+        staleTime: interval.intervalDays === 1 ? 45 * 1000 : 5 * 60 * 1000,
+        refetchInterval: interval.intervalDays === 1 ? 60 * 1000 : (false as const),
+        refetchOnWindowFocus: false,
+      }
+    )
   )
 
-  if (isLoading || !stats.stats) {
-    return <OverviewStatsSkeleton isLoading={isLoading} />
+  if (!stats.stats) {
+    return <OverviewStatsSkeleton isLoading={false} />
   }
 
   const statsCards = Object.entries(stats.stats).map(([key, value]) => {
@@ -60,7 +58,24 @@ const OverviewStats = () => {
     }
   })
 
-  return <StatsCards stats={statsCards} />
+  return (
+    <div className="relative min-h-[170px]">
+      <div
+        className={cn(
+          "pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/55 to-transparent transition-opacity duration-300",
+          isFetching ? "opacity-100" : "opacity-0"
+        )}
+      />
+      <div
+        className={cn(
+          "transition-opacity duration-300 motion-reduce:transition-none",
+          isFetching ? "opacity-90" : "opacity-100"
+        )}
+      >
+        <StatsCards stats={statsCards} />
+      </div>
+    </div>
+  )
 }
 
 export default OverviewStats

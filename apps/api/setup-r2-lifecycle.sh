@@ -45,10 +45,10 @@ echo ""
 
 # Run from script dir so npx finds wrangler in apps/api/node_modules
 cd "$SCRIPT_DIR"
-npx wrangler r2 bucket lifecycle set "$BUCKET" --file "$LIFECYCLE_FILE"
+npx wrangler r2 bucket lifecycle set "$BUCKET" --file "$LIFECYCLE_FILE" --jurisdiction "eu"
 
 echo ""
 echo "Lifecycle rules applied successfully."
 echo ""
 echo "To verify, run:"
-echo "  npx wrangler r2 bucket lifecycle list $BUCKET"
+echo "  npx wrangler r2 bucket lifecycle list $BUCKET --jurisdiction eu"

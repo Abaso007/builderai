@@ -7,9 +7,88 @@ import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 import { SuperLink } from "~/components/super-link"
+import { unprice } from "~/lib/unprice"
 import { api } from "~/trpc/server"
 import { CustomerActions } from "../../_components/customers/customer-actions"
 import { RealtimePanel } from "../_components/realtime/realtime-panel"
+
+type CustomerUsageResult = NonNullable<
+  Awaited<ReturnType<typeof unprice.customers.getUsage>>["result"]
+>
+type CustomerUsageFeature = CustomerUsageResult["groups"][number]["features"][number]
+
+function buildRealtimeCycleUsageRows(usageData?: CustomerUsageResult | null) {
+  if (!usageData) {
+    return []
+  }
+
+  const rows: Array<{
+    featureSlug: string
+    currentUsage: number
+    limitType: "hard" | "soft" | "none"
+    featureType: CustomerUsageFeature["type"]
+  }> = []
+
+  for (const group of usageData.groups) {
+    for (const feature of group.features) {
+      if (feature.type === "usage") {
+        rows.push({
+          featureSlug: feature.id,
+          currentUsage: feature.usageBar.current,
+          limitType: feature.usageBar.limitType,
+          featureType: feature.type,
+        })
+        continue
+      }
+
+      if (feature.type === "tiered") {
+        rows.push({
+          featureSlug: feature.id,
+          currentUsage: feature.tieredDisplay.currentUsage,
+          limitType: "none",
+          featureType: feature.type,
+        })
+        continue
+      }
+
+      rows.push({
+        featureSlug: feature.id,
+        currentUsage: 0,
+        limitType: "none",
+        featureType: feature.type,
+      })
+    }
+  }
+
+  return rows
+}
+
+function formatActivePhaseBillingPeriod(interval?: string, intervalCount?: number): string | null {
+  if (!interval) {
+    return null
+  }
+
+  if (intervalCount && intervalCount > 1) {
+    return `every ${intervalCount} ${interval}s`
+  }
+
+  switch (interval) {
+    case "month":
+      return "monthly"
+    case "year":
+      return "yearly"
+    case "week":
+      return "weekly"
+    case "day":
+      return "daily"
+    case "minute":
+      return "minutely"
+    case "onetime":
+      return "one-time"
+    default:
+      return interval
+  }
+}
 
 export default async function CustomerUsagePage({
   params,
@@ -48,6 +127,32 @@ export default async function CustomerUsagePage({
         (b.currentCycleStartAt ?? b.createdAtM ?? 0) - (a.currentCycleStartAt ?? a.createdAtM ?? 0)
     )[0]
 
+  const currentPlanVersionId = currentSubscription?.phases[0]?.planVersionId
+
+  const [
+    { result: entitlementResult },
+    { result: subscriptionResult },
+    { result: customerUsageResult },
+    currentPlanVersionResult,
+  ] = await Promise.all([
+    unprice.customers.getEntitlements(customer.id),
+    unprice.customers.getSubscription(customer.id),
+    unprice.customers.getUsage(customer.id),
+    currentPlanVersionId
+      ? api.planVersions.getById({ id: currentPlanVersionId }).catch(() => null)
+      : Promise.resolve(null),
+  ])
+
+  const currentPlanVersion = currentPlanVersionResult?.planVersion ?? null
+
+  const entitlementSlugs = entitlementResult?.map((entitlement) => entitlement.featureSlug) ?? []
+  const cycleFeatureUsageRows = buildRealtimeCycleUsageRows(customerUsageResult)
+
+  const activePhaseBillingPeriod = formatActivePhaseBillingPeriod(
+    subscriptionResult?.activePhase?.planVersion.billingConfig.billingInterval,
+    subscriptionResult?.activePhase?.planVersion.billingConfig.billingIntervalCount
+  )
+
   return (
     <DashboardShell
       header={
@@ -84,18 +189,20 @@ export default async function CustomerUsagePage({
         </div>
       </TabNavigation>
 
-      <div className="mt-4 space-y-4">
-        <RealtimePanel
-          customerId={customer.id}
-          projectId={customer.projectId}
-          sessionToken={sessionToken}
-          runtimeEnv={process.env.NODE_ENV ?? "development"}
-          currentPlanSlug={currentSubscription?.planSlug ?? null}
-          currentCycleStartAt={currentSubscription?.currentCycleStartAt ?? null}
-          currentCycleEndAt={currentSubscription?.currentCycleEndAt ?? null}
-          cycleTimezone={currentSubscription?.timezone ?? null}
-        />
-      </div>
+      <RealtimePanel
+        customerId={customer.id}
+        projectId={customer.projectId}
+        sessionToken={sessionToken}
+        runtimeEnv={process.env.NEXT_PUBLIC_APP_ENV ?? "development"}
+        currentPlanSlug={currentSubscription?.planSlug ?? null}
+        currentCycleStartAt={currentSubscription?.currentCycleStartAt ?? null}
+        currentCycleEndAt={currentSubscription?.currentCycleEndAt ?? null}
+        cycleTimezone={currentSubscription?.timezone ?? null}
+        entitlementSlugs={entitlementSlugs}
+        cycleFeatureUsageRows={cycleFeatureUsageRows}
+        currentPhaseBillingPeriod={activePhaseBillingPeriod}
+        planVersionFeatures={currentPlanVersion?.planFeatures ?? []}
+      />
     </DashboardShell>
   )
 }

@@ -2294,9 +2294,7 @@ export class EntitlementService {
     }
 
     // Usage type
-    const isHardLimit =
-      planVersionFeature.metadata?.overageStrategy === "none" ||
-      planVersionFeature.metadata?.overageStrategy === "last-call"
+    const isHardLimit = planVersionFeature.metadata?.overageStrategy === "none"
 
     return {
       ...baseFeature,

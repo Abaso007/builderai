@@ -8,10 +8,10 @@ import { useRealtimeIntervalFilter } from "~/hooks/use-filter"
 import { realtimeIntervalValues } from "~/lib/searchParams"
 
 const options = [
-  { value: String(realtimeIntervalValues[0]), label: "Last 5 minutes", hotkey: "1" },
-  { value: String(realtimeIntervalValues[1]), label: "Last 60 minutes", hotkey: "2" },
-  { value: String(realtimeIntervalValues[2]), label: "Last 1 day", hotkey: "3" },
-  { value: String(realtimeIntervalValues[3]), label: "Last 7 days", hotkey: "4" },
+  { value: String(realtimeIntervalValues[0]), label: "Last 5 minutes", hotkey: "M" },
+  { value: String(realtimeIntervalValues[1]), label: "Last 60 minutes", hotkey: "H" },
+  { value: String(realtimeIntervalValues[2]), label: "Last 1 day", hotkey: "D" },
+  { value: String(realtimeIntervalValues[3]), label: "Last 7 days", hotkey: "W" },
 ] as const
 
 export function RealtimeIntervalFilter({ className }: { className?: string }) {
@@ -38,13 +38,13 @@ export function RealtimeIntervalFilter({ className }: { className?: string }) {
         setWindowSeconds({ realtimeInterval: value })
       }}
     >
-      <SelectTrigger className={cn("w-60 items-start [&_[data-description]]:hidden", className)}>
+      <SelectTrigger className={cn("w-44 items-start [&_[data-description]]:hidden", className)}>
         <div className="flex items-center gap-2 font-medium text-xs">
           <Calendar className="size-4" />
           <SelectValue placeholder="Select time window" />
         </div>
       </SelectTrigger>
-      <SelectContent className="w-60">
+      <SelectContent className="w-44">
         {options.map((option) => {
           return (
             <SelectItem

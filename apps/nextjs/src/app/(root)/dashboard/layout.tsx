@@ -48,12 +48,14 @@ export default async function DashboardLayout({
         <TRPCReactProvider allEndpointsProcedures={allEndpointsProcedures}>
           <TooltipProvider delayDuration={300}>
             <Provider>
-              <div className="flex h-screen flex-col overflow-hidden lg:flex-row">
+              <div className="flex h-screen min-h-0 flex-col overflow-hidden lg:flex-row">
                 {sidebar}
-                <main className="flex w-full flex-1 flex-col overflow-hidden">
+                <main className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
                   {header}
                   {breadcrumbs}
-                  <div className="hide-scrollbar flex-grow overflow-y-auto">{children}</div>
+                  <div className="hide-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain">
+                    {children}
+                  </div>
                 </main>
               </div>
             </Provider>

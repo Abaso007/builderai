@@ -38,6 +38,30 @@ export default async function DashboardOverview(props: {
         ...ANALYTICS_CONFIG_REALTIME,
       }
     ),
+    trpc.analytics.getUsage.queryOptions(
+      {
+        interval_days: interval.intervalDays,
+      },
+      {
+        ...ANALYTICS_CONFIG_REALTIME,
+      }
+    ),
+    trpc.analytics.getVerifications.queryOptions(
+      {
+        interval_days: interval.intervalDays,
+      },
+      {
+        ...ANALYTICS_CONFIG_REALTIME,
+      }
+    ),
+    trpc.analytics.getVerificationRegions.queryOptions(
+      {
+        interval_days: interval.intervalDays,
+      },
+      {
+        ...ANALYTICS_CONFIG_REALTIME,
+      }
+    ),
   ])
 
   return (
@@ -47,12 +71,16 @@ export default async function DashboardOverview(props: {
         <IntervalFilter className="ml-auto" />
       </div>
       <HydrateClient>
-        <Suspense fallback={<OverviewStatsSkeleton isLoading={true} />}>
-          <OverviewStats />
-        </Suspense>
-        <Suspense fallback={<FeaturesStatsSkeleton isLoading={true} />}>
-          <FeaturesStats />
-        </Suspense>
+        <div className="min-h-[170px]">
+          <Suspense fallback={<OverviewStatsSkeleton isLoading={true} />}>
+            <OverviewStats />
+          </Suspense>
+        </div>
+        <div className="min-h-[520px]">
+          <Suspense fallback={<FeaturesStatsSkeleton />}>
+            <FeaturesStats />
+          </Suspense>
+        </div>
       </HydrateClient>
     </DashboardShell>
   )
