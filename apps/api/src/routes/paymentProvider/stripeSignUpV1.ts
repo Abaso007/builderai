@@ -52,6 +52,26 @@ const stripeSignUpMetadataSchema = z.object({
   cancelUrl: z.string().url().describe("The cancel url"),
 })
 
+function isExternalIdConflictError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false
+  }
+
+  const dbError = error as {
+    code?: string
+    constraint?: string
+    message?: string
+  }
+
+  return (
+    dbError.code === "23505" &&
+    (dbError.constraint === "cp_external_id_idx" ||
+      dbError.message?.includes("cp_external_id_idx") ||
+      dbError.message?.includes("external_id") ||
+      false)
+  )
+}
+
 export type StripeSignUpRequest = z.infer<typeof route.request.params>
 
 export const registerStripeSignUpV1 = (app: App) =>
@@ -137,6 +157,7 @@ export const registerStripeSignUpV1 = (app: App) =>
         id: customerSession.customer.id,
         projectId: customerSession.customer.projectId,
         stripeCustomerId: stripeSession.customerId,
+        externalId: customerSession.customer.externalId,
         name: customerSession.customer.name ?? "",
         email: customerSession.customer.email ?? "",
         defaultCurrency: customerSession.customer.currency,
@@ -159,6 +180,7 @@ export const registerStripeSignUpV1 = (app: App) =>
         target: [customers.id, customers.projectId],
         set: {
           stripeCustomerId: stripeSession.customerId,
+          externalId: customerSession.customer.externalId,
           name: customerSession.customer.name ?? "",
           email: customerSession.customer.email ?? "",
           defaultCurrency: customerSession.customer.currency,
@@ -180,6 +202,16 @@ export const registerStripeSignUpV1 = (app: App) =>
       })
       .returning()
       .then((result) => result.at(0))
+      .catch((error) => {
+        if (isExternalIdConflictError(error)) {
+          throw new UnpriceApiError({
+            code: "CONFLICT",
+            message: "External customer id already exists for this project",
+          })
+        }
+
+        throw error
+      })
 
     if (!customerUnprice) {
       throw new UnpriceApiError({

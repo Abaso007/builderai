@@ -1,10 +1,8 @@
 import type {
-  FeatureHeatmap,
   FeaturesOverview,
   PageBrowserVisits,
   PageCountryVisits,
   PageOverview,
-  PlansConversion,
   Stats,
   Usage,
   VerificationRegions,
@@ -53,6 +51,7 @@ export type CacheNamespaces = {
   customersProject: CustomersProjectCache[] | null
   customerSubscription: SubscriptionCache | null
   customer: CustomerCache | null
+  customerByExternalId: CustomerCache | null
   customerEntitlement: Entitlement | null
   accessControlList: {
     customerUsageLimitReached: boolean | null
@@ -70,10 +69,8 @@ export type CacheNamespaces = {
   pageCountryVisits: PageCountryVisits | null
   pageBrowserVisits: PageBrowserVisits | null
   getPagesOverview: PageOverview | null
-  getFeatureHeatmap: FeatureHeatmap | null
   getFeaturesOverview: FeaturesOverview | null
   getPlansStats: Stats | null
-  getPlansConversion: PlansConversion | null
   getOverviewStats: Stats | null
   getUsage: Usage | null
   getVerifications: Verifications | null

@@ -29,16 +29,6 @@ interface RawCompactionMarker {
   compactedAt: string
 }
 
-class CompactWriteError extends Error {
-  public readonly kind: "empty"
-
-  constructor(kind: "empty", message: string) {
-    super(message)
-    this.name = "CompactWriteError"
-    this.kind = kind
-  }
-}
-
 async function listAllObjects(
   bucket: R2Bucket,
   prefix: string
@@ -95,7 +85,7 @@ async function* streamNdjsonLines(body: ReadableStream<Uint8Array>): AsyncGenera
   }
 }
 
-function createCompactStream(
+async function scanCompactionPayload(
   bucket: R2Bucket,
   sourceKeys: string[],
   counters: {
@@ -103,49 +93,69 @@ function createCompactStream(
     invalidLines: number
     bytes: number
   }
-): ReadableStream<Uint8Array> {
+): Promise<void> {
   const encoder = new TextEncoder()
 
-  return new ReadableStream({
-    async start(controller) {
-      try {
-        for (const key of sourceKeys) {
-          const obj = await bucket.get(key)
-          if (!obj?.body) {
-            continue
-          }
+  for (const key of sourceKeys) {
+    const obj = await bucket.get(key)
+    if (!obj?.body) {
+      continue
+    }
 
-          for await (const line of streamNdjsonLines(obj.body)) {
-            const trimmed = line.trim()
-            if (!trimmed) {
-              continue
-            }
-
-            try {
-              JSON.parse(trimmed)
-            } catch {
-              counters.invalidLines += 1
-              continue
-            }
-
-            counters.count += 1
-
-            const output = encoder.encode(`${trimmed}\n`)
-            counters.bytes += output.byteLength
-            controller.enqueue(output)
-          }
-        }
-
-        if (counters.count === 0) {
-          throw new CompactWriteError("empty", "No valid NDJSON records found")
-        }
-
-        controller.close()
-      } catch (error) {
-        controller.error(error)
+    for await (const line of streamNdjsonLines(obj.body)) {
+      const trimmed = line.trim()
+      if (!trimmed) {
+        continue
       }
-    },
-  })
+
+      try {
+        JSON.parse(trimmed)
+      } catch {
+        counters.invalidLines += 1
+        continue
+      }
+
+      counters.count += 1
+      counters.bytes += encoder.encode(`${trimmed}\n`).byteLength
+    }
+  }
+}
+
+async function writeCompactionPayload(
+  bucket: R2Bucket,
+  sourceKeys: string[],
+  writer: WritableStreamDefaultWriter<ArrayBuffer | ArrayBufferView>
+): Promise<void> {
+  const encoder = new TextEncoder()
+
+  try {
+    for (const key of sourceKeys) {
+      const obj = await bucket.get(key)
+      if (!obj?.body) {
+        continue
+      }
+
+      for await (const line of streamNdjsonLines(obj.body)) {
+        const trimmed = line.trim()
+        if (!trimmed) {
+          continue
+        }
+
+        try {
+          JSON.parse(trimmed)
+        } catch {
+          continue
+        }
+
+        await writer.write(encoder.encode(`${trimmed}\n`))
+      }
+    }
+
+    await writer.close()
+  } catch (error) {
+    await writer.abort(error)
+    throw error
+  }
 }
 
 async function compactFiles(
@@ -162,10 +172,22 @@ async function compactFiles(
     invalidLines: 0,
     bytes: 0,
   }
-  const resultStream = createCompactStream(bucket, sourceKeys, counters)
+  await scanCompactionPayload(bucket, sourceKeys, counters)
 
-  try {
-    const putResult = await bucket.put(targetKey, resultStream, {
+  if (counters.count === 0) {
+    return {
+      count: 0,
+      bytes: 0,
+      written: false,
+      invalidLines: counters.invalidLines,
+    }
+  }
+
+  const fixedLengthStream = new FixedLengthStream(counters.bytes)
+  const writer = fixedLengthStream.writable.getWriter()
+
+  const [putResult] = await Promise.all([
+    bucket.put(targetKey, fixedLengthStream.readable, {
       onlyIf: { etagDoesNotMatch: "*" },
       httpMetadata: {
         contentType: "application/x-ndjson",
@@ -176,25 +198,15 @@ async function compactFiles(
         lineCount: counters.count.toString(),
         invalidLineCount: counters.invalidLines.toString(),
       },
-    })
+    }),
+    writeCompactionPayload(bucket, sourceKeys, writer),
+  ])
 
-    return {
-      count: counters.count,
-      bytes: counters.bytes,
-      written: putResult !== null,
-      invalidLines: counters.invalidLines,
-    }
-  } catch (error) {
-    if (error instanceof CompactWriteError && error.kind === "empty") {
-      return {
-        count: 0,
-        bytes: 0,
-        written: false,
-        invalidLines: 0,
-      }
-    }
-
-    throw error
+  return {
+    count: counters.count,
+    bytes: counters.bytes,
+    written: putResult !== null,
+    invalidLines: counters.invalidLines,
   }
 }
 

@@ -536,6 +536,22 @@ export class EntitlementService {
     })
 
     if (
+      !consumeResult.allowed &&
+      consumeResult.deniedReason === "LIMIT_EXCEEDED" &&
+      this.storage.insertReportUsageDeniedEvent
+    ) {
+      this.waitUntil(
+        this.storage.insertReportUsageDeniedEvent({
+          project_id: params.projectId,
+          customer_id: params.customerId,
+          feature_slug: params.featureSlug,
+          timestamp: params.timestamp,
+          denied_reason: consumeResult.deniedReason,
+        })
+      )
+    }
+
+    if (
       shouldBlockCustomer ||
       (params.usage < 0 && consumeResult.allowed && consumeResult.remaining > 0)
     ) {

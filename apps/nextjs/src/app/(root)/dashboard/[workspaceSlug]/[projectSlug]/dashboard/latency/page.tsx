@@ -6,7 +6,10 @@ import { DashboardShell } from "~/components/layout/dashboard-shell"
 import { intervalParams } from "~/lib/searchParams"
 import { HydrateClient, batchPrefetch, trpc } from "~/trpc/server"
 import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
-import { LatencyTable, LatencyTableSkeleton } from "../_components/latency-table"
+import {
+  ProjectLatencyPanel,
+  ProjectLatencyPanelSkeleton,
+} from "../_components/project-latency-panel"
 import TabsDashboard from "../_components/tabs-dashboard"
 
 export const dynamic = "force-dynamic"
@@ -22,6 +25,22 @@ export default async function DashboardLatency(props: {
   const interval = prepareInterval(filter.intervalFilter)
 
   batchPrefetch([
+    trpc.analytics.getFeaturesOverview.queryOptions(
+      {
+        interval_days: interval.intervalDays,
+      },
+      {
+        ...ANALYTICS_CONFIG_REALTIME,
+      }
+    ),
+    trpc.analytics.getVerifications.queryOptions(
+      {
+        interval_days: interval.intervalDays,
+      },
+      {
+        ...ANALYTICS_CONFIG_REALTIME,
+      }
+    ),
     trpc.analytics.getVerificationRegions.queryOptions(
       {
         interval_days: interval.intervalDays,
@@ -40,20 +59,9 @@ export default async function DashboardLatency(props: {
       </div>
 
       <HydrateClient>
-        <Suspense fallback={<LatencyTableSkeleton />}>
-          <LatencyTable />
+        <Suspense fallback={<ProjectLatencyPanelSkeleton />}>
+          <ProjectLatencyPanel />
         </Suspense>
-        {/* <Suspense
-          fallback={
-            <FeatureUsageHeatmap>
-              <FeatureUsageHeatmapSkeleton isLoading={true} />
-            </FeatureUsageHeatmap>
-          }
-        >
-          <FeatureUsageHeatmap>
-            <FeatureUsageHeatmapContent />
-          </FeatureUsageHeatmap>
-        </Suspense> */}
       </HydrateClient>
     </DashboardShell>
   )

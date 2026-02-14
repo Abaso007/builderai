@@ -112,6 +112,7 @@ export class NoopUsageLimiter implements UsageLimiter {
       totalUsage: 0,
       allowedCount: 0,
       deniedCount: 0,
+      limitExceededCount: 0,
       bucketSizeSeconds: 300,
       featureStats: [],
       usageSeries: [],

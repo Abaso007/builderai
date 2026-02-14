@@ -32,6 +32,7 @@ export const bufferMetricsResponseSchema = z.object({
   totalUsage: z.number(),
   allowedCount: z.number(),
   deniedCount: z.number(),
+  limitExceededCount: z.number(),
   bucketSizeSeconds: z.number(),
   featureStats: z.array(
     z.object({
@@ -54,6 +55,7 @@ export const bufferMetricsResponseSchema = z.object({
       verificationCount: z.number(),
       allowedCount: z.number(),
       deniedCount: z.number(),
+      limitExceededCount: z.number(),
     })
   ),
   oldestTimestamp: z.number().nullable(),

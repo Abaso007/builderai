@@ -1,5 +1,14 @@
-import { relations } from "drizzle-orm"
-import { boolean, foreignKey, index, json, primaryKey, text, varchar } from "drizzle-orm/pg-core"
+import { relations, sql } from "drizzle-orm"
+import {
+  boolean,
+  foreignKey,
+  index,
+  json,
+  primaryKey,
+  text,
+  uniqueIndex,
+  varchar,
+} from "drizzle-orm/pg-core"
 import type { z } from "zod"
 
 import { pgTableProject } from "../utils/_table"
@@ -26,6 +35,7 @@ export const customers = pgTableProject(
     email: text("email").notNull(),
     name: text("name").notNull(),
     description: text("description"),
+    externalId: text("external_id"),
     metadata: json("metadata").$type<z.infer<typeof customerMetadataSchema>>(),
     stripeCustomerId: text("stripe_customer_id").unique("stripe_customer_unique"),
     active: boolean("active").notNull().default(true),
@@ -36,6 +46,9 @@ export const customers = pgTableProject(
   },
   (table) => ({
     email: index("email").on(table.email),
+    externalId: uniqueIndex("cp_external_id_idx")
+      .on(table.projectId, table.externalId)
+      .where(sql`${table.externalId} IS NOT NULL`),
     primary: primaryKey({
       columns: [table.id, table.projectId],
       name: "pk_customer",

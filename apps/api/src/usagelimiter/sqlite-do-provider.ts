@@ -391,6 +391,13 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         usage: Number(record.usage ?? 0),
       })
 
+      await this.updateReportUsageAggregates({
+        timestamp: record.timestamp,
+        featureSlug: record.feature_slug,
+        reportUsage: 1,
+        limitExceeded: 0,
+      })
+
       return Ok(undefined)
     } catch (error) {
       return this.logAndError("insertUsageRecord", error)
@@ -430,6 +437,33 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       return Ok(undefined)
     } catch (error) {
       return this.logAndError("insertVerification", error)
+    }
+  }
+
+  async insertReportUsageDeniedEvent(record: {
+    project_id: string
+    customer_id: string
+    feature_slug: string
+    timestamp: number
+    denied_reason: string
+  }): Promise<Result<void, UnPriceEntitlementStorageError>> {
+    try {
+      this.assertInitialized()
+
+      if (record.denied_reason !== "LIMIT_EXCEEDED") {
+        return Ok(undefined)
+      }
+
+      await this.updateReportUsageAggregates({
+        timestamp: record.timestamp,
+        featureSlug: record.feature_slug,
+        reportUsage: 1,
+        limitExceeded: 1,
+      })
+
+      return Ok(undefined)
+    } catch (error) {
+      return this.logAndError("insertReportUsageDeniedEvent", error)
     }
   }
 
@@ -1330,6 +1364,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         totalUsage: number
         allowedCount: number
         deniedCount: number
+        limitExceededCount: number
         bucketSizeSeconds: number
         featureStats: Array<{
           featureSlug: string
@@ -1347,6 +1382,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           verificationCount: number
           allowedCount: number
           deniedCount: number
+          limitExceededCount: number
         }>
         oldestTimestamp: number | null
         newestTimestamp: number | null
@@ -1396,6 +1432,18 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         .groupBy(schema.verificationAggregates.bucket_start)
         .orderBy(schema.verificationAggregates.bucket_start)
 
+      const reportUsageSeries = await this.db
+        .select({
+          bucketStart: schema.reportUsageAggregates.bucket_start,
+          limitExceededCount: sql<number>`sum(${schema.reportUsageAggregates.limit_exceeded_count})`,
+        })
+        .from(schema.reportUsageAggregates)
+        .where(
+          sql`${schema.reportUsageAggregates.bucket_size_seconds} = ${selectedBucketSizeSeconds} AND ${schema.reportUsageAggregates.bucket_start} >= ${windowStart}`
+        )
+        .groupBy(schema.reportUsageAggregates.bucket_start)
+        .orderBy(schema.reportUsageAggregates.bucket_start)
+
       const usageStatsByFeature = await this.db
         .select({
           featureSlug: schema.usageAggregates.feature_slug,
@@ -1437,6 +1485,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       let totalVerificationCount = 0
       let totalAllowed = 0
       let totalDenied = 0
+      let totalLimitExceeded = 0
       let oldestTimestamp: number | null = null
       let newestTimestamp: number | null = null
 
@@ -1470,6 +1519,48 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         }
       }
 
+      const reportUsageByBucket = new Map(
+        reportUsageSeries.map((bucket) => [
+          bucket.bucketStart,
+          {
+            limitExceededCount: bucket.limitExceededCount,
+          },
+        ])
+      )
+
+      for (const bucket of reportUsageSeries) {
+        totalLimitExceeded += bucket.limitExceededCount
+      }
+
+      const verificationSeriesMap = new Map(
+        verificationSeries.map((bucket) => [
+          bucket.bucketStart,
+          {
+            ...bucket,
+            limitExceededCount: 0,
+          },
+        ])
+      )
+
+      for (const [bucketStart, reportUsage] of reportUsageByBucket) {
+        const existing = verificationSeriesMap.get(bucketStart)
+        if (existing) {
+          existing.limitExceededCount = reportUsage.limitExceededCount
+        } else {
+          verificationSeriesMap.set(bucketStart, {
+            bucketStart,
+            verificationCount: 0,
+            allowedCount: 0,
+            deniedCount: 0,
+            limitExceededCount: reportUsage.limitExceededCount,
+          })
+        }
+      }
+
+      const verificationSeriesRows = Array.from(verificationSeriesMap.values()).sort(
+        (a, b) => a.bucketStart - b.bucketStart
+      )
+
       const usageOldest = usageSeries[0]?.bucketStart ?? null
       const verificationOldest = verificationSeries[0]?.bucketStart ?? null
       const usageNewest = usageSeries[usageSeries.length - 1]?.bucketStart ?? null
@@ -1496,10 +1587,11 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         totalUsage: totalUsageSum,
         allowedCount: totalAllowed,
         deniedCount: totalDenied,
+        limitExceededCount: totalLimitExceeded,
         bucketSizeSeconds: selectedBucketSizeSeconds,
         featureStats: Array.from(featureMap.values()),
         usageSeries,
-        verificationSeries,
+        verificationSeries: verificationSeriesRows,
         oldestTimestamp,
         newestTimestamp,
       })
@@ -1537,6 +1629,42 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           set: {
             usage_count: sql`${schema.usageAggregates.usage_count} + 1`,
             total_usage: sql`cast(${schema.usageAggregates.total_usage} as real) + ${data.usage}`,
+            updated_at: now,
+          },
+        })
+    }
+  }
+
+  private async updateReportUsageAggregates(data: {
+    timestamp: number
+    featureSlug: string
+    reportUsage: number
+    limitExceeded: number
+  }): Promise<void> {
+    const now = Date.now()
+
+    for (const bucketSizeSeconds of AGGREGATE_BUCKETS) {
+      const bucketStart = this.getBucketStart(data.timestamp, bucketSizeSeconds)
+
+      await this.db
+        .insert(schema.reportUsageAggregates)
+        .values({
+          bucket_start: bucketStart,
+          bucket_size_seconds: bucketSizeSeconds,
+          feature_slug: data.featureSlug,
+          report_usage_count: data.reportUsage,
+          limit_exceeded_count: data.limitExceeded,
+          updated_at: now,
+        })
+        .onConflictDoUpdate({
+          target: [
+            schema.reportUsageAggregates.bucket_start,
+            schema.reportUsageAggregates.bucket_size_seconds,
+            schema.reportUsageAggregates.feature_slug,
+          ],
+          set: {
+            report_usage_count: sql`${schema.reportUsageAggregates.report_usage_count} + ${data.reportUsage}`,
+            limit_exceeded_count: sql`${schema.reportUsageAggregates.limit_exceeded_count} + ${data.limitExceeded}`,
             updated_at: now,
           },
         })
@@ -1601,6 +1729,11 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         .delete(schema.verificationAggregates)
         .where(
           sql`(${schema.verificationAggregates.bucket_size_seconds} = ${MINUTE_BUCKET_SECONDS} AND ${schema.verificationAggregates.bucket_start} < ${minuteCutoff}) OR (${schema.verificationAggregates.bucket_size_seconds} = ${HOUR_BUCKET_SECONDS} AND ${schema.verificationAggregates.bucket_start} < ${hourCutoff})`
+        ),
+      this.db
+        .delete(schema.reportUsageAggregates)
+        .where(
+          sql`(${schema.reportUsageAggregates.bucket_size_seconds} = ${MINUTE_BUCKET_SECONDS} AND ${schema.reportUsageAggregates.bucket_start} < ${minuteCutoff}) OR (${schema.reportUsageAggregates.bucket_size_seconds} = ${HOUR_BUCKET_SECONDS} AND ${schema.reportUsageAggregates.bucket_start} < ${hourCutoff})`
         ),
     ])
   }

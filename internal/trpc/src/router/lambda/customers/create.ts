@@ -13,8 +13,16 @@ export const create = protectedProjectProcedure
   .input(customerInsertBaseSchema)
   .output(z.object({ customer: customerSelectSchema }))
   .mutation(async (opts) => {
-    const { description, name, email, metadata, defaultCurrency, stripeCustomerId, timezone } =
-      opts.input
+    const {
+      description,
+      name,
+      email,
+      metadata,
+      defaultCurrency,
+      stripeCustomerId,
+      timezone,
+      externalId,
+    } = opts.input
     const { project } = opts.ctx
 
     const unPriceCustomerId = project.workspace.unPriceCustomerId
@@ -53,6 +61,7 @@ export const create = protectedProjectProcedure
         timezone: timezone || "UTC",
         active: true,
         ...(metadataWithGeolocation && { metadata: metadataWithGeolocation }),
+        ...(externalId && { externalId }),
         ...(defaultCurrency && { defaultCurrency }),
         ...(stripeCustomerId && { stripeCustomerId }),
       })

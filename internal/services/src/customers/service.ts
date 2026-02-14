@@ -33,6 +33,26 @@ type SignUpContext = {
   cancelUrl: string
 }
 
+function isExternalIdConflictError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false
+  }
+
+  const dbError = error as {
+    code?: string
+    constraint?: string
+    message?: string
+  }
+
+  return (
+    dbError.code === "23505" &&
+    (dbError.constraint === "cp_external_id_idx" ||
+      dbError.message?.includes("cp_external_id_idx") ||
+      dbError.message?.includes("external_id") ||
+      false)
+  )
+}
+
 export class CustomerService {
   private readonly db: Database
   private readonly logger: Logger
@@ -261,6 +281,29 @@ export class CustomerService {
     return customer
   }
 
+  private async getCustomerByExternalIdData(
+    projectId: string,
+    externalId: string
+  ): Promise<CustomerCache | null> {
+    const customer = await this.db.query.customers.findFirst({
+      with: {
+        project: {
+          with: {
+            workspace: true,
+          },
+        },
+      },
+      where: (customer, { and, eq }) =>
+        and(eq(customer.projectId, projectId), eq(customer.externalId, externalId)),
+    })
+
+    if (!customer) {
+      return null
+    }
+
+    return customer
+  }
+
   /**
    * Gets the customer data from the database
    * @param customerId - Customer id
@@ -317,7 +360,133 @@ export class CustomerService {
       return Ok(null)
     }
 
+    if (val.externalId) {
+      const cacheKey = `${val.projectId}:${val.externalId}`
+      this.waitUntil(this.cache.customerByExternalId.set(cacheKey, val))
+    }
+
     return Ok(val)
+  }
+
+  public async getCustomerByExternalId(
+    projectId: string,
+    externalId: string,
+    opts?: {
+      skipCache: boolean
+    }
+  ): Promise<Result<CustomerCache | null, FetchError | UnPriceCustomerError>> {
+    const cacheKey = `${projectId}:${externalId}`
+
+    if (opts?.skipCache) {
+      this.logger.debug("skipping cache for getCustomerByExternalId", {
+        projectId,
+        externalId,
+      })
+    }
+
+    const { val, err } = opts?.skipCache
+      ? await wrapResult(
+          this.getCustomerByExternalIdData(projectId, externalId),
+          (err) =>
+            new FetchError({
+              message: `unable to query for getCustomerByExternalIdData, ${err.message}`,
+              retry: false,
+            })
+        )
+      : await retry(
+          3,
+          async () =>
+            this.cache.customerByExternalId.swr(cacheKey, () =>
+              this.getCustomerByExternalIdData(projectId, externalId)
+            ),
+          (attempt, err) => {
+            this.logger.warn(
+              "Failed to fetch getCustomerByExternalIdData data from cache, retrying...",
+              {
+                projectId,
+                externalId,
+                attempt,
+                error: err.message,
+              }
+            )
+          }
+        )
+
+    if (err) {
+      this.logger.error("error getting getCustomerByExternalIdData", {
+        error: err.message,
+      })
+
+      return Err(
+        new FetchError({
+          message: `unable to query db for getCustomerByExternalIdData, ${err.message}`,
+          retry: false,
+        })
+      )
+    }
+
+    if (!val) {
+      return Ok(null)
+    }
+
+    this.waitUntil(this.cache.customer.set(val.id, val))
+
+    return Ok(val)
+  }
+
+  public async resolveCustomerId(opts: {
+    projectId: string
+    customerId?: string
+    externalId?: string
+  }): Promise<
+    Result<{ customerId: string; projectId: string }, FetchError | UnPriceCustomerError>
+  > {
+    const { projectId, customerId, externalId } = opts
+
+    if (customerId) {
+      const { err, val } = await this.getCustomer(customerId)
+
+      if (err) {
+        return Err(err)
+      }
+
+      if (!val || val.projectId !== projectId) {
+        return Err(
+          new UnPriceCustomerError({
+            code: "CUSTOMER_NOT_FOUND",
+            message: "Customer not found",
+          })
+        )
+      }
+
+      return Ok({ customerId: val.id, projectId: val.projectId })
+    }
+
+    if (!externalId) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "CUSTOMER_NOT_FOUND",
+          message: "Either customerId or externalId is required",
+        })
+      )
+    }
+
+    const { err, val } = await this.getCustomerByExternalId(projectId, externalId)
+
+    if (err) {
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "CUSTOMER_NOT_FOUND",
+          message: "Customer not found",
+        })
+      )
+    }
+
+    return Ok({ customerId: val.id, projectId: val.projectId })
   }
 
   /**
@@ -877,6 +1046,28 @@ export class CustomerService {
     }
 
     const { planVersion, pageId } = planResolution.val
+
+    if (input.externalId) {
+      const { err: existingCustomerErr, val: existingCustomer } =
+        await this.getCustomerByExternalId(projectId, input.externalId, {
+          skipCache: true,
+        })
+
+      if (existingCustomerErr) {
+        this.wideEventHelpers?.addError(existingCustomerErr)
+        return Err(existingCustomerErr)
+      }
+
+      if (existingCustomer) {
+        return Err(
+          new UnPriceCustomerError({
+            code: "CUSTOMER_EXTERNAL_ID_CONFLICT",
+            message: "External customer id already exists for this project",
+          })
+        )
+      }
+    }
+
     const customerId = newId("customer")
     const successUrl = input.successUrl.replace("{CUSTOMER_ID}", customerId)
 
@@ -1306,9 +1497,11 @@ export class CustomerService {
     >
   > {
     const { input, projectId, planVersion, customerId, pageId, successUrl, cancelUrl } = context
-    const { email, name, config, timezone, metadata } = input
+    const { email, name, config, timezone, metadata, externalId } = input
 
     const currency = input.defaultCurrency ?? planVersion.project.defaultCurrency
+
+    const customerMetadata = externalId ? { ...metadata, externalId } : metadata
 
     try {
       await this.db.transaction(async (trx) => {
@@ -1322,7 +1515,8 @@ export class CustomerService {
             defaultCurrency: currency,
             timezone: timezone ?? planVersion.project.timezone,
             active: true,
-            metadata: metadata,
+            externalId: externalId,
+            metadata: customerMetadata,
           })
           .returning()
           .then((data) => data[0])
@@ -1426,6 +1620,15 @@ export class CustomerService {
         customerId: customerId,
       })
     } catch (error) {
+      if (isExternalIdConflictError(error)) {
+        return Err(
+          new UnPriceCustomerError({
+            code: "CUSTOMER_EXTERNAL_ID_CONFLICT",
+            message: "External customer id already exists for this project",
+          })
+        )
+      }
+
       const err = error as Error
 
       return Ok({

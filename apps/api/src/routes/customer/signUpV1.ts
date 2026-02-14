@@ -4,8 +4,10 @@ import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 
 import { customerSignUpSchema, signUpResponseSchema } from "@unprice/db/validators"
+import { UnPriceCustomerError } from "@unprice/services/customers"
 import type { z } from "zod"
 import { keyAuth } from "~/auth/key"
+import { UnpriceApiError } from "~/errors/http"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 
@@ -98,6 +100,16 @@ export const registerSignUpV1 = (app: App) =>
       .finally(() => endTime(c, "customerSignUp"))
 
     if (result.err) {
+      if (
+        result.err instanceof UnPriceCustomerError &&
+        result.err.code === "CUSTOMER_EXTERNAL_ID_CONFLICT"
+      ) {
+        throw new UnpriceApiError({
+          code: "CONFLICT",
+          message: result.err.message,
+        })
+      }
+
       throw result.err
     }
 

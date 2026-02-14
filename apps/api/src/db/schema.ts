@@ -116,3 +116,21 @@ export const verificationAggregates = pgTableProject(
     index("verification_aggregates_bucket_idx").on(table.bucket_size_seconds, table.bucket_start),
   ]
 )
+
+export const reportUsageAggregates = pgTableProject(
+  "report_usage_aggregates",
+  {
+    bucket_start: integer().notNull(),
+    bucket_size_seconds: integer().notNull(),
+    feature_slug: text().notNull(),
+    report_usage_count: integer().notNull().default(0),
+    limit_exceeded_count: integer().notNull().default(0),
+    updated_at: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.bucket_start, table.bucket_size_seconds, table.feature_slug],
+    }),
+    index("report_usage_aggregates_bucket_idx").on(table.bucket_size_seconds, table.bucket_start),
+  ]
+)

@@ -1,22 +1,17 @@
-import { SUBSCRIPTION_STATUS } from "@unprice/db/utils"
 import { Button } from "@unprice/ui/button"
-import { Separator } from "@unprice/ui/separator"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
-import { Typography } from "@unprice/ui/typography"
-import { Code, Plus } from "lucide-react"
+import { Code } from "lucide-react"
+import { cookies } from "next/headers"
 import { notFound } from "next/navigation"
-import { Suspense } from "react"
 import { CodeApiSheet } from "~/components/code-api-sheet"
-import { DataTable } from "~/components/data-table/data-table"
-import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 import { SuperLink } from "~/components/super-link"
 import { api } from "~/trpc/server"
 import { CustomerActions } from "../../_components/customers/customer-actions"
-import { columns } from "../../_components/subscriptions/table-subscriptions/columns"
+import { RealtimePanel } from "../_components/realtime/realtime-panel"
 
-export default async function CustomerPage({
+export default async function CustomerUsagePage({
   params,
 }: {
   params: {
@@ -36,6 +31,23 @@ export default async function CustomerPage({
     notFound()
   }
 
+  const sessionCookieName =
+    process.env.NODE_ENV === "production" ? "__Secure-authjs.session-token" : "authjs.session-token"
+  const sessionToken = cookies().get(sessionCookieName)?.value ?? ""
+
+  const currentSubscription =
+    [...customer.subscriptions]
+      .filter((subscription) => subscription.active)
+      .sort(
+        (a, b) =>
+          (b.currentCycleStartAt ?? b.createdAtM ?? 0) -
+          (a.currentCycleStartAt ?? a.createdAtM ?? 0)
+      )[0] ??
+    [...customer.subscriptions].sort(
+      (a, b) =>
+        (b.currentCycleStartAt ?? b.createdAtM ?? 0) - (a.currentCycleStartAt ?? a.createdAtM ?? 0)
+    )[0]
+
   return (
     <DashboardShell
       header={
@@ -52,20 +64,7 @@ export default async function CustomerPage({
                   API
                 </Button>
               </CodeApiSheet>
-              <div className="button-primary flex items-center space-x-1 rounded-md">
-                <div className="sm:col-span-full">
-                  <SuperLink href={`/${workspaceSlug}/${projectSlug}/customers/subscriptions/new`}>
-                    <Button variant={"custom"}>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Subscription
-                    </Button>
-                  </SuperLink>
-                </div>
-
-                <Separator orientation="vertical" className="h-[20px] p-0" />
-
-                <CustomerActions customer={customer} />
-              </div>
+              <CustomerActions customer={customer} />
             </div>
           }
         />
@@ -74,61 +73,28 @@ export default async function CustomerPage({
       <TabNavigation>
         <div className="flex items-center">
           <TabNavigationLink asChild active>
-            <SuperLink href={`${baseUrl}`}>Subscriptions</SuperLink>
+            <SuperLink href={`${baseUrl}`}>Overview</SuperLink>
+          </TabNavigationLink>
+          <TabNavigationLink asChild>
+            <SuperLink href={`${baseUrl}/subscriptions`}>Subscriptions</SuperLink>
           </TabNavigationLink>
           <TabNavigationLink asChild>
             <SuperLink href={`${baseUrl}/invoices`}>Invoices</SuperLink>
           </TabNavigationLink>
-          <TabNavigationLink asChild>
-            <SuperLink href={`${baseUrl}/usage`}>Usage</SuperLink>
-          </TabNavigationLink>
         </div>
       </TabNavigation>
-      <div className="mt-4">
-        <div className="flex flex-col px-1 py-4">
-          <Typography variant="p" affects="removePaddingMargin">
-            All subscriptions of this customer
-          </Typography>
-        </div>
-        <Suspense
-          fallback={
-            <DataTableSkeleton
-              columnCount={11}
-              searchableColumnCount={1}
-              filterableColumnCount={2}
-              cellWidths={[
-                "10rem",
-                "40rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "8rem",
-              ]}
-            />
-          }
-        >
-          <DataTable
-            columns={columns}
-            data={customer.subscriptions}
-            filterOptions={{
-              filterBy: "customerId",
-              filterColumns: true,
-              filterDateRange: true,
-              filterServerSide: false,
-              filterSelectors: {
-                status: SUBSCRIPTION_STATUS.map((value) => ({
-                  value: value,
-                  label: value,
-                })),
-              },
-            }}
-          />
-        </Suspense>
+
+      <div className="mt-4 space-y-4">
+        <RealtimePanel
+          customerId={customer.id}
+          projectId={customer.projectId}
+          sessionToken={sessionToken}
+          runtimeEnv={process.env.NODE_ENV ?? "development"}
+          currentPlanSlug={currentSubscription?.planSlug ?? null}
+          currentCycleStartAt={currentSubscription?.currentCycleStartAt ?? null}
+          currentCycleEndAt={currentSubscription?.currentCycleEndAt ?? null}
+          cycleTimezone={currentSubscription?.timezone ?? null}
+        />
       </div>
     </DashboardShell>
   )

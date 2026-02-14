@@ -10,10 +10,7 @@ import {
   featureUsageSchemaV1,
   featureVerificationSchemaV1,
   pageEventSchema,
-  schemaFeature,
   schemaPlanClick,
-  schemaPlanVersion,
-  schemaPlanVersionFeature,
 } from "./validators"
 
 export class Analytics {
@@ -131,31 +128,10 @@ export class Analytics {
     })
   }
 
-  public get ingestFeatures() {
-    return this.writeClient.buildIngestEndpoint({
-      datasource: "unprice_features",
-      event: schemaFeature,
-    })
-  }
-
-  public get ingestPlanVersionFeatures() {
-    return this.writeClient.buildIngestEndpoint({
-      datasource: "unprice_plan_version_features",
-      event: schemaPlanVersionFeature,
-    })
-  }
-
   public get ingestPageEvents() {
     return this.writeClient.buildIngestEndpoint({
       datasource: "unprice_page_hits",
       event: pageEventSchema,
-    })
-  }
-
-  public get ingestPlanVersions() {
-    return this.writeClient.buildIngestEndpoint({
-      datasource: "unprice_plan_versions",
-      event: schemaPlanVersion,
     })
   }
 
@@ -181,25 +157,6 @@ export class Analytics {
     })
   }
 
-  // analytics events
-  public get getLatestEvents() {
-    return this.readClient.buildPipe({
-      pipe: "v1_get_latest_events",
-      parameters: z.object({
-        action: z.custom<AnalyticsEventAction>().optional(),
-        project_id: z.string().optional(),
-        interval_days: z.number().optional(),
-      }),
-      data: z.object({
-        timestamp: z.coerce.date(),
-        action: z.string(),
-        session_id: z.string(),
-        payload: z.string(),
-      }),
-    })
-  }
-
-  // analytics pages
   public get getPlansConversion() {
     return this.readClient.buildPipe({
       pipe: "v1_get_plans_conversion",
@@ -218,8 +175,26 @@ export class Analytics {
       opts: {
         cache: "no-store",
         retries: 3,
-        timeout: 5000, // 5 seconds
+        timeout: 5000,
       },
+    })
+  }
+
+  // analytics events
+  public get getLatestEvents() {
+    return this.readClient.buildPipe({
+      pipe: "v1_get_latest_events",
+      parameters: z.object({
+        action: z.custom<AnalyticsEventAction>().optional(),
+        project_id: z.string().optional(),
+        interval_days: z.number().optional(),
+      }),
+      data: z.object({
+        timestamp: z.coerce.date(),
+        action: z.string(),
+        session_id: z.string(),
+        payload: z.string(),
+      }),
     })
   }
 
@@ -451,32 +426,6 @@ export class Analytics {
         max: z.number(),
         count: z.number(),
         last_during_period: z.number(),
-      }),
-      opts: {
-        cache: "no-store",
-        retries: 3,
-        timeout: 5000, // 5 seconds
-      },
-    })
-  }
-
-  public get getFeatureHeatmap() {
-    return this.readClient.buildPipe({
-      pipe: "v1_get_feature_heatmap",
-      parameters: z.object({
-        project_id: z.string().optional(),
-        start: z.number().optional(),
-        end: z.number().optional(),
-        interval_days: z.number().optional(),
-      }),
-      data: z.object({
-        plan_slug: z.string(),
-        feature_slug: z.string(),
-        project_id: z.string(),
-        usage_count: z.number(),
-        usage_sum: z.number(),
-        verification_count: z.number(),
-        activity_score: z.number(),
       }),
       opts: {
         cache: "no-store",

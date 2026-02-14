@@ -45,6 +45,16 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
     }
   }
 
+  async insertReportUsageDeniedEvent(_record: {
+    project_id: string
+    customer_id: string
+    feature_slug: string
+    timestamp: number
+    denied_reason: string
+  }): Promise<Result<void, UnPriceEntitlementStorageError>> {
+    return Ok(undefined)
+  }
+
   private isInitialized(): Result<void, UnPriceEntitlementStorageError> {
     if (!this.initialized) {
       return Err(new UnPriceEntitlementStorageError({ message: "Not initialized" }))

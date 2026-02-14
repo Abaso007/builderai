@@ -22,43 +22,63 @@ export const route = createRoute({
   tags,
   request: {
     body: jsonContentRequired(
-      z.object({
-        customerId: z.string().openapi({
-          description: "The customer ID",
-          example: "cus_1H7KQFLr7RepUyQBKdnvY",
+      z
+        .object({
+          customerId: z
+            .string()
+            .openapi({
+              description: "The unprice customer ID",
+              example: "cus_1H7KQFLr7RepUyQBKdnvY",
+            })
+            .optional(),
+          externalId: z
+            .string()
+            .openapi({
+              description: "The external customer ID provided at sign up",
+              example: "user_123",
+            })
+            .optional(),
+          featureSlug: z.string().openapi({
+            description: "The feature slug",
+            example: "tokens",
+          }),
+          action: z
+            .string()
+            .openapi({
+              description:
+                "The action being performed (e.g., 'read', 'write', 'delete'). Normalized to lowercase with spaces as hyphens.",
+              example: "read",
+            })
+            .optional()
+            .transform((v) =>
+              v == null || v === "" ? undefined : v.trim().toLowerCase().replace(/\s+/g, "-")
+            ),
+          metadata: z
+            .record(z.string(), z.string())
+            .openapi({
+              description: "Additional metadata for the verification",
+              example: {
+                source: "api",
+              },
+            })
+            .optional(),
+          usage: z
+            .number()
+            .openapi({
+              description: "The usage to check feature access for, if not provided, it will be 0",
+              example: 100,
+            })
+            .optional(),
+        })
+        .superRefine((data, ctx) => {
+          if (!data.customerId && !data.externalId) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Either customerId or externalId is required",
+              path: ["customerId", "externalId"],
+            })
+          }
         }),
-        featureSlug: z.string().openapi({
-          description: "The feature slug",
-          example: "tokens",
-        }),
-        action: z
-          .string()
-          .openapi({
-            description:
-              "The action being performed (e.g., 'read', 'write', 'delete'). Normalized to lowercase with spaces as hyphens.",
-            example: "read",
-          })
-          .optional()
-          .transform((v) =>
-            v == null || v === "" ? undefined : v.trim().toLowerCase().replace(/\s+/g, "-")
-          ),
-        metadata: z
-          .record(z.string(), z.string())
-          .openapi({
-            description: "Additional metadata for the verification",
-            example: {
-              source: "api",
-            },
-          })
-          .optional(),
-        usage: z
-          .number()
-          .openapi({
-            description: "The usage to check feature access for, if not provided, it will be 0",
-            example: 100,
-          })
-          .optional(),
-      }),
       "Body of the request"
     ),
   },
@@ -77,8 +97,8 @@ export type VerifyResponse = z.infer<
 
 export const registerVerifyV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId, featureSlug, metadata, usage, action } = c.req.valid("json")
-    const { usagelimiter } = c.get("services")
+    const { customerId, externalId, featureSlug, metadata, usage, action } = c.req.valid("json")
+    const { usagelimiter, customer } = c.get("services")
     const stats = c.get("stats")
     const requestId = c.get("requestId")
     const performanceStart = c.get("performanceStart")
@@ -86,7 +106,26 @@ export const registerVerifyV1 = (app: App) =>
 
     // validate the request
     const key = await keyAuth(c)
-    const projectId = await resolveContextProjectId(c, key.projectId, customerId)
+    const projectId = customerId
+      ? await resolveContextProjectId(c, key.projectId, customerId)
+      : key.projectId
+
+    let resolvedCustomerId: string
+
+    if (customerId) {
+      resolvedCustomerId = customerId
+    } else {
+      const { err: resolveCustomerErr, val: customerContext } = await customer.resolveCustomerId({
+        projectId,
+        externalId,
+      })
+
+      if (resolveCustomerErr) {
+        throw resolveCustomerErr
+      }
+
+      resolvedCustomerId = customerContext.customerId
+    }
 
     // bouncer is explicitly ignored here because we don't want to hurt latency on the verification path
     // also it makes sense to let customer verify the feature so their service continue working
@@ -97,7 +136,7 @@ export const registerVerifyV1 = (app: App) =>
 
     // validate usage from db
     const { err, val: result } = await usagelimiter.verify({
-      customerId,
+      customerId: resolvedCustomerId,
       featureSlug,
       projectId,
       requestId,

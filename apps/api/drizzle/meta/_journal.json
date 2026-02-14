@@ -29,6 +29,13 @@
       "when": 1771075000000,
       "tag": "0003_sturdy_usage_rollups",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1771075600000,
+      "tag": "0004_clever_report_usage_rollups",
+      "breakpoints": true
     }
   ]
 }

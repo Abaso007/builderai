@@ -62,13 +62,6 @@ export const create = protectedProjectProcedure
             action: "create",
             metadata: { module: "feature" },
           }),
-        opts.ctx.analytics.ingestFeatures({
-          id: featureId,
-          project_id: project.id,
-          slug,
-          code: featureData.code,
-          timestamp: new Date().toISOString(),
-        }),
       ])
     )
 

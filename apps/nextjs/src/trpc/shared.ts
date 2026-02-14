@@ -20,8 +20,8 @@ export const getBaseUrl = () => {
 }
 
 export const ANALYTICS_CONFIG_REALTIME = {
-  staleTime: 0,
-  refetchInterval: 5000,
+  staleTime: 30 * 1000, // 30 seconds
+  refetchInterval: 30 * 1000, // 30 seconds
   refetchOnWindowFocus: true,
 }
 

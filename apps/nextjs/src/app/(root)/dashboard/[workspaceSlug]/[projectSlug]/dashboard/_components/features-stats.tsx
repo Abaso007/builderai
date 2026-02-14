@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Bar, BarChart, CartesianGrid, XAxis } from "recharts"
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import {
@@ -40,6 +40,8 @@ const chartConfig = {
   },
 } satisfies ChartConfig
 
+const chartKeys = Object.keys(chartConfig) as Array<keyof typeof chartConfig>
+
 export function FeaturesStatsSkeleton({
   isLoading,
   error,
@@ -48,8 +50,9 @@ export function FeaturesStatsSkeleton({
   error?: string
 }) {
   const [intervalFilter] = useIntervalFilter()
+
   return (
-    <Card className="py-0">
+    <Card className="flex min-h-[560px] flex-col overflow-hidden py-0">
       <CardHeader className="!p-0 flex flex-col items-stretch space-y-0 border-b md:flex-row">
         <div className="md:!py-0 flex flex-1 flex-col justify-center gap-1 px-6 pt-4 pb-3 md:w-1/2">
           <CardTitle>Verifications</CardTitle>
@@ -58,12 +61,11 @@ export function FeaturesStatsSkeleton({
           </CardDescription>
         </div>
         <div className="flex space-y-0 md:w-1/2">
-          {Object.keys(chartConfig).map((key) => {
-            const chart = key as keyof typeof chartConfig
+          {chartKeys.map((chart) => {
             return (
-              // biome-ignore lint/a11y/useButtonType: <explanation>
               <button
-                key={Math.random()}
+                type="button"
+                key={chart}
                 className="relative z-30 flex flex-1 flex-col justify-center gap-1 border-t px-6 py-4 text-left even:border-l data-[active=true]:bg-muted md:border-t-0 md:border-l md:px-8 md:py-6"
               >
                 <span className="line-clamp-1 text-muted-foreground text-xs">
@@ -75,8 +77,8 @@ export function FeaturesStatsSkeleton({
           })}
         </div>
       </CardHeader>
-      <CardContent className="px-2 md:p-6">
-        <EmptyPlaceholder className="min-h-[250px]" isLoading={isLoading}>
+      <CardContent className="flex-1 px-2 pb-3 md:px-6 md:pt-3 md:pb-6">
+        <EmptyPlaceholder className="min-h-[420px] md:min-h-[520px]" isLoading={isLoading}>
           <EmptyPlaceholder.Icon>
             <BarChart3 className="h-8 w-8" />
           </EmptyPlaceholder.Icon>
@@ -97,6 +99,29 @@ export function FeaturesStatsSkeleton({
 export function FeaturesStats() {
   const [intervalFilter] = useIntervalFilter()
   const trpc = useTRPC()
+  const isNearRealtime = intervalFilter.intervalDays === 1
+
+  const formatXAxis = React.useCallback(
+    (value: string) => {
+      const date = new Date(value)
+      if (Number.isNaN(date.getTime())) {
+        return "--"
+      }
+
+      if (intervalFilter.intervalDays === 1) {
+        return date.toLocaleTimeString("en-US", {
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      }
+
+      return date.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+      })
+    },
+    [intervalFilter.intervalDays]
+  )
 
   const {
     data: featuresOverview,
@@ -110,6 +135,9 @@ export function FeaturesStats() {
       },
       {
         ...ANALYTICS_CONFIG_REALTIME,
+        staleTime: isNearRealtime ? 45 * 1000 : 5 * 60 * 1000,
+        refetchInterval: isNearRealtime ? 60 * 1000 : (false as const),
+        refetchOnWindowFocus: false,
       }
     )
   )
@@ -134,14 +162,15 @@ export function FeaturesStats() {
 
   const [activeChart, setActiveChart] = React.useState<keyof typeof chartConfig>("verifications")
 
+  const activeGradientId = React.useMemo(() => `features-stats-fill-${activeChart}`, [activeChart])
+
   const total = React.useMemo(
     () => ({
       usage: chartData.reduce((acc, curr) => acc + curr.usage, 0),
-      // latency show the max latency
-      latency: Math.max(...chartData.map((item) => item.latency)),
+      latency: chartData.length > 0 ? Math.max(...chartData.map((item) => item.latency)) : 0,
       verifications: chartData.reduce((acc, curr) => acc + curr.verifications, 0),
     }),
-    [intervalFilter.intervalDays, chartData.length, activeChart]
+    [chartData]
   )
 
   if (isLoading || !chartData || chartData.length === 0) {
@@ -149,7 +178,7 @@ export function FeaturesStats() {
   }
 
   return (
-    <Card className="py-0">
+    <Card className="flex min-h-[560px] flex-col overflow-hidden py-0">
       <CardHeader className="!p-0 flex flex-col items-stretch space-y-0 border-b md:flex-row">
         <div className="md:!py-0 flex flex-1 flex-col justify-center gap-1 px-6 pt-4 pb-3 md:w-1/2">
           <CardTitle>{chartConfig[activeChart].label}</CardTitle>
@@ -158,26 +187,28 @@ export function FeaturesStats() {
           </CardDescription>
         </div>
         <div className="flex space-y-0 md:w-1/2">
-          {Object.keys(chartConfig).map((key) => {
-            const chart = key as keyof typeof chartConfig
+          {chartKeys.map((chart) => {
+            const Icon = chartConfig[chart].icon
+
             return (
-              // biome-ignore lint/a11y/useButtonType: <explanation>
               <button
-                key={Math.random()}
+                type="button"
+                key={chart}
                 data-active={activeChart === chart}
-                className="relative z-30 flex flex-1 flex-col justify-center gap-1 border-t px-6 py-4 text-left even:border-l data-[active=true]:bg-muted md:border-t-0 md:border-l md:px-8 md:py-6"
+                className="relative z-30 flex flex-1 flex-col justify-center gap-1 border-t px-5 py-4 text-left transition-colors even:border-l data-[active=true]:bg-muted/70 md:border-t-0 md:border-l md:px-7 md:py-6"
                 onClick={() => setActiveChart(chart)}
               >
-                <span className="line-clamp-1 text-muted-foreground text-xs">
+                <span className="inline-flex items-center gap-1.5 text-muted-foreground text-xs">
+                  <Icon className="h-3.5 w-3.5" />
                   {chartConfig[chart].label}
                 </span>
                 <span className="flex items-center gap-1 font-bold text-lg leading-none sm:text-3xl">
                   <NumberTicker
-                    value={total[key as keyof typeof total]}
+                    value={total[chart]}
                     startValue={0}
                     decimalPlaces={0}
                     withFormatter={true}
-                    isTime={key === "latency"}
+                    isTime={chart === "latency"}
                   />
                 </span>
               </button>
@@ -185,16 +216,27 @@ export function FeaturesStats() {
           })}
         </div>
       </CardHeader>
-      <CardContent className="px-2 md:p-6">
-        <ChartContainer config={chartConfig} className="aspect-auto h-[250px] w-full">
-          <BarChart
+      <CardContent className="flex-1 px-2 pb-3 md:px-6 md:pt-3 md:pb-6">
+        <ChartContainer
+          config={chartConfig}
+          className="aspect-auto h-[55vh] max-h-[720px] min-h-[420px] w-full"
+        >
+          <AreaChart
             accessibilityLayer
             data={chartData}
             margin={{
               left: 12,
               right: 12,
+              top: 12,
+              bottom: 10,
             }}
           >
+            <defs>
+              <linearGradient id={activeGradientId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor={`var(--color-${activeChart})`} stopOpacity={0.3} />
+                <stop offset="95%" stopColor={`var(--color-${activeChart})`} stopOpacity={0} />
+              </linearGradient>
+            </defs>
             <CartesianGrid vertical={false} />
             <XAxis
               dataKey="date"
@@ -202,19 +244,22 @@ export function FeaturesStats() {
               axisLine={false}
               tickMargin={8}
               minTickGap={32}
+              tickFormatter={formatXAxis}
+            />
+            <YAxis
+              axisLine={false}
+              tickLine={false}
+              width={44}
+              tickMargin={8}
               tickFormatter={(value) => {
-                const date = new Date(value)
-                if (intervalFilter.intervalDays === 1) {
-                  return date.toLocaleTimeString("en-US", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })
+                if (activeChart === "latency") {
+                  return `${Math.round(value)}ms`
                 }
 
-                return date.toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                })
+                return Intl.NumberFormat("en-US", {
+                  notation: "compact",
+                  compactDisplay: "short",
+                }).format(value)
               }}
             />
             <ChartTooltip
@@ -226,7 +271,10 @@ export function FeaturesStats() {
                   labelFormatter={(_, item) => {
                     const date = new Date(item.at(0)?.payload.date)
 
-                    if (!date) return "Invalid date"
+                    if (Number.isNaN(date.getTime())) {
+                      return "Invalid date"
+                    }
+
                     if (intervalFilter.intervalDays === 1) {
                       return date.toLocaleTimeString("en-US", {
                         month: "short",
@@ -246,8 +294,16 @@ export function FeaturesStats() {
                 />
               }
             />
-            <Bar dataKey={activeChart} fill={`var(--color-${activeChart})`} />
-          </BarChart>
+            <Area
+              dataKey={activeChart}
+              type="monotone"
+              stroke={`var(--color-${activeChart})`}
+              fill={`url(#${activeGradientId})`}
+              strokeWidth={2.2}
+              dot={false}
+              activeDot={{ r: 4 }}
+            />
+          </AreaChart>
         </ChartContainer>
       </CardContent>
     </Card>

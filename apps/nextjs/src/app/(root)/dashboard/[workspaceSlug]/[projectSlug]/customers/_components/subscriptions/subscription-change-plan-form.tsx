@@ -123,6 +123,7 @@ export default function SubscriptionChangePlanForm({
           withSeparator
           planVersions={planVersions}
           isLoading={isLoading}
+          withFeatureDetails
         />
 
         <div className="mt-8 flex justify-end space-x-4">
