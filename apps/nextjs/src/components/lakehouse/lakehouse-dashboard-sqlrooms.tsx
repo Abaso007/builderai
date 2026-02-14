@@ -41,22 +41,6 @@ function useIsMounted() {
 }
 
 // ============================================================================
-// Types
-// ============================================================================
-
-interface ManifestFile {
-  url: string
-  key: string
-  day: string
-  type: "raw" | "compact" | "metadata"
-  source?: "usage" | "verification" | "metadata"
-  count: number
-  bytes: number
-  etag?: string
-  immutable?: boolean
-}
-
-// ============================================================================
 // Predefined Queries
 // ============================================================================
 
@@ -210,6 +194,51 @@ FROM metadata
 ORDER BY timestamp DESC
 LIMIT 200`,
   },
+  entitlementSnapshotsRaw: {
+    label: "Entitlement Snapshots (raw)",
+    description: "Immutable entitlement snapshots",
+    query: `SELECT
+  entitlement_snapshot_id,
+  feature_slug,
+  feature_type,
+  aggregation_method,
+  merging_policy,
+  "limit",
+  effective_at,
+  expires_at,
+  source_entitlement_version,
+  computed_at
+FROM entitlement_snapshots
+ORDER BY computed_at DESC
+LIMIT 200`,
+  },
+  usageWithEntitlementContext: {
+    label: "Usage + Entitlements",
+    description: "Usage joined with immutable entitlement context",
+    query: `SELECT
+  u.id,
+  u.timestamp,
+  u.customer_id,
+  u.feature_slug,
+  u.usage,
+  u.cost,
+  u.rate_amount,
+  u.rate_currency,
+  u.entitlement_snapshot_id,
+  s.feature_type,
+  s.aggregation_method,
+  s.merging_policy,
+  s."limit" AS entitlement_limit,
+  s.source_entitlement_version
+FROM usage u
+LEFT JOIN entitlement_snapshots s
+  ON u.entitlement_snapshot_id = s.entitlement_snapshot_id
+  AND u.project_id = s.project_id
+  AND u.customer_id = s.customer_id
+  AND u.feature_slug = s.feature_slug
+WHERE u.deleted = 0
+LIMIT 500`,
+  },
 } as const
 
 type QueryKey = keyof typeof PREDEFINED_QUERIES
@@ -221,7 +250,22 @@ const TABLE_CONFIG = {
   usage: { tableName: "usage", label: "Usage Events" },
   verification: { tableName: "verifications", label: "Verifications" },
   metadata: { tableName: "metadata", label: "Metadata" },
+  entitlement_snapshot: {
+    tableName: "entitlement_snapshots",
+    label: "Entitlement Snapshots",
+  },
 } as const
+
+type ManifestFile = {
+  url: string
+  key: string
+  day: string
+  type: "raw" | "compact"
+  source: "usage" | "verification" | "metadata" | "entitlement_snapshot"
+  count: number
+  bytes: number
+  etag?: string
+}
 
 const usageTrendChartConfig = {
   events: { label: "Events", color: "var(--chart-2)" },
@@ -262,13 +306,15 @@ function LakehouseDashboardInner() {
   const hasUsage = loadedTables.includes("usage")
   const hasVerification = loadedTables.includes("verifications")
   const hasMetadata = loadedTables.includes("metadata")
+  const hasEntitlementSnapshots = loadedTables.includes("entitlement_snapshots")
 
   const requiredTables = useCallback((query: string) => {
     const lowered = query.toLowerCase()
-    const required: Array<"usage" | "verifications" | "metadata"> = []
+    const required: Array<"usage" | "verifications" | "metadata" | "entitlement_snapshots"> = []
     if (/\busage\b/.test(lowered)) required.push("usage")
     if (/\bverifications\b/.test(lowered)) required.push("verifications")
     if (/\bmetadata\b/.test(lowered)) required.push("metadata")
+    if (/\bentitlement_snapshots\b/.test(lowered)) required.push("entitlement_snapshots")
     return required
   }, [])
 
@@ -277,31 +323,34 @@ function LakehouseDashboardInner() {
   const refreshTableSchemas = useRoomStore((state) => state.db.refreshTableSchemas)
   const tables = useRoomStore((state) => state.db.tables)
 
-  // Fetch URLs using tRPC
-  const {
-    data: urlsData,
-    isLoading: isLoadingUrls,
-    error: urlsError,
-    refetch: refetchUrls,
-  } = useQuery(
+  const credentialsQuery = useQuery(
     trpc.analytics.getLakehouseUrls.queryOptions(
       { interval: interval.name },
       { staleTime: 1000 * 60 * 5 }
     )
   )
 
-  // Load parquet files into DuckDB when URLs change
+  const manifestQuery = useQuery(
+    trpc.analytics.getLakehouseManifest.queryOptions(
+      { interval: interval.name },
+      { staleTime: 1000 * 60 * 5 }
+    )
+  )
+
+  const isLoadingUrls = credentialsQuery.isLoading || manifestQuery.isLoading
+  const urlsError = credentialsQuery.error || manifestQuery.error
+
   const loadDataIntoDb = useCallback(async () => {
-    if (!urlsData) return
+    if (!manifestQuery.data) return
 
     setIsLoadingData(true)
     setLoadError(null)
 
     try {
-      const typedUrls = urlsData as unknown as { result: { manifest: { files: ManifestFile[] } } }
-      const manifestResult = typedUrls.result?.manifest
+      const files = manifestQuery.data?.files as unknown
+      const manifestFiles = (Array.isArray(files) ? files : []) as ManifestFile[]
 
-      if (!manifestResult?.files?.length) {
+      if (!manifestFiles?.length) {
         loadedManifestFingerprintRef.current = null
         setLoadedFileCount(0)
         setLoadedTables([])
@@ -309,16 +358,15 @@ function LakehouseDashboardInner() {
         return
       }
 
-      const manifestFiles = manifestResult.files ?? []
       const groupedFiles = new Map<string, ManifestFile[]>()
       for (const file of manifestFiles) {
-        const source = file.source ?? "usage"
-        const key = `${file.day}|${source}`
+        const source = (file as ManifestFile).source ?? "usage"
+        const key = `${(file as ManifestFile).day}|${source}`
         const group = groupedFiles.get(key)
         if (group) {
-          group.push(file)
+          group.push(file as ManifestFile)
         } else {
-          groupedFiles.set(key, [file])
+          groupedFiles.set(key, [file as ManifestFile])
         }
       }
 
@@ -430,6 +478,11 @@ FROM ${readExpr}`
         totalFiles += selectedFiles.filter((f) => f.source === "metadata").length
       }
 
+      if (await loadTableFromSource("entitlement_snapshot", selectedFiles)) {
+        tablesLoaded.push("entitlement_snapshots")
+        totalFiles += selectedFiles.filter((f) => f.source === "entitlement_snapshot").length
+      }
+
       await refreshTableSchemas()
       loadedManifestFingerprintRef.current = manifestFingerprint
       setLoadedFileCount(totalFiles)
@@ -446,6 +499,8 @@ FROM ${readExpr}`
         setSqlQuery(PREDEFINED_QUERIES.verificationByFeature.query)
       } else if (tablesLoaded.includes("metadata")) {
         setSqlQuery(PREDEFINED_QUERIES.metadataRaw.query)
+      } else if (tablesLoaded.includes("entitlement_snapshots")) {
+        setSqlQuery(PREDEFINED_QUERIES.entitlementSnapshotsRaw.query)
       } else {
         setSqlQuery("")
       }
@@ -455,14 +510,13 @@ FROM ${readExpr}`
     } finally {
       setIsLoadingData(false)
     }
-  }, [urlsData, getConnector, refreshTableSchemas, loadedTables.length, loadedFileCount])
+  }, [manifestQuery.data, getConnector, refreshTableSchemas, loadedTables.length, loadedFileCount])
 
-  // Load data when URLs change
   useEffect(() => {
-    if (urlsData && !isLoadingUrls) {
+    if (manifestQuery.data && !isLoadingUrls) {
       void loadDataIntoDb()
     }
-  }, [urlsData, isLoadingUrls, loadDataIntoDb])
+  }, [manifestQuery.data, isLoadingUrls, loadDataIntoDb])
 
   // Reset state when interval changes to force reload
   useEffect(() => {
@@ -512,7 +566,8 @@ FROM ${readExpr}`
 
   // Handle refresh
   const handleRefresh = () => {
-    void refetchUrls()
+    void credentialsQuery.refetch()
+    void manifestQuery.refetch()
   }
 
   // Handle SQL editor change
@@ -543,8 +598,9 @@ FROM ${readExpr}`
     if (hasUsage) return PREDEFINED_QUERIES.usageByFeature.query
     if (hasVerification) return PREDEFINED_QUERIES.verificationByFeature.query
     if (hasMetadata) return PREDEFINED_QUERIES.metadataRaw.query
+    if (hasEntitlementSnapshots) return PREDEFINED_QUERIES.entitlementSnapshotsRaw.query
     return ""
-  }, [hasUsage, hasMetadata, hasVerification])
+  }, [hasUsage, hasMetadata, hasVerification, hasEntitlementSnapshots])
 
   useEffect(() => {
     if (!tableReady) return

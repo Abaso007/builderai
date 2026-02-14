@@ -552,7 +552,7 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  "/v1/lakehouse/file": {
+  "/v1/lakehouse/catalog/credentials": {
     parameters: {
       query?: never
       header?: never
@@ -560,52 +560,10 @@ export interface paths {
       cookie?: never
     }
     /**
-     * get lakehouse file
-     * @description Get lakehouse file for a given key
+     * get lakehouse catalog credentials
+     * @description Issue short-lived, workspace-scoped temporary R2 credentials for direct DuckDB-Iceberg access
      */
-    get: operations["lakehouse.getFile"]
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/lakehouse/manifest": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * get lakehouse manifest
-     * @description Get lakehouse manifest for a given range
-     */
-    post: operations["lakehouse.getManifest"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/lakehouse/compact": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * compact lakehouse files
-     * @description Manually trigger compaction for a specific day. Combines raw NDJSON files into a single compacted file per source.
-     */
-    post: operations["lakehouse.compact"]
+    post: operations["lakehouse.getCatalogCredentials"]
     delete?: never
     options?: never
     head?: never
@@ -4275,296 +4233,39 @@ export interface operations {
       }
     }
   }
-  "lakehouse.getFile": {
-    parameters: {
-      query: {
-        key: string
-        exp?: number | null
-        sig?: string
-      }
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Stream of the file */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/octet-stream": string
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "lakehouse.getManifest": {
+  "lakehouse.getCatalogCredentials": {
     parameters: {
       query?: never
       header?: never
       path?: never
       cookie?: never
     }
-    /** @description Body of the request for the get usage */
     requestBody: {
       content: {
         "application/json": {
-          /**
-           * @description The project ID (optional, only available for main projects)
-           * @example project_1H7KQFLr7RepUyQBKdnvY
-           */
-          project_id?: string
-          /**
-           * @description The range of the usage, last hour, day, week or month
-           * @example 24h
-           * @enum {string}
-           */
-          range: "24h" | "7d" | "30d" | "90d"
+          durationSeconds?: number
+          projectId?: string
+          customerId?: string
         }
       }
     }
     responses: {
-      /** @description The result of the get lakehouse manifest */
       200: {
         headers: {
           [name: string]: unknown
         }
         content: {
           "application/json": {
-            manifest: {
-              range: string
-              days: {
-                day: string
-                updatedAt: string
-                raw: {
-                  key: string
-                  minTs: string
-                  maxTs: string
-                  count: number
-                  bytes: number
-                }[]
-                compact: {
-                  key: string
-                  minTs: string
-                  maxTs: string
-                  count: number
-                  bytes: number
-                } | null
-              }[]
-              files: {
-                url: string
-                key: string
-                day: string
-                /** @enum {string} */
-                type: "raw" | "compact" | "metadata"
-                /** @enum {string} */
-                source: "usage" | "verification" | "metadata"
-                count: number
-                bytes: number
-                etag?: string
-                /** @default false */
-                immutable: boolean
-              }[]
-            }
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "lakehouse.compact": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Body of the request for manual compaction */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description Day to compact in YYYY-MM-DD format
-           * @example 2026-02-12
-           */
-          day: string
-          /**
-           * @description Whether to delete raw files after successful compaction
-           * @default false
-           * @example false
-           */
-          delete_source_files: boolean
-        }
-      }
-    }
-    responses: {
-      /** @description The result of the compaction */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            result: {
-              success: boolean
-              day: string
-              projectsProcessed: number
-              results: {
-                projectId: string
-                /** @enum {string} */
-                source: "usage" | "verification" | "metadata"
-                compacted: boolean
-                skipped: boolean
-                files: number
-                lines: number
-                bytes: number
-                invalidLines: number
-              }[]
-              error?: string
+            bucket: string
+            prefix: string
+            durationSeconds: number
+            workspaceId: string
+            r2Endpoint: string
+            credentials: {
+              accessKeyId: string
+              secretAccessKey: string
+              sessionToken: string
+              expiration?: string | number
             }
           }
         }

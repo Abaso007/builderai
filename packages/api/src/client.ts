@@ -379,15 +379,15 @@ export class Unprice {
 
   public get lakehouse() {
     return {
-      getManifest: async (
-        req: paths["/v1/lakehouse/manifest"]["post"]["requestBody"]["content"]["application/json"]
+      getCatalogCredentials: async (
+        req: paths["/v1/lakehouse/catalog/credentials"]["post"]["requestBody"]["content"]["application/json"]
       ): Promise<
         Result<
-          paths["/v1/lakehouse/manifest"]["post"]["responses"]["200"]["content"]["application/json"]
+          paths["/v1/lakehouse/catalog/credentials"]["post"]["responses"]["200"]["content"]["application/json"]
         >
       > => {
         return await this.fetch({
-          path: ["v1", "lakehouse", "manifest"],
+          path: ["v1", "lakehouse", "catalog", "credentials"],
           method: "POST",
           body: req,
         })

@@ -81,7 +81,7 @@ function formatRegion(regionCode: string) {
   return `${region.location} (${code})`
 }
 
-export function FeaturesStatsSkeleton({ intervalLabel }: { intervalLabel?: string }) {
+export function FeaturesStatsSkeleton() {
   return (
     <Card className="overflow-hidden border-muted/60">
       <CardHeader>
@@ -111,9 +111,7 @@ export function FeaturesStatsSkeleton({ intervalLabel }: { intervalLabel?: strin
           <Skeleton className="h-[320px] w-full rounded-md" />
         </div>
 
-        <p className="text-muted-foreground text-xs">
-          Fetching usage and verification activity{intervalLabel ? ` for ${intervalLabel}` : ""}.
-        </p>
+        <p className="text-muted-foreground text-xs">Fetching usage and verification activity...</p>
       </CardContent>
     </Card>
   )

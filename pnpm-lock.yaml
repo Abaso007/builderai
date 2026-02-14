@@ -74,6 +74,9 @@ importers:
       '@unprice/error':
         specifier: workspace:^
         version: link:../../internal/error
+      '@unprice/lakehouse':
+        specifier: workspace:^
+        version: link:../../internal/lakehouse
       '@unprice/logging':
         specifier: workspace:^
         version: link:../../internal/logging
@@ -253,6 +256,9 @@ importers:
       '@unprice/error':
         specifier: workspace:^
         version: link:../../internal/error
+      '@unprice/lakehouse':
+        specifier: workspace:^
+        version: link:../../internal/lakehouse
       '@unprice/logging':
         specifier: workspace:^
         version: link:../../internal/logging
@@ -730,6 +736,22 @@ importers:
         specifier: ^5.3.3
         version: 5.9.3
 
+  internal/lakehouse:
+    dependencies:
+      '@unprice/logging':
+        specifier: workspace:^
+        version: link:../logging
+      zod:
+        specifier: ^3.24.2
+        version: 3.25.76
+    devDependencies:
+      '@unprice/tsconfig':
+        specifier: workspace:^
+        version: link:../../tooling/typescript
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+
   internal/logging:
     dependencies:
       '@axiomhq/js':
@@ -926,6 +948,9 @@ importers:
       '@unprice/error':
         specifier: workspace:^
         version: link:../error
+      '@unprice/lakehouse':
+        specifier: workspace:^
+        version: link:../lakehouse
       '@unprice/logging':
         specifier: workspace:^
         version: link:../logging

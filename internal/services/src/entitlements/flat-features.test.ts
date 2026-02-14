@@ -48,6 +48,7 @@ describe("EntitlementService - Flat Features", () => {
             displayAmount: "0",
           },
         },
+        featurePlanVersionId: "fpv_123",
       },
     ],
   })

@@ -1,0 +1,8 @@
+{
+  "fields": [
+    { "name": "event_date", "type": "string", "required": false },
+    { "name": "project_id", "type": "string", "required": true },
+    { "name": "customer_id", "type": "string", "required": true },
+    { "name": "payload", "type": "json", "required": false }
+  ]
+}

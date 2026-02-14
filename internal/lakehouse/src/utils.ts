@@ -1,30 +1,20 @@
-// Utility functions for the serverless lakehouse
+import type { LakehouseSource } from "./schemas"
 
-/**
- * Get a date N days ago in YYYY-MM-DD format (UTC)
- */
 export function getDaysAgoUTC(days: number): string {
   const d = new Date()
   d.setUTCDate(d.getUTCDate() - days)
   return d.toISOString().split("T")[0] ?? ""
 }
 
-/**
- * Get array of dates for a range
- */
 export function getDateRangeUTC(range: "24h" | "7d" | "30d" | "90d"): string[] {
   const days = range === "24h" ? 1 : Number.parseInt(range)
   const dates: string[] = []
-  for (let i = 0; i < days; i++) {
+  for (let i = 0; i < days; i += 1) {
     dates.push(getDaysAgoUTC(i))
   }
   return dates
 }
 
-/**
- * Split YYYY-MM-DD into path parts (year, zero-padded month, zero-padded day)
- * e.g. "2026-02-02" -> { year: "2026", month: "02", day: "02" }
- */
 export function dayToPathParts(day: string): { year: string; month: string; day: string } {
   const [year, month, dayNum] = day.split("-")
   if (!year || !month || !dayNum) {
@@ -37,17 +27,6 @@ export function dayToPathParts(day: string): { year: string; month: string; day:
   }
 }
 
-/**
- * Lakehouse source types
- */
-export type LakehouseSource = "usage" | "verification" | "metadata"
-
-/**
- * Prefix for raw NDJSON files (per project, per day, per source)
- * Uses Hive-style partitioning: year=YYYY/month=MM/day=DD/customer=ID
- * Path: lakehouse/raw/{projectId}/{source}/year={year}/month={month}/day={day}/
- * (raw/ first so R2 lifecycle can target prefix lakehouse/raw/ for 7-day expiry)
- */
 export function getLakehouseRawPrefix(
   projectId: string,
   source: LakehouseSource,
@@ -59,10 +38,6 @@ export function getLakehouseRawPrefix(
   return customerId ? `${base}customer=${customerId}/` : base
 }
 
-/**
- * Key for a raw NDJSON file (immutable batch)
- * Path: lakehouse/raw/{projectId}/{source}/{year}/{month}/{day}/part-{suffix}.ndjson
- */
 export function getLakehouseRawKey(
   projectId: string,
   source: LakehouseSource,
@@ -73,11 +48,6 @@ export function getLakehouseRawKey(
   return `${getLakehouseRawPrefix(projectId, source, day, customerId)}part-${suffix}.ndjson`
 }
 
-/**
- * Prefix for compacted NDJSON files (per project, per day, per source)
- * Uses Hive-style partitioning: year=YYYY/month=MM/day=DD
- * Path: lakehouse/compacted/{projectId}/{source}/year={year}/month={month}/day={day}/
- */
 export function getLakehouseCompactedPrefix(
   projectId: string,
   source: LakehouseSource,
@@ -87,10 +57,6 @@ export function getLakehouseCompactedPrefix(
   return `lakehouse/compacted/${projectId}/${source}/year=${year}/month=${month}/day=${d}/`
 }
 
-/**
- * Key for a compacted NDJSON file (daily compaction result)
- * Path: lakehouse/compacted/{projectId}/{source}/{year}/{month}/{day}/data.ndjson
- */
 export function getLakehouseCompactedKey(
   projectId: string,
   source: LakehouseSource,
@@ -146,8 +112,8 @@ export function getLakehouseIndexKey(
 
 function toBase64Url(bytes: Uint8Array): string {
   let binary = ""
-  for (const b of bytes) {
-    binary += String.fromCharCode(b)
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i] ?? 0)
   }
   const base64 = btoa(binary)
   return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "")

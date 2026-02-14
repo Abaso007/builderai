@@ -12,6 +12,9 @@ export const cloudflareRatelimiter = z.custom<{
 }>((r) => !!r && typeof r.limit === "function")
 
 export const r2Bucket = z.custom<R2Bucket>((b) => typeof b === "object")
+export const pipelinesBinding = z.custom<{ send: (records: unknown[]) => Promise<void> }>(
+  (binding) => !!binding && typeof binding === "object" && typeof binding.send === "function"
+)
 
 // This function should be called at the start of each request.
 export function createRuntimeEnv(workerEnv: Record<string, string | number | boolean | undefined>) {
@@ -32,8 +35,17 @@ export function createRuntimeEnv(workerEnv: Record<string, string | number | boo
       RL_FREE_600_60s: cloudflareRatelimiter,
       CLOUDFLARE_ZONE_ID: z.string().optional(),
       CLOUDFLARE_API_TOKEN: z.string().optional(),
+      CLOUDFLARE_API_TOKEN_LAKEHOUSE: z.string().optional(),
+      CLOUDFLARE_ACCOUNT_ID_LAKEHOUSE: z.string().optional(),
+      CLOUDFLARE_PARENT_ACCESS_KEY_ID_LAKEHOUSE: z.string().optional(),
       CLOUDFLARE_CACHE_DOMAIN: z.string().optional(),
       LAKEHOUSE: r2Bucket.optional(),
+      LAKEHOUSE_PIPELINE_USAGE: pipelinesBinding,
+      LAKEHOUSE_PIPELINE_VERIFICATION: pipelinesBinding,
+      LAKEHOUSE_PIPELINE_METADATA: pipelinesBinding,
+      LAKEHOUSE_PIPELINE_ENTITLEMENT_SNAPSHOT: pipelinesBinding,
+      LAKEHOUSE_BUCKET_NAME: z.string().optional(),
+      LAKEHOUSE_ICEBERG_PREFIX: z.string().optional(),
     },
     emptyStringAsUndefined: true,
     runtimeEnv: workerEnv,

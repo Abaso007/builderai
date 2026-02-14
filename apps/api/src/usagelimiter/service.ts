@@ -92,6 +92,12 @@ export class UsageLimiterService implements UsageLimiter {
       cache: this.cache,
       metrics: this.metrics,
       wideEventHelpers: this.wideEventHelpers,
+      config: {
+        revalidateInterval:
+          env.APP_ENV === "development"
+            ? 30000 // 30 seconds
+            : 1000 * 60 * 60 * 24, // 24 hours
+      },
     })
   }
 

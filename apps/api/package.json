@@ -1,6 +1,8 @@
 {
   "name": "api",
   "scripts": {
+    "scripts:r2-lifecycle": "./scripts/setup-r2-lifecycle.sh",
+    "scripts:r2-pipelines": "./scripts/configure-r2-and-pipelines.sh",
     "deploy:preview": "wrangler deploy --env preview",
     "deploy:prod": "wrangler deploy --env prod",
     "dev": "sh dev.sh",
@@ -30,6 +32,7 @@
     "@unprice/db": "workspace:^",
     "@unprice/error": "workspace:^",
     "@unprice/logging": "workspace:^",
+    "@unprice/lakehouse": "workspace:^",
     "@unprice/logs": "workspace:^",
     "@unprice/metrics": "workspace:^",
     "@unprice/services": "workspace:^",

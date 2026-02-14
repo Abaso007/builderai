@@ -1,0 +1,28 @@
+{
+  "rules": [
+    {
+      "id": "delete-raw-after-7-days",
+      "enabled": true,
+      "conditions": { "prefix": "lakehouse/raw/" },
+      "deleteObjectsTransition": {
+        "condition": { "maxAge": 604800, "type": "Age" }
+      }
+    },
+    {
+      "id": "delete-compacted-after-retention",
+      "enabled": true,
+      "conditions": { "prefix": "lakehouse/compacted/" },
+      "deleteObjectsTransition": {
+        "condition": { "maxAge": 31536000, "type": "Age" }
+      }
+    },
+    {
+      "id": "abort-incomplete-multipart-7-days",
+      "enabled": true,
+      "conditions": { "prefix": "" },
+      "abortMultipartUploadsTransition": {
+        "condition": { "maxAge": 604800, "type": "Age" }
+      }
+    }
+  ]
+}

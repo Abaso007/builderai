@@ -79,7 +79,6 @@ export const registerStripeSignUpV1 = (app: App) =>
     const { sessionId, projectId } = c.req.valid("param")
     const key = c.req.header("cf-connecting-ip") ?? c.req.header("x-forwarded-for") ?? projectId
     const { customer, db, subscription, analytics } = c.get("services")
-    const stats = c.get("stats")
 
     // rate limit the request
     const result = await c.env.RL_FREE_600_60s.limit({ key })
@@ -166,14 +165,6 @@ export const registerStripeSignUpV1 = (app: App) =>
         metadata: {
           stripeSubscriptionId: stripeSession.subscriptionId ?? "",
           stripeDefaultPaymentMethodId: defaultPaymentMethodId ?? "",
-          externalId: customerSession.customer.externalId,
-          // stats
-          colo: stats.colo,
-          country: stats.country,
-          city: stats.city,
-          isEUCountry: stats.isEUCountry,
-          region: stats.region,
-          continent: stats.continent,
         },
       })
       .onConflictDoUpdate({
@@ -189,14 +180,6 @@ export const registerStripeSignUpV1 = (app: App) =>
           metadata: {
             stripeSubscriptionId: stripeSession.subscriptionId ?? "",
             stripeDefaultPaymentMethodId: defaultPaymentMethodId ?? "",
-            externalId: customerSession.customer.externalId,
-            // analytics
-            colo: stats.colo,
-            country: stats.country,
-            city: stats.city,
-            isEUCountry: stats.isEUCountry,
-            region: stats.region,
-            continent: stats.continent,
           },
         },
       })

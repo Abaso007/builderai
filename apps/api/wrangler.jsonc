@@ -14,9 +14,6 @@
         "enabled": true,
         "head_sampling_rate": 1.0 // 100% of requests
       },
-      "triggers": {
-        "crons": ["0 3 * * *"]
-      },
       "route": {
         "pattern": "api.unprice.dev",
         "custom_domain": true
@@ -26,6 +23,24 @@
           "binding": "LAKEHOUSE",
           "bucket_name": "unprice-lakehouse-prod",
           "jurisdiction": "eu"
+        }
+      ],
+      "pipelines": [
+        {
+          "pipeline": "lakehouse_usage_stream",
+          "binding": "LAKEHOUSE_PIPELINE_USAGE"
+        },
+        {
+          "pipeline": "lakehouse_verifications_stream",
+          "binding": "LAKEHOUSE_PIPELINE_VERIFICATION"
+        },
+        {
+          "pipeline": "lakehouse_metadata_stream",
+          "binding": "LAKEHOUSE_PIPELINE_METADATA"
+        },
+        {
+          "pipeline": "lakehouse_entitlements_stream",
+          "binding": "LAKEHOUSE_PIPELINE_ENTITLEMENT_SNAPSHOT"
         }
       ],
       "unsafe": {
@@ -69,9 +84,6 @@
         "enabled": true,
         "head_sampling_rate": 1.0 // 100% of requests
       },
-      "triggers": {
-        "crons": ["0 3 * * *"]
-      },
       "route": {
         "pattern": "preview-api.unprice.dev",
         "custom_domain": true
@@ -79,8 +91,25 @@
       "r2_buckets": [
         {
           "binding": "LAKEHOUSE",
-          "bucket_name": "unprice-lakehouse-preview",
-          "jurisdiction": "eu"
+          "bucket_name": "unprice-lakehouse-preview"
+        }
+      ],
+      "pipelines": [
+        {
+          "pipeline": "lakehouse_usage_stream",
+          "binding": "LAKEHOUSE_PIPELINE_USAGE"
+        },
+        {
+          "pipeline": "lakehouse_verifications_stream",
+          "binding": "LAKEHOUSE_PIPELINE_VERIFICATION"
+        },
+        {
+          "pipeline": "lakehouse_metadata_stream",
+          "binding": "LAKEHOUSE_PIPELINE_METADATA"
+        },
+        {
+          "pipeline": "lakehouse_entitlements_stream",
+          "binding": "LAKEHOUSE_PIPELINE_ENTITLEMENT_SNAPSHOT"
         }
       ],
       "unsafe": {
@@ -123,9 +152,6 @@
       ]
     },
     "dev": {
-      "triggers": {
-        "crons": ["0 3 * * *"]
-      },
       "route": {
         "pattern": "localhost:8787",
         "custom_domain": false
@@ -133,8 +159,25 @@
       "r2_buckets": [
         {
           "binding": "LAKEHOUSE",
-          "bucket_name": "unprice-lakehouse-dev",
-          "jurisdiction": "eu"
+          "bucket_name": "unprice-lakehouse-dev"
+        }
+      ],
+      "pipelines": [
+        {
+          "pipeline": "lakehouse_usage_stream",
+          "binding": "LAKEHOUSE_PIPELINE_USAGE"
+        },
+        {
+          "pipeline": "lakehouse_verifications_stream",
+          "binding": "LAKEHOUSE_PIPELINE_VERIFICATION"
+        },
+        {
+          "pipeline": "lakehouse_metadata_stream",
+          "binding": "LAKEHOUSE_PIPELINE_METADATA"
+        },
+        {
+          "pipeline": "lakehouse_entitlements_stream",
+          "binding": "LAKEHOUSE_PIPELINE_ENTITLEMENT_SNAPSHOT"
         }
       ],
       "unsafe": {

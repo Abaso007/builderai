@@ -350,6 +350,7 @@ describe("Golden Scenario - Customer Journey", () => {
             limit: 1000,
             effectiveAt: initialNow,
             expiresAt: initialNow + 365 * 24 * 60 * 60 * 1000,
+            featurePlanVersionId: "fpv_idem_1",
           },
         ],
       },
@@ -440,6 +441,7 @@ describe("Golden Scenario - Customer Journey", () => {
             limit: 1000,
             effectiveAt: initialNow,
             expiresAt: initialNow + 365 * 24 * 60 * 60 * 1000,
+            featurePlanVersionId: "fpv_idem_1",
           },
         ],
       },
@@ -504,6 +506,7 @@ describe("Golden Scenario - Customer Journey", () => {
       limit: 5000,
       effectiveAt: clock.now(),
       expiresAt: initialNow + 365 * 24 * 60 * 60 * 1000,
+      featurePlanVersionId: "fpv_idem_1",
     }
 
     const premiumEntitlement = createMockEntitlementState(
@@ -564,6 +567,7 @@ describe("Golden Scenario - Customer Journey", () => {
       limit: 1000,
       effectiveAt: clock.now(),
       expiresAt: initialNow + 365 * 24 * 60 * 60 * 1000,
+      featurePlanVersionId: "fpv_idem_1",
     }
 
     const downgradedEntitlement = createMockEntitlementState(

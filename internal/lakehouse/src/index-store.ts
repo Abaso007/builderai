@@ -1,4 +1,5 @@
-import { type LakehouseSource, getLakehouseIndexKey } from "~/util/lakehouse"
+import type { LakehouseSource } from "./schemas"
+import { getLakehouseIndexKey } from "./utils"
 
 interface LakehouseIndexObject {
   etag?: string

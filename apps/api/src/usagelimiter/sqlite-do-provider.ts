@@ -1,4 +1,3 @@
-import type { R2Bucket } from "@cloudflare/workers-types"
 import type {
   Analytics,
   AnalyticsFeatureMetadata,
@@ -7,6 +6,14 @@ import type {
 } from "@unprice/analytics"
 import type { EntitlementState } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
+import type {
+  LakehouseCursorState,
+  LakehouseEntitlementSnapshotEvent,
+  LakehouseMetadataEvent,
+  LakehouseService,
+  LakehouseUsageEvent,
+  LakehouseVerificationEvent,
+} from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logging"
 import {
   type UnPriceEntitlementStorage,
@@ -17,12 +24,6 @@ import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlit
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import xxhash, { type XXHashAPI } from "xxhash-wasm"
 import { type UsageRecord, type Verification, schema } from "~/db/types"
-import { getLakehouseRawKey } from "~/util/lakehouse"
-import {
-  type LakehouseDaySourceIndex,
-  addRawEntry,
-  updateLakehouseIndex,
-} from "~/util/lakehouse-index"
 import migrations from "../../drizzle/migrations"
 
 // Constants
@@ -39,6 +40,7 @@ const MINUTE_AGGREGATE_RETENTION_SECONDS = WINDOW_1_DAY * 2
 const HOUR_AGGREGATE_RETENTION_SECONDS = WINDOW_7_DAYS * 4
 const STATE_KEY_PREFIX = "state:"
 const SEEN_META_PREFIX = "seen_meta_"
+const SEEN_SNAPSHOT_PREFIX = "seen_snapshot_"
 const CURSOR_KEY = "cursor_state"
 const INTERNAL_METADATA_KEYS = new Set([
   "cost",
@@ -70,7 +72,27 @@ interface BatchResult<T, ID> {
 
 // Schema version for event evolution tracking
 // Increment when making breaking changes to event structure
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
+
+interface LakehouseEntitlementSnapshotRecord {
+  entitlement_snapshot_id: string
+  schema_version: number
+  hash_version: number
+  computed_at: number
+  project_id: string
+  customer_id: string
+  feature_slug: string
+  feature_type: string
+  aggregation_method: string
+  merging_policy: string
+  limit: number | null
+  effective_at: number
+  expires_at: number | null
+  source_entitlement_version: string
+  reset_config: Record<string, unknown> | null
+  metadata: Record<string, unknown> | null
+  grants: Array<Record<string, unknown>>
+}
 
 // Tinybird ingestion payload types (what analytics.ingest* methods expect)
 interface TinybirdUsagePayload {
@@ -136,6 +158,16 @@ interface CursorState {
   lastR2VerificationId: number | null
 }
 
+interface PreparedLakehousePayload {
+  cursorState: LakehouseCursorState
+  usageRecords: LakehouseUsageEvent[]
+  verificationRecords: LakehouseVerificationEvent[]
+  metadataRecords: LakehouseMetadataEvent[]
+  entitlementSnapshots: LakehouseEntitlementSnapshotEvent[]
+  seenSnapshotSet: Set<string>
+  seenSnapshotDate: string
+}
+
 export interface FlushPressureStats {
   pendingUsageRecords: number
   pendingVerificationRecords: number
@@ -161,7 +193,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   private readonly state: DurableObjectState
   private readonly analytics: Analytics
   private readonly logger: Logger
-  private readonly lakehouse: R2Bucket | undefined
+  private readonly lakehouseService: LakehouseService
 
   // Memoized entitlement states for fast lookups
   private stateCache = new Map<string, EntitlementState>()
@@ -181,13 +213,13 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     state: DurableObjectState
     analytics: Analytics
     logger: Logger
-    lakehouse?: R2Bucket
+    lakehouseService: LakehouseService
   }) {
     this.storage = args.storage
     this.state = args.state
     this.analytics = args.analytics
     this.logger = args.logger
-    this.lakehouse = args.lakehouse
+    this.lakehouseService = args.lakehouseService
     this.db = drizzle(args.storage, { schema, logger: false })
   }
 
@@ -368,6 +400,17 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           timestamp: record.timestamp,
           created_at: record.created_at,
           metadata: record.metadata ? JSON.stringify(record.metadata) : null,
+          cost: record.cost != null ? String(record.cost) : null,
+          rate_amount: record.rate_amount != null ? String(record.rate_amount) : null,
+          rate_currency: record.rate_currency ?? null,
+          entitlement_snapshot_id: record.entitlement_snapshot_id ?? null,
+          entitlement_version: record.entitlement_version ?? null,
+          entitlement_feature_type: record.entitlement_feature_type ?? null,
+          entitlement_limit: record.entitlement_limit ?? null,
+          entitlement_overage_strategy: record.entitlement_overage_strategy ?? null,
+          entitlement_effective_at: record.entitlement_effective_at ?? null,
+          entitlement_expires_at: record.entitlement_expires_at ?? null,
+          entitlement_snapshot: record.entitlement_snapshot ?? null,
           deleted: record.deleted ?? 0,
           idempotence_key: record.idempotence_key,
           request_id: record.request_id,
@@ -421,6 +464,16 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         latency: record.latency != null ? String(record.latency) : "0",
         allowed: record.allowed,
         metadata: record.metadata ? JSON.stringify(record.metadata) : null,
+        usage: record.usage != null ? String(record.usage) : null,
+        remaining: record.remaining != null ? String(record.remaining) : null,
+        entitlement_snapshot_id: record.entitlement_snapshot_id ?? null,
+        entitlement_version: record.entitlement_version ?? null,
+        entitlement_feature_type: record.entitlement_feature_type ?? null,
+        entitlement_limit: record.entitlement_limit ?? null,
+        entitlement_overage_strategy: record.entitlement_overage_strategy ?? null,
+        entitlement_effective_at: record.entitlement_effective_at ?? null,
+        entitlement_expires_at: record.entitlement_expires_at ?? null,
+        entitlement_snapshot: record.entitlement_snapshot ?? null,
         // first-class analytics columns
         country: record.country ?? "UNK",
         region: record.region ?? "UNK",
@@ -490,6 +543,11 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       // 2. Process metadata (compute meta_id, extract unique metadata)
       const processed = await this.processMetadata(usageBatch.records, verificationBatch.records)
 
+      const lakehousePrepared = await this.prepareLakehousePayload(processed, {
+        lastR2UsageId: this.cursors.lastR2UsageId,
+        lastR2VerificationId: this.cursors.lastR2VerificationId,
+      })
+
       // 3. Filter records for each destination based on cursors to avoid double counting
       const usageForTinybird = processed.usageRecords.filter((r) => {
         if (!this.cursors.lastTinybirdUsageId) return true
@@ -503,84 +561,84 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
 
       // 4. Send to destinations in parallel
       const [r2Result, usageResult, verificationResult] = await Promise.all([
-        this.flushToR2(processed).catch((err) => {
-          this.logger.error("R2 flush failed (best-effort)", { error: this.errorMessage(err) })
-          return { success: false }
-        }),
+        this.flushToR2(lakehousePrepared),
         this.ingestUsageToTinybird(usageForTinybird),
         this.ingestVerificationsToTinybird(verificationForTinybird),
       ])
 
-      // 5. Update cursors based on successful uploads
-      let cursorsChanged = false
+      const allFlushesSucceeded =
+        r2Result.success && usageResult.success && verificationResult.success
 
-      if (usageResult.success && usageForTinybird.length > 0) {
-        // Usage is DESC, so first record has highest ID
-        const maxId = usageForTinybird[0]?.record.id
+      if (allFlushesSucceeded) {
+        // 5a. Update tinybird cursors first (same filter as the payload that was sent)
         if (
-          maxId &&
-          (!this.cursors.lastTinybirdUsageId || maxId > this.cursors.lastTinybirdUsageId)
+          usageForTinybird.length > 0 &&
+          this.cursors.lastTinybirdUsageId !== usageForTinybird[0]!.record.id
         ) {
-          this.cursors.lastTinybirdUsageId = maxId
-          cursorsChanged = true
+          this.cursors.lastTinybirdUsageId = usageForTinybird[0]!.record.id
         }
-      }
 
-      if (verificationResult.success && verificationForTinybird.length > 0) {
-        // Verification is ASC, so last record has highest ID
-        const maxId = verificationForTinybird[verificationForTinybird.length - 1]?.record.id
         if (
-          maxId !== undefined &&
-          (this.cursors.lastTinybirdVerificationId === null ||
-            maxId > this.cursors.lastTinybirdVerificationId)
+          verificationForTinybird.length > 0 &&
+          this.cursors.lastTinybirdVerificationId !==
+            verificationForTinybird[verificationForTinybird.length - 1]!.record.id
         ) {
-          this.cursors.lastTinybirdVerificationId = maxId
-          cursorsChanged = true
+          this.cursors.lastTinybirdVerificationId =
+            verificationForTinybird[verificationForTinybird.length - 1]!.record.id
         }
-      }
 
-      // R2 cursors are updated inside flushToR2, but we need to persist them
-      if (r2Result.success) {
-        cursorsChanged = true
-      }
+        // 5b. Persist sinks that use the same payload and commit once both destinations succeed
+        this.cursors.lastR2UsageId = r2Result.cursorState.lastR2UsageId
+        this.cursors.lastR2VerificationId = r2Result.cursorState.lastR2VerificationId
 
-      if (cursorsChanged) {
         await this.saveCursors()
-      }
 
-      // 6. Update seen metadata set
-      if (processed.uniqueMetadata.length > 0) {
-        await this.updateSeenMetaSet(processed.todayKey, processed.seenMetaSet)
-      }
-
-      // 7. Delete records that have been safely persisted to BOTH destinations
-      // For Usage (DESC): We can delete if both cursors have advanced past the batch
-      if (usageBatch.firstId && usageBatch.lastId) {
-        const tbSafe =
-          this.cursors.lastTinybirdUsageId !== null &&
-          this.cursors.lastTinybirdUsageId >= usageBatch.firstId
-        const r2Safe =
-          this.cursors.lastR2UsageId !== null && this.cursors.lastR2UsageId >= usageBatch.firstId
-
-        if (tbSafe && r2Safe) {
-          await this.deleteUsageRecordsBatch(usageBatch.firstId, usageBatch.lastId)
+        // 6. Update seen metadata/snapshot sets only after a fully successful flush
+        if (processed.uniqueMetadata.length > 0) {
+          await this.updateSeenMetaSet(processed.todayKey, processed.seenMetaSet)
         }
-      }
 
-      // For Verification (ASC): We can delete if both cursors have advanced past the batch
-      if (verificationBatch.firstId !== null && verificationBatch.lastId !== null) {
-        const tbSafe =
-          this.cursors.lastTinybirdVerificationId !== null &&
-          this.cursors.lastTinybirdVerificationId >= verificationBatch.lastId
-        const r2Safe =
-          this.cursors.lastR2VerificationId !== null &&
-          this.cursors.lastR2VerificationId >= verificationBatch.lastId
-
-        if (tbSafe && r2Safe) {
-          await this.deleteVerificationRecordsBatch(
-            verificationBatch.firstId,
-            verificationBatch.lastId
+        if (lakehousePrepared.seenSnapshotSet.size > 0) {
+          await this.updateSeenSnapshotSet(
+            lakehousePrepared.seenSnapshotDate,
+            lakehousePrepared.seenSnapshotSet
           )
+        }
+
+        // 7. Delete records that have been safely persisted to BOTH destinations
+        // For Usage (DESC): We can delete if both cursors have advanced past the batch
+        if (usageBatch.firstId && usageBatch.lastId) {
+          const tbSafe =
+            this.cursors.lastTinybirdUsageId !== null &&
+            usageBatch.firstId !== null &&
+            this.cursors.lastTinybirdUsageId >= usageBatch.firstId
+          const r2Safe =
+            this.cursors.lastR2UsageId !== null &&
+            usageBatch.firstId !== null &&
+            this.cursors.lastR2UsageId >= usageBatch.firstId
+
+          if (tbSafe && r2Safe) {
+            await this.deleteUsageRecordsBatch(usageBatch.firstId, usageBatch.lastId)
+          }
+        }
+
+        // For Verification (ASC): We can delete if both cursors have advanced past the batch
+        if (verificationBatch.firstId !== null && verificationBatch.lastId !== null) {
+          const tbSafe =
+            this.cursors.lastTinybirdVerificationId !== null &&
+            verificationBatch.lastId !== null &&
+            this.cursors.lastTinybirdVerificationId >= verificationBatch.lastId
+          const r2Safe =
+            this.cursors.lastR2VerificationId !== null &&
+            verificationBatch.lastId !== null &&
+            this.cursors.lastR2VerificationId >= verificationBatch.lastId
+
+          if (tbSafe && r2Safe) {
+            await this.deleteVerificationRecordsBatch(
+              verificationBatch.firstId,
+              verificationBatch.lastId
+            )
+          }
         }
       }
 
@@ -792,6 +850,122 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     }
   }
 
+  private toEventDate(timestamp: number): string {
+    return new Date(timestamp).toISOString().slice(0, 10)
+  }
+
+  private toFiniteNumber(value: unknown): number | null {
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : null
+    }
+
+    if (typeof value === "string") {
+      const parsed = Number(value)
+      return Number.isFinite(parsed) ? parsed : null
+    }
+
+    return null
+  }
+
+  private parseEntitlementSnapshot(raw: string | null): LakehouseEntitlementSnapshotRecord | null {
+    if (!raw) return null
+
+    try {
+      const parsed = JSON.parse(raw)
+      if (!parsed || typeof parsed !== "object") {
+        return null
+      }
+
+      const record = parsed as Record<string, unknown>
+      const snapshotId = record.entitlement_snapshot_id
+      const projectId = record.project_id
+      const customerId = record.customer_id
+      const featureSlug = record.feature_slug
+
+      if (
+        typeof snapshotId !== "string" ||
+        typeof projectId !== "string" ||
+        typeof customerId !== "string" ||
+        typeof featureSlug !== "string"
+      ) {
+        return null
+      }
+
+      const resetConfig =
+        record.reset_config && typeof record.reset_config === "object"
+          ? (record.reset_config as Record<string, unknown>)
+          : null
+
+      const metadata =
+        record.metadata && typeof record.metadata === "object"
+          ? (record.metadata as Record<string, unknown>)
+          : null
+
+      const grants = Array.isArray(record.grants)
+        ? record.grants.filter((entry) => !!entry && typeof entry === "object")
+        : []
+
+      return {
+        entitlement_snapshot_id: snapshotId,
+        schema_version: this.toFiniteNumber(record.schema_version) ?? 1,
+        hash_version: this.toFiniteNumber(record.hash_version) ?? 1,
+        computed_at: this.toFiniteNumber(record.computed_at) ?? Date.now(),
+        project_id: projectId,
+        customer_id: customerId,
+        feature_slug: featureSlug,
+        feature_type: typeof record.feature_type === "string" ? record.feature_type : "unknown",
+        aggregation_method:
+          typeof record.aggregation_method === "string" ? record.aggregation_method : "sum",
+        merging_policy: typeof record.merging_policy === "string" ? record.merging_policy : "sum",
+        limit: record.limit === null ? null : this.toFiniteNumber(record.limit),
+        effective_at: this.toFiniteNumber(record.effective_at) ?? 0,
+        expires_at: record.expires_at === null ? null : this.toFiniteNumber(record.expires_at),
+        source_entitlement_version:
+          typeof record.source_entitlement_version === "string"
+            ? record.source_entitlement_version
+            : "",
+        reset_config: resetConfig,
+        metadata,
+        grants: grants as Array<Record<string, unknown>>,
+      }
+    } catch {
+      return null
+    }
+  }
+
+  private collectEntitlementSnapshots(params: {
+    usageRecords: ProcessedUsageRecord[]
+    verificationRecords: ProcessedVerificationRecord[]
+  }): LakehouseEntitlementSnapshotRecord[] {
+    const snapshots = new Map<string, LakehouseEntitlementSnapshotRecord>()
+
+    const addSnapshot = (record: UsageRecord | Verification) => {
+      const snapshotId = record.entitlement_snapshot_id
+      if (!snapshotId || snapshots.has(snapshotId)) return
+
+      const parsed = this.parseEntitlementSnapshot(record.entitlement_snapshot)
+      if (!parsed) return
+
+      snapshots.set(snapshotId, {
+        ...parsed,
+        entitlement_snapshot_id: snapshotId,
+        project_id: record.project_id,
+        customer_id: record.customer_id,
+        feature_slug: record.feature_slug,
+      })
+    }
+
+    for (const { record } of params.usageRecords) {
+      addSnapshot(record)
+    }
+
+    for (const { record } of params.verificationRecords) {
+      addSnapshot(record)
+    }
+
+    return Array.from(snapshots.values())
+  }
+
   private extractTagMetadata(
     metadata: Record<string, unknown> | null
   ): Record<string, unknown> | null {
@@ -968,287 +1142,169 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   // R2 Lakehouse
   // ─────────────────────────────────────────────────────────────────────────────
 
-  /**
-   * Flushes processed usage, verification, and metadata records to R2.
-   *
-   * Strategy:
-   * 1. Write raw NDJSON files (immutable batches) for usage, verifications, and metadata.
-   * 2. Leave compaction/indexing to a separate lakehouse compactor endpoint.
-   * 3. Update local state to track last flushed IDs (prevent double-flushing).
-   *
-   * @param processed The batch of processed records and metadata.
-   */
-  private async flushToR2(processed: MetadataProcessingResult): Promise<{ success: boolean }> {
-    if (!this.lakehouse) {
-      this.logger.warn("R2 lakehouse not configured; skipping flush to R2", {
-        usageRecords: processed.usageRecords.length,
-        verificationRecords: processed.verificationRecords.length,
+  private async prepareLakehousePayload(
+    processed: MetadataProcessingResult,
+    cursorState: LakehouseCursorState
+  ): Promise<PreparedLakehousePayload> {
+    const newUsageRecords = processed.usageRecords.filter((record) => {
+      if (!cursorState.lastR2UsageId) return true
+      return record.record.id > cursorState.lastR2UsageId
+    })
+
+    const newVerificationRecords = processed.verificationRecords.filter((record) => {
+      if (cursorState.lastR2VerificationId === null) return true
+      return record.record.id > cursorState.lastR2VerificationId
+    })
+
+    const entitlementSnapshots = this.collectEntitlementSnapshots({
+      usageRecords: newUsageRecords,
+      verificationRecords: newVerificationRecords,
+    })
+
+    const dayString = new Date().toISOString().slice(0, 10)
+    const seenSnapshotSet = await this.getSeenSnapshotSet(dayString)
+    const newEntitlementSnapshots = entitlementSnapshots.filter((snapshot) => {
+      if (seenSnapshotSet.has(snapshot.entitlement_snapshot_id)) {
+        return false
+      }
+
+      seenSnapshotSet.add(snapshot.entitlement_snapshot_id)
+      return true
+    })
+
+    const usageEvents: LakehouseUsageEvent[] = newUsageRecords.map(
+      ({ record, metaId, region, action, keyId, country }) => ({
+        id: record.id,
+        event_date: this.toEventDate(record.timestamp),
+        idempotence_key: record.idempotence_key,
+        feature_slug: record.feature_slug,
+        request_id: record.request_id,
+        project_id: record.project_id,
+        customer_id: record.customer_id,
+        timestamp: record.timestamp,
+        metadata_id: String(metaId),
+        usage: Number(record.usage ?? 0),
+        created_at: record.created_at,
+        deleted: record.deleted,
+        meta_id: String(metaId),
+        country: country ?? record.country ?? "UNK",
+        region: region ?? record.region ?? "UNK",
+        action: action ?? record.action ?? null,
+        key_id: keyId ?? record.key_id ?? null,
+        cost:
+          record.cost != null && Number.isFinite(Number(record.cost)) ? Number(record.cost) : null,
+        rate_amount:
+          record.rate_amount != null && Number.isFinite(Number(record.rate_amount))
+            ? Number(record.rate_amount)
+            : null,
+        rate_currency: record.rate_currency ?? null,
+        entitlement_snapshot_id: record.entitlement_snapshot_id ?? null,
+        entitlement_version: record.entitlement_version ?? null,
+        entitlement_feature_type: record.entitlement_feature_type ?? null,
+        entitlement_limit: record.entitlement_limit ?? null,
+        entitlement_overage_strategy: record.entitlement_overage_strategy ?? null,
+        entitlement_effective_at: record.entitlement_effective_at ?? null,
+        entitlement_expires_at: record.entitlement_expires_at ?? null,
+        schema_version: SCHEMA_VERSION,
       })
-      return { success: true }
+    )
+
+    const verificationEvents: LakehouseVerificationEvent[] = newVerificationRecords.map(
+      ({ record, metaId, region, action, keyId, country }) => ({
+        event_id: record.id,
+        event_date: this.toEventDate(record.timestamp),
+        project_id: record.project_id,
+        denied_reason: record.denied_reason ?? null,
+        allowed: record.allowed,
+        timestamp: record.timestamp,
+        created_at: record.created_at,
+        latency: record.latency ? Number(record.latency) : 0,
+        feature_slug: record.feature_slug,
+        customer_id: record.customer_id,
+        request_id: record.request_id,
+        metadata_id: String(metaId),
+        country: country ?? record.country ?? "UNK",
+        region: region ?? record.region ?? "UNK",
+        meta_id: String(metaId),
+        action: action ?? record.action ?? null,
+        key_id: keyId ?? record.key_id ?? null,
+        usage:
+          record.usage != null && Number.isFinite(Number(record.usage))
+            ? Number(record.usage)
+            : null,
+        remaining:
+          record.remaining != null && Number.isFinite(Number(record.remaining))
+            ? Number(record.remaining)
+            : null,
+        entitlement_snapshot_id: record.entitlement_snapshot_id ?? null,
+        entitlement_version: record.entitlement_version ?? null,
+        entitlement_feature_type: record.entitlement_feature_type ?? null,
+        entitlement_limit: record.entitlement_limit ?? null,
+        entitlement_overage_strategy: record.entitlement_overage_strategy ?? null,
+        entitlement_effective_at: record.entitlement_effective_at ?? null,
+        entitlement_expires_at: record.entitlement_expires_at ?? null,
+        schema_version: SCHEMA_VERSION,
+      })
+    )
+
+    const metadataEvents: LakehouseMetadataEvent[] = processed.uniqueMetadata.map((entry) => ({
+      event_date: this.toEventDate(entry.timestamp),
+      project_id: entry.project_id,
+      customer_id: entry.customer_id,
+      metadata_id: String(entry.meta_id),
+      meta_id: String(entry.meta_id),
+      tags: entry.tags,
+      timestamp: entry.timestamp,
+      schema_version: SCHEMA_VERSION,
+    }))
+
+    const snapshotEvents: LakehouseEntitlementSnapshotEvent[] = newEntitlementSnapshots.map(
+      (snapshot) => ({
+        ...snapshot,
+        event_date: this.toEventDate(snapshot.computed_at),
+      })
+    )
+
+    return {
+      cursorState,
+      usageRecords: usageEvents,
+      verificationRecords: verificationEvents,
+      metadataRecords: metadataEvents,
+      entitlementSnapshots: snapshotEvents,
+      seenSnapshotSet,
+      seenSnapshotDate: dayString,
     }
+  }
 
+  private async flushToR2(
+    prepared: PreparedLakehousePayload
+  ): Promise<{ success: boolean; cursorState: LakehouseCursorState }> {
     try {
-      // Filter out usage records that have already been flushed to R2
-      const newUsageRecords = processed.usageRecords.filter((p) => {
-        if (!this.cursors.lastR2UsageId) return true
-        return p.record.id > this.cursors.lastR2UsageId
-      })
-
-      // Filter out verification records that have already been flushed to R2
-      const newVerificationRecords = processed.verificationRecords.filter((p) => {
-        if (this.cursors.lastR2VerificationId === null) return true
-        return p.record.id > this.cursors.lastR2VerificationId
-      })
-
-      // If nothing new to flush, return early
       if (
-        newUsageRecords.length === 0 &&
-        newVerificationRecords.length === 0 &&
-        processed.uniqueMetadata.length === 0
+        prepared.usageRecords.length === 0 &&
+        prepared.verificationRecords.length === 0 &&
+        prepared.metadataRecords.length === 0 &&
+        prepared.entitlementSnapshots.length === 0
       ) {
-        return { success: true }
+        return { success: true, cursorState: prepared.cursorState }
       }
 
-      const now = new Date()
-      const dayString = now.toISOString().slice(0, 10) // YYYY-MM-DD
-      const uploads: Promise<void>[] = []
+      const lakehouseResult = await this.lakehouseService.flushRaw({
+        cursorState: prepared.cursorState,
+        usageRecords: prepared.usageRecords,
+        verificationRecords: prepared.verificationRecords,
+        metadataRecords: prepared.metadataRecords,
+        entitlementSnapshots: prepared.entitlementSnapshots,
+      })
 
-      const indexUpdates: Array<{
-        projectId: string
-        source: "usage" | "verification" | "metadata"
-        day: string
-        entry: {
-          key: string
-          bytes: number
-          etag?: string
-          uploadedAt: string
-        }
-      }> = []
-
-      // Phase 1: Write raw NDJSON files to R2 (include meta_id so lakehouse can JOIN with metadata)
-      // Upload usage records grouped by project/customer; payload includes meta_id from processed records
-      if (newUsageRecords.length > 0) {
-        const usagePayloads = newUsageRecords.map(
-          ({ record, metaId, region, action, keyId, country }) => ({
-            id: record.id,
-            idempotence_key: record.idempotence_key,
-            feature_slug: record.feature_slug,
-            request_id: record.request_id,
-            project_id: record.project_id,
-            customer_id: record.customer_id,
-            timestamp: record.timestamp,
-            usage: Number(record.usage ?? 0),
-            created_at: record.created_at,
-            deleted: record.deleted,
-            meta_id: String(metaId),
-            country: country ?? record.country ?? "UNK",
-            region: region ?? record.region ?? "UNK",
-            action: action ?? record.action ?? null,
-            key_id: keyId ?? record.key_id ?? null,
-            schema_version: SCHEMA_VERSION,
-          })
-        )
-        const usageGroups = this.groupByProjectCustomer(usagePayloads)
-        for (const [key, records] of usageGroups) {
-          const [projectId, customerId] = key.split("/") as [string, string]
-          const fileKey = this.getR2RawFileKey(projectId, customerId, dayString, now, "usage")
-          const buffer = this.toNDJSON(records)
-
-          uploads.push(
-            this.lakehouse
-              .put(fileKey, buffer, {
-                httpMetadata: { contentType: "application/x-ndjson" },
-              })
-              .then((result) => {
-                indexUpdates.push({
-                  projectId,
-                  source: "usage",
-                  day: dayString,
-                  entry: {
-                    key: fileKey,
-                    bytes: buffer.byteLength,
-                    etag: result?.etag,
-                    uploadedAt: now.toISOString(),
-                  },
-                })
-              })
-          )
-        }
+      return {
+        success: lakehouseResult.success,
+        cursorState: lakehouseResult.cursorState,
       }
-
-      // Upload verification records; payload includes meta_id from processed records
-      if (newVerificationRecords.length > 0) {
-        const verificationPayloads = newVerificationRecords.map(
-          ({ record, metaId, region, action, keyId, country }) => ({
-            project_id: record.project_id,
-            denied_reason: record.denied_reason ?? null,
-            allowed: record.allowed,
-            timestamp: record.timestamp,
-            created_at: record.created_at,
-            latency: record.latency ? Number(record.latency) : 0,
-            feature_slug: record.feature_slug,
-            customer_id: record.customer_id,
-            request_id: record.request_id,
-            country: country ?? record.country ?? "UNK",
-            region: region ?? record.region ?? "UNK",
-            meta_id: String(metaId),
-            action: action ?? record.action ?? null,
-            key_id: keyId ?? record.key_id ?? null,
-            schema_version: SCHEMA_VERSION,
-          })
-        )
-        const verificationGroups = this.groupByProjectCustomer(verificationPayloads)
-        for (const [key, records] of verificationGroups) {
-          const [projectId, customerId] = key.split("/") as [string, string]
-          const fileKey = this.getR2RawFileKey(
-            projectId,
-            customerId,
-            dayString,
-            now,
-            "verification"
-          )
-          const buffer = this.toNDJSON(records)
-
-          uploads.push(
-            this.lakehouse
-              .put(fileKey, buffer, {
-                httpMetadata: { contentType: "application/x-ndjson" },
-              })
-              .then((result) => {
-                indexUpdates.push({
-                  projectId,
-                  source: "verification",
-                  day: dayString,
-                  entry: {
-                    key: fileKey,
-                    bytes: buffer.byteLength,
-                    etag: result?.etag,
-                    uploadedAt: now.toISOString(),
-                  },
-                })
-              })
-          )
-        }
-      }
-
-      // Upload metadata (raw NDJSON)
-      if (processed.uniqueMetadata.length > 0) {
-        const metadataByCustomer = this.groupByProjectCustomer(processed.uniqueMetadata)
-
-        for (const [key, entries] of metadataByCustomer) {
-          const [projectId, customerId] = key.split("/") as [string, string]
-          const rawFileKey = this.getR2RawFileKey(projectId, customerId, dayString, now, "metadata")
-          const buffer = this.toNDJSON(
-            entries.map((e) => ({
-              meta_id: String(e.meta_id),
-              tags: e.tags,
-              timestamp: e.timestamp,
-              schema_version: SCHEMA_VERSION,
-            }))
-          )
-
-          uploads.push(
-            this.lakehouse
-              .put(rawFileKey, buffer, {
-                httpMetadata: { contentType: "application/x-ndjson" },
-              })
-              .then((result) => {
-                indexUpdates.push({
-                  projectId,
-                  source: "metadata",
-                  day: dayString,
-                  entry: {
-                    key: rawFileKey,
-                    bytes: buffer.byteLength,
-                    etag: result?.etag,
-                    uploadedAt: now.toISOString(),
-                  },
-                })
-              })
-          )
-        }
-      }
-
-      if (uploads.length > 0) {
-        await Promise.all(uploads)
-      }
-
-      if (indexUpdates.length > 0) {
-        await Promise.all(
-          indexUpdates.map(async (update) => {
-            const ok = await updateLakehouseIndex({
-              bucket: this.lakehouse!,
-              projectId: update.projectId,
-              source: update.source,
-              day: update.day,
-              mutate: (current: LakehouseDaySourceIndex) => addRawEntry(current, update.entry),
-            })
-
-            if (!ok) {
-              throw new Error(
-                `Failed to update lakehouse index after retries for ${update.projectId}/${update.source}/${update.day}`
-              )
-            }
-          })
-        )
-      }
-
-      // Update state only with IDs we actually flushed (batch order: usage DESC, verification ASC)
-      if (newUsageRecords.length > 0) {
-        const lastFlushedUsage = newUsageRecords[0]!
-        this.cursors.lastR2UsageId = lastFlushedUsage.record.id
-      }
-      if (newVerificationRecords.length > 0) {
-        const lastFlushedVerification = newVerificationRecords[newVerificationRecords.length - 1]!
-        this.cursors.lastR2VerificationId = lastFlushedVerification.record.id
-      }
-
-      return { success: true }
     } catch (error) {
       this.logger.error("Failed to flush to R2", { error: this.errorMessage(error) })
-      return { success: false }
+      return { success: false, cursorState: prepared.cursorState }
     }
-  }
-
-  private groupByProjectCustomer<T extends { project_id: string; customer_id: string }>(
-    records: T[]
-  ): Map<string, T[]> {
-    const groups = new Map<string, T[]>()
-
-    for (const record of records) {
-      const key = `${record.project_id}/${record.customer_id}`
-      const group = groups.get(key)
-      if (group) {
-        group.push(record)
-      } else {
-        groups.set(key, [record])
-      }
-    }
-
-    return groups
-  }
-
-  private toNDJSON<T extends object>(records: T[]): Uint8Array {
-    if (records.length === 0) return new Uint8Array()
-    const ndjson = records.map((r) => JSON.stringify(r)).join("\n")
-    return new TextEncoder().encode(ndjson)
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // R2 Key Generation
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  /** Key for a raw NDJSON file within a daily partition (project-level lakehouse) */
-  private getR2RawFileKey(
-    projectId: string,
-    customerId: string,
-    day: string,
-    date: Date,
-    type: "usage" | "verification" | "metadata"
-  ): string {
-    const timestamp = date.getTime()
-    const suffix = `${timestamp}-${customerId}`
-    return getLakehouseRawKey(projectId, type, day, customerId, suffix)
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1265,10 +1321,22 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     return new Set(stored ?? [])
   }
 
+  private async getSeenSnapshotSet(date: string): Promise<Set<string>> {
+    const key = `${SEEN_SNAPSHOT_PREFIX}${date}`
+    const stored = await this.storage.get<string[]>(key)
+    return new Set(stored ?? [])
+  }
+
   private async updateSeenMetaSet(date: string, metaIds: Set<string>): Promise<void> {
     const key = `${SEEN_META_PREFIX}${date}`
     await this.storage.put(key, Array.from(metaIds))
     await this.rotateSeenMetadata(date)
+  }
+
+  private async updateSeenSnapshotSet(date: string, snapshotIds: Set<string>): Promise<void> {
+    const key = `${SEEN_SNAPSHOT_PREFIX}${date}`
+    await this.storage.put(key, Array.from(snapshotIds))
+    await this.rotateSeenSnapshots(date)
   }
 
   private async rotateSeenMetadata(currentDateStr: string): Promise<void> {
@@ -1293,6 +1361,31 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       }
     } catch (error) {
       this.logger.error("Failed to rotate seen metadata", { error: this.errorMessage(error) })
+    }
+  }
+
+  private async rotateSeenSnapshots(currentDateStr: string): Promise<void> {
+    try {
+      const keys = await this.storage.list({ prefix: SEEN_SNAPSHOT_PREFIX })
+      const cutoffDate = new Date(currentDateStr)
+      cutoffDate.setDate(cutoffDate.getDate() - METADATA_RETENTION_DAYS)
+
+      const keysToDelete: string[] = []
+
+      for (const [key] of keys) {
+        const datePart = key.replace(SEEN_SNAPSHOT_PREFIX, "")
+        const keyDate = new Date(datePart)
+
+        if (!Number.isNaN(keyDate.getTime()) && keyDate < cutoffDate) {
+          keysToDelete.push(key)
+        }
+      }
+
+      if (keysToDelete.length > 0) {
+        await Promise.all(keysToDelete.map((key) => this.storage.delete(key)))
+      }
+    } catch (error) {
+      this.logger.error("Failed to rotate seen snapshots", { error: this.errorMessage(error) })
     }
   }
 

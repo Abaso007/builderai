@@ -6,16 +6,16 @@ import { unprice } from "#utils/unprice"
 export const getLakehouseUrls = protectedProjectProcedure
   .input(
     z.object({
-      interval: z.enum(["24h", "7d", "30d", "90d"]),
+      interval: z.enum(["24h", "7d", "30d", "90d"]).optional(),
     })
   )
   .query(async ({ input, ctx }) => {
-    const { interval } = input
+    void input
     const projectId = ctx.project.id
 
-    const result = await unprice.lakehouse.getManifest({
-      project_id: projectId,
-      range: interval,
+    const result = await unprice.lakehouse.getCatalogCredentials({
+      projectId,
+      durationSeconds: 3600,
     })
 
     if (result.error) {

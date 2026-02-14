@@ -60,7 +60,6 @@ export const registerSignUpV1 = (app: App) =>
       sessionId,
     } = c.req.valid("json")
     const { customer } = c.get("services")
-    const stats = c.get("stats")
 
     // validate the request
     const key = await keyAuth(c)
@@ -83,17 +82,7 @@ export const registerSignUpV1 = (app: App) =>
           externalId,
           billingInterval,
           sessionId,
-          // TODO: this can bloat storage, we should only store the necessary metadata
-          metadata: {
-            ...metadata,
-            // analytics
-            colo: stats.colo,
-            country: stats.country,
-            city: stats.city,
-            isEUCountry: stats.isEUCountry,
-            region: stats.region,
-            continent: stats.continent,
-          },
+          metadata: metadata,
         },
         projectId: key.projectId,
       })

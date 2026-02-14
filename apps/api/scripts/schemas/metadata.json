@@ -1,0 +1,12 @@
+{
+  "fields": [
+    { "name": "event_date", "type": "string", "required": true },
+    { "name": "project_id", "type": "string", "required": true },
+    { "name": "customer_id", "type": "string", "required": true },
+    { "name": "metadata_id", "type": "string", "required": true },
+    { "name": "meta_id", "type": "string", "required": true },
+    { "name": "tags", "type": "string", "required": false },
+    { "name": "timestamp", "type": "int64", "required": true },
+    { "name": "schema_version", "type": "int64", "required": false }
+  ]
+}

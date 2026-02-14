@@ -36,6 +36,13 @@
       "when": 1771075600000,
       "tag": "0004_clever_report_usage_rollups",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1771080000000,
+      "tag": "0005_marvelous_entitlement_snapshots",
+      "breakpoints": true
     }
   ]
 }

@@ -42,6 +42,7 @@
     "@unprice/email": "workspace:^",
     "@unprice/error": "workspace:^",
     "@unprice/logging": "workspace:^",
+    "@unprice/lakehouse": "workspace:^",
     "@unprice/logs": "workspace:^",
     "@unprice/metrics": "workspace:^",
     "@unprice/services": "workspace:^",

@@ -1,4 +1,3 @@
-import type { R2Bucket } from "@cloudflare/workers-types"
 import { CloudflareStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
@@ -26,6 +25,7 @@ import { EntitlementService } from "@unprice/services/entitlements"
 import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/metrics"
 import { type Connection, Server } from "partyserver"
 import type { Env } from "~/env"
+import { CloudflarePipelineLakehouseService } from "~/lakehouse/pipeline"
 import type { BufferMetricsResponse } from "./interface"
 import { type FlushPressureStats, SqliteDOStorageProvider } from "./sqlite-do-provider"
 
@@ -123,7 +123,6 @@ export class DurableObjectUsagelimiter extends Server {
   private storage: SqliteDOStorageProvider
   // metrics service
   private metrics: Metrics
-  // default ttl for the usage records and verifications
   private TTL_ANALYTICS = 1000 * 60 // 1 minute
   // last broadcast message time
   private LAST_BROADCAST_MSG = Date.now()
@@ -154,13 +153,11 @@ export class DurableObjectUsagelimiter extends Server {
 
     this._env = env
 
-    // set a revalidation period of 5 secs for development
     if (env.APP_ENV === "development") {
       this.TTL_ANALYTICS = 1000 * 10 // 10 seconds
       this.SAMPLE_RATE = 1
     }
 
-    // set a revalidation period of 5 mins for preview
     if (env.APP_ENV === "preview") {
       this.TTL_ANALYTICS = 1000 * 60 // 1 minute
       this.SAMPLE_RATE = 0.1
@@ -249,6 +246,17 @@ export class DurableObjectUsagelimiter extends Server {
       singleton: false, // Don't use singleton for hibernating DOs
     })
 
+    const lakehouseService = new CloudflarePipelineLakehouseService({
+      logger: this.logger,
+      bucket: env.LAKEHOUSE,
+      pipelines: {
+        usage: env.LAKEHOUSE_PIPELINE_USAGE,
+        verification: env.LAKEHOUSE_PIPELINE_VERIFICATION,
+        metadata: env.LAKEHOUSE_PIPELINE_METADATA,
+        entitlement_snapshot: env.LAKEHOUSE_PIPELINE_ENTITLEMENT_SNAPSHOT,
+      },
+    })
+
     // initialize the storage provider
     this.storage = new SqliteDOStorageProvider({
       storage: this.ctx.storage,
@@ -260,7 +268,7 @@ export class DurableObjectUsagelimiter extends Server {
         tinybirdUrl: env.TINYBIRD_URL,
         logger: this.logger,
       }),
-      lakehouse: env.LAKEHOUSE as unknown as R2Bucket,
+      lakehouseService,
     })
 
     // initialize the storage provider - must block until complete
@@ -298,9 +306,9 @@ export class DurableObjectUsagelimiter extends Server {
       metrics: this.metrics,
       config: {
         revalidateInterval:
-          env.NODE_ENV === "development"
+          env.APP_ENV === "development"
             ? 30000 // 30 seconds
-            : 300000, // 5 minutes
+            : 1000 * 60 * 60 * 24, // 24 hours
       },
     })
 

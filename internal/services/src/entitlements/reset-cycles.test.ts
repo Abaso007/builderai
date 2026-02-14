@@ -55,6 +55,7 @@ describe("EntitlementService - Reset Cycles", () => {
         expiresAt: jan1 + 30 * 24 * 60 * 60 * 1000, // 30 days
         limit: 100,
         priority: 10,
+        featurePlanVersionId: "fpv_idem_1",
       },
     ],
     effectiveAt: jan1,
@@ -272,6 +273,7 @@ describe("EntitlementService - Reset Cycles", () => {
           limit: 10,
           effectiveAt: monthStart,
           expiresAt: monthEnd,
+          featurePlanVersionId: "fpv_idem_1",
         },
       ],
     })

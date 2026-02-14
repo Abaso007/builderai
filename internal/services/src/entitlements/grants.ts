@@ -533,6 +533,7 @@ export class GrantsManager {
       limit: g.limit,
       priority: g.priority,
       config: g.featurePlanVersion.config, // Keep config for pricing calculations
+      featurePlanVersionId: g.featurePlanVersionId,
     }))
 
     // Merge grants according to merging policy derived from feature type

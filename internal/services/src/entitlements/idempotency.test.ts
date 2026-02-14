@@ -41,6 +41,7 @@ describe("EntitlementService - Idempotency & Flush", () => {
       {
         id: "grant_idem_1",
         type: "subscription",
+        featurePlanVersionId: "fpv_idem_1",
         effectiveAt: now - 10000,
         expiresAt: now + 10000,
         limit: 100,

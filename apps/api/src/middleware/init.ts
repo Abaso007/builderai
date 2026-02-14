@@ -15,6 +15,7 @@ import { CustomerService } from "@unprice/services/customers"
 import { LogdrainMetrics, NoopMetrics } from "@unprice/services/metrics"
 import type { MiddlewareHandler } from "hono"
 import type { HonoEnv } from "~/hono/env"
+import { CloudflarePipelineLakehouseService } from "~/lakehouse/pipeline"
 import { ApiProjectService } from "~/project"
 import { UsageLimiterService } from "~/usagelimiter/service"
 
@@ -235,6 +236,17 @@ export function init(): MiddlewareHandler<HonoEnv> {
       hashCache,
     })
 
+    const lakehouse = new CloudflarePipelineLakehouseService({
+      logger,
+      bucket: c.env.LAKEHOUSE,
+      pipelines: {
+        usage: c.env.LAKEHOUSE_PIPELINE_USAGE,
+        verification: c.env.LAKEHOUSE_PIPELINE_VERIFICATION,
+        metadata: c.env.LAKEHOUSE_PIPELINE_METADATA,
+        entitlement_snapshot: c.env.LAKEHOUSE_PIPELINE_ENTITLEMENT_SNAPSHOT,
+      },
+    })
+
     c.set("services", {
       version: "1.0.0",
       usagelimiter: usageLimiterService,
@@ -247,6 +259,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       apikey,
       db,
       customer,
+      lakehouse,
       wideEventHelpers,
     })
 

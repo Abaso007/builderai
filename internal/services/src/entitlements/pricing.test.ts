@@ -85,6 +85,7 @@ describe("EntitlementService - Pricing", () => {
         limit: 100,
         priority: 10,
         config: pricingConfig,
+        featurePlanVersionId: "fpv_idem_1",
       },
     ],
   })
@@ -243,6 +244,7 @@ describe("EntitlementService - Pricing", () => {
           limit: 100,
           priority: 10,
           config: unitPricingConfig,
+          featurePlanVersionId: "fpv_unit_1",
         },
       ],
     })

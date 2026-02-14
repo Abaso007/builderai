@@ -21,6 +21,10 @@ declare namespace Cloudflare {
 		APP_ENV: string;
 		DATABASE_READ1_URL: string;
 		DATABASE_URL: string;
+		LAKEHOUSE_PIPELINE_USAGE: { send: (records: unknown[]) => Promise<void> };
+		LAKEHOUSE_PIPELINE_VERIFICATION: { send: (records: unknown[]) => Promise<void> };
+		LAKEHOUSE_PIPELINE_METADATA: { send: (records: unknown[]) => Promise<void> };
+		LAKEHOUSE_PIPELINE_ENTITLEMENT_SNAPSHOT: { send: (records: unknown[]) => Promise<void> };
 	}
 }
 interface Env extends Cloudflare.Env {}

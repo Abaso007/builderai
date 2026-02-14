@@ -1,0 +1,32 @@
+{
+  "fields": [
+    { "name": "id", "type": "string", "required": true },
+    { "name": "event_date", "type": "string", "required": true },
+    { "name": "idempotence_key", "type": "string", "required": true },
+    { "name": "feature_slug", "type": "string", "required": true },
+    { "name": "request_id", "type": "string", "required": true },
+    { "name": "project_id", "type": "string", "required": true },
+    { "name": "customer_id", "type": "string", "required": true },
+    { "name": "timestamp", "type": "int64", "required": true },
+    { "name": "metadata_id", "type": "string", "required": true },
+    { "name": "usage", "type": "float64", "required": true },
+    { "name": "created_at", "type": "int64", "required": false },
+    { "name": "deleted", "type": "int64", "required": false },
+    { "name": "meta_id", "type": "string", "required": false },
+    { "name": "country", "type": "string", "required": false },
+    { "name": "region", "type": "string", "required": false },
+    { "name": "action", "type": "string", "required": false },
+    { "name": "key_id", "type": "string", "required": false },
+    { "name": "cost", "type": "float64", "required": false },
+    { "name": "rate_amount", "type": "float64", "required": false },
+    { "name": "rate_currency", "type": "string", "required": false },
+    { "name": "entitlement_snapshot_id", "type": "string", "required": false },
+    { "name": "entitlement_version", "type": "string", "required": false },
+    { "name": "entitlement_feature_type", "type": "string", "required": false },
+    { "name": "entitlement_limit", "type": "int64", "required": false },
+    { "name": "entitlement_overage_strategy", "type": "string", "required": false },
+    { "name": "entitlement_effective_at", "type": "int64", "required": false },
+    { "name": "entitlement_expires_at", "type": "int64", "required": false },
+    { "name": "schema_version", "type": "int64", "required": false }
+  ]
+}

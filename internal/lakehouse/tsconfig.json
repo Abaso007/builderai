@@ -1,0 +1,11 @@
+{
+  "extends": "@unprice/tsconfig/base.json",
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "tsBuildInfoFile": "node_modules/.cache/tsbuildinfo.json"
+  },
+  "include": ["src", "env.ts"],
+  "exclude": ["node_modules", "dist", ".turbo"]
+}
