@@ -26,7 +26,7 @@ export const featureInsertBaseSchema = createInsertSchema(schema.features, {
     .describe(
       "URL-friendly unique identifier for the feature. Must be lowercase with hyphens only. Used for API lookups and references. Example: 'api-calls', 'storage-gb', 'team-members'"
     ),
-  unit: z
+  unitOfMeasure: z
     .string()
     .default("units")
     .optional()

@@ -412,7 +412,7 @@ export function FeatureConfigForm({
           <UsageFormFields
             form={form}
             currency={planVersion.currency}
-            units={activeFeature?.feature?.unit ?? "units"}
+            units={activeFeature?.unitOfMeasure ?? "units"}
             isDisabled={isPublished}
           />
         )}
@@ -421,7 +421,7 @@ export function FeatureConfigForm({
           <TierFormFields
             form={form}
             currency={planVersion.currency}
-            units={activeFeature?.feature?.unit ?? "units"}
+            units={activeFeature?.unitOfMeasure ?? "units"}
             isDisabled={isPublished}
           />
         )}

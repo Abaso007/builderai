@@ -101,6 +101,7 @@ export interface UsageLimiter {
   resetEntitlements(params: { customerId: string; projectId: string }): Promise<
     Result<void, BaseError>
   >
+  resetUsage(params: { customerId: string; projectId: string }): Promise<Result<void, BaseError>>
   /**
    * Get the access control list from the cache
    * This is used to get the ACL for a customer and project

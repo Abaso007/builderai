@@ -544,7 +544,8 @@ export class SubscriptionService {
           })
         )
 
-        if (!isFirstPhase) {
+        // reset entitlements if the phase is not the first one and the phase is active
+        if (!isFirstPhase && isActivePhase) {
           // TODO: change this when implementing webhooks service + qstash
           this.waitUntil(
             unprice.customers.resetEntitlements({

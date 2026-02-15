@@ -106,7 +106,6 @@ async function Content({
 
   // create the workspace
   const newWorkspace = await api.workspaces.create({
-    id: customer.metadata?.externalId,
     name: customer.name,
     unPriceCustomerId: customer.id,
   })

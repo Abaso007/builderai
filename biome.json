@@ -54,7 +54,11 @@
       "./internal/db/src/migrations",
       "./internal/jobs/.trigger",
       "./apps/api/drizzle",
-      "./apps/api/worker-configuration.d.ts"
+      "./apps/api/worker-configuration.d.ts",
+      "./internal/lakehouse/lakenv",
+      "./internal/lakehouse/.ipynb_checkpoints",
+      "./internal/lakehouse/lakehouse.ipynb",
+      "./apps/api/scripts/*"
     ]
   },
   "formatter": {
@@ -78,7 +82,11 @@
       "./internal/db/src/migrations",
       "./internal/jobs/.trigger",
       "./apps/api/drizzle/migrations",
-      "./apps/api/worker-configuration.d.ts"
+      "./apps/api/worker-configuration.d.ts",
+      "./internal/lakehouse/lakenv",
+      "./internal/lakehouse/.ipynb_checkpoints",
+      "./internal/lakehouse/lakehouse.ipynb",
+      "./apps/api/scripts/*"
     ]
   },
   "organizeImports": {
@@ -97,7 +105,11 @@
       "./internal/db/src/migrations",
       "./internal/jobs/.trigger",
       "./apps/api/drizzle/migrations",
-      "./apps/api/worker-configuration.d.ts"
+      "./apps/api/worker-configuration.d.ts",
+      "./internal/lakehouse/lakenv",
+      "./internal/lakehouse/.ipynb_checkpoints",
+      "./internal/lakehouse/lakehouse.ipynb",
+      "./apps/api/scripts/*"
     ]
   },
   "javascript": {

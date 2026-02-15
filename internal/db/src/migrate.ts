@@ -200,7 +200,7 @@ async function main() {
         title: feature.TITLE,
         description: feature.DESCRIPTION,
         projectId: project.id,
-        unit: feature.UNIT,
+        unitOfMeasure: feature.UNIT,
       }))
     )
     .onConflictDoUpdate({
@@ -208,7 +208,7 @@ async function main() {
       set: {
         title: sql`excluded.title`,
         description: sql`excluded.description`,
-        unit: sql`excluded.unit`,
+        unitOfMeasure: sql`excluded.unit_of_measure`,
       },
     })
 

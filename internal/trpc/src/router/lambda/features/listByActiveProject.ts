@@ -10,6 +10,7 @@ export const listByActiveProject = protectedProjectProcedure
 
     const features = await opts.ctx.db.query.features.findMany({
       where: (feature, { eq }) => eq(feature.projectId, project.id),
+      orderBy: (feature, { desc }) => [desc(feature.createdAtM)],
     })
 
     return {

@@ -199,7 +199,7 @@ async function main() {
         title: feature.TITLE,
         description: feature.DESCRIPTION,
         projectId: project.id,
-        unit: feature.UNIT,
+        unitOfMeasure: feature.UNIT,
       }))
     )
     .onConflictDoNothing()

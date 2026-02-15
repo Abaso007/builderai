@@ -4,7 +4,7 @@ import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent } from "stoker/openapi/helpers"
 
 import { z } from "zod"
-import { keyAuth } from "~/auth/key"
+import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 
@@ -47,9 +47,11 @@ export const registerGetSubscriptionV1 = (app: App) =>
     // validate the request
     const key = await keyAuth(c)
 
+    const projectId = await resolveContextProjectId(c, key.projectId, customerId)
+
     const { val: subscription, err } = await customer.getActiveSubscription({
       customerId,
-      projectId: key.projectId,
+      projectId,
       now: Date.now(),
       opts: {
         skipCache: true,

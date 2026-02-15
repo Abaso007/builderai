@@ -1,17 +1,15 @@
 {
   "fields": [
-    { "name": "event_id", "type": "int64", "required": true },
+    { "name": "id", "type": "string", "required": true },
     { "name": "event_date", "type": "string", "required": true },
     { "name": "project_id", "type": "string", "required": true },
     { "name": "denied_reason", "type": "string", "required": false },
     { "name": "allowed", "type": "int64", "required": true },
     { "name": "timestamp", "type": "int64", "required": true },
-    { "name": "created_at", "type": "int64", "required": false },
     { "name": "latency", "type": "float64", "required": false },
     { "name": "feature_slug", "type": "string", "required": true },
     { "name": "customer_id", "type": "string", "required": true },
     { "name": "request_id", "type": "string", "required": true },
-    { "name": "metadata_id", "type": "string", "required": true },
     { "name": "country", "type": "string", "required": false },
     { "name": "region", "type": "string", "required": false },
     { "name": "meta_id", "type": "string", "required": false },
@@ -19,13 +17,7 @@
     { "name": "key_id", "type": "string", "required": false },
     { "name": "usage", "type": "float64", "required": false },
     { "name": "remaining", "type": "int64", "required": false },
-    { "name": "entitlement_snapshot_id", "type": "string", "required": false },
-    { "name": "entitlement_version", "type": "string", "required": false },
-    { "name": "entitlement_feature_type", "type": "string", "required": false },
-    { "name": "entitlement_limit", "type": "int64", "required": false },
-    { "name": "entitlement_overage_strategy", "type": "string", "required": false },
-    { "name": "entitlement_effective_at", "type": "int64", "required": false },
-    { "name": "entitlement_expires_at", "type": "int64", "required": false },
+    { "name": "entitlement_id", "type": "string", "required": false },
     { "name": "schema_version", "type": "int64", "required": false }
   ]
 }

@@ -518,6 +518,11 @@ export const planVersionFeatureSelectBaseSchema = createSelectSchema(planVersion
   featureType: typeFeatureSchema.describe(
     "The pricing model type: 'flat' (fixed price), 'tier' (volume-based tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)"
   ),
+  unitOfMeasure: z
+    .string()
+    .describe(
+      "Unit of measurement captured for this plan version feature. Used for display and billing context without relying on mutable feature definitions"
+    ),
   billingConfig: billingConfigSchema.describe(
     "Billing cycle configuration including interval (month/year), billing anchor date, and plan type (recurring/onetime)"
   ),
@@ -563,6 +568,11 @@ export const planVersionFeatureInsertBaseSchema = createInsertSchema(planVersion
     .describe(
       "Optional configuration for when usage counters reset. Useful for features with usage limits that refresh periodically"
     ),
+  unitOfMeasure: z
+    .string()
+    .default("units")
+    .optional()
+    .describe("Unit of measurement snapshot for this plan version feature. Defaults to 'units'"),
   defaultQuantity: z.coerce
     .number()
     .int()
@@ -692,7 +702,7 @@ export const planVersionFeatureInsertBaseSchema = createInsertSchema(planVersion
 export const planVersionFeatureDragDropSchema = planVersionFeatureSelectBaseSchema
   .extend({
     feature: featureSelectBaseSchema.describe(
-      "The base feature definition including title, slug, unit, and description"
+      "The base feature definition including title, slug, unit of measure, and description"
     ),
   })
   .describe(

@@ -1532,16 +1532,113 @@ export class EntitlementService {
     }
 
     // reset the cache and blocked customer flag
+    // Handle storage.reset() separately to capture its error
+    const [storageResetResult] = await Promise.all([
+      this.storage.reset(),
+      this.cache.customerEntitlements.remove(cacheKey),
+      this.cache.negativeEntitlements.remove(`negative:${projectId}:${customerId}:all`),
+      this.customerService.invalidateAccessControlList(customerId, projectId),
+      this.cache.getCurrentUsage.remove(cacheKey),
+      // delete the entitlements from the database
+      this.db
+        .delete(entitlements)
+        .where(and(eq(entitlements.customerId, customerId), eq(entitlements.projectId, projectId))),
+    ])
+
+    // Check if storage.reset() failed and return the error
+    if (storageResetResult.err) {
+      return Err(storageResetResult.err)
+    }
+
+    return Ok(undefined)
+  }
+
+  public async resetUsage(params: {
+    customerId: string
+    projectId: string
+  }): Promise<Result<void, UnPriceEntitlementError | UnPriceEntitlementStorageError>> {
+    const customerId = params.customerId
+    const projectId = params.projectId
+    const cacheKey = `${projectId}:${customerId}`
+
+    const { val: entitlementsData } = await this.getActiveEntitlements({
+      customerId,
+      projectId,
+    })
+
+    if (entitlementsData && entitlementsData.length > 0) {
+      await Promise.all(
+        entitlementsData.map((e) =>
+          this.cache.customerEntitlement.remove(
+            this.storage.makeKey({
+              customerId,
+              projectId,
+              featureSlug: e.featureSlug,
+            })
+          )
+        )
+      )
+    }
+
+    const { val: states, err: statesErr } = await this.storage.getAll()
+    if (statesErr) {
+      return Err(statesErr)
+    }
+
+    const now = Date.now()
+    const resetResults = await Promise.all(
+      states
+        .filter((state) => state.customerId === customerId && state.projectId === projectId)
+        .map((state) => {
+          const existingMeter = state.meter ?? {
+            usage: "0",
+            snapshotUsage: "0",
+            lastReconciledId: "",
+            lastUpdated: now,
+            lastCycleStart: undefined,
+          }
+
+          const cycleWindow = state.resetConfig
+            ? calculateCycleWindow({
+                effectiveStartDate: state.effectiveAt,
+                effectiveEndDate: state.expiresAt,
+                now,
+                config: {
+                  name: state.resetConfig.name,
+                  interval: state.resetConfig.resetInterval,
+                  intervalCount: state.resetConfig.resetIntervalCount,
+                  anchor: state.resetConfig.resetAnchor,
+                  planType: state.resetConfig.planType,
+                },
+                trialEndsAt: null,
+              })
+            : null
+
+          const updatedState: EntitlementState = {
+            ...state,
+            meter: {
+              ...existingMeter,
+              usage: "0",
+              snapshotUsage: "0",
+              lastUpdated: now,
+              lastCycleStart: cycleWindow?.start ?? existingMeter.lastCycleStart,
+            },
+          }
+
+          return this.storage.set({ state: updatedState })
+        })
+    )
+
+    const resetError = resetResults.find((result) => result.err)?.err
+    if (resetError) {
+      return Err(resetError)
+    }
+
     await Promise.all([
       this.cache.customerEntitlements.remove(cacheKey),
       this.cache.negativeEntitlements.remove(`negative:${projectId}:${customerId}:all`),
       this.customerService.invalidateAccessControlList(customerId, projectId),
       this.cache.getCurrentUsage.remove(cacheKey),
-      this.storage.reset(),
-      // delete the entitlements from the database
-      this.db
-        .delete(entitlements)
-        .where(and(eq(entitlements.customerId, customerId), eq(entitlements.projectId, projectId))),
     ])
 
     return Ok(undefined)
@@ -1883,6 +1980,7 @@ export class EntitlementService {
       ...state,
       effectiveAt: mergedGrants.effectiveAt,
       expiresAt: mergedGrants.expiresAt,
+      unitOfMeasure: mergedGrants.grants[0]?.unitOfMeasure ?? state.unitOfMeasure,
       grants: mergedGrants.grants,
     })
   }
@@ -2431,7 +2529,7 @@ export class EntitlementService {
         tieredDisplay: {
           currentUsage: usage,
           billableUsage: Math.max(0, usage - included),
-          unit: planVersionFeature.feature.unit ?? "units",
+          unit: planVersionFeature.unitOfMeasure ?? "units",
           freeAmount: included,
           tiers: formattedTiers,
           currentTierLabel: formattedTiers.find((t) => t.isActive)?.label,
@@ -2456,7 +2554,7 @@ export class EntitlementService {
         included,
         limit: limit ?? undefined,
         limitType: isHardLimit ? "hard" : "soft",
-        unit: planVersionFeature.feature.unit ?? "units",
+        unit: planVersionFeature.unitOfMeasure ?? "units",
         notifyThreshold: planVersionFeature.metadata?.notifyUsageThreshold ?? 95,
         overageStrategy: planVersionFeature.metadata?.overageStrategy ?? "none",
       },

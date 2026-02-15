@@ -304,7 +304,7 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
                           ? `${toDecimal(
                               dinero(planFeatureVersion?.config?.price.dinero),
                               ({ value, currency }) => `${currencySymbol(currency.code)}${value}`
-                            )} per ${planFeatureVersion?.config?.units} ${planFeatureVersion?.feature.unit ?? "units"}`
+                            )} per ${planFeatureVersion?.config?.units} ${planFeatureVersion?.unitOfMeasure ?? "units"}`
                           : toDecimal(
                               dinero(planFeatureVersion?.config?.price.dinero),
                               ({ value, currency }) => `${currencySymbol(currency.code)}${value}`

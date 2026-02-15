@@ -1,5 +1,13 @@
 import { relations } from "drizzle-orm"
-import { doublePrecision, foreignKey, integer, json, primaryKey, unique } from "drizzle-orm/pg-core"
+import {
+  doublePrecision,
+  foreignKey,
+  integer,
+  json,
+  primaryKey,
+  unique,
+  varchar,
+} from "drizzle-orm/pg-core"
 import type * as z from "zod"
 
 import { pgTableProject } from "../utils/_table"
@@ -30,6 +38,8 @@ export const planVersionFeatures = pgTableProject(
     featureId: cuid("feature_id").notNull(),
     // type of the feature - flat, tier, usage, etc.
     featureType: typeFeatureEnum("feature_type").notNull(),
+    // unit of measurement for the feature at the time of publishing
+    unitOfMeasure: varchar("unit_of_measure", { length: 24 }).notNull().default("units"),
     // configuration of the feature
     config: json("features_config").$type<z.infer<typeof configFeatureSchema>>().notNull(),
     // billing config for the feature usually the same as the plan version billing config

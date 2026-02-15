@@ -12,7 +12,6 @@ import { EntitlementService } from "../entitlements/service"
 import type { Metrics } from "../metrics"
 import { SubscriptionService } from "../subscriptions/service"
 import { createClock, createMockEntitlementState, createMockWideEventLogger } from "../test-utils"
-import { unprice } from "../utils/unprice"
 
 vi.mock("../env", () => ({
   env: {
@@ -81,6 +80,7 @@ describe("Golden Scenario - Customer Journey", () => {
         id: "pf_1",
         feature: { id: "f_1", slug: featureSlug },
         featureType: "usage",
+        unitOfMeasure: "units",
         aggregationMethod: "sum",
         config: { usageMode: "sum" },
         billingConfig: {
@@ -230,6 +230,7 @@ describe("Golden Scenario - Customer Journey", () => {
                 featurePlanVersion: {
                   feature: { slug: featureSlug },
                   featureType: "usage",
+                  unitOfMeasure: "units",
                   aggregationMethod: "sum",
                   config: { usageMode: "sum" },
                   billingConfig: {
@@ -490,9 +491,6 @@ describe("Golden Scenario - Customer Journey", () => {
 
     expect(upgradeResult.err).toBeUndefined()
 
-    // Verify entitlement reset call
-    expect(unprice.customers.resetEntitlements).toHaveBeenCalledTimes(1)
-
     // Manually simulate the side effect of resetEntitlements (clearing storage)
     // because our mock of resetEntitlements doesn't do it.
     await mockStorage.delete({ customerId, projectId, featureSlug })
@@ -553,7 +551,6 @@ describe("Golden Scenario - Customer Journey", () => {
     })
 
     expect(downgradeResult.err).toBeUndefined()
-    expect(unprice.customers.resetEntitlements).toHaveBeenCalledTimes(2) // Second call
 
     // Manually simulate the side effect of resetEntitlements (clearing storage)
     await mockStorage.delete({ customerId, projectId, featureSlug })
@@ -644,6 +641,7 @@ describe("Golden Scenario - Customer Journey", () => {
       subscriptionItem: {
         featurePlanVersion: {
           featureType: "flat", // Proration only for flat/tier/package
+          unitOfMeasure: "units",
           billingConfig: prepaidPlanVersion.billingConfig,
         },
         // Required for deep property access in billing service
@@ -724,6 +722,7 @@ describe("Golden Scenario - Customer Journey", () => {
                 id: "si_1",
                 featurePlanVersion: {
                   featureType: "flat",
+                  unitOfMeasure: "units",
                   billingConfig: prepaidPlanVersion.billingConfig,
                 },
               },

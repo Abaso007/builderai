@@ -13,7 +13,7 @@ Reference: [Build an end-to-end data pipeline (Cloudflare)](https://developers.c
   - `usage.json` – Usage events (aligned with `LakehouseUsageEvent`).
   - `verifications.json` – Verification events (aligned with `LakehouseVerificationEvent`).
   - `metadata.json` – Metadata events (aligned with `LakehouseMetadataEvent`).
-  - `entitlements.json` – Entitlement snapshot events (project_id, customer_id, optional event_date, payload as JSON).
+  - `entitlements.json` – Entitlement snapshot events (aligned with `entitlementSchema` from `internal/db/src/validators/entitlements.ts`).
 - **`docs/`** – Extra documentation:
   - **`iceberg-schema-and-partitioning.md`** – How the Apache Iceberg table schema and partition keys are determined (stream schema + `__ingest_ts`, partition by DAY on `__ingest_ts`; custom partition keys like `(event_date, project_id, customer_id)` are not configurable via wrangler for R2 Data Catalog sinks).
 

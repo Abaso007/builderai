@@ -86,9 +86,11 @@ export function FeaturesStatsSkeleton() {
     <Card className="overflow-hidden border-muted/60">
       <CardHeader>
         <CardTitle>Overview Intelligence</CardTitle>
-        <CardDescription>Loading trend, feature matrix, and region latency data...</CardDescription>
+        <CardDescription>
+          Loading trend, feature activity and latency by region data...
+        </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-4 pt-4 pb-6">
         <div className="grid gap-3 md:grid-cols-3">
           {["verifications", "usage", "latency"].map((item) => {
             return (
@@ -126,7 +128,7 @@ function FeaturesStatsEmptyState({ intervalLabel }: { intervalLabel: string }) {
           Unified view of usage reported, verifications, and latency for the {intervalLabel}.
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="py-4">
         <EmptyPlaceholder className="min-h-[520px] transition-opacity duration-300">
           <EmptyPlaceholder.Icon>
             <LineChartIcon className="h-8 w-8 opacity-50 motion-safe:animate-pulse" />
@@ -149,7 +151,7 @@ function FeaturesStatsErrorState({ error }: { error: string }) {
         <CardTitle>Overview Intelligence</CardTitle>
         <CardDescription>Analytics data could not be loaded right now.</CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="pt-4 pb-6">
         <EmptyPlaceholder className="min-h-[520px]">
           <EmptyPlaceholder.Icon>
             <TriangleAlert className="h-8 w-8 opacity-60" />
@@ -489,7 +491,7 @@ export function FeaturesStats() {
             {intervalFilter.label}.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4 pt-4 pb-6">
           <div className="grid gap-3 md:grid-cols-3">
             <Card className="border-muted/60">
               <CardContent className="px-4 py-3">

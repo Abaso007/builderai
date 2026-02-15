@@ -32,6 +32,7 @@ describe("EntitlementService - Multiple Grants", () => {
     effectiveAt: now - 10000,
     expiresAt: now + 10000,
     overageStrategy: "none" as const,
+    unitOfMeasure: "units",
     featurePlanVersionId: "fpv_A",
     subjectType: "customer",
     subjectId: customerId,
@@ -46,6 +47,7 @@ describe("EntitlementService - Multiple Grants", () => {
     effectiveAt: now - 10000,
     expiresAt: now + 10000,
     overageStrategy: "none" as const,
+    unitOfMeasure: "units",
     featurePlanVersionId: "fpv_B",
     subjectType: "customer",
     subjectId: customerId,
@@ -58,6 +60,7 @@ describe("EntitlementService - Multiple Grants", () => {
     projectId,
     featureSlug,
     featureType: "usage",
+    unitOfMeasure: "units",
     limit: 150, // Sum of limits (100 + 50)
     aggregationMethod: "sum",
     mergingPolicy: "sum",

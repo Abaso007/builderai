@@ -415,10 +415,35 @@ export class UsageLimiterService implements UsageLimiter {
     )
 
     // reset the entitlements for the customer
-    await durableObject.resetEntitlements({
+    const result = await durableObject.resetEntitlements({
       customerId: params.customerId,
       projectId: params.projectId,
     })
+
+    // Propagate error from DO reset
+    if (result.err) {
+      return Err(result.err)
+    }
+
+    return Ok(undefined)
+  }
+
+  public async resetUsage(params: {
+    customerId: string
+    projectId: string
+  }): Promise<Result<void, BaseError>> {
+    const durableObject = this.getStub(
+      this.getDurableObjectCustomerId(params.customerId, params.projectId)
+    )
+
+    const result = await durableObject.resetUsage({
+      customerId: params.customerId,
+      projectId: params.projectId,
+    })
+
+    if (result.err) {
+      return Err(result.err)
+    }
 
     return Ok(undefined)
   }

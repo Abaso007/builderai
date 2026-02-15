@@ -54,14 +54,21 @@ export const route = createRoute({
               v == null || v === "" ? undefined : v.trim().toLowerCase().replace(/\s+/g, "-")
             ),
           metadata: z
-            .record(z.string(), z.string())
+            .object({
+              source: z.string().optional(),
+              resourceId: z.string().optional(),
+              resourceType: z.string().optional(),
+            })
             .openapi({
-              description: "Additional metadata for the verification",
+              description: "Additional metadata for the usage report",
               example: {
                 source: "api",
+                resourceId: "123",
+                resourceType: "user",
               },
             })
             .optional(),
+          // TODO: turn this into a verify + consume request - better delete it and create a new endpoint to avoid confusion
           usage: z
             .number()
             .openapi({

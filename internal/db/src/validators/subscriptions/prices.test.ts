@@ -182,6 +182,7 @@ describe("calculateFlatPricePlan", () => {
         {
           id: "fv_4HsTVDfaaTtnAkq5sKB1Raj4tgaG",
           featureType: "flat",
+          unitOfMeasure: "units",
           config: {
             price: {
               dinero: {
@@ -223,6 +224,7 @@ describe("calculateFlatPricePlan", () => {
         {
           id: "fv_4HsTVDfaaTtnAkq5sKB1Raj4tg23G",
           featureType: "flat",
+          unitOfMeasure: "units",
           config: {
             price: {
               dinero: {

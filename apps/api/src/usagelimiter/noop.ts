@@ -29,6 +29,13 @@ export class NoopUsageLimiter implements UsageLimiter {
     return Ok(undefined)
   }
 
+  public async resetUsage(_params: {
+    customerId: string
+    projectId: string
+  }): Promise<Result<void, BaseError>> {
+    return Ok(undefined)
+  }
+
   public async getAccessControlList(_data: {
     customerId: string
     projectId: string
@@ -106,6 +113,16 @@ export class NoopUsageLimiter implements UsageLimiter {
     projectId: string
     windowSeconds?: 300 | 3600 | 86400 | 604800
   }): Promise<Result<BufferMetricsResponse, BaseError>> {
+    const windowSeconds = _data.windowSeconds ?? 300
+    const bucketSizeSeconds =
+      windowSeconds <= 300
+        ? 60
+        : windowSeconds <= 3600
+          ? 300
+          : windowSeconds <= 86400
+            ? 3600
+            : 86400
+
     return Ok({
       usageCount: 0,
       verificationCount: 0,
@@ -113,7 +130,7 @@ export class NoopUsageLimiter implements UsageLimiter {
       allowedCount: 0,
       deniedCount: 0,
       limitExceededCount: 0,
-      bucketSizeSeconds: 300,
+      bucketSizeSeconds,
       featureStats: [],
       usageSeries: [],
       verificationSeries: [],

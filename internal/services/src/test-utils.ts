@@ -46,6 +46,7 @@ export const createMockEntitlementState = (
     customerId: "cust_123",
     featureSlug: "test-feature",
     featureType: "usage",
+    unitOfMeasure: "units",
     limit: 100,
     aggregationMethod: "sum",
     mergingPolicy: "sum",

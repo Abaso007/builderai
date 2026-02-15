@@ -33,6 +33,7 @@ export const create = protectedProjectProcedure
       resetConfig,
       type,
       aggregationMethod,
+      unitOfMeasure,
     } = opts.input
     const project = opts.ctx.project
 
@@ -108,6 +109,7 @@ export const create = protectedProjectProcedure
         featureId: featureData.id,
         projectId: project.id,
         planVersionId: planVersionData.id,
+        unitOfMeasure: unitOfMeasure ?? featureData.unitOfMeasure ?? "units",
         // for now we use the same billing config as the plan version
         billingConfig: {
           ...billingConfigCreate,

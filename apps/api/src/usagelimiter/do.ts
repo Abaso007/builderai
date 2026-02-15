@@ -380,6 +380,16 @@ export class DurableObjectUsagelimiter extends Server {
     })
   }
 
+  public async resetUsage(params: {
+    customerId: string
+    projectId: string
+  }): Promise<Result<void, BaseError>> {
+    return await this.entitlementService.resetUsage({
+      customerId: params.customerId,
+      projectId: params.projectId,
+    })
+  }
+
   public async getActiveEntitlements(params: {
     customerId: string
     projectId: string

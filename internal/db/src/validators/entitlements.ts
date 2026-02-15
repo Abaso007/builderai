@@ -144,10 +144,13 @@ export type ReportUsageResult = z.infer<typeof reportUsageResultSchema>
 export const entitlementGrantsSnapshotSchema = z.object({
   id: z.string(),
   type: grantTypeSchema,
+  name: z.string().optional(),
   priority: z.number(),
   effectiveAt: z.number(),
   expiresAt: z.number().nullable(),
   limit: z.number().nullable(),
+  unitOfMeasure: z.string().optional(),
+  featurePlanVersionId: z.string().optional(),
   config: configFeatureSchema.optional(), // Added for pricing calculations
 })
 
@@ -160,6 +163,11 @@ export const entitlementSchema = createSelectSchema(schema.entitlements, {
   aggregationMethod: aggregationMethodSchema,
   featureType: typeFeatureSchema,
   mergingPolicy: entitlementMergingPolicySchema,
+  unitOfMeasure: z
+    .string()
+    .describe(
+      "Unit of measurement for this entitlement, computed from the winning grants. Example: 'calls', 'GB', 'seats'"
+    ),
 })
 
 export const meterStateSchema = z.object({

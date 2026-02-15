@@ -81,18 +81,19 @@ export function PricingItem({
 
   // if the feature is usage and the feature slug does not include the unit, we don't show the units
   const showUnits =
-    feature.featureType === "usage" && !feature.feature.slug.includes(feature.feature.unit)
+    feature.featureType === "usage" &&
+    !feature.feature.slug.includes(feature.unitOfMeasure ?? "units")
 
   const freeUnitsText =
     freeUnits === Number.POSITIVE_INFINITY
       ? feature.limit
-        ? `Up to ${nFormatter(feature.limit)} ${showUnits ? feature.feature.unit : ""}`
+        ? `Up to ${nFormatter(feature.limit)} ${showUnits ? (feature.unitOfMeasure ?? "units") : ""}`
         : "Unlimited"
       : freeUnits === 0
         ? feature.limit
-          ? `Up to ${nFormatter(feature.limit)} ${showUnits ? feature.feature.unit : ""}`
+          ? `Up to ${nFormatter(feature.limit)} ${showUnits ? (feature.unitOfMeasure ?? "units") : ""}`
           : "Starts at 0"
-        : `${nFormatter(freeUnits)} ${showUnits ? feature.feature.unit : ""}`
+        : `${nFormatter(freeUnits)} ${showUnits ? (feature.unitOfMeasure ?? "units") : ""}`
 
   switch (feature.featureType) {
     case "flat": {

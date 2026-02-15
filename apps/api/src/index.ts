@@ -16,6 +16,7 @@ import { registerGetPaymentMethodsV1 } from "./routes/customer/getPaymentMethods
 import { registerGetSubscriptionV1 } from "./routes/customer/getSubscriptionV1"
 import { registerGetUsageV1 } from "./routes/customer/getUsageV1"
 import { registerResetEntitlementsV1 } from "./routes/customer/resetEntitlementsV1"
+import { registerResetUsageV1 } from "./routes/customer/resetUsageV1"
 import { registerSignUpV1 } from "./routes/customer/signUpV1"
 import { registerVerifyV1 } from "./routes/customer/verifyV1"
 import { registerGetCatalogCredentialsV1 } from "./routes/lakehouse/getCatalogCredentialsV1"
@@ -97,6 +98,7 @@ registerGetPaymentMethodsV1(app)
 registerSignUpV1(app)
 registerCreatePaymentMethodV1(app)
 registerResetEntitlementsV1(app)
+registerResetUsageV1(app)
 registerUpdateACLV1(app)
 // Project routes
 registerGetFeaturesV1(app)

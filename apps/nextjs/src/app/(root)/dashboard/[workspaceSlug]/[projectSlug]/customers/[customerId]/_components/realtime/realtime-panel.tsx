@@ -133,6 +133,39 @@ function formatCompactNumber(value: number): string {
   }).format(value)
 }
 
+function resolveBucketSizeSeconds(windowSeconds: number): number {
+  if (windowSeconds <= 300) return 60
+  if (windowSeconds <= 3600) return 300
+  if (windowSeconds <= 86400) return 3600
+  return 86400
+}
+
+function formatBucketLabel(bucketSizeSeconds: number): string {
+  if (bucketSizeSeconds % 86400 === 0) {
+    return `${bucketSizeSeconds / 86400}d`
+  }
+  if (bucketSizeSeconds % 3600 === 0) {
+    return `${bucketSizeSeconds / 3600}h`
+  }
+  return `${bucketSizeSeconds / 60}m`
+}
+
+function formatBucketTimestamp(timestamp: number, bucketSizeSeconds: number): string {
+  const date = new Date(timestamp)
+
+  if (bucketSizeSeconds >= 86400) {
+    return date.toLocaleDateString([], {
+      month: "short",
+      day: "2-digit",
+    })
+  }
+
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
 export function RealtimePanel(props: {
   customerId: string
   projectId: string
@@ -256,12 +289,16 @@ export function RealtimePanel(props: {
     }
   }, [socket, windowSeconds])
 
-  const shouldRollupToFiveMinutes =
-    windowSeconds === 60 * 60 && (metrics?.bucketSizeSeconds ?? 60) <= 60
-
-  const chartBucketSizeSeconds = shouldRollupToFiveMinutes
-    ? 5 * 60
-    : Math.max(metrics?.bucketSizeSeconds ?? 60, 60)
+  const desiredBucketSizeSeconds = useMemo(
+    () => resolveBucketSizeSeconds(windowSeconds),
+    [windowSeconds]
+  )
+  const sourceBucketSizeSeconds = metrics?.bucketSizeSeconds ?? desiredBucketSizeSeconds
+  const chartBucketSizeSeconds = Math.max(sourceBucketSizeSeconds, desiredBucketSizeSeconds)
+  const isRollupActive = sourceBucketSizeSeconds < chartBucketSizeSeconds
+  const rollupLabel = isRollupActive
+    ? ` - grouped from ${formatBucketLabel(sourceBucketSizeSeconds)} to ${formatBucketLabel(chartBucketSizeSeconds)}.`
+    : ""
 
   const usageSeriesRows = useMemo(() => {
     const grouped = new Map<
@@ -297,10 +334,7 @@ export function RealtimePanel(props: {
       .sort((a, b) => a.bucketStart - b.bucketStart)
       .map((bucket) => ({
         ...bucket,
-        time: new Date(bucket.bucketStart).toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
+        time: formatBucketTimestamp(bucket.bucketStart, chartBucketSizeSeconds),
       }))
   }, [metrics?.usageSeries, chartBucketSizeSeconds])
 
@@ -365,10 +399,7 @@ export function RealtimePanel(props: {
       .sort((a, b) => a.bucketStart - b.bucketStart)
       .map((bucket) => ({
         ...bucket,
-        time: new Date(bucket.bucketStart).toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
+        time: formatBucketTimestamp(bucket.bucketStart, chartBucketSizeSeconds),
       }))
   }, [metrics?.verificationSeries, metrics?.usageSeries, chartBucketSizeSeconds])
 
@@ -469,10 +500,7 @@ export function RealtimePanel(props: {
     return `${formatDateForTimezone(currentCycleStartAt, browserTimezone)} → ${formatDateForTimezone(currentCycleEndAt, browserTimezone)}`
   }, [currentCycleStartAt, currentCycleEndAt, browserTimezone])
 
-  const bucketLabel =
-    chartBucketSizeSeconds % 3600 === 0
-      ? `${chartBucketSizeSeconds / 3600}h`
-      : `${chartBucketSizeSeconds / 60}m`
+  const bucketLabel = formatBucketLabel(chartBucketSizeSeconds)
 
   return (
     <div className="space-y-6">
@@ -613,8 +641,7 @@ export function RealtimePanel(props: {
               <InfoTooltip content="Timeline of usage units from `reportUsage`. Buckets are grouped for readability when needed." />
             </div>
             <CardDescription>
-              Total usage reported over time ({bucketLabel} buckets)
-              {shouldRollupToFiveMinutes ? " - grouped from 1m to 5m." : ""}
+              Total usage reported over time ({bucketLabel} buckets){rollupLabel}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -721,7 +748,7 @@ export function RealtimePanel(props: {
         <Card className="border-muted/60 lg:w-[32%] lg:flex-none">
           <CardHeader>
             <CardTitle className="text-base">Entitlements</CardTitle>
-            <CardDescription>Usage and verification by entitlement</CardDescription>
+            <CardDescription>Usage and verification in the current billing cycle</CardDescription>
           </CardHeader>
           <CardContent>
             {entitlementRows.length === 0 ? (

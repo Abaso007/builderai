@@ -35,7 +35,7 @@ type FlatFeature = {
   title: string
   slug: string
   description: string
-  unit: string
+  unitOfMeasure: string
 }
 
 type SeatPackConfig = {
@@ -63,7 +63,7 @@ type TemplatePlan = {
     title: string
     slug: string
     description: string
-    unit: string
+    unitOfMeasure: string
     config: UsageConfig
   }
   flatFeatures: FlatFeature[]
@@ -73,21 +73,21 @@ const BASE_FEE_FEATURE: FlatFeature = {
   title: "Pro Access",
   slug: "pro-access",
   description: "Base access fee for the plan.",
-  unit: "access",
+  unitOfMeasure: "access",
 }
 
 const SEAT_FEATURE: FlatFeature = {
   title: "Seats",
   slug: "seats",
   description: "Seat-based access for the plan.",
-  unit: "seat",
+  unitOfMeasure: "seat",
 }
 
 const CREDITS_FEATURE: FlatFeature = {
   title: "Credits",
   slug: "credits",
   description: "Daily credits that reset automatically.",
-  unit: "credit",
+  unitOfMeasure: "credit",
 }
 
 const TEMPLATE_PLANS: TemplatePlan[] = [
@@ -114,7 +114,7 @@ const TEMPLATE_PLANS: TemplatePlan[] = [
       title: "API Calls",
       slug: "api-calls",
       description: "Metered API requests.",
-      unit: "call",
+      unitOfMeasure: "call",
       config: {
         mode: "unit",
         price: "0.01",
@@ -126,13 +126,13 @@ const TEMPLATE_PLANS: TemplatePlan[] = [
         title: "Priority Support",
         slug: "priority-support",
         description: "Email + chat support.",
-        unit: "support",
+        unitOfMeasure: "support",
       },
       {
         title: "Custom Domains",
         slug: "custom-domains",
         description: "Bring your own domain.",
-        unit: "domain",
+        unitOfMeasure: "domain",
       },
     ],
   },
@@ -159,7 +159,7 @@ const TEMPLATE_PLANS: TemplatePlan[] = [
       title: "Events",
       slug: "events",
       description: "Tracked product events.",
-      unit: "event",
+      unitOfMeasure: "event",
       config: {
         mode: "tier",
         tiers: [
@@ -174,13 +174,13 @@ const TEMPLATE_PLANS: TemplatePlan[] = [
         title: "SSO",
         slug: "sso",
         description: "Single sign-on.",
-        unit: "sso",
+        unitOfMeasure: "sso",
       },
       {
         title: "Audit Logs",
         slug: "audit-logs",
         description: "Detailed audit history.",
-        unit: "log",
+        unitOfMeasure: "log",
       },
     ],
   },
@@ -203,7 +203,7 @@ const TEMPLATE_PLANS: TemplatePlan[] = [
       title: "Seats",
       slug: "seats",
       description: "Active seats billed annually.",
-      unit: "seat",
+      unitOfMeasure: "seat",
       config: {
         mode: "unit",
         price: "20",
@@ -216,13 +216,13 @@ const TEMPLATE_PLANS: TemplatePlan[] = [
         title: "Dedicated CSM",
         slug: "dedicated-csm",
         description: "A dedicated customer success manager.",
-        unit: "csm",
+        unitOfMeasure: "csm",
       },
       {
         title: "Custom SLAs",
         slug: "custom-sla",
         description: "Enterprise SLA guarantees.",
-        unit: "sla",
+        unitOfMeasure: "sla",
       },
     ],
   },
@@ -507,7 +507,7 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
                 title: template.usage.title,
                 slug: template.usage.slug,
                 description: template.usage.description,
-                unit: template.usage.unit,
+                unitOfMeasure: template.usage.unitOfMeasure,
               })
 
         if (template.usage.config.mode === "unit") {

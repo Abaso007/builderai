@@ -74,7 +74,7 @@ const createFeatureInputSchema = z.object({
   description: featureInsertBaseSchema.shape.description.describe(
     "Detailed explanation of what this feature provides"
   ),
-  unit: featureInsertBaseSchema.shape.unit.describe(
+  unitOfMeasure: featureInsertBaseSchema.shape.unitOfMeasure.describe(
     "Unit of measurement. Examples: 'calls', 'GB', 'seats', 'tokens', 'requests'"
   ),
 })
@@ -83,7 +83,7 @@ const createFeatureTool = tool({
   description:
     "Create a new feature for pricing plans. Features are the building blocks of your pricing - they represent capabilities, limits, or usage metrics. Examples: 'API Calls', 'Team Members', 'Storage GB'. The slug should be URL-friendly (lowercase with hyphens). ALWAYS create features BEFORE creating plan version features.",
   inputSchema: createFeatureInputSchema,
-  async *execute({ title, slug, description, unit }) {
+  async *execute({ title, slug, description, unitOfMeasure }) {
     yield { state: "creating" as const, title }
 
     try {
@@ -91,7 +91,7 @@ const createFeatureTool = tool({
         title: title,
         slug,
         description,
-        unit,
+        unitOfMeasure,
       })
 
       yield {
@@ -112,7 +112,7 @@ const createFeatureTool = tool({
 // =============================================================================
 const listFeaturesTool = tool({
   description:
-    "List all features that have been created for this project. Use BEFORE creating plan version features to get feature IDs. Returns feature id, title, slug, and unit.",
+    "List all features that have been created for this project. Use BEFORE creating plan version features to get feature IDs. Returns feature id, title, slug, and unit of measure.",
   inputSchema: z.object({}),
   async *execute() {
     yield { state: "loading" as const }
@@ -664,7 +664,7 @@ const systemPrompt = `You are an expert in SaaS pricing and monetization strateg
 ## CORE CONCEPTS
 
 1. **Feature**: The building block - represents a capability (e.g., "API Calls", "Team Members", "Storage").
-   - Features have a title, slug (lowercase-hyphens), and unit.
+   - Features have a title, slug (lowercase-hyphens), and unit of measure.
    - Try to figure out the simplest name of the feature, like if the feature is unlimited tokens, the name should be tokens. The unlimited part is configured in the plan version feature.
    - Create features first if they don't exist before adding them to plans.
 

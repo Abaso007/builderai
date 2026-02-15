@@ -126,6 +126,7 @@ function buildMockSubscription({
               featurePlanVersion: {
                 id: "fpv_123",
                 featureType: "flat",
+                unitOfMeasure: "units",
                 feature: { id: "feature_123", slug: "test-feature", title: "Test Feature" },
                 aggregationMethod: "sum",
                 config: { units: 1 },
@@ -378,6 +379,7 @@ describe("SubscriptionMachine - comprehensive", () => {
                   units: subscription.phases[0]!.items[0]!.units,
                   featurePlanVersion: {
                     id: subscription.phases[0]!.items[0]!.featurePlanVersion.id,
+                    unitOfMeasure: "units",
                   },
                 },
               },

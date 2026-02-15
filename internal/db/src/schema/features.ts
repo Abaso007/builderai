@@ -19,7 +19,7 @@ export const features = pgTableProject(
     // code is the unique code for the feature that is used in redis cache for the entitlements calculation (bitmap)
     code: serial("code").notNull(),
     // unit of measurement for the feature - GB, MB, tokens, calls
-    unit: varchar("unit", { length: 24 }).notNull().default("units"),
+    unitOfMeasure: varchar("unit_of_measure", { length: 24 }).notNull().default("units"),
     title: varchar("title", { length: 50 }).notNull(),
     description: text("description"),
   },

@@ -1,4 +1,3 @@
-import { env } from "cloudflare:workers"
 import { createRoute } from "@hono/zod-openapi"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
@@ -14,12 +13,11 @@ import type { App } from "~/hono/app"
 const tags = ["customer"]
 
 export const route = createRoute({
-  path: "/v1/customer/resetEntitlements",
-  operationId: "customers.resetEntitlements",
-  summary: "reset entitlements",
-  description: "Reset entitlements for a customer",
+  path: "/v1/customer/resetUsage",
+  operationId: "customers.resetUsage",
+  summary: "reset usage",
+  description: "Reset usage counters for a customer",
   method: "post",
-  hide: env.APP_ENV === "production",
   tags,
   request: {
     body: jsonContentRequired(
@@ -41,48 +39,42 @@ export const route = createRoute({
       z.object({
         success: z.boolean(),
       }),
-      "The result of the reset entitlements"
+      "The result of the reset usage"
     ),
     ...openApiErrorResponses,
   },
 })
 
-export type ResetEntitlementsRequest = z.infer<
+export type ResetUsageRequest = z.infer<
   (typeof route.request.body)["content"]["application/json"]["schema"]
 >
-export type ResetEntitlementsResponse = z.infer<
+export type ResetUsageResponse = z.infer<
   (typeof route.responses)[200]["content"]["application/json"]["schema"]
 >
 
-export const registerResetEntitlementsV1 = (app: App) =>
+export const registerResetUsageV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customerId, projectId } = c.req.valid("json")
     const { usagelimiter } = c.get("services")
 
-    // validate the request
     await keyAuth(c)
 
     const isMain = c.get("isMain")
     if (!isMain) {
       throw new UnpriceApiError({
         code: "FORBIDDEN",
-        message: "Only main keys can reset entitlements.",
+        message: "Only main keys can reset usage.",
       })
     }
 
-    const finalProjectId = projectId
+    startTime(c, "resetUsage")
 
-    // start a timer
-    startTime(c, "resetEntitlements")
-
-    // delete the customer from the DO
-    const { err } = await usagelimiter.resetEntitlements({
+    const { err } = await usagelimiter.resetUsage({
       customerId,
-      projectId: finalProjectId,
+      projectId,
     })
 
-    // end the timer
-    endTime(c, "resetEntitlements")
+    endTime(c, "resetUsage")
 
     if (err) {
       throw err

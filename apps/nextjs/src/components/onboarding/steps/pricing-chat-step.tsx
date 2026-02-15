@@ -344,7 +344,7 @@ function useLoadedArtifacts(
           title: pf.feature.title,
           slug: pf.feature.slug,
           description: pf.feature.description,
-          unit: pf.feature.unit,
+          unitOfMeasure: pf.feature.unitOfMeasure,
         },
         createdAt: Date.now(),
       })
@@ -402,7 +402,7 @@ curl -X POST ${baseUrl}/features \\
     title: input.title,
     slug: input.slug,
     description: input.description,
-    unit: input.unit,
+    unitOfMeasure: input.unitOfMeasure,
   })}'`
 
     case "createPlan":

@@ -1,8 +1,22 @@
 {
   "fields": [
-    { "name": "event_date", "type": "string", "required": false },
-    { "name": "project_id", "type": "string", "required": true },
-    { "name": "customer_id", "type": "string", "required": true },
-    { "name": "payload", "type": "json", "required": false }
+    {"name": "id", "type": "string", "required": true},
+    { "name": "event_date", "type": "string", "required": true },
+    {"name": "project_id", "type": "string", "required": true},
+    {"name": "customer_id", "type": "string", "required": true},
+    {"name": "timestamp", "type": "int64", "required": true},
+    {"name": "feature_slug", "type": "string", "required": true},
+    {"name": "feature_type", "type": "string", "required": true},
+    {"name": "unit_of_measure", "type": "string", "required": true},
+    {"name": "reset_config", "type": "json", "required": false},
+    {"name": "aggregation_method", "type": "string", "required": true},
+    {"name": "merging_policy", "type": "string", "required": true},
+    {"name": "limit", "type": "int64", "required": false},
+    {"name": "effective_at", "type": "int64", "required": true},
+    {"name": "expires_at", "type": "int64", "required": false},
+    {"name": "version", "type": "string", "required": true},
+    {"name": "grants", "type": "json", "required": true},
+    {"name": "metadata", "type": "json", "required": false},
+    { "name": "schema_version", "type": "int64", "required": false }
   ]
 }

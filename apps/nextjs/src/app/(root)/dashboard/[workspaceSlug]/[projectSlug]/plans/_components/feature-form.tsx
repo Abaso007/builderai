@@ -181,10 +181,10 @@ export function FeatureForm({
 
           <FormField
             control={form.control}
-            name="unit"
+            name="unitOfMeasure"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Unit</FormLabel>
+                <FormLabel>Unit of Measure</FormLabel>
                 <FormDescription>
                   Enter the unit of measurement for the feature, please use singular form.
                 </FormDescription>

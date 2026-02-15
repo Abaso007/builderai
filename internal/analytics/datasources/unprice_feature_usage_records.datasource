@@ -24,4 +24,4 @@ ENGINE_VER timestamp
 ENGINE_TTL toDateTime(fromUnixTimestamp64Milli(timestamp)) + INTERVAL 90 DAY
 
 FORWARD_QUERY >
-    SELECT id, timestamp, feature_slug, customer_id, CAST(usage, 'Decimal64(4)') AS usage, idempotence_key, project_id, created_at, deleted
+  SELECT id, timestamp, feature_slug, customer_id, CAST(usage, 'Decimal64(4)') AS usage, idempotence_key, project_id, created_at, deleted

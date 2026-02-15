@@ -34,10 +34,19 @@ const WINDOW_60_MIN = 3600
 const WINDOW_1_DAY = 86400
 const WINDOW_7_DAYS = 604800
 const MINUTE_BUCKET_SECONDS = 60
+const FIVE_MIN_BUCKET_SECONDS = WINDOW_5_MIN
 const HOUR_BUCKET_SECONDS = 3600
-const AGGREGATE_BUCKETS = [MINUTE_BUCKET_SECONDS, HOUR_BUCKET_SECONDS] as const
-const MINUTE_AGGREGATE_RETENTION_SECONDS = WINDOW_1_DAY * 2
-const HOUR_AGGREGATE_RETENTION_SECONDS = WINDOW_7_DAYS * 4
+const DAY_BUCKET_SECONDS = WINDOW_1_DAY
+const AGGREGATE_BUCKETS = [
+  MINUTE_BUCKET_SECONDS,
+  FIVE_MIN_BUCKET_SECONDS,
+  HOUR_BUCKET_SECONDS,
+  DAY_BUCKET_SECONDS,
+] as const
+const MINUTE_AGGREGATE_RETENTION_SECONDS = WINDOW_5_MIN
+const FIVE_MIN_AGGREGATE_RETENTION_SECONDS = WINDOW_60_MIN
+const HOUR_AGGREGATE_RETENTION_SECONDS = WINDOW_1_DAY
+const DAY_AGGREGATE_RETENTION_SECONDS = WINDOW_7_DAYS
 const STATE_KEY_PREFIX = "state:"
 const SEEN_META_PREFIX = "seen_meta_"
 const SEEN_SNAPSHOT_PREFIX = "seen_snapshot_"
@@ -1495,7 +1504,13 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           : WINDOW_60_MIN
 
       const selectedBucketSizeSeconds =
-        normalizedWindowSeconds <= WINDOW_60_MIN ? MINUTE_BUCKET_SECONDS : HOUR_BUCKET_SECONDS
+        normalizedWindowSeconds <= WINDOW_5_MIN
+          ? MINUTE_BUCKET_SECONDS
+          : normalizedWindowSeconds <= WINDOW_60_MIN
+            ? FIVE_MIN_BUCKET_SECONDS
+            : normalizedWindowSeconds <= WINDOW_1_DAY
+              ? HOUR_BUCKET_SECONDS
+              : DAY_BUCKET_SECONDS
       const windowStart = Date.now() - normalizedWindowSeconds * 1000
 
       const usageSeries = await this.db
@@ -1810,23 +1825,25 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
 
   private async pruneAggregateBuckets(nowMs: number): Promise<void> {
     const minuteCutoff = nowMs - MINUTE_AGGREGATE_RETENTION_SECONDS * 1000
+    const fiveMinuteCutoff = nowMs - FIVE_MIN_AGGREGATE_RETENTION_SECONDS * 1000
     const hourCutoff = nowMs - HOUR_AGGREGATE_RETENTION_SECONDS * 1000
+    const dayCutoff = nowMs - DAY_AGGREGATE_RETENTION_SECONDS * 1000
 
     await Promise.all([
       this.db
         .delete(schema.usageAggregates)
         .where(
-          sql`(${schema.usageAggregates.bucket_size_seconds} = ${MINUTE_BUCKET_SECONDS} AND ${schema.usageAggregates.bucket_start} < ${minuteCutoff}) OR (${schema.usageAggregates.bucket_size_seconds} = ${HOUR_BUCKET_SECONDS} AND ${schema.usageAggregates.bucket_start} < ${hourCutoff})`
+          sql`(${schema.usageAggregates.bucket_size_seconds} = ${MINUTE_BUCKET_SECONDS} AND ${schema.usageAggregates.bucket_start} < ${minuteCutoff}) OR (${schema.usageAggregates.bucket_size_seconds} = ${FIVE_MIN_BUCKET_SECONDS} AND ${schema.usageAggregates.bucket_start} < ${fiveMinuteCutoff}) OR (${schema.usageAggregates.bucket_size_seconds} = ${HOUR_BUCKET_SECONDS} AND ${schema.usageAggregates.bucket_start} < ${hourCutoff}) OR (${schema.usageAggregates.bucket_size_seconds} = ${DAY_BUCKET_SECONDS} AND ${schema.usageAggregates.bucket_start} < ${dayCutoff})`
         ),
       this.db
         .delete(schema.verificationAggregates)
         .where(
-          sql`(${schema.verificationAggregates.bucket_size_seconds} = ${MINUTE_BUCKET_SECONDS} AND ${schema.verificationAggregates.bucket_start} < ${minuteCutoff}) OR (${schema.verificationAggregates.bucket_size_seconds} = ${HOUR_BUCKET_SECONDS} AND ${schema.verificationAggregates.bucket_start} < ${hourCutoff})`
+          sql`(${schema.verificationAggregates.bucket_size_seconds} = ${MINUTE_BUCKET_SECONDS} AND ${schema.verificationAggregates.bucket_start} < ${minuteCutoff}) OR (${schema.verificationAggregates.bucket_size_seconds} = ${FIVE_MIN_BUCKET_SECONDS} AND ${schema.verificationAggregates.bucket_start} < ${fiveMinuteCutoff}) OR (${schema.verificationAggregates.bucket_size_seconds} = ${HOUR_BUCKET_SECONDS} AND ${schema.verificationAggregates.bucket_start} < ${hourCutoff}) OR (${schema.verificationAggregates.bucket_size_seconds} = ${DAY_BUCKET_SECONDS} AND ${schema.verificationAggregates.bucket_start} < ${dayCutoff})`
         ),
       this.db
         .delete(schema.reportUsageAggregates)
         .where(
-          sql`(${schema.reportUsageAggregates.bucket_size_seconds} = ${MINUTE_BUCKET_SECONDS} AND ${schema.reportUsageAggregates.bucket_start} < ${minuteCutoff}) OR (${schema.reportUsageAggregates.bucket_size_seconds} = ${HOUR_BUCKET_SECONDS} AND ${schema.reportUsageAggregates.bucket_start} < ${hourCutoff})`
+          sql`(${schema.reportUsageAggregates.bucket_size_seconds} = ${MINUTE_BUCKET_SECONDS} AND ${schema.reportUsageAggregates.bucket_start} < ${minuteCutoff}) OR (${schema.reportUsageAggregates.bucket_size_seconds} = ${FIVE_MIN_BUCKET_SECONDS} AND ${schema.reportUsageAggregates.bucket_start} < ${fiveMinuteCutoff}) OR (${schema.reportUsageAggregates.bucket_size_seconds} = ${HOUR_BUCKET_SECONDS} AND ${schema.reportUsageAggregates.bucket_start} < ${hourCutoff}) OR (${schema.reportUsageAggregates.bucket_size_seconds} = ${DAY_BUCKET_SECONDS} AND ${schema.reportUsageAggregates.bucket_start} < ${dayCutoff})`
         ),
     ])
   }

@@ -62,11 +62,17 @@ export const route = createRoute({
               v == null || v === "" ? undefined : v.trim().toLowerCase().replace(/\s+/g, "-")
             ),
           metadata: z
-            .record(z.string(), z.string())
+            .object({
+              source: z.string().optional(),
+              resourceId: z.string().optional(),
+              resourceType: z.string().optional(),
+            })
             .openapi({
               description: "Additional metadata for the usage report",
               example: {
                 source: "api",
+                resourceId: "123",
+                resourceType: "user",
               },
             })
             .optional(),

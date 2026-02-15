@@ -153,7 +153,7 @@ export const planVersionExtendedSchema = planVersionSelectBaseSchema
       .array(
         planVersionFeatureSelectBaseSchema.extend({
           feature: featureSelectBaseSchema.describe(
-            "The base feature definition with title, slug, and unit"
+            "The base feature definition with title, slug, and unit of measure"
           ),
         })
       )
@@ -243,7 +243,9 @@ export const getPlanVersionApiResponseSchema = planVersionSelectBaseSchema
               description: "The text you can use to show the clients",
             }),
           feature: featureSelectBaseSchema
-            .describe("The base feature definition with title, slug, unit, and description")
+            .describe(
+              "The base feature definition with title, slug, unit of measure, and description"
+            )
             .openapi({
               description: "The feature information",
             }),
