@@ -25,7 +25,7 @@ import { EntitlementService } from "@unprice/services/entitlements"
 import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/metrics"
 import { type Connection, Server } from "partyserver"
 import type { Env } from "~/env"
-import { CloudflarePipelineLakehouseService } from "~/lakehouse/pipeline"
+import { createCloudflareLakehouseService } from "~/lakehouse/service"
 import type { BufferMetricsResponse } from "./interface"
 import { type FlushPressureStats, SqliteDOStorageProvider } from "./sqlite-do-provider"
 
@@ -246,15 +246,9 @@ export class DurableObjectUsagelimiter extends Server {
       singleton: false, // Don't use singleton for hibernating DOs
     })
 
-    const lakehouseService = new CloudflarePipelineLakehouseService({
+    const lakehouseService = createCloudflareLakehouseService({
       logger: this.logger,
-      bucket: env.LAKEHOUSE,
-      pipelines: {
-        usage: env.LAKEHOUSE_PIPELINE_USAGE,
-        verification: env.LAKEHOUSE_PIPELINE_VERIFICATION,
-        metadata: env.LAKEHOUSE_PIPELINE_METADATA,
-        entitlement_snapshot: env.LAKEHOUSE_PIPELINE_ENTITLEMENT_SNAPSHOT,
-      },
+      env,
     })
 
     // initialize the storage provider

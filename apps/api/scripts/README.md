@@ -126,4 +126,4 @@ Re-running `configure-r2-and-pipelines.sh` is safe: create steps are best-effort
 ## Related
 
 - **Wrangler config** – `apps/api/wrangler.jsonc` defines R2 bucket bindings (`LAKEHOUSE`) per env.
-- **Lakehouse types** – `internal/lakehouse/src/interface.ts` and `internal/lakehouse/src/schemas.ts` define the event shapes the schemas in `scripts/schemas/` align with.
+- **Lakehouse types/registry** – `internal/lakehouse/src/interface.ts` and `internal/lakehouse/src/registry.ts` define the shared event contracts that `scripts/schemas/` align with.

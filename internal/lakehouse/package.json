@@ -17,7 +17,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@unprice/logging": "workspace:^",
     "zod": "^3.24.2"
   },
   "devDependencies": {

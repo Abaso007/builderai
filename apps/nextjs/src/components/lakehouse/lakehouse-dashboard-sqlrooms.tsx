@@ -5,6 +5,11 @@ import { useSql } from "@sqlrooms/duckdb"
 import { RoomShell } from "@sqlrooms/room-shell"
 import { SqlMonacoEditor } from "@sqlrooms/sql-editor"
 import { useQuery } from "@tanstack/react-query"
+import {
+  DEFAULT_LAKEHOUSE_QUERY,
+  PREDEFINED_LAKEHOUSE_QUERIES,
+  type PredefinedLakehouseQueryKey,
+} from "@unprice/lakehouse"
 import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import {
@@ -28,222 +33,9 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
 import { useIntervalFilter } from "~/hooks/use-filter"
+import { useMounted } from "~/hooks/use-mounted"
 import { useTRPC } from "~/trpc/client"
 import { roomStore, useRoomStore } from "./sqlrooms-store"
-
-// Client-side only check to avoid hydration issues
-function useIsMounted() {
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => {
-    setMounted(true)
-  }, [])
-  return mounted
-}
-
-// ============================================================================
-// Predefined Queries
-// ============================================================================
-
-const PREDEFINED_QUERIES = {
-  allUsage: {
-    label: "Usage (raw + tags)",
-    description: "All usage events with metadata tags",
-    query: `WITH metadata_dedup AS (
-  SELECT
-    CAST(meta_id AS VARCHAR) AS meta_id,
-    project_id,
-    customer_id,
-    MIN(tags) AS tags
-  FROM metadata
-  GROUP BY 1, 2, 3
-)
-SELECT
-  u.*,
-  m.tags as metadata_tags
-FROM usage u
-LEFT JOIN metadata_dedup m
-  ON CAST(u.meta_id AS VARCHAR) = m.meta_id
-  AND u.project_id = m.project_id
-  AND u.customer_id = m.customer_id
-WHERE u.deleted = 0
-LIMIT 500`,
-  },
-  usageByFeature: {
-    label: "Usage by Feature",
-    description: "Aggregate usage grouped by feature",
-    query: `SELECT
-  u.feature_slug,
-  COUNT(*) as total_events,
-  SUM(u.usage) as total_usage,
-  COUNT(DISTINCT u.customer_id) as unique_customers,
-  MIN(u.timestamp) as first_event,
-  MAX(u.timestamp) as last_event
-FROM usage u
-WHERE u.deleted = 0
-GROUP BY u.feature_slug
-ORDER BY total_usage DESC`,
-  },
-  usageByCustomer: {
-    label: "Usage by Customer",
-    description: "Aggregate usage grouped by customer",
-    query: `SELECT
-  u.customer_id,
-  COUNT(*) as total_events,
-  SUM(u.usage) as total_usage,
-  COUNT(DISTINCT u.feature_slug) as features_used,
-  MIN(u.timestamp) as first_event,
-  MAX(u.timestamp) as last_event
-FROM usage u
-WHERE u.deleted = 0
-GROUP BY u.customer_id
-ORDER BY total_usage DESC`,
-  },
-  usageByRegion: {
-    label: "Usage by Region",
-    description: "Aggregate usage grouped by region/geography",
-    query: `SELECT
-  u.region,
-  COUNT(*) as total_events,
-  SUM(u.usage) as total_usage,
-  COUNT(DISTINCT u.customer_id) as unique_customers,
-  COUNT(DISTINCT u.feature_slug) as features_used
-FROM usage u
-WHERE u.deleted = 0
-GROUP BY u.region
-ORDER BY total_usage DESC`,
-  },
-  verificationByFeature: {
-    label: "Verification Deny Rate by Feature",
-    description: "Where users get blocked most",
-    query: `SELECT
-  v.feature_slug,
-  COUNT(*) as total_checks,
-  SUM(CASE WHEN v.allowed = 0 THEN 1 ELSE 0 END) as denied,
-  ROUND(SUM(CASE WHEN v.allowed = 0 THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0), 2) as deny_rate_pct,
-  AVG(v.latency) as avg_latency
-FROM verifications v
-GROUP BY v.feature_slug
-ORDER BY deny_rate_pct DESC`,
-  },
-  deniedCustomers: {
-    label: "Customers Impacted by Denials",
-    description: "Accounts with the most denied checks",
-    query: `SELECT
-  v.customer_id,
-  COUNT(*) as denied_events,
-  COUNT(DISTINCT v.feature_slug) as affected_features,
-  MIN(v.timestamp) as first_denial,
-  MAX(v.timestamp) as last_denial
-FROM verifications v
-WHERE v.allowed = 0
-GROUP BY v.customer_id
-ORDER BY denied_events DESC
-LIMIT 200`,
-  },
-  verificationLatency: {
-    label: "Verification Latency by Feature",
-    description: "Which features are slow to verify",
-    query: `SELECT
-  v.feature_slug,
-  AVG(v.latency) as avg_latency,
-  MAX(v.latency) as max_latency,
-  COUNT(*) as total_checks
-FROM verifications v
-GROUP BY v.feature_slug
-ORDER BY avg_latency DESC`,
-  },
-  usageByTagKey: {
-    label: "Usage by Tag Key",
-    description: "Which metadata tags show up most",
-    query: `WITH metadata_dedup AS (
-  SELECT
-    CAST(meta_id AS VARCHAR) AS meta_id,
-    project_id,
-    customer_id,
-    MIN(tags) AS tags
-  FROM metadata
-  GROUP BY 1, 2, 3
-),
-joined AS (
-  SELECT u.id, m.tags
-  FROM usage u
-  LEFT JOIN metadata_dedup m
-    ON CAST(u.meta_id AS VARCHAR) = m.meta_id
-    AND u.project_id = m.project_id
-    AND u.customer_id = m.customer_id
-  WHERE u.deleted = 0 AND m.tags IS NOT NULL
-),
-tags AS (
-  SELECT unnest(json_keys(tags)) AS tag
-  FROM joined
-)
-SELECT tag, COUNT(*) AS events
-FROM tags
-WHERE tag NOT IN ('cost', 'rate', 'rate_amount', 'rate_currency', 'rate_unit_size', 'usage', 'remaining')
-GROUP BY tag
-ORDER BY events DESC`,
-  },
-  metadataRaw: {
-    label: "Metadata (raw)",
-    description: "Raw metadata records with tags",
-    query: `SELECT
-  meta_id,
-  tags,
-  timestamp
-FROM metadata
-ORDER BY timestamp DESC
-LIMIT 200`,
-  },
-  entitlementSnapshotsRaw: {
-    label: "Entitlement Snapshots (raw)",
-    description: "Immutable entitlement snapshots",
-    query: `SELECT
-  entitlement_snapshot_id,
-  feature_slug,
-  feature_type,
-  aggregation_method,
-  merging_policy,
-  "limit",
-  effective_at,
-  expires_at,
-  source_entitlement_version,
-  computed_at
-FROM entitlement_snapshots
-ORDER BY computed_at DESC
-LIMIT 200`,
-  },
-  usageWithEntitlementContext: {
-    label: "Usage + Entitlements",
-    description: "Usage joined with immutable entitlement context",
-    query: `SELECT
-  u.id,
-  u.timestamp,
-  u.customer_id,
-  u.feature_slug,
-  u.usage,
-  u.cost,
-  u.rate_amount,
-  u.rate_currency,
-  u.entitlement_snapshot_id,
-  s.feature_type,
-  s.aggregation_method,
-  s.merging_policy,
-  s."limit" AS entitlement_limit,
-  s.source_entitlement_version
-FROM usage u
-LEFT JOIN entitlement_snapshots s
-  ON u.entitlement_snapshot_id = s.entitlement_snapshot_id
-  AND u.project_id = s.project_id
-  AND u.customer_id = s.customer_id
-  AND u.feature_slug = s.feature_slug
-WHERE u.deleted = 0
-LIMIT 500`,
-  },
-} as const
-
-type QueryKey = keyof typeof PREDEFINED_QUERIES
-
-const DEFAULT_QUERY = PREDEFINED_QUERIES.allUsage.query
 
 // Table configurations for each data source
 const TABLE_CONFIG = {
@@ -290,7 +82,7 @@ type TableSource = keyof typeof TABLE_CONFIG
 function LakehouseDashboardInner() {
   const trpc = useTRPC()
   const [interval] = useIntervalFilter()
-  const [sqlQuery, setSqlQuery] = useState<string>(DEFAULT_QUERY)
+  const [sqlQuery, setSqlQuery] = useState<string>(DEFAULT_LAKEHOUSE_QUERY)
   const [executedQuery, setExecutedQuery] = useState<string | null>(null)
   const [isExecuting, setIsExecuting] = useState(false)
   const [isLoadingData, setIsLoadingData] = useState(false)
@@ -491,16 +283,16 @@ FROM ${readExpr}`
       // Auto-execute default query after loading if we have usage
       if (tablesLoaded.includes("usage")) {
         const initialQuery = tablesLoaded.includes("metadata")
-          ? PREDEFINED_QUERIES.allUsage.query
-          : PREDEFINED_QUERIES.usageByFeature.query
+          ? PREDEFINED_LAKEHOUSE_QUERIES.allUsage.query
+          : PREDEFINED_LAKEHOUSE_QUERIES.usageByFeature.query
         setSqlQuery(initialQuery)
         setExecutedQuery(initialQuery)
       } else if (tablesLoaded.includes("verifications")) {
-        setSqlQuery(PREDEFINED_QUERIES.verificationByFeature.query)
+        setSqlQuery(PREDEFINED_LAKEHOUSE_QUERIES.verificationByFeature.query)
       } else if (tablesLoaded.includes("metadata")) {
-        setSqlQuery(PREDEFINED_QUERIES.metadataRaw.query)
+        setSqlQuery(PREDEFINED_LAKEHOUSE_QUERIES.metadataRaw.query)
       } else if (tablesLoaded.includes("entitlement_snapshots")) {
-        setSqlQuery(PREDEFINED_QUERIES.entitlementSnapshotsRaw.query)
+        setSqlQuery(PREDEFINED_LAKEHOUSE_QUERIES.entitlementSnapshotsRaw.query)
       } else {
         setSqlQuery("")
       }
@@ -594,11 +386,11 @@ FROM ${readExpr}`
   }, [sqlQuery, requiredTables, loadedTables])
 
   const getFallbackQuery = useCallback(() => {
-    if (hasUsage && hasMetadata) return PREDEFINED_QUERIES.allUsage.query
-    if (hasUsage) return PREDEFINED_QUERIES.usageByFeature.query
-    if (hasVerification) return PREDEFINED_QUERIES.verificationByFeature.query
-    if (hasMetadata) return PREDEFINED_QUERIES.metadataRaw.query
-    if (hasEntitlementSnapshots) return PREDEFINED_QUERIES.entitlementSnapshotsRaw.query
+    if (hasUsage && hasMetadata) return PREDEFINED_LAKEHOUSE_QUERIES.allUsage.query
+    if (hasUsage) return PREDEFINED_LAKEHOUSE_QUERIES.usageByFeature.query
+    if (hasVerification) return PREDEFINED_LAKEHOUSE_QUERIES.verificationByFeature.query
+    if (hasMetadata) return PREDEFINED_LAKEHOUSE_QUERIES.metadataRaw.query
+    if (hasEntitlementSnapshots) return PREDEFINED_LAKEHOUSE_QUERIES.entitlementSnapshotsRaw.query
     return ""
   }, [hasUsage, hasMetadata, hasVerification, hasEntitlementSnapshots])
 
@@ -649,10 +441,10 @@ FROM metadata`
 
   const metadataCoverageQuery = `WITH metadata_dedup AS (
   SELECT
-    CAST(meta_id AS VARCHAR) AS meta_id,
+    CAST(id AS VARCHAR) AS meta_id,
     project_id,
     customer_id,
-    MIN(tags) AS tags
+    MIN(payload) AS payload
   FROM metadata
   GROUP BY 1, 2, 3
 ),
@@ -664,7 +456,7 @@ metadata_user_tags AS (
   FROM metadata_dedup
   WHERE EXISTS (
     SELECT 1
-    FROM unnest(json_keys(tags)) AS t(tag)
+    FROM unnest(json_keys(payload)) AS t(tag)
     WHERE t.tag NOT IN ('cost', 'rate', 'rate_amount', 'rate_currency', 'rate_unit_size', 'usage', 'remaining')
   )
 )
@@ -715,24 +507,24 @@ ORDER BY minute`
 
   const topTagsQuery = `WITH metadata_dedup AS (
   SELECT
-    CAST(meta_id AS VARCHAR) AS meta_id,
+    CAST(id AS VARCHAR) AS meta_id,
     project_id,
     customer_id,
-    MIN(tags) AS tags
+    MIN(payload) AS payload
   FROM metadata
   GROUP BY 1, 2, 3
 ),
 joined AS (
-  SELECT u.id, m.tags
+  SELECT u.id, m.payload
   FROM usage u
   LEFT JOIN metadata_dedup m
     ON CAST(u.meta_id AS VARCHAR) = m.meta_id
     AND u.project_id = m.project_id
     AND u.customer_id = m.customer_id
-  WHERE u.deleted = 0 AND m.tags IS NOT NULL
+  WHERE u.deleted = 0 AND m.payload IS NOT NULL
 ),
 tags AS (
-  SELECT unnest(json_keys(tags)) AS tag
+  SELECT unnest(json_keys(payload)) AS tag
   FROM joined
 )
 SELECT tag, COUNT(*) AS events
@@ -905,8 +697,8 @@ LIMIT 1`
   }, [verificationSummaryRow, hasVerification])
 
   const handleApplyQuery = useCallback(
-    (queryKey: QueryKey) => {
-      const query = PREDEFINED_QUERIES[queryKey]
+    (queryKey: PredefinedLakehouseQueryKey) => {
+      const query = PREDEFINED_LAKEHOUSE_QUERIES[queryKey]
       if (!query) return
       const required = requiredTables(query.query)
       const missing = required.filter((table) => !loadedTables.includes(table))
@@ -1378,7 +1170,7 @@ LIMIT 1`
               <Select
                 value=""
                 onValueChange={(key: string) => {
-                  const query = PREDEFINED_QUERIES[key as QueryKey]
+                  const query = PREDEFINED_LAKEHOUSE_QUERIES[key as PredefinedLakehouseQueryKey]
                   if (query) {
                     setSqlQuery(query.query)
                     setManualQueryError(null)
@@ -1389,8 +1181,8 @@ LIMIT 1`
                   <SelectValue placeholder="Predefined queries..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.entries(PREDEFINED_QUERIES).map(([key, { label }]) => {
-                    const query = PREDEFINED_QUERIES[key as QueryKey]
+                  {Object.entries(PREDEFINED_LAKEHOUSE_QUERIES).map(([key, { label }]) => {
+                    const query = PREDEFINED_LAKEHOUSE_QUERIES[key as PredefinedLakehouseQueryKey]
                     const required = requiredTables(query.query)
                     const disabled = required.some((table) => !loadedTables.includes(table))
                     return (
@@ -1510,10 +1302,10 @@ LIMIT 1`
 // ============================================================================
 
 export function LakehouseDashboardSqlrooms() {
-  const isMounted = useIsMounted()
+  const mounted = useMounted()
 
   // Prevent SSR/hydration issues with DuckDB WASM and Monaco
-  if (!isMounted) {
+  if (!mounted) {
     return (
       <div className="w-full min-w-0 space-y-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">

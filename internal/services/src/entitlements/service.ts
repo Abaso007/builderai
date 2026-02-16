@@ -46,10 +46,10 @@ const ENTITLEMENT_SNAPSHOT_SCHEMA_VERSION = 1
 const ENTITLEMENT_SNAPSHOT_HASH_VERSION = 1
 
 interface EntitlementSnapshotRecordV1 {
-  entitlement_snapshot_id: string
+  id: string
   schema_version: number
   hash_version: number
-  computed_at: number
+  timestamp: number
   project_id: string
   customer_id: string
   feature_slug: string
@@ -59,7 +59,7 @@ interface EntitlementSnapshotRecordV1 {
   limit: number | null
   effective_at: number
   expires_at: number | null
-  source_entitlement_version: string
+  version: string
   reset_config: Record<string, unknown> | null
   metadata: Record<string, unknown> | null
   grants: Array<Record<string, unknown>>
@@ -234,10 +234,10 @@ export class EntitlementService {
     }
 
     const snapshotRecord: EntitlementSnapshotRecordV1 = {
-      entitlement_snapshot_id: snapshotId,
+      id: snapshotId,
       schema_version: ENTITLEMENT_SNAPSHOT_SCHEMA_VERSION,
       hash_version: ENTITLEMENT_SNAPSHOT_HASH_VERSION,
-      computed_at: Date.now(),
+      timestamp: Date.now(),
       project_id: state.projectId,
       customer_id: state.customerId,
       feature_slug: state.featureSlug,
@@ -247,7 +247,7 @@ export class EntitlementService {
       limit: state.limit ?? null,
       effective_at: state.effectiveAt,
       expires_at: state.expiresAt ?? null,
-      source_entitlement_version: state.version,
+      version: state.version,
       reset_config: (state.resetConfig ?? null) as Record<string, unknown> | null,
       metadata: (state.metadata ?? null) as Record<string, unknown> | null,
       grants: normalizedGrants,

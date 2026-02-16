@@ -11,7 +11,6 @@ export const cloudflareRatelimiter = z.custom<{
   limit: (opts: { key: string }) => Promise<{ success: boolean }>
 }>((r) => !!r && typeof r.limit === "function")
 
-export const r2Bucket = z.custom<R2Bucket>((b) => typeof b === "object")
 export const pipelinesBinding = z.custom<{ send: (records: unknown[]) => Promise<void> }>(
   (binding) => !!binding && typeof binding === "object" && typeof binding.send === "function"
 )
@@ -39,7 +38,6 @@ export function createRuntimeEnv(workerEnv: Record<string, string | number | boo
       CLOUDFLARE_ACCOUNT_ID_LAKEHOUSE: z.string().optional(),
       CLOUDFLARE_PARENT_ACCESS_KEY_ID_LAKEHOUSE: z.string().optional(),
       CLOUDFLARE_CACHE_DOMAIN: z.string().optional(),
-      LAKEHOUSE: r2Bucket.optional(),
       LAKEHOUSE_PIPELINE_USAGE: pipelinesBinding,
       LAKEHOUSE_PIPELINE_VERIFICATION: pipelinesBinding,
       LAKEHOUSE_PIPELINE_METADATA: pipelinesBinding,
