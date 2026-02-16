@@ -1,4 +1,5 @@
 import {
+  type LakehouseFieldDefinition,
   type LakehouseSourceSchemaDefinition,
   getLakehouseSourceSchema,
   resolveLakehouseSourceFromTable,
@@ -33,6 +34,11 @@ export interface LakehouseQueryColumnRef {
 
 export interface LakehouseQueryProjection extends LakehouseQueryColumnRef {
   alias?: string
+  /**
+   * Applies schema-evolution defaults for fields added after source firstVersion.
+   * Expression form: CASE WHEN schema_version >= addedInVersion THEN value ELSE defaultValue END
+   */
+  applyEvolutionDefault?: boolean
 }
 
 export interface LakehouseQueryJoinCondition {
@@ -80,6 +86,13 @@ interface ResolvedTable {
   source: LakehouseSourceSchemaDefinition
 }
 
+interface ResolvedColumn {
+  sql: string
+  tableAlias: string
+  table: ResolvedTable
+  field: LakehouseFieldDefinition
+}
+
 const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]*$/
 
 function quoteIdentifier(value: string): string {
@@ -109,19 +122,24 @@ function resolveColumn(
   column: LakehouseQueryColumnRef,
   tableAliases: Map<string, ResolvedTable>,
   fallbackTableAlias: string
-): string {
+): ResolvedColumn {
   const tableAlias = column.table ?? fallbackTableAlias
   const resolvedTable = tableAliases.get(tableAlias)
   if (!resolvedTable) {
     throw new Error(`Unknown table alias in query: ${tableAlias}`)
   }
 
-  const isKnownField = resolvedTable.source.fields.some((field) => field.name === column.column)
-  if (!isKnownField) {
+  const field = resolvedTable.source.fields.find((entry) => entry.name === column.column)
+  if (!field) {
     throw new Error(`Unknown column '${column.column}' on table '${resolvedTable.table}'`)
   }
 
-  return `${quoteIdentifier(tableAlias)}.${quoteIdentifier(column.column)}`
+  return {
+    sql: `${quoteIdentifier(tableAlias)}.${quoteIdentifier(column.column)}`,
+    tableAlias,
+    table: resolvedTable,
+    field,
+  }
 }
 
 function compileFilter(
@@ -130,7 +148,7 @@ function compileFilter(
   fallbackTableAlias: string,
   params: unknown[]
 ): string {
-  const fieldRef = resolveColumn(filter.column, tableAliases, fallbackTableAlias)
+  const fieldRef = resolveColumn(filter.column, tableAliases, fallbackTableAlias).sql
 
   switch (filter.op) {
     case "eq":
@@ -188,6 +206,25 @@ function quoteTableRef(table: string, alias: string): string {
   return `${quotedTable} AS ${quotedAlias}`
 }
 
+function applyEvolutionDefaultProjection(column: ResolvedColumn): string {
+  if (column.field.addedInVersion <= column.table.source.firstVersion) {
+    return column.sql
+  }
+
+  const defaultValue = column.field.defaultValue
+  const schemaVersionField = column.table.source.fields.find((field) => field.name === "schema_version")
+
+  if (!schemaVersionField) {
+    throw new Error(`Table '${column.table.table}' is missing required schema_version field`)
+  }
+
+  const schemaVersionSql = `${quoteIdentifier(column.tableAlias)}.${quoteIdentifier("schema_version")}`
+  const addedInVersion = column.field.addedInVersion
+  const defaultSql = inlineSqlValue(defaultValue)
+
+  return `CASE WHEN ${schemaVersionSql} >= ${addedInVersion} THEN ${column.sql} ELSE ${defaultSql} END`
+}
+
 function escapeSqlString(value: string): string {
   return value.replaceAll("'", "''")
 }
@@ -228,11 +265,14 @@ export function buildLakehouseQuery(spec: LakehouseQuerySpec): BuiltLakehouseQue
   const params: unknown[] = []
   const selectSql = spec.select
     .map((column) => {
-      const field = resolveColumn(column, tableAliases, from.alias)
+      const resolvedColumn = resolveColumn(column, tableAliases, from.alias)
+      const expression = column.applyEvolutionDefault
+        ? applyEvolutionDefaultProjection(resolvedColumn)
+        : resolvedColumn.sql
       if (!column.alias) {
-        return field
+        return expression
       }
-      return `${field} AS ${quoteIdentifier(column.alias)}`
+      return `${expression} AS ${quoteIdentifier(column.alias)}`
     })
     .join(", ")
 
@@ -250,8 +290,8 @@ export function buildLakehouseQuery(spec: LakehouseQuerySpec): BuiltLakehouseQue
     const joinType = (join.type ?? "inner").toUpperCase()
     const conditions = join.on
       .map((condition) => {
-        const left = resolveColumn(condition.left, tableAliases, from.alias)
-        const right = resolveColumn(condition.right, tableAliases, from.alias)
+        const left = resolveColumn(condition.left, tableAliases, from.alias).sql
+        const right = resolveColumn(condition.right, tableAliases, from.alias).sql
         return `${left} = ${right}`
       })
       .join(" AND ")
@@ -270,7 +310,7 @@ export function buildLakehouseQuery(spec: LakehouseQuerySpec): BuiltLakehouseQue
 
   if (spec.groupBy?.length) {
     const groupBySql = spec.groupBy
-      .map((column) => resolveColumn(column, tableAliases, from.alias))
+      .map((column) => resolveColumn(column, tableAliases, from.alias).sql)
       .join(", ")
     sqlParts.push(`GROUP BY ${groupBySql}`)
   }
@@ -279,7 +319,7 @@ export function buildLakehouseQuery(spec: LakehouseQuerySpec): BuiltLakehouseQue
     const orderBySql = spec.orderBy
       .map((entry) => {
         const direction = (entry.direction ?? "asc").toUpperCase()
-        return `${resolveColumn(entry.column, tableAliases, from.alias)} ${direction}`
+        return `${resolveColumn(entry.column, tableAliases, from.alias).sql} ${direction}`
       })
       .join(", ")
     sqlParts.push(`ORDER BY ${orderBySql}`)

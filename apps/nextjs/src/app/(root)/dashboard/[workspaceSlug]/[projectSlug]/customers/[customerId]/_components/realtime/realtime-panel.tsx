@@ -34,7 +34,7 @@ import {
   Zap,
 } from "lucide-react"
 import { usePartySocket } from "partysocket/react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { NumberTicker } from "~/components/analytics/number-ticker"
 import { RealtimeIntervalFilter } from "~/components/analytics/realtime-interval-filter"
@@ -108,6 +108,8 @@ const verificationChartConfig = {
     color: "var(--chart-5)",
   },
 } satisfies ChartConfig
+
+const SNAPSHOT_REQUEST_THROTTLE_MS = 1500
 
 function InfoTooltip({ content }: { content: string }) {
   return (
@@ -197,8 +199,41 @@ export function RealtimePanel(props: {
   const [windowSeconds] = useRealtimeIntervalFilter()
   const [metrics, setMetrics] = useState<Metrics | null>(null)
   const [events, setEvents] = useState<RealtimeEvent[]>([])
+  const [liveCycleUsageBySlug, setLiveCycleUsageBySlug] = useState<Record<string, number>>({})
   const [browserTimezone, setBrowserTimezone] = useState<string | null>(null)
   const lastSnapshotRequestedAtRef = useRef(0)
+
+  const requestSnapshot = useCallback(
+    (
+      targetSocket: Pick<WebSocket, "send"> | null | undefined,
+      options: {
+        force?: boolean
+      } = {}
+    ) => {
+      if (!targetSocket) {
+        return
+      }
+
+      const now = Date.now()
+      if (
+        !options.force &&
+        now - lastSnapshotRequestedAtRef.current < SNAPSHOT_REQUEST_THROTTLE_MS
+      ) {
+        return
+      }
+
+      lastSnapshotRequestedAtRef.current = now
+      targetSocket.send(
+        JSON.stringify({
+          type: "snapshot_request",
+          windowSeconds,
+          customerId,
+          projectId,
+        })
+      )
+    },
+    [windowSeconds, customerId, projectId]
+  )
 
   useEffect(() => {
     const resolvedTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -213,12 +248,16 @@ export function RealtimePanel(props: {
     prefix: "broadcast",
     party: "usagelimit",
     query: { sessionToken },
+    onOpen: (event) => {
+      requestSnapshot(event.currentTarget as WebSocket | null, { force: true })
+    },
     onMessage: (event) => {
       try {
         const payload = JSON.parse(event.data) as
           | {
               type: "snapshot"
               metrics: Metrics
+              usageByFeature?: Record<string, number>
             }
           | {
               type?: "verify" | "reportUsage"
@@ -233,6 +272,9 @@ export function RealtimePanel(props: {
 
         if (payload && "type" in payload && payload.type === "snapshot" && "metrics" in payload) {
           setMetrics(payload.metrics)
+          if (payload.usageByFeature) {
+            setLiveCycleUsageBySlug(payload.usageByFeature)
+          }
           return
         }
 
@@ -259,18 +301,7 @@ export function RealtimePanel(props: {
           ...prev.slice(0, 29),
         ])
 
-        if (socket?.readyState === WebSocket.OPEN) {
-          const now = Date.now()
-          if (now - lastSnapshotRequestedAtRef.current >= 1500) {
-            lastSnapshotRequestedAtRef.current = now
-            socket.send(
-              JSON.stringify({
-                type: "snapshot_request",
-                windowSeconds,
-              })
-            )
-          }
-        }
+        requestSnapshot(event.currentTarget as WebSocket | null)
       } catch {
         return
       }
@@ -278,16 +309,8 @@ export function RealtimePanel(props: {
   })
 
   useEffect(() => {
-    if (socket?.readyState === WebSocket.OPEN) {
-      lastSnapshotRequestedAtRef.current = Date.now()
-      socket.send(
-        JSON.stringify({
-          type: "snapshot_request",
-          windowSeconds,
-        })
-      )
-    }
-  }, [socket, windowSeconds])
+    requestSnapshot(socket as unknown as Pick<WebSocket, "send"> | null, { force: true })
+  }, [socket, requestSnapshot])
 
   const desiredBucketSizeSeconds = useMemo(
     () => resolveBucketSizeSeconds(windowSeconds),
@@ -411,10 +434,6 @@ export function RealtimePanel(props: {
     return Math.min(100, Math.max(0, (metrics.allowedCount / metrics.verificationCount) * 100))
   }, [metrics?.verificationCount, metrics?.allowedCount])
 
-  const featureStatsBySlug = useMemo(() => {
-    return new Map((metrics?.featureStats ?? []).map((feature) => [feature.featureSlug, feature]))
-  }, [metrics?.featureStats])
-
   const planVersionFeaturesBySlug = useMemo(() => {
     return new Map(planVersionFeatures.map((feature) => [feature.feature.slug, feature]))
   }, [planVersionFeatures])
@@ -429,27 +448,24 @@ export function RealtimePanel(props: {
     )
 
     return uniqueSlugs.map((featureSlug) => {
-      const featureStats = featureStatsBySlug.get(featureSlug)
       const planVersionFeature = planVersionFeaturesBySlug.get(featureSlug)
       const cycleFeatureUsage = cycleFeatureUsageBySlug.get(featureSlug)
+      const liveCycleUsage = liveCycleUsageBySlug[featureSlug]
 
       return {
         featureSlug,
-        usageCount: featureStats?.usageCount ?? 0,
-        verificationCount: featureStats?.verificationCount ?? 0,
-        totalUsage: featureStats?.totalUsage ?? 0,
-        cycleUsage: cycleFeatureUsage?.currentUsage ?? null,
+        cycleUsage: liveCycleUsage ?? cycleFeatureUsage?.currentUsage ?? null,
         cycleLimitType: cycleFeatureUsage?.limitType,
         cycleFeatureType: cycleFeatureUsage?.featureType,
         limit: planVersionFeature?.limit ?? null,
         planVersionFeature,
       }
     })
-  }, [entitlementSlugs, featureStatsBySlug, planVersionFeaturesBySlug, cycleFeatureUsageBySlug])
+  }, [entitlementSlugs, planVersionFeaturesBySlug, cycleFeatureUsageBySlug, liveCycleUsageBySlug])
 
   const maxVisibleEntitlementUsage = useMemo(() => {
     return entitlementRows.reduce((maxUsage, entitlement) => {
-      return Math.max(maxUsage, entitlement.cycleUsage ?? entitlement.totalUsage)
+      return Math.max(maxUsage, entitlement.cycleUsage ?? 0)
     }, 0)
   }, [entitlementRows])
 
@@ -748,7 +764,7 @@ export function RealtimePanel(props: {
         <Card className="border-muted/60 lg:w-[32%] lg:flex-none">
           <CardHeader>
             <CardTitle className="text-base">Entitlements</CardTitle>
-            <CardDescription>Usage and verification in the current billing cycle</CardDescription>
+            <CardDescription>Usage in the current billing cycle</CardDescription>
           </CardHeader>
           <CardContent>
             {entitlementRows.length === 0 ? (
@@ -766,7 +782,7 @@ export function RealtimePanel(props: {
                       ? entitlement.limit
                       : null
                   const hasLimit = limitValue !== null
-                  const usageValue = entitlement.cycleUsage ?? entitlement.totalUsage
+                  const usageValue = entitlement.cycleUsage ?? 0
                   const overageStrategy =
                     entitlement.planVersionFeature?.metadata?.overageStrategy ?? "none"
                   const effectiveLimitType =
@@ -805,7 +821,7 @@ export function RealtimePanel(props: {
                       : `var(--chart-${(index % 5) + 1})`
 
                   const usageSummaryText = isFlatFeature
-                    ? `Flat feature · ${formatCompactNumber(entitlement.verificationCount)} verifications`
+                    ? "Flat feature"
                     : `${formatCompactNumber(usageValue)} used · ${usageStatusText}`
 
                   return (
@@ -905,11 +921,7 @@ export function RealtimePanel(props: {
                         )}
                       </div>
                       <div className="flex items-center justify-between text-muted-foreground text-xs">
-                        <span>
-                          {isFlatFeature
-                            ? `flat feature · verifications ${entitlement.verificationCount}`
-                            : `usage events ${entitlement.usageCount} · verifications ${entitlement.verificationCount}`}
-                        </span>
+                        <span>{isFlatFeature ? "flat feature" : "current cycle usage"}</span>
                         {!isFlatFeature && typeof entitlement.limit === "number" && (
                           <span>limit {formatCompactNumber(entitlement.limit)}</span>
                         )}

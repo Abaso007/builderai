@@ -1,9 +1,9 @@
 import type { AnalyticsFeatureMetadata } from "@unprice/analytics"
 import type {
   LakehouseCursorState,
-  LakehouseEntitlementSnapshotEvent,
   LakehouseFlushInput,
   LakehouseFlushResult,
+  LakehouseJsonValue,
   LakehouseMetadataEvent,
   LakehouseService,
   LakehouseUsageEvent,
@@ -11,7 +11,7 @@ import type {
 } from "@unprice/lakehouse"
 import {
   LAKEHOUSE_INTERNAL_METADATA_KEYS,
-  LAKEHOUSE_SCHEMA_VERSION,
+  getLakehouseSourceCurrentVersion,
   getLakehouseSourceEventZodSchema,
 } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logging"
@@ -50,28 +50,6 @@ interface LakehousePreparedPayload {
   usageRecords: LakehouseUsageEvent[]
   verificationRecords: LakehouseVerificationEvent[]
   metadataRecords: LakehouseMetadataEvent[]
-  entitlementSnapshots: LakehouseEntitlementSnapshotEvent[]
-  seenSnapshotSet: Set<string>
-  seenSnapshotDate: string
-}
-
-interface ParsedEntitlementSnapshotRecord {
-  id: string
-  schemaVersion: number
-  timestamp: number
-  projectId: string
-  customerId: string
-  featureSlug: string
-  featureType: string
-  aggregationMethod: string
-  mergingPolicy: string
-  limit: number | null
-  effectiveAt: number
-  expiresAt: number | null
-  version: string
-  resetConfig: Record<string, unknown> | null
-  metadata: Record<string, unknown> | null
-  grants: Array<Record<string, unknown>>
 }
 
 export interface LakehouseMetadataBuildParams {
@@ -98,6 +76,9 @@ interface PipelineSender {
 }
 
 const INTERNAL_METADATA_KEYS = new Set<string>(LAKEHOUSE_INTERNAL_METADATA_KEYS)
+const USAGE_SCHEMA_VERSION = getLakehouseSourceCurrentVersion("usage")
+const VERIFICATION_SCHEMA_VERSION = getLakehouseSourceCurrentVersion("verification")
+const METADATA_SCHEMA_VERSION = getLakehouseSourceCurrentVersion("metadata")
 
 function chunkRecords<T>(records: T[], chunkSize: number): T[][] {
   if (records.length === 0) {
@@ -127,125 +108,6 @@ function toEventDate(timestamp: number): string {
   return new Date(timestamp).toISOString().slice(0, 10)
 }
 
-function toFiniteNumber(value: unknown): number | null {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : null
-  }
-  if (typeof value === "string") {
-    const parsed = Number(value)
-    return Number.isFinite(parsed) ? parsed : null
-  }
-  return null
-}
-
-function parseEntitlementSnapshot(raw: string | null): ParsedEntitlementSnapshotRecord | null {
-  if (!raw) {
-    return null
-  }
-
-  try {
-    const parsed = JSON.parse(raw)
-    if (!parsed || typeof parsed !== "object") {
-      return null
-    }
-
-    const record = parsed as Record<string, unknown>
-    const snapshotId = record.id
-    const projectId = record.project_id
-    const customerId = record.customer_id
-    const featureSlug = record.feature_slug
-
-    if (
-      typeof snapshotId !== "string" ||
-      typeof projectId !== "string" ||
-      typeof customerId !== "string" ||
-      typeof featureSlug !== "string"
-    ) {
-      return null
-    }
-
-    const resetConfig =
-      record.reset_config && typeof record.reset_config === "object"
-        ? (record.reset_config as Record<string, unknown>)
-        : null
-
-    const metadata =
-      record.metadata && typeof record.metadata === "object"
-        ? (record.metadata as Record<string, unknown>)
-        : null
-
-    const grants = Array.isArray(record.grants)
-      ? record.grants.filter((entry) => !!entry && typeof entry === "object")
-      : []
-
-    return {
-      id: snapshotId,
-      schemaVersion: toFiniteNumber(record.schema_version) ?? 1,
-      timestamp: toFiniteNumber(record.timestamp) ?? Date.now(),
-      projectId: projectId,
-      customerId: customerId,
-      featureSlug: featureSlug,
-      featureType: typeof record.feature_type === "string" ? record.feature_type : "unknown",
-      aggregationMethod:
-        typeof record.aggregation_method === "string" ? record.aggregation_method : "sum",
-      mergingPolicy: typeof record.merging_policy === "string" ? record.merging_policy : "sum",
-      limit: record.limit === null ? null : toFiniteNumber(record.limit),
-      effectiveAt: toFiniteNumber(record.effective_at) ?? 0,
-      expiresAt: record.expires_at === null ? null : toFiniteNumber(record.expires_at),
-      version: typeof record.version === "string" ? record.version : "",
-      resetConfig: resetConfig,
-      metadata,
-      grants: grants as Array<Record<string, unknown>>,
-    }
-  } catch {
-    return null
-  }
-}
-
-function collectEntitlementSnapshots(params: {
-  usageRecords: LakehouseProcessedUsageRecord[]
-  verificationRecords: LakehouseProcessedVerificationRecord[]
-}): ParsedEntitlementSnapshotRecord[] {
-  const snapshots = new Map<string, ParsedEntitlementSnapshotRecord>()
-
-  const addSnapshot = (record: UsageRecord | Verification) => {
-    const parsed = parseEntitlementSnapshot(record.entitlement_snapshot)
-    if (!parsed) {
-      return
-    }
-
-    const snapshotId = parsed.id
-    if (!snapshotId || snapshots.has(snapshotId)) {
-      return
-    }
-
-    snapshots.set(snapshotId, {
-      ...parsed,
-      id: snapshotId,
-      projectId: record.project_id,
-      customerId: record.customer_id,
-      featureSlug: record.feature_slug,
-    })
-  }
-
-  for (const { record } of params.usageRecords) {
-    addSnapshot(record)
-  }
-  for (const { record } of params.verificationRecords) {
-    addSnapshot(record)
-  }
-
-  return Array.from(snapshots.values())
-}
-
-function parseMetadataPayload(tags: string): unknown {
-  try {
-    return JSON.parse(tags)
-  } catch {
-    return { tags }
-  }
-}
-
 function parseMetadata(raw: string | null): Record<string, unknown> | null {
   if (!raw) {
     return null
@@ -273,7 +135,7 @@ function extractTagMetadata(
   return Object.fromEntries(tagEntries)
 }
 
-function toStableMetadataJson(metadata: Record<string, unknown> | null): string {
+function toStableMetadataJson(metadata: Record<string, unknown> | null): LakehouseJsonValue {
   if (!metadata || Object.keys(metadata).length === 0) {
     return "{}"
   }
@@ -296,7 +158,8 @@ export async function buildLakehouseMetadataProcessingResult(
   for (const record of params.usageRecords) {
     const metadata = extractTagMetadata(parseMetadata(record.metadata))
     const metadataJson = toStableMetadataJson(metadata)
-    const hash = metadataJson === "{}" ? BigInt(0) : await params.hashMetadataJson(metadataJson)
+    const hash =
+      metadataJson === "{}" ? BigInt(0) : await params.hashMetadataJson(String(metadataJson))
     const metaId = Number(hash)
     const metaIdKey = hash.toString()
 
@@ -304,7 +167,7 @@ export async function buildLakehouseMetadataProcessingResult(
       params.seenMetaSet.add(metaIdKey)
       uniqueMetadata.push({
         meta_id: metaId,
-        tags: metadataJson,
+        tags: String(metadataJson),
         project_id: record.project_id,
         customer_id: record.customer_id,
         timestamp: record.timestamp,
@@ -324,7 +187,8 @@ export async function buildLakehouseMetadataProcessingResult(
   for (const record of params.verificationRecords) {
     const metadata = extractTagMetadata(parseMetadata(record.metadata))
     const metadataJson = toStableMetadataJson(metadata)
-    const hash = metadataJson === "{}" ? BigInt(0) : await params.hashMetadataJson(metadataJson)
+    const hash =
+      metadataJson === "{}" ? BigInt(0) : await params.hashMetadataJson(String(metadataJson))
     const metaId = Number(hash)
     const metaIdKey = hash.toString()
 
@@ -332,7 +196,7 @@ export async function buildLakehouseMetadataProcessingResult(
       params.seenMetaSet.add(metaIdKey)
       uniqueMetadata.push({
         meta_id: metaId,
-        tags: metadataJson,
+        tags: String(metadataJson),
         project_id: record.project_id,
         customer_id: record.customer_id,
         timestamp: record.timestamp,
@@ -361,8 +225,6 @@ export async function buildLakehouseMetadataProcessingResult(
 export function buildLakehousePreparedPayload(params: {
   processed: LakehouseMetadataProcessingResult
   cursorState: LakehouseCursorState
-  seenSnapshotSet: Set<string>
-  seenSnapshotDate: string
 }): LakehousePreparedPayload {
   const newUsageRecords = params.processed.usageRecords.filter((record) => {
     if (!params.cursorState.lastR2UsageId) return true
@@ -372,19 +234,6 @@ export function buildLakehousePreparedPayload(params: {
   const newVerificationRecords = params.processed.verificationRecords.filter((record) => {
     if (params.cursorState.lastR2VerificationId === null) return true
     return record.record.id > params.cursorState.lastR2VerificationId
-  })
-
-  const entitlementSnapshots = collectEntitlementSnapshots({
-    usageRecords: newUsageRecords,
-    verificationRecords: newVerificationRecords,
-  })
-
-  const newEntitlementSnapshots = entitlementSnapshots.filter((snapshot) => {
-    if (params.seenSnapshotSet.has(snapshot.id)) {
-      return false
-    }
-    params.seenSnapshotSet.add(snapshot.id)
-    return true
   })
 
   const usageRecords: LakehouseUsageEvent[] = newUsageRecords.map(
@@ -399,7 +248,7 @@ export function buildLakehousePreparedPayload(params: {
       idempotence_key: record.idempotence_key,
       feature_slug: record.feature_slug,
       usage: Number(record.usage ?? 0),
-      entitlement_id: record.entitlement_snapshot_id ?? "",
+      entitlement_id: record.entitlement_id,
       deleted: record.deleted,
       meta_id: String(metaId),
       country: country ?? record.country ?? "UNK",
@@ -416,7 +265,7 @@ export function buildLakehousePreparedPayload(params: {
           ? Number(record.rate_amount)
           : undefined,
       rate_currency: record.rate_currency ?? undefined,
-      schema_version: LAKEHOUSE_SCHEMA_VERSION,
+      schema_version: USAGE_SCHEMA_VERSION,
     })
   )
 
@@ -426,8 +275,9 @@ export function buildLakehousePreparedPayload(params: {
       event_date: toEventDate(record.timestamp),
       project_id: record.project_id,
       denied_reason: record.denied_reason ?? undefined,
-      allowed: record.allowed,
+      allowed: record.allowed === 1,
       timestamp: record.timestamp,
+      entitlement_id: record.entitlement_id,
       latency: record.latency ? Number(record.latency) : undefined,
       feature_slug: record.feature_slug,
       customer_id: record.customer_id,
@@ -445,8 +295,7 @@ export function buildLakehousePreparedPayload(params: {
         record.remaining != null && Number.isFinite(Number(record.remaining))
           ? Number(record.remaining)
           : undefined,
-      entitlement_id: record.entitlement_snapshot_id ?? undefined,
-      schema_version: LAKEHOUSE_SCHEMA_VERSION,
+      schema_version: VERIFICATION_SCHEMA_VERSION,
     })
   )
 
@@ -456,44 +305,17 @@ export function buildLakehousePreparedPayload(params: {
       event_date: toEventDate(entry.timestamp),
       project_id: entry.project_id,
       customer_id: entry.customer_id,
-      payload: parseMetadataPayload(entry.tags),
+      payload: toStableMetadataJson(parseMetadata(entry.tags)),
       timestamp: entry.timestamp,
-      schema_version: LAKEHOUSE_SCHEMA_VERSION,
+      schema_version: METADATA_SCHEMA_VERSION,
     })
   )
-
-  const entitlementSnapshotsRecords: LakehouseEntitlementSnapshotEvent[] =
-    newEntitlementSnapshots.map(
-      (snapshot): LakehouseEntitlementSnapshotEvent => ({
-        id: snapshot.id,
-        event_date: toEventDate(snapshot.timestamp),
-        project_id: snapshot.projectId,
-        customer_id: snapshot.customerId,
-        timestamp: snapshot.timestamp,
-        feature_slug: snapshot.featureSlug,
-        feature_type: snapshot.featureType,
-        unit_of_measure: "unit",
-        reset_config: snapshot.resetConfig ?? undefined,
-        aggregation_method: snapshot.aggregationMethod,
-        merging_policy: snapshot.mergingPolicy,
-        limit: snapshot.limit ?? undefined,
-        effective_at: snapshot.effectiveAt,
-        expires_at: snapshot.expiresAt ?? undefined,
-        version: snapshot.version,
-        grants: snapshot.grants,
-        metadata: snapshot.metadata ?? undefined,
-        schema_version: snapshot.schemaVersion ?? LAKEHOUSE_SCHEMA_VERSION,
-      })
-    )
 
   return {
     cursorState: params.cursorState,
     usageRecords,
     verificationRecords,
     metadataRecords,
-    entitlementSnapshots: entitlementSnapshotsRecords,
-    seenSnapshotSet: params.seenSnapshotSet,
-    seenSnapshotDate: params.seenSnapshotDate,
   }
 }
 

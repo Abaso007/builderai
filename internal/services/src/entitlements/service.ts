@@ -6,7 +6,6 @@ import {
   currencies,
   dinero,
   formatMoney,
-  hashStringSHA256,
   toDecimal,
 } from "@unprice/db/utils"
 import type { Dinero } from "@unprice/db/utils"
@@ -41,34 +40,6 @@ import { customers, entitlements, subscriptions } from "@unprice/db/schema"
 import { ulid } from "ulid"
 import { CustomerService } from "../customers/service"
 import { UsageMeter } from "./usage-meter"
-
-const ENTITLEMENT_SNAPSHOT_SCHEMA_VERSION = 1
-const ENTITLEMENT_SNAPSHOT_HASH_VERSION = 1
-
-interface EntitlementSnapshotRecordV1 {
-  id: string
-  schema_version: number
-  hash_version: number
-  timestamp: number
-  project_id: string
-  customer_id: string
-  feature_slug: string
-  feature_type: string
-  aggregation_method: string
-  merging_policy: string
-  limit: number | null
-  effective_at: number
-  expires_at: number | null
-  version: string
-  reset_config: Record<string, unknown> | null
-  metadata: Record<string, unknown> | null
-  grants: Array<Record<string, unknown>>
-}
-
-interface EntitlementSnapshotContext {
-  snapshotId: string
-  snapshotJson: string
-}
 
 /**
  * Simplified Entitlement Service
@@ -160,105 +131,6 @@ export class EntitlementService {
     return Math.round(value * 100) / 100
   }
 
-  private normalizeForStableHash(value: unknown): unknown {
-    if (Array.isArray(value)) {
-      return value.map((item) => this.normalizeForStableHash(item))
-    }
-
-    if (value && typeof value === "object") {
-      const objectValue = value as Record<string, unknown>
-      const entries = Object.entries(objectValue)
-        .filter(([, entryValue]) => entryValue !== undefined)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([key, entryValue]) => [key, this.normalizeForStableHash(entryValue)] as const)
-
-      return Object.fromEntries(entries)
-    }
-
-    return value
-  }
-
-  private toBase64Url(value: string): string {
-    return value.replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "")
-  }
-
-  private async buildEntitlementSnapshotContext(
-    state: EntitlementState
-  ): Promise<EntitlementSnapshotContext> {
-    const normalizedGrants = [...state.grants]
-      .sort((a, b) => {
-        const priorityDiff = (b.priority ?? 0) - (a.priority ?? 0)
-        if (priorityDiff !== 0) return priorityDiff
-        return a.id.localeCompare(b.id)
-      })
-      .map((grant) =>
-        this.normalizeForStableHash({
-          id: grant.id,
-          type: grant.type,
-          priority: grant.priority,
-          effectiveAt: grant.effectiveAt,
-          expiresAt: grant.expiresAt,
-          limit: grant.limit,
-          config: grant.config ?? null,
-        })
-      ) as Array<Record<string, unknown>>
-
-    const hashInput = this.normalizeForStableHash({
-      v: ENTITLEMENT_SNAPSHOT_HASH_VERSION,
-      project_id: state.projectId,
-      customer_id: state.customerId,
-      feature_slug: state.featureSlug,
-      feature_type: state.featureType,
-      aggregation_method: state.aggregationMethod,
-      merging_policy: state.mergingPolicy,
-      limit: state.limit ?? null,
-      effective_at: state.effectiveAt,
-      expires_at: state.expiresAt ?? null,
-      reset_config: state.resetConfig ?? null,
-      metadata: state.metadata ?? null,
-      grants: normalizedGrants,
-    })
-
-    let snapshotId: string
-    try {
-      const hash = await hashStringSHA256(JSON.stringify(hashInput))
-      snapshotId = `es_v${ENTITLEMENT_SNAPSHOT_HASH_VERSION}_${this.toBase64Url(hash)}`
-    } catch (error) {
-      this.logger.warn("Failed to compute entitlement snapshot hash", {
-        error: error instanceof Error ? error.message : String(error),
-        projectId: state.projectId,
-        customerId: state.customerId,
-        featureSlug: state.featureSlug,
-      })
-      snapshotId = `es_v${ENTITLEMENT_SNAPSHOT_HASH_VERSION}_${this.toBase64Url(state.version)}`
-    }
-
-    const snapshotRecord: EntitlementSnapshotRecordV1 = {
-      id: snapshotId,
-      schema_version: ENTITLEMENT_SNAPSHOT_SCHEMA_VERSION,
-      hash_version: ENTITLEMENT_SNAPSHOT_HASH_VERSION,
-      timestamp: Date.now(),
-      project_id: state.projectId,
-      customer_id: state.customerId,
-      feature_slug: state.featureSlug,
-      feature_type: state.featureType,
-      aggregation_method: state.aggregationMethod,
-      merging_policy: state.mergingPolicy,
-      limit: state.limit ?? null,
-      effective_at: state.effectiveAt,
-      expires_at: state.expiresAt ?? null,
-      version: state.version,
-      reset_config: (state.resetConfig ?? null) as Record<string, unknown> | null,
-      metadata: (state.metadata ?? null) as Record<string, unknown> | null,
-      grants: normalizedGrants,
-    }
-
-    return {
-      snapshotId,
-      snapshotJson: JSON.stringify(snapshotRecord),
-    }
-  }
-
   private getUsageMeter(validatedState: EntitlementState): UsageMeter {
     return new UsageMeter(
       {
@@ -323,6 +195,7 @@ export class EntitlementService {
           request_id: params.requestId,
           created_at: Date.now(),
           meta_id: 0,
+          entitlement_id: "",
           region: params.region ?? "UNK",
           // first-class analytics columns
           country: params.country ?? "UNK",
@@ -358,7 +231,6 @@ export class EntitlementService {
 
     const usageMeter = this.getUsageMeter(validatedState)
     const verifyResult = usageMeter.verify(params.timestamp, params.usage)
-    const snapshotContext = await this.buildEntitlementSnapshotContext(validatedState)
     const latency = Date.now() - params.performanceStart
 
     this.waitUntil(
@@ -372,14 +244,7 @@ export class EntitlementService {
         metadata: params.metadata,
         usage: params.usage ?? 0,
         remaining: verifyResult.remaining,
-        entitlement_snapshot_id: snapshotContext.snapshotId,
-        entitlement_version: validatedState.version,
-        entitlement_feature_type: validatedState.featureType,
-        entitlement_limit: validatedState.limit ?? undefined,
-        entitlement_overage_strategy: validatedState.metadata?.overageStrategy ?? "none",
-        entitlement_effective_at: validatedState.effectiveAt,
-        entitlement_expires_at: validatedState.expiresAt ?? undefined,
-        entitlement_snapshot: snapshotContext.snapshotJson,
+        entitlement_id: validatedState.id,
         latency,
         request_id: params.requestId,
         created_at: Date.now(),
@@ -601,8 +466,6 @@ export class EntitlementService {
     })
 
     if (consumeResult.allowed) {
-      const snapshotContext = await this.buildEntitlementSnapshotContext(validatedState)
-
       // Calculate incremental cost
       const totalUsageAfter = Number(meterResult.usage)
       const totalUsageBefore = totalUsageAfter - params.usage
@@ -637,14 +500,7 @@ export class EntitlementService {
         cost: incrementalCost,
         rate_amount: this.roundToTwoDecimals(rateAmount),
         rate_currency: rateCurrency,
-        entitlement_snapshot_id: snapshotContext.snapshotId,
-        entitlement_version: validatedState.version,
-        entitlement_feature_type: validatedState.featureType,
-        entitlement_limit: validatedState.limit ?? undefined,
-        entitlement_overage_strategy: validatedState.metadata?.overageStrategy ?? "none",
-        entitlement_effective_at: validatedState.effectiveAt,
-        entitlement_expires_at: validatedState.expiresAt ?? undefined,
-        entitlement_snapshot: snapshotContext.snapshotJson,
+        entitlement_id: validatedState.id,
         deleted: 0,
         meta_id: 0, // this is a placeholder for the meta_id
         // first-class analytics columns

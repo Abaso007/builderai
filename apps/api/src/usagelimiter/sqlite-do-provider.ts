@@ -1,8 +1,13 @@
 import type { Analytics, AnalyticsUsage, AnalyticsVerification } from "@unprice/analytics"
 import type { EntitlementState } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
-import type { LakehouseCursorState, LakehouseService } from "@unprice/lakehouse"
-import { LAKEHOUSE_SCHEMA_VERSION } from "@unprice/lakehouse"
+import {
+  type LakehouseCursorState,
+  type LakehouseEntitlementSnapshotEvent,
+  type LakehouseJsonValue,
+  type LakehouseService,
+  getLakehouseSourceCurrentVersion,
+} from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logging"
 import {
   type UnPriceEntitlementStorage,
@@ -44,6 +49,7 @@ const STATE_KEY_PREFIX = "state:"
 const SEEN_META_PREFIX = "seen_meta_"
 const SEEN_SNAPSHOT_PREFIX = "seen_snapshot_"
 const CURSOR_KEY = "cursor_state"
+const ENTITLEMENT_SNAPSHOT_SCHEMA_VERSION = getLakehouseSourceCurrentVersion("entitlement_snapshot")
 
 // Type guard for EntitlementState
 function isEntitlementState(value: unknown): value is EntitlementState {
@@ -56,40 +62,35 @@ function isEntitlementState(value: unknown): value is EntitlementState {
   )
 }
 
+function toEventDate(timestamp: number): string {
+  return new Date(timestamp).toISOString().slice(0, 10)
+}
+
+function normalizeJsonValue(value: unknown): LakehouseJsonValue {
+  if (value === null) return null
+  if (typeof value === "string" || typeof value === "boolean") return value
+  if (typeof value === "number") return Number.isFinite(value) ? value : null
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeJsonValue(entry))
+  }
+
+  if (typeof value === "object") {
+    const normalizedEntries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .map(([key, entry]) => [key, normalizeJsonValue(entry)] as const)
+
+    return Object.fromEntries(normalizedEntries)
+  }
+
+  return null
+}
+
 // Batch result type for type safety
 interface BatchResult<T, ID> {
   records: T[]
   firstId: ID | null
   lastId: ID | null
-}
-
-// Tinybird ingestion payload types (what analytics.ingest* methods expect)
-interface TinybirdUsagePayload {
-  id: string
-  timestamp: number
-  usage: number
-  deleted: number
-  project_id: string
-  customer_id: string
-  feature_slug: string
-  created_at: number
-  idempotence_key: string
-  // schema evolution tracking
-  schema_version: number
-}
-
-interface TinybirdVerificationPayload {
-  timestamp: number
-  latency: number
-  denied_reason: string | undefined
-  allowed: number
-  project_id: string
-  customer_id: string
-  feature_slug: string
-  created_at: number
-  region: string
-  // schema evolution tracking
-  schema_version: number
 }
 
 // Processed record with metadata for internal use
@@ -243,7 +244,17 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   async getAll(): Promise<Result<EntitlementState[], UnPriceEntitlementStorageError>> {
     try {
       this.assertInitialized()
-      return Ok(Array.from(this.stateCache.values()))
+      const entries = await this.storage.list({ prefix: STATE_KEY_PREFIX })
+      const nextCache = new Map<string, EntitlementState>()
+
+      for (const [key, value] of entries) {
+        if (isEntitlementState(value)) {
+          nextCache.set(key, value)
+        }
+      }
+
+      this.stateCache = nextCache
+      return Ok(Array.from(nextCache.values()))
     } catch (error) {
       return this.logAndError("getAll", error)
     }
@@ -342,14 +353,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           cost: record.cost != null ? String(record.cost) : null,
           rate_amount: record.rate_amount != null ? String(record.rate_amount) : null,
           rate_currency: record.rate_currency ?? null,
-          entitlement_snapshot_id: record.entitlement_snapshot_id ?? null,
-          entitlement_version: record.entitlement_version ?? null,
-          entitlement_feature_type: record.entitlement_feature_type ?? null,
-          entitlement_limit: record.entitlement_limit ?? null,
-          entitlement_overage_strategy: record.entitlement_overage_strategy ?? null,
-          entitlement_effective_at: record.entitlement_effective_at ?? null,
-          entitlement_expires_at: record.entitlement_expires_at ?? null,
-          entitlement_snapshot: record.entitlement_snapshot ?? null,
+          entitlement_id: record.entitlement_id,
           deleted: record.deleted ?? 0,
           idempotence_key: record.idempotence_key,
           request_id: record.request_id,
@@ -405,14 +409,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         metadata: record.metadata ? JSON.stringify(record.metadata) : null,
         usage: record.usage != null ? String(record.usage) : null,
         remaining: record.remaining != null ? String(record.remaining) : null,
-        entitlement_snapshot_id: record.entitlement_snapshot_id ?? null,
-        entitlement_version: record.entitlement_version ?? null,
-        entitlement_feature_type: record.entitlement_feature_type ?? null,
-        entitlement_limit: record.entitlement_limit ?? null,
-        entitlement_overage_strategy: record.entitlement_overage_strategy ?? null,
-        entitlement_effective_at: record.entitlement_effective_at ?? null,
-        entitlement_expires_at: record.entitlement_expires_at ?? null,
-        entitlement_snapshot: record.entitlement_snapshot ?? null,
+        entitlement_id: record.entitlement_id,
         // first-class analytics columns
         country: record.country ?? "UNK",
         region: record.region ?? "UNK",
@@ -501,8 +498,10 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           lastR2UsageId: this.cursors.lastR2UsageId,
           lastR2VerificationId: this.cursors.lastR2VerificationId,
         },
+      })
+      const entitlementSnapshots = await this.buildEntitlementSnapshots({
+        prepared: lakehousePrepared,
         seenSnapshotSet,
-        seenSnapshotDate: lakehouseSnapshotDate,
       })
 
       // 3. Filter records for each destination based on cursors to avoid double counting
@@ -518,7 +517,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
 
       // 4. Send to destinations in parallel
       const [r2Result, usageResult, verificationResult] = await Promise.all([
-        this.flushToR2(lakehousePrepared),
+        this.flushToR2(lakehousePrepared, entitlementSnapshots),
         this.ingestUsageToTinybird(usageForTinybird),
         this.ingestVerificationsToTinybird(verificationForTinybird),
       ])
@@ -555,11 +554,8 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           await this.updateSeenMetaSet(processed.todayKey, processed.seenMetaSet)
         }
 
-        if (lakehousePrepared.seenSnapshotSet.size > 0) {
-          await this.updateSeenSnapshotSet(
-            lakehousePrepared.seenSnapshotDate,
-            lakehousePrepared.seenSnapshotSet
-          )
+        if (entitlementSnapshots.length > 0) {
+          await this.updateSeenSnapshotSet(lakehouseSnapshotDate, seenSnapshotSet)
         }
 
         // 7. Delete records that have been safely persisted to BOTH destinations
@@ -733,7 +729,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     if (records.length === 0) return { success: true }
 
     try {
-      const payload: TinybirdUsagePayload[] = records.map(({ record }) => ({
+      const payload = records.map(({ record }) => ({
         id: record.id,
         timestamp: record.timestamp,
         usage: Number(record.usage ?? 0),
@@ -743,7 +739,6 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         feature_slug: record.feature_slug,
         created_at: record.created_at,
         idempotence_key: record.idempotence_key,
-        schema_version: LAKEHOUSE_SCHEMA_VERSION,
       }))
 
       const result = await this.analytics.ingestFeaturesUsage(payload)
@@ -783,7 +778,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     if (records.length === 0) return { success: true }
 
     try {
-      const payload: TinybirdVerificationPayload[] = records.map(({ record, region }) => ({
+      const payload = records.map(({ record, region }) => ({
         timestamp: record.timestamp,
         latency: record.latency ? Number(record.latency) : 0,
         denied_reason: record.denied_reason ?? undefined,
@@ -793,7 +788,6 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         feature_slug: record.feature_slug,
         created_at: record.created_at,
         region,
-        schema_version: LAKEHOUSE_SCHEMA_VERSION,
       }))
 
       const result = await this.analytics.ingestFeaturesVerification(payload)
@@ -861,15 +855,109 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   // R2 Lakehouse
   // ─────────────────────────────────────────────────────────────────────────────
 
-  private async flushToR2(
+  private async buildEntitlementSnapshots(params: {
     prepared: LakehousePreparedPayload
+    seenSnapshotSet: Set<string>
+  }): Promise<LakehouseEntitlementSnapshotEvent[]> {
+    const referencedEntitlementIds = new Set<string>()
+
+    for (const record of params.prepared.usageRecords) {
+      if (record.entitlement_id && record.entitlement_id.length > 0) {
+        referencedEntitlementIds.add(record.entitlement_id)
+      }
+    }
+
+    for (const record of params.prepared.verificationRecords) {
+      if (record.entitlement_id && record.entitlement_id.length > 0) {
+        referencedEntitlementIds.add(record.entitlement_id)
+      }
+    }
+
+    if (referencedEntitlementIds.size === 0) {
+      return []
+    }
+
+    const statesResult = await this.getAll()
+    if (statesResult.err) {
+      this.logger.warn("Failed to load entitlement states for lakehouse snapshot emission", {
+        error: statesResult.err.message,
+      })
+      return []
+    }
+
+    const stateByEntitlementId = new Map<string, EntitlementState>()
+    for (const state of statesResult.val) {
+      if (!stateByEntitlementId.has(state.id)) {
+        stateByEntitlementId.set(state.id, state)
+      }
+    }
+
+    const snapshots: LakehouseEntitlementSnapshotEvent[] = []
+    const missingStates: string[] = []
+
+    for (const entitlementId of referencedEntitlementIds) {
+      if (params.seenSnapshotSet.has(entitlementId)) {
+        continue
+      }
+
+      const state = stateByEntitlementId.get(entitlementId)
+      if (!state) {
+        missingStates.push(entitlementId)
+        continue
+      }
+
+      const timestamp =
+        typeof state.computedAt === "number" && Number.isFinite(state.computedAt)
+          ? state.computedAt
+          : Date.now()
+
+      const normalizedGrants = normalizeJsonValue(state.grants)
+      const normalizedResetConfig = normalizeJsonValue(state.resetConfig ?? null)
+      const normalizedMetadata = normalizeJsonValue(state.metadata ?? null)
+
+      snapshots.push({
+        id: state.id,
+        event_date: toEventDate(timestamp),
+        project_id: state.projectId,
+        customer_id: state.customerId,
+        timestamp,
+        feature_slug: state.featureSlug,
+        feature_type: state.featureType,
+        unit_of_measure: state.unitOfMeasure || "unit",
+        reset_config: normalizedResetConfig,
+        aggregation_method: state.aggregationMethod,
+        merging_policy: state.mergingPolicy,
+        limit: state.limit ?? undefined,
+        effective_at: state.effectiveAt,
+        expires_at: state.expiresAt ?? undefined,
+        version: state.version,
+        grants: normalizedGrants,
+        metadata: normalizedMetadata,
+        schema_version: ENTITLEMENT_SNAPSHOT_SCHEMA_VERSION,
+      })
+
+      params.seenSnapshotSet.add(entitlementId)
+    }
+
+    if (missingStates.length > 0) {
+      this.logger.warn("Missing entitlement state for lakehouse snapshot emission", {
+        missing_count: missingStates.length,
+      })
+    }
+
+    return snapshots
+  }
+
+  private async flushToR2(
+    prepared: LakehousePreparedPayload,
+    entitlementSnapshots: LakehouseEntitlementSnapshotEvent[]
   ): Promise<{ success: boolean; cursorState: LakehouseCursorState }> {
     try {
       if (
         prepared.usageRecords.length === 0 &&
         prepared.verificationRecords.length === 0 &&
         prepared.metadataRecords.length === 0 &&
-        prepared.entitlementSnapshots.length === 0
+        entitlementSnapshots.length === 0
       ) {
         return { success: true, cursorState: prepared.cursorState }
       }
@@ -879,7 +967,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         usageRecords: prepared.usageRecords,
         verificationRecords: prepared.verificationRecords,
         metadataRecords: prepared.metadataRecords,
-        entitlementSnapshots: prepared.entitlementSnapshots,
+        entitlementSnapshots,
       })
 
       return {

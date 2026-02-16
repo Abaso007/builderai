@@ -10,7 +10,7 @@ import {
   issueLakehouseCatalogCredentials,
   parseScopedId,
   resolveScopedProjectId,
-} from "~/lakehouse/catalog-credentials"
+} from "~/lakehouse/service"
 
 const tags = ["lakehouse"]
 
@@ -18,7 +18,6 @@ const responseSchema = z.object({
   bucket: z.string(),
   prefix: z.string(),
   durationSeconds: z.number().int(),
-  workspaceId: z.string(),
   r2Endpoint: z.string().url(),
   credentials: z.object({
     accessKeyId: z.string(),
@@ -64,15 +63,7 @@ export const registerGetCatalogCredentialsV1 = (app: App) =>
     const body = c.req.valid("json")
     const key = await keyAuth(c)
     const requestedProjectId = parseScopedId(body.projectId, "projectId")
-    const workspaceId = c.get("workspaceId")
     const callerProjectId = c.get("projectId")
-
-    if (!workspaceId) {
-      throw new UnpriceApiError({
-        code: "UNAUTHORIZED",
-        message: "workspace id is required",
-      })
-    }
 
     if (!callerProjectId) {
       throw new UnpriceApiError({
@@ -91,7 +82,6 @@ export const registerGetCatalogCredentialsV1 = (app: App) =>
     const durationSeconds = body.durationSeconds ?? 60
     const credentials = await issueLakehouseCatalogCredentials({
       env: c.env,
-      workspaceId,
       projectId: scopedProjectId,
       customerId: scopedCustomerId,
       durationSeconds,

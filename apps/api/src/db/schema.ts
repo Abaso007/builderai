@@ -8,7 +8,7 @@ import {
   unique,
 } from "drizzle-orm/sqlite-core"
 
-export const version = "usagelimiter_v1"
+export const version = "usagelimiter_v2"
 
 export const pgTableProject = sqliteTableCreator((name) => `${version}_${name}`)
 
@@ -44,14 +44,7 @@ export const usageRecords = pgTableProject(
     cost: numeric(),
     rate_amount: numeric(),
     rate_currency: text(),
-    entitlement_snapshot_id: text(),
-    entitlement_version: text(),
-    entitlement_feature_type: text(),
-    entitlement_limit: integer(),
-    entitlement_overage_strategy: text(),
-    entitlement_effective_at: integer(),
-    entitlement_expires_at: integer(),
-    entitlement_snapshot: text(),
+    entitlement_id: text().notNull(),
     // 0 = not deleted, 1 = deleted
     deleted: integer().notNull().default(0),
     // first-class analytics columns
@@ -83,14 +76,7 @@ export const verifications = pgTableProject(
     metadata: text(),
     usage: numeric(),
     remaining: numeric(),
-    entitlement_snapshot_id: text(),
-    entitlement_version: text(),
-    entitlement_feature_type: text(),
-    entitlement_limit: integer(),
-    entitlement_overage_strategy: text(),
-    entitlement_effective_at: integer(),
-    entitlement_expires_at: integer(),
-    entitlement_snapshot: text(),
+    entitlement_id: text().notNull(),
     allowed: integer().notNull().default(0),
     // first-class analytics columns
     country: text().default("UNK"),

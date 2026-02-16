@@ -7,8 +7,6 @@ export const LAKEHOUSE_SOURCES = [
 
 export type LakehouseSource = (typeof LAKEHOUSE_SOURCES)[number]
 
-export const LAKEHOUSE_SCHEMA_VERSION = 2
-
 export const LAKEHOUSE_INTERNAL_METADATA_KEYS = [
   "cost",
   "rate",

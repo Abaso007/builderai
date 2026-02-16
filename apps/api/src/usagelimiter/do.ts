@@ -3,6 +3,7 @@ import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
 import type {
   CurrentUsage,
+  EntitlementState,
   MinimalEntitlement,
   ReportUsageRequest,
   ReportUsageResult,
@@ -107,6 +108,25 @@ const summarizeUsageResult = (
     degraded: result.degraded,
     degradedReason: result.degradedReason,
   }
+}
+
+const buildUsageByFeature = (params: {
+  states: EntitlementState[]
+  customerId: string
+  projectId: string
+}): Record<string, number> => {
+  const { states, customerId, projectId } = params
+  const usageByFeature: Record<string, number> = {}
+
+  for (const state of states) {
+    if (state.customerId !== customerId || state.projectId !== projectId) {
+      continue
+    }
+
+    usageByFeature[state.featureSlug] = Number(state.meter.usage ?? 0)
+  }
+
+  return usageByFeature
 }
 
 // This durable object takes care of handling the usage of every feature per customer.
@@ -769,6 +789,8 @@ export class DurableObjectUsagelimiter extends Server {
       const parsed = JSON.parse(message) as {
         type?: "snapshot_request"
         windowSeconds?: 300 | 3600 | 86400 | 604800
+        customerId?: string
+        projectId?: string
       }
 
       if (parsed.type === "snapshot_request") {
@@ -786,10 +808,31 @@ export class DurableObjectUsagelimiter extends Server {
           return
         }
 
+        let usageByFeature: Record<string, number> | undefined
+
+        if (parsed.customerId && parsed.projectId) {
+          const allStatesResult = await this.storage.getAll()
+
+          if (allStatesResult.err) {
+            this.logger.warn("Failed to resolve in-memory usage for snapshot", {
+              customerId: parsed.customerId,
+              projectId: parsed.projectId,
+              error: allStatesResult.err.message,
+            })
+          } else {
+            usageByFeature = buildUsageByFeature({
+              states: allStatesResult.val,
+              customerId: parsed.customerId,
+              projectId: parsed.projectId,
+            })
+          }
+        }
+
         conn.send(
           JSON.stringify({
             type: "snapshot",
             metrics: val,
+            usageByFeature,
             source: "durable_object",
           })
         )

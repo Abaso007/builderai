@@ -5,43 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1770048299223,
-      "tag": "0000_real_bruce_banner",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1770304099756,
-      "tag": "0001_add_analytics_columns",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1770309412487,
-      "tag": "0002_sad_layla_miller",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1771075000000,
-      "tag": "0003_sturdy_usage_rollups",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1771075600000,
-      "tag": "0004_clever_report_usage_rollups",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1771080000000,
-      "tag": "0005_marvelous_entitlement_snapshots",
+      "when": 1771264840314,
+      "tag": "0000_cynical_puff_adder",
       "breakpoints": true
     }
   ]

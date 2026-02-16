@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Apply R2 lifecycle rules to the lakehouse bucket for the given environment.
 # Run from apps/api: ./scripts/setup-r2-lifecycle.sh <env>
-# Requires: WRANGLER_R2_SQL_AUTH_TOKEN not needed for lifecycle; jurisdiction eu.
+# Requires: WRANGLER_R2_SQL_AUTH_TOKEN not needed for lifecycle.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,10 +48,10 @@ echo "Using config: $LIFECYCLE_FILE"
 echo ""
 
 cd "$API_DIR"
-npx wrangler r2 bucket lifecycle set "$BUCKET" --file "$LIFECYCLE_FILE" --jurisdiction "eu"
+npx wrangler r2 bucket lifecycle set "$BUCKET" --file "$LIFECYCLE_FILE"
 
 echo ""
 echo "Lifecycle rules applied successfully."
 echo ""
 echo "To verify, run:"
-echo "  npx wrangler r2 bucket lifecycle list $BUCKET --jurisdiction eu"
+echo "  npx wrangler r2 bucket lifecycle list $BUCKET"

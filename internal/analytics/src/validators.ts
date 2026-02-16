@@ -102,14 +102,7 @@ export const featureVerificationSchemaV1 = z.object({
   meta_id: bigintToNumber.default(0),
   usage: z.number().optional(),
   remaining: z.number().optional(),
-  entitlement_snapshot_id: z.string().optional(),
-  entitlement_version: z.string().optional(),
-  entitlement_feature_type: z.string().optional(),
-  entitlement_limit: z.number().nullable().optional(),
-  entitlement_overage_strategy: z.string().optional(),
-  entitlement_effective_at: z.number().optional(),
-  entitlement_expires_at: z.number().nullable().optional(),
-  entitlement_snapshot: z.string().optional(),
+  entitlement_id: z.string(),
   // metadata is kept for internal SQLite storage, stripped before sending to Tinybird
   metadata: z.record(z.string(), z.unknown()).nullable().optional(),
   // first-class analytics columns
@@ -138,14 +131,7 @@ export const featureUsageSchemaV1 = z.object({
   cost: z.number().optional(),
   rate_amount: z.number().optional(),
   rate_currency: z.string().optional(),
-  entitlement_snapshot_id: z.string().optional(),
-  entitlement_version: z.string().optional(),
-  entitlement_feature_type: z.string().optional(),
-  entitlement_limit: z.number().nullable().optional(),
-  entitlement_overage_strategy: z.string().optional(),
-  entitlement_effective_at: z.number().optional(),
-  entitlement_expires_at: z.number().nullable().optional(),
-  entitlement_snapshot: z.string().optional(),
+  entitlement_id: z.string(),
   // metadata is kept for internal SQLite storage, stripped before sending to Tinybird
   metadata: z.record(z.string(), z.unknown()).nullable().optional(),
   // first-class analytics columns

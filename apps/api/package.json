@@ -2,9 +2,11 @@
   "name": "api",
   "scripts": {
     "scripts:r2-lifecycle": "./scripts/setup-r2-lifecycle.sh",
-    "scripts:r2-pipelines": "./scripts/configure-r2-and-pipelines.sh",
+    "scripts:r2-pipelines": "./scripts/configure-lakehouse-pipelines.sh",
+    "scripts:lakehouse-schemas": "pnpm --filter @unprice/db exec tsx ../../apps/api/scripts/generate-lakehouse-schemas.ts",
     "deploy:preview": "wrangler deploy --env preview",
     "deploy:prod": "wrangler deploy --env prod",
+    "dev:remote": "wrangler dev -e dev --remote",
     "dev": "sh dev.sh",
     "dev:wrangler": "wrangler dev -e dev",
     "start": "wrangler dev -e dev",

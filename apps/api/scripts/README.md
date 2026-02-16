@@ -1,14 +1,17 @@
 # API scripts: R2 and Pipelines configuration
 
-Scripts to configure R2 buckets, R2 Data Catalog, lifecycle rules, and Cloudflare Pipelines for the lakehouse data sources: **verifications**, **usage**, **metadata**, and **entitlements**.
+Scripts to configure R2 Data Catalog, lifecycle rules, and Cloudflare Pipelines for the lakehouse data sources: **verifications**, **usage**, **metadata**, and **entitlements**.
+R2 buckets are assumed to already exist.
 
 Reference: [Build an end-to-end data pipeline (Cloudflare)](https://developers.cloudflare.com/r2-sql/tutorials/end-to-end-pipeline/).
 
 ## Layout
 
-- **`configure-r2-and-pipelines.sh`** – Main entry: creates buckets (optional), enables Data Catalog, creates streams/sinks/pipelines for all four sources, optionally applies lifecycle.
+- **`configure-lakehouse-pipelines.sh`** – Main entry: enables Data Catalog, creates streams/sinks/pipelines for all four sources, optionally applies lifecycle. Does not create buckets.
+- **`configure-r2-and-pipelines.sh`** – Deprecated wrapper to `configure-lakehouse-pipelines.sh`.
 - **`setup-r2-lifecycle.sh`** – Applies R2 lifecycle rules (raw delete after 7 days, compacted retention, multipart abort) to the chosen env bucket.
 - **`r2-lifecycle.json`** – Lifecycle rules used by `setup-r2-lifecycle.sh`.
+- **`generate-lakehouse-schemas.ts`** – Regenerates `schemas/*.json` from `@unprice/lakehouse` registry.
 - **`schemas/`** – Pipeline stream JSON schemas (these define the **Iceberg table columns**; see [Iceberg schema and partitioning](docs/iceberg-schema-and-partitioning.md)):
   - `usage.json` – Usage events (aligned with `LakehouseUsageEvent`).
   - `verifications.json` – Verification events (aligned with `LakehouseVerificationEvent`).
@@ -20,7 +23,23 @@ Reference: [Build an end-to-end data pipeline (Cloudflare)](https://developers.c
 All scripts are intended to be run from **`apps/api`** (where `wrangler` and `node_modules` live). You can also use npm from `apps/api`:
 
 - `npm run scripts:r2-lifecycle -- dev` (or `preview` / `prod`)
-- `npm run scripts:r2-pipelines -- dev` (options: `--skip-buckets`, `--skip-lifecycle`, `--skip-compaction`)
+- `npm run scripts:r2-pipelines -- dev` (options: `--skip-lifecycle`, `--skip-compaction`, `--recreate`, `--delete-only`, `--name-prefix`, `--name-suffix`)
+- `npm run scripts:lakehouse-schemas` (regenerates pipeline schema JSON files)
+
+## Regenerate schema JSON files
+
+When fields change in `internal/lakehouse/src/registry.ts`, regenerate Cloudflare stream schema files:
+
+```bash
+npm run scripts:lakehouse-schemas
+```
+
+This writes:
+
+- `scripts/schemas/usage.json`
+- `scripts/schemas/verifications.json`
+- `scripts/schemas/metadata.json`
+- `scripts/schemas/entitlements.json`
 
 ## Prerequisites
 
@@ -33,44 +52,68 @@ All scripts are intended to be run from **`apps/api`** (where `wrangler` and `no
      - **Workers R2 Data Catalog**: Read, Edit
      - **Workers R2 SQL**: Read (for querying)
      - **Workers R2 Storage**: Read, Edit
-   - Export it:
+   - Export it (preferred variable):
      ```bash
      export WRANGLER_R2_SQL_AUTH_TOKEN="<your-token>"
      ```
+   - Optional fallback: `CLOUDFLARE_API_TOKEN` is also accepted by `configure-lakehouse-pipelines.sh` and will be used when `WRANGLER_R2_SQL_AUTH_TOKEN` is unset.
 
 3. **Environments and buckets** (must match `wrangler.jsonc`):
    - `dev` → `unprice-lakehouse-dev`
    - `preview` → `unprice-lakehouse-preview`
    - `prod` → `unprice-lakehouse-prod`
+   - Buckets must already exist before running pipeline configuration.
 
 ## Usage
 
-### Full configuration (buckets + catalog + streams + sinks + pipelines + lifecycle)
+### Pipeline configuration (catalog + streams + sinks + pipelines + lifecycle)
 
 From `apps/api`:
 
 ```bash
 export WRANGLER_R2_SQL_AUTH_TOKEN="<token>"
-./scripts/configure-r2-and-pipelines.sh dev
+./scripts/configure-lakehouse-pipelines.sh dev
 ```
 
-For preview/prod, replace `dev` with `preview` or `prod`.
+Or:
+
+```bash
+export CLOUDFLARE_API_TOKEN="<token>"
+./scripts/configure-lakehouse-pipelines.sh dev
+```
+
+Use `dev`, `preview`, or `prod` depending on the environment you want to provision.
 
 ### Options
 
-- **`--skip-buckets`** – Do not create the R2 bucket (use existing bucket from your wrangler env).
 - **`--skip-lifecycle`** – Do not apply R2 lifecycle rules.
 - **`--skip-compaction`** – Do not enable R2 Data Catalog compaction.
+- **`--recreate`** – Delete matching pipelines/sinks/streams first, then recreate.
+- **`--delete-only`** – Delete matching pipelines/sinks/streams and exit (no create).
+- **`--name-prefix <prefix>`** – Prefix for stream/sink/pipeline names.
+- **`--name-suffix <suffix>`** – Suffix for stream/sink/pipeline names (default is `_<environment>`).
 
 Examples:
 
 ```bash
-# Only catalog + pipelines + lifecycle (bucket already exists)
-./scripts/configure-r2-and-pipelines.sh prod --skip-buckets
-
 # Catalog + pipelines, no lifecycle
-./scripts/configure-r2-and-pipelines.sh dev --skip-lifecycle
+./scripts/configure-lakehouse-pipelines.sh dev --skip-lifecycle
+
+# Force clean recreate for one environment naming scheme
+./scripts/configure-lakehouse-pipelines.sh dev --recreate
+
+# Delete only (for broken partial setup), then run again without --delete-only
+./scripts/configure-lakehouse-pipelines.sh dev --delete-only
+
+# Custom name format (prefix + suffix)
+./scripts/configure-lakehouse-pipelines.sh prod --name-prefix "team1_" --name-suffix "_prod"
 ```
+
+## Local development strategy
+
+- Use this script for cloud-backed validation in `dev`, `preview`, or `prod`.
+- Run Workers locally with `wrangler dev` when you only need local API iteration.
+- Use cloud environments whenever you need to validate full stream -> sink -> catalog flow.
 
 ### Lifecycle only
 
@@ -90,9 +133,14 @@ Lifecycle rules (see `r2-lifecycle.json`):
 
 | Resource type | Names |
 |--------------|--------|
-| **Streams** | `lakehouse_usage_stream`, `lakehouse_verifications_stream`, `lakehouse_metadata_stream`, `lakehouse_entitlements_stream` |
-| **Sinks** | `lakehouse_usage_sink`, `lakehouse_verifications_sink`, `lakehouse_metadata_sink`, `lakehouse_entitlements_sink` |
-| **Pipelines** | `lakehouse_usage_pipeline`, `lakehouse_verifications_pipeline`, `lakehouse_metadata_pipeline`, `lakehouse_entitlements_pipeline` |
+| **Streams** | `${prefix}lakehouse_usage_stream${suffix}`, `${prefix}lakehouse_verifications_stream${suffix}`, `${prefix}lakehouse_metadata_stream${suffix}`, `${prefix}lakehouse_entitlements_stream${suffix}` |
+| **Sinks** | `${prefix}lakehouse_usage_sink${suffix}`, `${prefix}lakehouse_verifications_sink${suffix}`, `${prefix}lakehouse_metadata_sink${suffix}`, `${prefix}lakehouse_entitlements_sink${suffix}` |
+| **Pipelines** | `${prefix}lakehouse_usage_pipeline${suffix}`, `${prefix}lakehouse_verifications_pipeline${suffix}`, `${prefix}lakehouse_metadata_pipeline${suffix}`, `${prefix}lakehouse_entitlements_pipeline${suffix}` |
+
+Default naming:
+
+- `prefix=""`
+- `suffix="_<environment>"` (for example `_preview` or `_prod`)
 
 Data catalog namespace: **`lakehouse`**. Tables: **`usage`**, **`verification`**, **`metadata`**, **`entitlement_snapshot`**.
 
@@ -121,9 +169,9 @@ Data catalog namespace: **`lakehouse`**. Tables: **`usage`**, **`verification`**
 
 ## Idempotency
 
-Re-running `configure-r2-and-pipelines.sh` is safe: create steps are best-effort; if a resource already exists, the script logs and continues. To recreate a stream/sink/pipeline, delete it in the dashboard or via wrangler, then run the script again.
+Re-running `configure-lakehouse-pipelines.sh` is safe: existing resources are detected and skipped. For clean replacement, use `--recreate` (or `--delete-only` followed by a normal run).
 
 ## Related
 
-- **Wrangler config** – `apps/api/wrangler.jsonc` defines R2 bucket bindings (`LAKEHOUSE`) per env.
+- **Wrangler config** – `apps/api/wrangler.jsonc` defines R2 bucket bindings (`LAKEHOUSE`). `preview`/`prod` also define `LAKEHOUSE_PIPELINE_*` bindings that point to stream resources (`lakehouse_<source>_stream_<environment>`). Local `dev` can ingest over HTTP stream endpoints via `LAKEHOUSE_STREAM_*_URL` and `LAKEHOUSE_STREAM_AUTH_TOKEN`.
 - **Lakehouse types/registry** – `internal/lakehouse/src/interface.ts` and `internal/lakehouse/src/registry.ts` define the shared event contracts that `scripts/schemas/` align with.
