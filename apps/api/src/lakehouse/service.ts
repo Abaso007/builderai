@@ -8,10 +8,6 @@ import {
 interface LakehouseServiceEnv {
   APP_ENV?: "development" | "preview" | "production"
   CLOUDFLARE_API_TOKEN?: string
-  LAKEHOUSE_PIPELINE_USAGE?: { send: (records: unknown[]) => Promise<void> }
-  LAKEHOUSE_PIPELINE_VERIFICATION?: { send: (records: unknown[]) => Promise<void> }
-  LAKEHOUSE_PIPELINE_METADATA?: { send: (records: unknown[]) => Promise<void> }
-  LAKEHOUSE_PIPELINE_ENTITLEMENT_SNAPSHOT?: { send: (records: unknown[]) => Promise<void> }
   LAKEHOUSE_STREAM_USAGE_URL?: string
   LAKEHOUSE_STREAM_VERIFICATIONS_URL?: string
   LAKEHOUSE_STREAM_METADATA_URL?: string
@@ -44,55 +40,13 @@ class HttpLakehousePipelineSender {
   }
 }
 
-function createBindingSenders(env: LakehouseServiceEnv): LakehousePipelineBindingsBySource {
-  if (
-    !env.LAKEHOUSE_PIPELINE_USAGE ||
-    !env.LAKEHOUSE_PIPELINE_VERIFICATION ||
-    !env.LAKEHOUSE_PIPELINE_METADATA ||
-    !env.LAKEHOUSE_PIPELINE_ENTITLEMENT_SNAPSHOT
-  ) {
-    throw new UnpriceApiError({
-      code: "INTERNAL_SERVER_ERROR",
-      message:
-        "Lakehouse pipeline bindings are required outside development (LAKEHOUSE_PIPELINE_USAGE, LAKEHOUSE_PIPELINE_VERIFICATION, LAKEHOUSE_PIPELINE_METADATA, LAKEHOUSE_PIPELINE_ENTITLEMENT_SNAPSHOT).",
-    })
-  }
-
-  return {
-    usage: env.LAKEHOUSE_PIPELINE_USAGE,
-    verification: env.LAKEHOUSE_PIPELINE_VERIFICATION,
-    metadata: env.LAKEHOUSE_PIPELINE_METADATA,
-    entitlement_snapshot: env.LAKEHOUSE_PIPELINE_ENTITLEMENT_SNAPSHOT,
-  }
-}
-
-function hasBindingSenders(env: LakehouseServiceEnv): boolean {
-  return Boolean(
-    env.LAKEHOUSE_PIPELINE_USAGE &&
-      env.LAKEHOUSE_PIPELINE_VERIFICATION &&
-      env.LAKEHOUSE_PIPELINE_METADATA &&
-      env.LAKEHOUSE_PIPELINE_ENTITLEMENT_SNAPSHOT
-  )
-}
-
-function hasHttpStreamConfig(env: LakehouseServiceEnv): boolean {
-  const token = env.LAKEHOUSE_STREAM_AUTH_TOKEN ?? env.CLOUDFLARE_API_TOKEN
-  return Boolean(
-    token &&
-      env.LAKEHOUSE_STREAM_USAGE_URL &&
-      env.LAKEHOUSE_STREAM_VERIFICATIONS_URL &&
-      env.LAKEHOUSE_STREAM_METADATA_URL &&
-      env.LAKEHOUSE_STREAM_ENTITLEMENTS_URL
-  )
-}
-
 function createHttpStreamSenders(env: LakehouseServiceEnv): LakehousePipelineBindingsBySource {
   const token = env.LAKEHOUSE_STREAM_AUTH_TOKEN ?? env.CLOUDFLARE_API_TOKEN
   if (!token) {
     throw new UnpriceApiError({
       code: "INTERNAL_SERVER_ERROR",
       message:
-        "Lakehouse development HTTP ingest requires LAKEHOUSE_STREAM_AUTH_TOKEN (or CLOUDFLARE_API_TOKEN).",
+        "Lakehouse HTTP ingest requires LAKEHOUSE_STREAM_AUTH_TOKEN (or CLOUDFLARE_API_TOKEN).",
     })
   }
 
@@ -105,7 +59,7 @@ function createHttpStreamSenders(env: LakehouseServiceEnv): LakehousePipelineBin
   if (missing.length > 0) {
     throw new UnpriceApiError({
       code: "INTERNAL_SERVER_ERROR",
-      message: `Lakehouse development HTTP ingest is missing stream URLs: ${missing.join(", ")}`,
+      message: `Lakehouse HTTP ingest is missing stream URLs: ${missing.join(", ")}`,
     })
   }
 
@@ -117,7 +71,7 @@ function createHttpStreamSenders(env: LakehouseServiceEnv): LakehousePipelineBin
   if (!usageUrl || !verificationUrl || !metadataUrl || !entitlementUrl) {
     throw new UnpriceApiError({
       code: "INTERNAL_SERVER_ERROR",
-      message: "Lakehouse development HTTP ingest stream URLs are invalid.",
+      message: "Lakehouse HTTP ingest stream URLs are invalid.",
     })
   }
 
@@ -133,33 +87,10 @@ export function createCloudflareLakehouseService(params: {
   logger: Logger
   env: LakehouseServiceEnv
 }): CloudflarePipelineLakehouseService {
-  let pipelines: LakehousePipelineBindingsBySource
-  let mode: "http-stream" | "binding"
-
-  if (params.env.APP_ENV === "development") {
-    if (hasHttpStreamConfig(params.env)) {
-      pipelines = createHttpStreamSenders(params.env)
-      mode = "http-stream"
-    } else if (hasBindingSenders(params.env)) {
-      pipelines = createBindingSenders(params.env)
-      mode = "binding"
-      params.logger.warn(
-        "Lakehouse dev HTTP stream config missing; falling back to pipeline bindings"
-      )
-    } else {
-      throw new UnpriceApiError({
-        code: "INTERNAL_SERVER_ERROR",
-        message:
-          "Lakehouse development mode requires HTTP stream config (LAKEHOUSE_STREAM_*_URL + LAKEHOUSE_STREAM_AUTH_TOKEN/CLOUDFLARE_API_TOKEN) or pipeline bindings.",
-      })
-    }
-  } else {
-    pipelines = createBindingSenders(params.env)
-    mode = "binding"
-  }
+  const pipelines = createHttpStreamSenders(params.env)
 
   params.logger.debug("Lakehouse sender mode selected", {
-    mode,
+    mode: "http-stream",
     appEnv: params.env.APP_ENV ?? "unknown",
   })
 

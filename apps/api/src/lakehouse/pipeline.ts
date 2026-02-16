@@ -296,6 +296,8 @@ export function buildLakehousePreparedPayload(params: {
           ? Number(record.remaining)
           : undefined,
       schema_version: VERIFICATION_SCHEMA_VERSION,
+      // TODO: add cost and rate_amount and rate_currency
+      // TODO: we could simplify things by creating tables in the DO with entitlements and metadata
     })
   )
 

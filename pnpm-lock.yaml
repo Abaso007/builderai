@@ -98,6 +98,9 @@ importers:
       hono-party:
         specifier: ^0.0.6
         version: 0.0.6(@cloudflare/workers-types@4.20260115.0)(hono@4.11.4)(partyserver@0.0.65(@cloudflare/workers-types@4.20260115.0))
+      iceberg-js:
+        specifier: ^0.8.1
+        version: 0.8.1
       partyserver:
         specifier: ^0.0.65
         version: 0.0.65(@cloudflare/workers-types@4.20260115.0)
@@ -738,9 +741,6 @@ importers:
 
   internal/lakehouse:
     dependencies:
-      '@unprice/logging':
-        specifier: workspace:^
-        version: link:../logging
       zod:
         specifier: ^3.24.2
         version: 3.25.76
@@ -8512,6 +8512,10 @@ packages:
     resolution: {integrity: sha512-5gs5ytaNjBrh5Ow3zrvdUUY+0VxIuWVL4i9irt6friV+BqdCfmV11CQTWMiBYWHbXhco+J1kHfTOUkePhCDvMA==}
     engines: {node: '>=18'}
     hasBin: true
+
+  iceberg-js@0.8.1:
+    resolution: {integrity: sha512-1dhVQZXhcHje7798IVM+xoo/1ZdVfzOMIc8/rgVSijRK38EDqOJoGula9N/8ZI5RD8QTxNQtK/Gozpr+qUqRRA==}
+    engines: {node: '>=20.0.0'}
 
   ico-endec@0.1.6:
     resolution: {integrity: sha512-ZdLU38ZoED3g1j3iEyzcQj+wAkY2xfWNkymszfJPoxucIUhK7NayQ+/C4Kv0nDFMIsbtbEHldv3V8PU494/ueQ==}
@@ -21356,6 +21360,8 @@ snapshots:
   humanize-duration@3.33.2: {}
 
   husky@9.1.7: {}
+
+  iceberg-js@0.8.1: {}
 
   ico-endec@0.1.6: {}
 

@@ -28,24 +28,6 @@
         "LAKEHOUSE_BUCKET_NAME": "unprice-lakehouse-prod",
         "LAKEHOUSE_ICEBERG_PREFIX": "__r2_data_catalog"
       },
-      "pipelines": [
-        {
-          "pipeline": "lakehouse_usage_stream_prod",
-          "binding": "LAKEHOUSE_PIPELINE_USAGE"
-        },
-        {
-          "pipeline": "lakehouse_verifications_stream_prod",
-          "binding": "LAKEHOUSE_PIPELINE_VERIFICATION"
-        },
-        {
-          "pipeline": "lakehouse_metadata_stream_prod",
-          "binding": "LAKEHOUSE_PIPELINE_METADATA"
-        },
-        {
-          "pipeline": "lakehouse_entitlements_stream_prod",
-          "binding": "LAKEHOUSE_PIPELINE_ENTITLEMENT_SNAPSHOT"
-        }
-      ],
       "unsafe": {
         "bindings": [
           {
@@ -101,24 +83,6 @@
         "LAKEHOUSE_BUCKET_NAME": "unprice-lakehouse-preview",
         "LAKEHOUSE_ICEBERG_PREFIX": "__r2_data_catalog"
       },
-      "pipelines": [
-        {
-          "pipeline": "lakehouse_usage_stream_preview",
-          "binding": "LAKEHOUSE_PIPELINE_USAGE"
-        },
-        {
-          "pipeline": "lakehouse_verifications_stream_preview",
-          "binding": "LAKEHOUSE_PIPELINE_VERIFICATION"
-        },
-        {
-          "pipeline": "lakehouse_metadata_stream_preview",
-          "binding": "LAKEHOUSE_PIPELINE_METADATA"
-        },
-        {
-          "pipeline": "lakehouse_entitlements_stream_preview",
-          "binding": "LAKEHOUSE_PIPELINE_ENTITLEMENT_SNAPSHOT"
-        }
-      ],
       "unsafe": {
         // # Limit: the number of tokens allowed within a given period in a single
         // # Cloudflare location

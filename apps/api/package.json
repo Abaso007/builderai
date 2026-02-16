@@ -41,6 +41,7 @@
     "drizzle-orm": "^0.44.5",
     "hono": "^4.7.4",
     "hono-party": "^0.0.6",
+    "iceberg-js": "^0.8.1",
     "partyserver": "^0.0.65",
     "stoker": "^1.4.2",
     "ua-parser-js": "^2.0.3",

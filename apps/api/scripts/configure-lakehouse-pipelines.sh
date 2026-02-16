@@ -304,6 +304,141 @@ STREAM_SPECS=(
   "entitlements:entitlements:entitlement_snapshot"
 )
 
+STREAM_ENV_SPECS=(
+  "usage:LAKEHOUSE_STREAM_USAGE_URL"
+  "verifications:LAKEHOUSE_STREAM_VERIFICATIONS_URL"
+  "metadata:LAKEHOUSE_STREAM_METADATA_URL"
+  "entitlements:LAKEHOUSE_STREAM_ENTITLEMENTS_URL"
+)
+
+print_stream_env_block() {
+  local args=()
+  local source
+  local env_key
+  local stream_name
+  local streams_json
+  local env_lines
+
+  for spec in "${STREAM_ENV_SPECS[@]}"; do
+    source="${spec%%:*}"
+    env_key="${spec##*:}"
+    stream_name="$(resource_name "$source" "stream")"
+    args+=("${stream_name}=${env_key}")
+  done
+
+  if ! streams_json="$(npx wrangler pipelines streams list --json --per-page 1000 2>/dev/null)"; then
+    echo "Could not fetch stream ingest URLs automatically."
+    echo "Run: npx wrangler pipelines streams list"
+    return 0
+  fi
+
+  env_lines="$(
+    printf "%s" "$streams_json" | node -e '
+const fs = require("node:fs")
+const input = fs.readFileSync(0, "utf8")
+const specs = process.argv.slice(1).map((entry) => {
+  const idx = entry.indexOf("=")
+  if (idx === -1) return { streamName: entry, envName: entry }
+  return {
+    streamName: entry.slice(0, idx),
+    envName: entry.slice(idx + 1),
+  }
+})
+
+let parsed
+try {
+  parsed = JSON.parse(input)
+} catch {
+  process.exit(0)
+}
+
+function toArray(value) {
+  if (Array.isArray(value)) return value
+  if (!value || typeof value !== "object") return []
+
+  for (const key of ["result", "results", "items", "data", "streams"]) {
+    if (Array.isArray(value[key])) return value[key]
+  }
+
+  for (const candidate of Object.values(value)) {
+    if (Array.isArray(candidate)) return candidate
+  }
+
+  return []
+}
+
+function streamName(row) {
+  if (!row || typeof row !== "object") return ""
+  return (
+    row.name ??
+    row.stream ??
+    row.stream_name ??
+    row.pipeline ??
+    row.pipeline_name ??
+    ""
+  )
+}
+
+function firstUrl(value) {
+  if (typeof value === "string" && /^https?:\/\//i.test(value)) return value
+  if (!value || typeof value !== "object") return ""
+
+  const directKeys = [
+    "url",
+    "endpoint",
+    "http_url",
+    "httpUrl",
+    "http_endpoint",
+    "ingest_url",
+    "ingestUrl",
+  ]
+
+  for (const key of directKeys) {
+    const candidate = value[key]
+    if (typeof candidate === "string" && /^https?:\/\//i.test(candidate)) return candidate
+  }
+
+  if (value.http && typeof value.http === "object") {
+    const candidate = firstUrl(value.http)
+    if (candidate) return candidate
+  }
+
+  const stack = Object.values(value)
+  while (stack.length > 0) {
+    const current = stack.pop()
+    if (!current || typeof current !== "object") continue
+    for (const item of Object.values(current)) {
+      if (typeof item === "string" && /^https?:\/\//i.test(item)) return item
+      if (item && typeof item === "object") stack.push(item)
+    }
+  }
+
+  return ""
+}
+
+const rows = toArray(parsed)
+const lines = specs.map(({ streamName: targetStreamName, envName }) => {
+  const row = rows.find((candidate) => streamName(candidate) === targetStreamName)
+  const url = row ? firstUrl(row) : ""
+  return `${envName}=${url}`
+})
+
+process.stdout.write(lines.join("\n"))
+' "${args[@]}"
+  )"
+
+  echo "Copy/paste for .env:"
+  if [[ -n "$env_lines" ]]; then
+    printf "%s\n" "$env_lines"
+  else
+    printf "LAKEHOUSE_STREAM_USAGE_URL=\n"
+    printf "LAKEHOUSE_STREAM_VERIFICATIONS_URL=\n"
+    printf "LAKEHOUSE_STREAM_METADATA_URL=\n"
+    printf "LAKEHOUSE_STREAM_ENTITLEMENTS_URL=\n"
+  fi
+  printf "LAKEHOUSE_STREAM_AUTH_TOKEN=\${WRANGLER_R2_SQL_AUTH_TOKEN}\n"
+}
+
 if [[ "$RECREATE" == true || "$DELETE_ONLY" == true ]]; then
   echo ">>> Cleanup mode: deleting existing pipelines/sinks/streams for this environment naming scheme"
   for spec in "${STREAM_SPECS[@]}"; do
@@ -427,3 +562,5 @@ echo ""
 echo "Next steps:"
 echo "  - Get stream ingest endpoints: npx wrangler pipelines streams list"
 echo "  - Query R2 SQL: npx wrangler r2 sql query \"<WAREHOUSE>\" \"SELECT * FROM $NAMESPACE.usage LIMIT 10\""
+echo ""
+print_stream_env_block

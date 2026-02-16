@@ -5,6 +5,11 @@ declare namespace Cloudflare {
 	interface Env {
 		LAKEHOUSE_BUCKET_NAME: "unprice-lakehouse-prod" | "unprice-lakehouse-preview" | "unprice-lakehouse-dev";
 		LAKEHOUSE_ICEBERG_PREFIX: "lakehouse/iceberg";
+		LAKEHOUSE_STREAM_AUTH_TOKEN: string;
+		LAKEHOUSE_STREAM_USAGE_URL: string;
+		LAKEHOUSE_STREAM_VERIFICATIONS_URL: string;
+		LAKEHOUSE_STREAM_METADATA_URL: string;
+		LAKEHOUSE_STREAM_ENTITLEMENTS_URL: string;
 		ENCRYPTION_KEY: string;
 		AXIOM_API_TOKEN: string;
 		UNPRICE_API_URL: string;
@@ -30,10 +35,6 @@ declare namespace Cloudflare {
 		projectdo: DurableObjectNamespace<import("./src/index").DurableObjectProject>;
 		LAKEHOUSE: R2Bucket;
 		RL_FREE_600_60s: RateLimit;
-		LAKEHOUSE_PIPELINE_USAGE: import("cloudflare:pipelines").Pipeline<import("cloudflare:pipelines").PipelineRecord>;
-		LAKEHOUSE_PIPELINE_VERIFICATION: import("cloudflare:pipelines").Pipeline<import("cloudflare:pipelines").PipelineRecord>;
-		LAKEHOUSE_PIPELINE_METADATA: import("cloudflare:pipelines").Pipeline<import("cloudflare:pipelines").PipelineRecord>;
-		LAKEHOUSE_PIPELINE_ENTITLEMENT_SNAPSHOT: import("cloudflare:pipelines").Pipeline<import("cloudflare:pipelines").PipelineRecord>;
 	}
 }
 interface Env extends Cloudflare.Env {}
@@ -41,7 +42,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "LAKEHOUSE_BUCKET_NAME" | "LAKEHOUSE_ICEBERG_PREFIX" | "ENCRYPTION_KEY" | "AXIOM_API_TOKEN" | "UNPRICE_API_URL" | "AUTH_SECRET" | "AXIOM_DATASET" | "UNPRICE_API_KEY" | "UPSTASH_REDIS_REST_URL" | "CLOUDFLARE_ZONE_ID" | "TINYBIRD_URL" | "TINYBIRD_TOKEN" | "NODE_ENV" | "CLOUDFLARE_API_TOKEN" | "DRIZZLE_LOG" | "UPSTASH_REDIS_REST_TOKEN" | "DATABASE_READ2_URL" | "APP_ENV" | "DATABASE_READ1_URL" | "DATABASE_URL" | "CLOUDFLARE_API_TOKEN_LAKEHOUSE" | "CLOUDFLARE_ACCOUNT_ID" | "CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "LAKEHOUSE_BUCKET_NAME" | "LAKEHOUSE_ICEBERG_PREFIX" | "LAKEHOUSE_STREAM_AUTH_TOKEN" | "LAKEHOUSE_STREAM_USAGE_URL" | "LAKEHOUSE_STREAM_VERIFICATIONS_URL" | "LAKEHOUSE_STREAM_METADATA_URL" | "LAKEHOUSE_STREAM_ENTITLEMENTS_URL" | "ENCRYPTION_KEY" | "AXIOM_API_TOKEN" | "UNPRICE_API_URL" | "AUTH_SECRET" | "AXIOM_DATASET" | "UNPRICE_API_KEY" | "UPSTASH_REDIS_REST_URL" | "CLOUDFLARE_ZONE_ID" | "TINYBIRD_URL" | "TINYBIRD_TOKEN" | "NODE_ENV" | "CLOUDFLARE_API_TOKEN" | "DRIZZLE_LOG" | "UPSTASH_REDIS_REST_TOKEN" | "DATABASE_READ2_URL" | "APP_ENV" | "DATABASE_READ1_URL" | "DATABASE_URL" | "CLOUDFLARE_API_TOKEN_LAKEHOUSE" | "CLOUDFLARE_ACCOUNT_ID" | "CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID">> {}
 }
 declare module "*.sql" {
 	const value: string;
