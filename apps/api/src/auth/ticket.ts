@@ -24,7 +24,6 @@ export type RealtimeTicketPayload = {
   iss: typeof TICKET_ISSUER
   aud: typeof REALTIME_TICKET_AUDIENCE
   sub: string
-  userId: string
   projectId: string
   customerId: string
   iat: number
@@ -43,7 +42,6 @@ type CreateTicketParams = {
 
 type CreateRealtimeTicketParams = {
   secret: string
-  userId: string
   projectId: string
   customerId: string
   expiresInSeconds: number
@@ -193,8 +191,7 @@ export async function createRealtimeTicket(params: CreateRealtimeTicketParams): 
   const payload: RealtimeTicketPayload = {
     iss: TICKET_ISSUER,
     aud: REALTIME_TICKET_AUDIENCE,
-    sub: params.userId,
-    userId: params.userId,
+    sub: params.projectId,
     projectId: params.projectId,
     customerId: params.customerId,
     iat: now,
@@ -240,7 +237,7 @@ export async function verifyRealtimeTicket(params: {
 
   assertCommonClaims(payload)
 
-  if (!payload.userId || !payload.projectId || !payload.customerId) {
+  if (!payload.projectId || !payload.customerId) {
     unauthorized("Invalid ticket")
   }
 

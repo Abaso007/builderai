@@ -28,7 +28,6 @@ import {
   BarChart2,
   CircleHelp,
   Clock,
-  RefreshCw,
   Settings,
   Shield,
   ShieldCheck,
@@ -591,18 +590,22 @@ export function RealtimePanel(props: {
             <div className="inline-block">
               <div className="flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs shadow-sm">
                 <span className="relative flex h-2 w-2">
-                  {!isTicketExpired && (
+                  {realtimeTicket && !isTicketExpired && (
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
                   )}
                   <span
                     className={cn(
                       "relative inline-flex h-2 w-2 rounded-full",
-                      isTicketExpired ? "bg-amber-500" : "bg-emerald-500"
+                      !realtimeTicket
+                        ? "bg-muted-foreground/50"
+                        : isTicketExpired
+                          ? "bg-amber-500"
+                          : "bg-emerald-500"
                     )}
                   />
                 </span>
                 <span className="font-medium text-muted-foreground">
-                  {isTicketExpired ? "Refresh required" : "Live"}
+                  {!realtimeTicket ? "Unavailable" : isTicketExpired ? "Refresh required" : "Live"}
                 </span>
               </div>
             </div>
@@ -616,18 +619,21 @@ export function RealtimePanel(props: {
         </div>
       </div>
 
-      {isTicketExpired && (
-        <Card className="border-amber-500/40 bg-amber-50/30">
-          <CardContent className="flex flex-col gap-3 pt-6 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-amber-900 text-sm">
-              Realtime access token expired. Refresh this page to reconnect to the live stream.
-            </p>
-            <Button type="button" size="sm" variant="outline" onClick={handleRefreshPage}>
-              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-              Refresh page
+      {realtimeTicket && isTicketExpired && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/20">
+          <p className="text-amber-800 text-sm dark:text-amber-200">
+            Realtime token expired.{" "}
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="h-auto p-0 text-amber-800 underline-offset-2 hover:text-amber-900 dark:text-amber-200 dark:hover:text-amber-100"
+              onClick={handleRefreshPage}
+            >
+              Refresh to reconnect
             </Button>
-          </CardContent>
-        </Card>
+          </p>
+        </div>
       )}
 
       <div className="grid gap-4 lg:grid-cols-[1.25fr_2fr]">

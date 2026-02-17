@@ -8,7 +8,7 @@
     "deploy:prod": "wrangler deploy --env prod",
     "dev:remote": "wrangler dev -e dev --remote",
     "dev": "sh dev.sh",
-    "dev:wrangler": "wrangler dev -e dev",
+    "dev:wrangler": "wrangler dev src/index.ts -e dev",
     "start": "wrangler dev -e dev",
     "gentypes": "wrangler types",
     "clean": "rm -rf .turbo node_modules dist .wrangler",
@@ -21,7 +21,7 @@
     "@unprice/tsconfig": "workspace:^",
     "drizzle-kit": "^0.30.5",
     "typescript": "^5.3.3",
-    "wrangler": "4.12.0"
+    "wrangler": "4.66.0"
   },
   "dependencies": {
     "@auth/core": "^0.34.1",

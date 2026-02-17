@@ -441,6 +441,20 @@ export class Unprice {
         })
       },
 
+      getRealtimeUsage: async (
+        req: paths["/v1/analytics/realtime"]["post"]["requestBody"]["content"]["application/json"]
+      ): Promise<
+        Result<
+          paths["/v1/analytics/realtime"]["post"]["responses"]["200"]["content"]["application/json"]
+        >
+      > => {
+        return await this.fetch({
+          path: ["v1", "analytics", "realtime"],
+          method: "POST",
+          body: req,
+        })
+      },
+
       getVerifications: async (
         req: paths["/v1/analytics/verifications"]["post"]["requestBody"]["content"]["application/json"]
       ): Promise<
@@ -450,6 +464,24 @@ export class Unprice {
       > => {
         return await this.fetch({
           path: ["v1", "analytics", "verifications"],
+          method: "POST",
+          body: req,
+        })
+      },
+
+      /**
+       * Issue a short-lived ticket for customer realtime websocket access.
+       * Requires a session token (e.g. Auth.js session) when used for dashboard realtime.
+       */
+      getRealtimeTicket: async (
+        req: paths["/v1/analytics/realtime/ticket"]["post"]["requestBody"]["content"]["application/json"]
+      ): Promise<
+        Result<
+          paths["/v1/analytics/realtime/ticket"]["post"]["responses"]["200"]["content"]["application/json"]
+        >
+      > => {
+        return await this.fetch({
+          path: ["v1", "analytics", "realtime", "ticket"],
           method: "POST",
           body: req,
         })

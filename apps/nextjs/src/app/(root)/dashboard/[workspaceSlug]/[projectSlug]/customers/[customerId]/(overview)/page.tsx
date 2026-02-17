@@ -1,8 +1,6 @@
-import { API_DOMAIN } from "@unprice/config"
 import { Button } from "@unprice/ui/button"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
 import { Code } from "lucide-react"
-import { cookies } from "next/headers"
 import { notFound } from "next/navigation"
 import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
@@ -111,40 +109,14 @@ export default async function CustomerUsagePage({
     notFound()
   }
 
-  const sessionCookieName =
-    process.env.NODE_ENV === "production" ? "__Secure-authjs.session-token" : "authjs.session-token"
-  const sessionToken = cookies().get(sessionCookieName)?.value ?? ""
+  const { result: realtimeTicket, error: realtimeTicketError } =
+    await unprice.analytics.getRealtimeTicket({
+      customerId,
+      projectId: customer.projectId,
+    })
 
-  let realtimeTicket: string | null = null
-  let realtimeTicketExpiresAt: number | null = null
-
-  if (sessionToken) {
-    const realtimeTicketUrl = new URL("/v1/analytics/realtime/ticket", API_DOMAIN)
-    const realtimeTicketResponse = await fetch(realtimeTicketUrl, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${sessionToken}`,
-      },
-      body: JSON.stringify({
-        customer_id: customer.id,
-        project_id: customer.projectId,
-        expires_in_seconds: 3600,
-      }),
-      cache: "no-store",
-    }).catch(() => null)
-
-    if (realtimeTicketResponse?.ok) {
-      const payload = (await realtimeTicketResponse.json()) as {
-        ticket?: string
-        expires_at?: number
-      }
-
-      if (payload.ticket && typeof payload.expires_at === "number") {
-        realtimeTicket = payload.ticket
-        realtimeTicketExpiresAt = payload.expires_at
-      }
-    }
+  if (realtimeTicketError) {
+    throw new Error(realtimeTicketError.message)
   }
 
   const currentSubscription =
@@ -225,8 +197,8 @@ export default async function CustomerUsagePage({
       <RealtimePanel
         customerId={customer.id}
         projectId={customer.projectId}
-        realtimeTicket={realtimeTicket}
-        realtimeTicketExpiresAt={realtimeTicketExpiresAt}
+        realtimeTicket={realtimeTicket.ticket}
+        realtimeTicketExpiresAt={realtimeTicket.expiresAt}
         runtimeEnv={process.env.NEXT_PUBLIC_APP_ENV ?? "development"}
         currentPlanSlug={currentSubscription?.planSlug ?? null}
         currentCycleStartAt={currentSubscription?.currentCycleStartAt ?? null}

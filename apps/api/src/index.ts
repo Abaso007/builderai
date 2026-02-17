@@ -28,7 +28,6 @@ import { registerListPlanVersionsV1 } from "./routes/plans/listPlanVersionsV1"
 import { registerGetFeaturesV1 } from "./routes/project/getFeaturesV1"
 
 import { env } from "cloudflare:workers"
-import { getToken } from "@auth/core/jwt"
 import { ConsoleLogger } from "@unprice/logging"
 import { timing } from "hono/timing"
 import { verifyRealtimeTicket } from "~/auth/ticket"
@@ -75,81 +74,47 @@ app.use(
       prefix: "broadcast",
       onBeforeConnect: async (req) => {
         const url = new URL(req.url)
-        const { party, room } = resolvePartyAndRoomFromPath(url.pathname)
+        const { room } = resolvePartyAndRoomFromPath(url.pathname)
 
-        if (party === "usagelimit") {
-          const ticket = url.searchParams.get("ticket")
-          if (!ticket) {
+        const ticket = url.searchParams.get("ticket")
+
+        if (!ticket) {
+          return new Response("Unauthorized", { status: 401 })
+        }
+
+        try {
+          const payload = await verifyRealtimeTicket({
+            token: ticket,
+            secret: env.AUTH_SECRET,
+          })
+
+          if (!payload.customerId.startsWith("cus_")) {
             return new Response("Unauthorized", { status: 401 })
           }
 
-          try {
-            const payload = await verifyRealtimeTicket({
-              token: ticket,
-              secret: env.AUTH_SECRET,
-            })
-
-            if (!payload.userId.startsWith("usr_")) {
-              return new Response("Unauthorized", { status: 401 })
-            }
-
-            if (!room) {
-              return new Response("Forbidden", { status: 403 })
-            }
-
-            const roomParts = room.split(":")
-            if (roomParts.length < 3) {
-              return new Response("Forbidden", { status: 403 })
-            }
-
-            const roomProjectId = roomParts[roomParts.length - 2]
-            const roomCustomerId = roomParts[roomParts.length - 1]
-
-            if (payload.projectId !== roomProjectId || payload.customerId !== roomCustomerId) {
-              return new Response("Forbidden", { status: 403 })
-            }
-          } catch (error) {
-            if (error instanceof Error && error.message === "Ticket expired") {
-              return new Response("Ticket expired", { status: 401 })
-            }
-            return new Response("Unauthorized", { status: 401 })
+          if (!room) {
+            return new Response("Forbidden", { status: 403 })
           }
 
-          return
-        }
+          const roomParts = room.split(":")
+          if (roomParts.length < 3) {
+            return new Response("Forbidden", { status: 403 })
+          }
 
-        const sessionToken = url.searchParams.get("sessionToken")
-        if (!sessionToken) {
+          const roomProjectId = roomParts[roomParts.length - 2]
+          const roomCustomerId = roomParts[roomParts.length - 1]
+
+          if (payload.projectId !== roomProjectId || payload.customerId !== roomCustomerId) {
+            return new Response("Forbidden", { status: 403 })
+          }
+        } catch (error) {
+          if (error instanceof Error && error.message === "Ticket expired") {
+            return new Response("Ticket expired", { status: 401 })
+          }
           return new Response("Unauthorized", { status: 401 })
         }
 
-        const sessionName =
-          env.NODE_ENV === "production" ? "__Secure-authjs.session-token" : "authjs.session-token"
-
-        // set the req cookie
-        req.headers.set("cookie", `${sessionName}=${sessionToken}`)
-
-        const token = await getToken({
-          req,
-          secret: env.AUTH_SECRET,
-          raw: false,
-          salt: sessionName,
-          secureCookie: env.NODE_ENV === "production",
-        })
-
-        if (!token) return new Response("Unauthorized", { status: 401 })
-
-        // validate exp
-        if (token?.exp && token.exp < Date.now() / 1000) {
-          return new Response("Unauthorized", { status: 401 })
-        }
-
-        const userId = token?.id as string | undefined
-
-        // if id doesn't start with "usr_" throw an error
-        if (!userId?.startsWith("usr_")) {
-          return new Response("Unauthorized", { status: 401 })
-        }
+        return
       },
     },
   })

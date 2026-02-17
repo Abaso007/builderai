@@ -12,7 +12,6 @@ import { getPlansStats } from "./getPlansStats"
 import { getUsage } from "./getUsage"
 import { getVerificationRegions } from "./getVerificationRegions"
 import { getVerifications } from "./getVerifications"
-import { migrate } from "./migrate"
 
 export const analyticsRouter = createTRPCRouter({
   getVerifications: getVerifications,
@@ -20,7 +19,6 @@ export const analyticsRouter = createTRPCRouter({
   getUsage: getUsage,
   getBrowserVisits: getBrowserVisits,
   getCountryVisits: getCountryVisits,
-  migrate: migrate,
   getOverviewStats: getOverviewStats,
   getPlansConversion: getPlansConversion,
   getFeaturesOverview: getFeaturesOverview,

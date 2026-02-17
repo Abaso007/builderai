@@ -184,6 +184,26 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/v1/customer/resetUsage": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * reset usage
+     * @description Reset usage counters for a customer
+     */
+    post: operations["customers.resetUsage"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/v1/customer/updateACL": {
     parameters: {
       query?: never
@@ -552,6 +572,26 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/v1/analytics/realtime/ticket": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * issue realtime websocket ticket
+     * @description Issue a short-lived ticket for customer realtime websocket access. The ticket is scoped to user, project, and customer.
+     */
+    post: operations["analytics.getRealtimeTicket"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/v1/lakehouse/catalog/credentials": {
     parameters: {
       query?: never
@@ -559,8 +599,10 @@ export interface paths {
       path?: never
       cookie?: never
     }
+    get?: never
+    put?: never
     /**
-     * get lakehouse catalog credentials
+     * get scoped lakehouse credentials
      * @description Issue short-lived, workspace-scoped temporary R2 credentials for direct DuckDB-Iceberg access
      */
     post: operations["lakehouse.getCatalogCredentials"]
@@ -771,10 +813,15 @@ export interface operations {
       content: {
         "application/json": {
           /**
-           * @description The customer ID
+           * @description The unprice customer ID
            * @example cus_1H7KQFLr7RepUyQBKdnvY
            */
-          customerId: string
+          customerId?: string
+          /**
+           * @description The external customer ID provided at sign up
+           * @example user_123
+           */
+          externalId?: string
           /**
            * @description The feature slug
            * @example tokens
@@ -799,11 +846,15 @@ export interface operations {
           /**
            * @description Additional metadata for the usage report
            * @example {
-           *       "source": "api"
+           *       "source": "api",
+           *       "resourceId": "123",
+           *       "resourceType": "user"
            *     }
            */
           metadata?: {
-            [key: string]: string | undefined
+            source?: string
+            resourceId?: string
+            resourceType?: string
           }
         }
       }
@@ -851,6 +902,7 @@ export interface operations {
               | "PHASE_NOT_CREATED"
               | "FEATURE_NOT_FOUND_IN_SUBSCRIPTION"
               | "CUSTOMER_NOT_FOUND"
+              | "CUSTOMER_EXTERNAL_ID_CONFLICT"
               | "CUSTOMER_ENTITLEMENTS_NOT_FOUND"
               | "FEATURE_TYPE_NOT_SUPPORTED"
               | "PROJECT_DISABLED"
@@ -976,6 +1028,7 @@ export interface operations {
               | "PHASE_NOT_CREATED"
               | "FEATURE_NOT_FOUND_IN_SUBSCRIPTION"
               | "CUSTOMER_NOT_FOUND"
+              | "CUSTOMER_EXTERNAL_ID_CONFLICT"
               | "CUSTOMER_ENTITLEMENTS_NOT_FOUND"
               | "FEATURE_TYPE_NOT_SUPPORTED"
               | "PROJECT_DISABLED"
@@ -1127,10 +1180,15 @@ export interface operations {
       content: {
         "application/json": {
           /**
-           * @description The customer ID
+           * @description The unprice customer ID
            * @example cus_1H7KQFLr7RepUyQBKdnvY
            */
-          customerId: string
+          customerId?: string
+          /**
+           * @description The external customer ID provided at sign up
+           * @example user_123
+           */
+          externalId?: string
           /**
            * @description The feature slug
            * @example tokens
@@ -1142,13 +1200,17 @@ export interface operations {
            */
           action?: string
           /**
-           * @description Additional metadata for the verification
+           * @description Additional metadata for the usage report
            * @example {
-           *       "source": "api"
+           *       "source": "api",
+           *       "resourceId": "123",
+           *       "resourceType": "user"
            *     }
            */
           metadata?: {
-            [key: string]: string | undefined
+            source?: string
+            resourceId?: string
+            resourceType?: string
           }
           /**
            * @description The usage to check feature access for, if not provided, it will be 0
@@ -1196,6 +1258,7 @@ export interface operations {
               | "PHASE_NOT_CREATED"
               | "FEATURE_NOT_FOUND_IN_SUBSCRIPTION"
               | "CUSTOMER_NOT_FOUND"
+              | "CUSTOMER_EXTERNAL_ID_CONFLICT"
               | "CUSTOMER_ENTITLEMENTS_NOT_FOUND"
               | "FEATURE_TYPE_NOT_SUPPORTED"
               | "PROJECT_DISABLED"
@@ -1994,21 +2057,19 @@ export interface operations {
            */
           cancelUrl: string
           /**
-           * @description The metadata of the customer
+           * @description The metadata of the customer, very important to pass geolocation data if you want to segment later on
            * @example {
-           *       "externalId": "1234567890"
+           *       "country": "US",
+           *       "region": "CA",
+           *       "city": "San Francisco"
            *     }
            */
           metadata?: {
-            externalId?: string
             stripeSubscriptionId?: string
             stripeDefaultPaymentMethodId?: string
-            continent?: string
             country?: string
             region?: string
-            colo?: string
             city?: string
-            isEUCountry?: boolean | null
           }
         }
       }
@@ -2357,6 +2418,116 @@ export interface operations {
       }
     }
   }
+  "customers.resetUsage": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The customer ID */
+    requestBody: {
+      content: {
+        "application/json": {
+          /**
+           * @description The customer ID
+           * @example cus_1H7KQFLr7RepUyQBKdnvY
+           */
+          customerId: string
+          /**
+           * @description The project ID
+           * @example proj_1H7KQFLr7RepUyQBKdnvY
+           */
+          projectId: string
+        }
+      }
+    }
+    responses: {
+      /** @description The result of the reset usage */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            success: boolean
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
   "customers.updateACL": {
     parameters: {
       query?: never
@@ -2487,7 +2658,7 @@ export interface operations {
               projectId: string
               slug: string
               code: number
-              unit: string
+              unitOfMeasure: string
               title: string
               description: string | null
             }[]
@@ -2673,6 +2844,8 @@ export interface operations {
                  * @enum {string}
                  */
                 featureType: "flat" | "tier" | "package" | "usage"
+                /** @description Unit of measurement captured for this plan version feature. Used for display and billing context without relying on mutable feature definitions */
+                unitOfMeasure: string
                 /** @description Pricing configuration for this feature. Structure depends on featureType */
                 config:
                   | {
@@ -3100,7 +3273,7 @@ export interface operations {
                   updatedAtM: number
                   slug: string
                   code: number
-                  unit: string
+                  unitOfMeasure: string
                   title: string
                   description: string | null
                 }
@@ -3327,6 +3500,8 @@ export interface operations {
                  * @enum {string}
                  */
                 featureType: "flat" | "tier" | "package" | "usage"
+                /** @description Unit of measurement captured for this plan version feature. Used for display and billing context without relying on mutable feature definitions */
+                unitOfMeasure: string
                 /** @description Pricing configuration for this feature. Structure depends on featureType */
                 config:
                   | {
@@ -3754,7 +3929,7 @@ export interface operations {
                   updatedAtM: number
                   slug: string
                   code: number
-                  unit: string
+                  unitOfMeasure: string
                   title: string
                   description: string | null
                 }
@@ -4130,6 +4305,7 @@ export interface operations {
               totalUsage: number
               allowedCount: number
               deniedCount: number
+              limitExceededCount: number
               bucketSizeSeconds: number
               featureStats: {
                 featureSlug: string
@@ -4147,6 +4323,7 @@ export interface operations {
                 verificationCount: number
                 allowedCount: number
                 deniedCount: number
+                limitExceededCount: number
               }[]
               oldestTimestamp: number | null
               newestTimestamp: number | null
@@ -4233,6 +4410,119 @@ export interface operations {
       }
     }
   }
+  "analytics.getRealtimeTicket": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Realtime ticket request payload */
+    requestBody: {
+      content: {
+        "application/json": {
+          /**
+           * @description The customer ID to scope realtime access
+           * @example cus_1H7KQFLr7RepUyQBKdnvY
+           */
+          customerId: string
+          /**
+           * @description The project ID to scope realtime access
+           * @example project_1H7KQFLr7RepUyQBKdnvY
+           */
+          projectId: string
+        }
+      }
+    }
+    responses: {
+      /** @description Realtime websocket ticket */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            ticket: string
+            expiresAt: number
+            projectId: string
+            customerId: string
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
   "lakehouse.getCatalogCredentials": {
     parameters: {
       query?: never
@@ -4240,16 +4530,20 @@ export interface operations {
       path?: never
       cookie?: never
     }
+    /** @description Scoped credential request payload */
     requestBody: {
       content: {
         "application/json": {
-          durationSeconds?: number
+          /** @default 60 */
+          durationSeconds: number
           projectId?: string
           customerId?: string
+          date?: string
         }
       }
     }
     responses: {
+      /** @description Scoped temporary credentials */
       200: {
         headers: {
           [name: string]: unknown
@@ -4260,12 +4554,18 @@ export interface operations {
             prefix: string
             prefixes: string[]
             tablePrefixes: {
-              [key: string]: string
+              [key: string]: string | undefined
+            }
+            tableUrls: {
+              [key: string]: string | undefined
             }
             durationSeconds: number
+            /** Format: uri */
             r2Endpoint: string
+            /** Format: uri */
             catalogUrl: string
             catalogWarehouse: string
+            ticket: string
             credentials: {
               accessKeyId: string
               secretAccessKey: string
