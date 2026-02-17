@@ -212,7 +212,9 @@ function applyEvolutionDefaultProjection(column: ResolvedColumn): string {
   }
 
   const defaultValue = column.field.defaultValue
-  const schemaVersionField = column.table.source.fields.find((field) => field.name === "schema_version")
+  const schemaVersionField = column.table.source.fields.find(
+    (field) => field.name === "schema_version"
+  )
 
   if (!schemaVersionField) {
     throw new Error(`Table '${column.table.table}' is missing required schema_version field`)

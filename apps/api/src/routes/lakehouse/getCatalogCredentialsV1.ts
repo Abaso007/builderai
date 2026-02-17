@@ -17,8 +17,12 @@ const tags = ["lakehouse"]
 const responseSchema = z.object({
   bucket: z.string(),
   prefix: z.string(),
+  prefixes: z.array(z.string()),
+  tablePrefixes: z.record(z.string()),
   durationSeconds: z.number().int(),
   r2Endpoint: z.string().url(),
+  catalogUrl: z.string().url(),
+  catalogWarehouse: z.string(),
   credentials: z.object({
     accessKeyId: z.string(),
     secretAccessKey: z.string(),
@@ -31,6 +35,10 @@ const requestSchema = z.object({
   durationSeconds: z.number().int().min(60).max(3600).default(60).optional(),
   projectId: z.string().optional(),
   customerId: z.string().optional(),
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
 })
 
 export const route = createRoute({
@@ -79,13 +87,33 @@ export const registerGetCatalogCredentialsV1 = (app: App) =>
     })
     const scopedCustomerId = parseScopedId(body.customerId, "customerId")
 
-    const durationSeconds = body.durationSeconds ?? 60
+    const durationSeconds = body.durationSeconds ?? 86400 // 24 hours
     const credentials = await issueLakehouseCatalogCredentials({
       env: c.env,
       projectId: scopedProjectId,
       customerId: scopedCustomerId,
+      eventDate: body.date,
       durationSeconds,
     })
 
-    return c.json(credentials, HttpStatusCodes.OK)
+    const requestUrl = new URL(c.req.url)
+    const accountId = (() => {
+      try {
+        const host = new URL(credentials.r2Endpoint).hostname
+        return host.split(".")[0] ?? ""
+      } catch {
+        return ""
+      }
+    })()
+    const catalogUrl = accountId
+      ? `${requestUrl.origin}/v1/lakehouse/catalog/proxy/${accountId}/${credentials.bucket}`
+      : `${requestUrl.origin}/v1/lakehouse/catalog/proxy`
+
+    return c.json(
+      {
+        ...credentials,
+        catalogUrl,
+      },
+      HttpStatusCodes.OK
+    )
   })

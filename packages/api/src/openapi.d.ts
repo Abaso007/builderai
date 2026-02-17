@@ -4258,9 +4258,14 @@ export interface operations {
           "application/json": {
             bucket: string
             prefix: string
+            prefixes: string[]
+            tablePrefixes: {
+              [key: string]: string
+            }
             durationSeconds: number
-            workspaceId: string
             r2Endpoint: string
+            catalogUrl: string
+            catalogWarehouse: string
             credentials: {
               accessKeyId: string
               secretAccessKey: string

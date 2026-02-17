@@ -1,9 +1,14 @@
+import { createWasmDuckDbConnector } from "@sqlrooms/duckdb"
 import {
   type RoomShellSliceState,
   createRoomShellSlice,
   createRoomStore,
 } from "@sqlrooms/room-shell"
 import { type SqlEditorSliceState, createSqlEditorSlice } from "@sqlrooms/sql-editor"
+
+const duckDbConnector = createWasmDuckDbConnector({
+  allowUnsignedExtensions: true,
+})
 
 /**
  * Combined room state type for the Lakehouse dashboard.
@@ -22,6 +27,7 @@ export const { roomStore, useRoomStore } = createRoomStore<LakehouseRoomState>(
   (set, get, store) => ({
     // Base room shell slice - provides DuckDB integration, data sources, etc.
     ...createRoomShellSlice({
+      connector: duckDbConnector,
       config: {
         title: "Lakehouse Analytics",
         // Data sources will be loaded dynamically from the tRPC endpoint

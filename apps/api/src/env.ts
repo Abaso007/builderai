@@ -44,7 +44,6 @@ export function createRuntimeEnv(workerEnv: Record<string, string | number | boo
       LAKEHOUSE_STREAM_ENTITLEMENTS_URL: z.string().url().optional(),
       LAKEHOUSE_STREAM_AUTH_TOKEN: z.string().optional(),
       LAKEHOUSE_BUCKET_NAME: z.string().optional(),
-      LAKEHOUSE_ICEBERG_PREFIX: z.string().optional(),
     },
     emptyStringAsUndefined: true,
     runtimeEnv: workerEnv,

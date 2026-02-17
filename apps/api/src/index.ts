@@ -20,6 +20,7 @@ import { registerResetUsageV1 } from "./routes/customer/resetUsageV1"
 import { registerSignUpV1 } from "./routes/customer/signUpV1"
 import { registerVerifyV1 } from "./routes/customer/verifyV1"
 import { registerGetCatalogCredentialsV1 } from "./routes/lakehouse/getCatalogCredentialsV1"
+import { registerProxyCatalogV1 } from "./routes/lakehouse/proxyCatalogV1"
 import { registerStripeSetupV1 } from "./routes/paymentProvider/stripeSetupV1"
 import { registerStripeSignUpV1 } from "./routes/paymentProvider/stripeSignUpV1"
 import { registerGetPlanVersionV1 } from "./routes/plans/getPlanVersionV1"
@@ -118,6 +119,7 @@ registerGetRealtimeUsageV1(app)
 
 // Lakehouse routes
 registerGetCatalogCredentialsV1(app)
+registerProxyCatalogV1(app)
 
 // Export handler
 const handler = {

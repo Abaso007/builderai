@@ -39,24 +39,35 @@ import { roomStore, useRoomStore } from "./sqlrooms-store"
 
 // Table configurations for each data source
 const TABLE_CONFIG = {
-  usage: { tableName: "usage", label: "Usage Events" },
-  verification: { tableName: "verifications", label: "Verifications" },
-  metadata: { tableName: "metadata", label: "Metadata" },
+  usage: { tableName: "usage", catalogTable: "usage", label: "Usage Events" },
+  verification: {
+    tableName: "verifications",
+    catalogTable: "verification",
+    label: "Verifications",
+  },
+  metadata: { tableName: "metadata", catalogTable: "metadata", label: "Metadata" },
   entitlement_snapshot: {
     tableName: "entitlement_snapshots",
+    catalogTable: "entitlement_snapshot",
     label: "Entitlement Snapshots",
   },
 } as const
 
-type ManifestFile = {
-  url: string
-  key: string
-  day: string
-  type: "raw" | "compact"
-  source: "usage" | "verification" | "metadata" | "entitlement_snapshot"
-  count: number
-  bytes: number
-  etag?: string
+type LakehouseCatalogCredentials = {
+  bucket: string
+  prefix: string
+  prefixes: string[]
+  tablePrefixes: Record<string, string>
+  durationSeconds: number
+  r2Endpoint: string
+  catalogUrl: string
+  catalogWarehouse: string
+  credentials: {
+    accessKeyId: string
+    secretAccessKey: string
+    sessionToken: string
+    expiration?: string | number
+  }
 }
 
 const usageTrendChartConfig = {
@@ -90,7 +101,7 @@ function LakehouseDashboardInner() {
   const [manualQueryError, setManualQueryError] = useState<string | null>(null)
   const [loadedFileCount, setLoadedFileCount] = useState(0)
   const [loadedTables, setLoadedTables] = useState<string[]>([])
-  const loadedManifestFingerprintRef = useRef<string | null>(null)
+  const loadedCatalogFingerprintRef = useRef<string | null>(null)
   const resultsRef = useRef<HTMLDivElement | null>(null)
   const sqlShellRef = useRef<HTMLDivElement | null>(null)
   const pendingScrollRef = useRef(false)
@@ -116,66 +127,37 @@ function LakehouseDashboardInner() {
   const tables = useRoomStore((state) => state.db.tables)
 
   const credentialsQuery = useQuery(
-    trpc.analytics.getLakehouseUrls.queryOptions(
+    trpc.analytics.getLakehouseCredentials.queryOptions(
       { interval: interval.name },
       { staleTime: 1000 * 60 * 5 }
     )
   )
 
-  const manifestQuery = useQuery(
-    trpc.analytics.getLakehouseManifest.queryOptions(
-      { interval: interval.name },
-      { staleTime: 1000 * 60 * 5 }
-    )
-  )
-
-  const isLoadingUrls = credentialsQuery.isLoading || manifestQuery.isLoading
-  const urlsError = credentialsQuery.error || manifestQuery.error
+  const isLoadingUrls = credentialsQuery.isLoading
+  const urlsError = credentialsQuery.error
 
   const loadDataIntoDb = useCallback(async () => {
-    if (!manifestQuery.data) return
+    const credentialsResult = credentialsQuery.data
+    if (!credentialsResult || credentialsResult.error || !credentialsResult.result) {
+      return
+    }
 
     setIsLoadingData(true)
     setLoadError(null)
 
     try {
-      const files = manifestQuery.data?.files as unknown
-      const manifestFiles = (Array.isArray(files) ? files : []) as ManifestFile[]
+      const credentials = credentialsResult.result as LakehouseCatalogCredentials
+      const expireToken = credentials.credentials.expiration ?? ""
+      const catalogFingerprint = [
+        credentials.catalogWarehouse,
+        credentials.catalogUrl,
+        credentials.r2Endpoint,
+        credentials.credentials.accessKeyId,
+        String(expireToken),
+      ].join("|")
 
-      if (!manifestFiles?.length) {
-        loadedManifestFingerprintRef.current = null
-        setLoadedFileCount(0)
-        setLoadedTables([])
-        setIsLoadingData(false)
-        return
-      }
-
-      const groupedFiles = new Map<string, ManifestFile[]>()
-      for (const file of manifestFiles) {
-        const source = (file as ManifestFile).source ?? "usage"
-        const key = `${(file as ManifestFile).day}|${source}`
-        const group = groupedFiles.get(key)
-        if (group) {
-          group.push(file as ManifestFile)
-        } else {
-          groupedFiles.set(key, [file as ManifestFile])
-        }
-      }
-
-      const selectedFiles = Array.from(groupedFiles.values()).flatMap((group) => {
-        const compacted = group.filter((file) => file.type === "compact")
-        if (compacted.length > 0) {
-          return compacted
-        }
-        return group
-      })
-
-      const manifestFingerprint = selectedFiles
-        .map((file) => `${file.source ?? "usage"}|${file.key}|${file.etag ?? ""}|${file.bytes}`)
-        .sort()
-        .join("\n")
       if (
-        loadedManifestFingerprintRef.current === manifestFingerprint &&
+        loadedCatalogFingerprintRef.current === catalogFingerprint &&
         loadedTables.length > 0 &&
         loadedFileCount > 0
       ) {
@@ -185,99 +167,99 @@ function LakehouseDashboardInner() {
 
       const connector = await getConnector()
 
-      // Helper function to build read function with options
-      const buildReadExpr = (files: ManifestFile[]) => {
-        const escapeSqlString = (value: string) => value.replaceAll("'", "''")
-        const toSqlArray = (urls: string[]) =>
-          `[${urls.map((url) => `'${escapeSqlString(url)}'`).join(", ")}]`
-
-        const parquetUrls = files
-          .filter((file) => file.url.includes(".parquet"))
-          .map((file) => file.url)
-        const ndjsonUrls = files
-          .filter((file) => !file.url.includes(".parquet"))
-          .map((file) => file.url)
-
-        const reads: string[] = []
-
-        if (parquetUrls.length > 0) {
-          reads.push(`SELECT * FROM read_parquet(${toSqlArray(parquetUrls)}, union_by_name = true)`)
+      const escapeSqlString = (value: string) => value.replaceAll("'", "''")
+      const endpointHost = (() => {
+        try {
+          return new URL(credentials.r2Endpoint).host
+        } catch {
+          return credentials.r2Endpoint.replace(/^https?:\/\//, "")
         }
+      })()
 
-        if (ndjsonUrls.length > 0) {
-          reads.push(
-            `SELECT * FROM read_ndjson_auto(${toSqlArray(ndjsonUrls)}, ignore_errors := false, maximum_object_size := 33554432, auto_detect := true)`
-          )
-        }
+      await connector.query("INSTALL httpfs")
+      await connector.query("LOAD httpfs")
+      await connector.query("INSTALL iceberg")
+      await connector.query("LOAD iceberg")
 
-        if (reads.length === 1) {
-          return reads[0] ?? "SELECT 1 WHERE false"
-        }
+      await connector.query("DETACH DATABASE IF EXISTS lakehouse_catalog")
 
-        return reads.join(" UNION ALL ")
-      }
-
-      // Normalize schema for sources that can drift across files (JSON vs string, etc.)
-      const buildSourceSelect = (source: TableSource, readExpr: string) => {
-        if (source !== "verification") {
-          return `SELECT * FROM ${readExpr}`
-        }
-
-        return `SELECT
-  * REPLACE (CAST(denied_reason AS VARCHAR) AS denied_reason)
-FROM ${readExpr}`
-      }
-
-      // Helper function to load files for a specific source into a table
-      const loadTableFromSource = async (source: TableSource, files: ManifestFile[]) => {
+      for (const source of Object.keys(TABLE_CONFIG) as TableSource[]) {
         const config = TABLE_CONFIG[source]
-        const sourceFiles = files.filter((f) =>
-          source === "usage" ? !f.source || f.source === source : f.source === source
-        )
-        if (sourceFiles.length === 0) return false
-
         try {
           await connector.query(`DROP TABLE IF EXISTS ${config.tableName}`)
-        } catch {
-          // Table might not exist
-        }
+        } catch {}
+      }
 
-        const readExpr = buildReadExpr(sourceFiles)
-        const sourceSelect = buildSourceSelect(source, `(${readExpr})`)
+      await connector.query(`CREATE OR REPLACE SECRET lakehouse_r2_secret (
+  TYPE S3,
+  KEY_ID '${escapeSqlString(credentials.credentials.accessKeyId)}',
+  SECRET '${escapeSqlString(credentials.credentials.secretAccessKey)}',
+  SESSION_TOKEN '${escapeSqlString(credentials.credentials.sessionToken)}',
+  ENDPOINT '${escapeSqlString(endpointHost)}',
+  URL_STYLE 'path',
+  REGION 'auto'
+)`)
+
+      await connector.query(`ATTACH '${escapeSqlString(credentials.catalogWarehouse)}' AS lakehouse_catalog (
+  TYPE ICEBERG,
+  ENDPOINT '${escapeSqlString(credentials.catalogUrl)}',
+  AUTHORIZATION_TYPE 'none'
+)`)
+
+      const loadTableFromSource = async (source: TableSource) => {
+        const config = TABLE_CONFIG[source]
+        const sourceSelect =
+          source === "verification"
+            ? `SELECT * REPLACE (CAST(denied_reason AS VARCHAR) AS denied_reason)
+FROM lakehouse_catalog.lakehouse.${config.catalogTable}`
+            : `SELECT * FROM lakehouse_catalog.lakehouse.${config.catalogTable}`
+
         await connector.query(`CREATE TABLE ${config.tableName} AS ${sourceSelect}`)
-
         return true
       }
 
-      // Load all three table types
       const tablesLoaded: string[] = []
-      let totalFiles = 0
+      let totalTables = 0
 
-      if (await loadTableFromSource("usage", selectedFiles)) {
+      if (
+        await loadTableFromSource("usage").catch(() => {
+          return false
+        })
+      ) {
         tablesLoaded.push("usage")
-        totalFiles += selectedFiles.filter((f) => !f.source || f.source === "usage").length
+        totalTables += 1
       }
 
-      // Load verifications
-      if (await loadTableFromSource("verification", selectedFiles)) {
+      if (
+        await loadTableFromSource("verification").catch(() => {
+          return false
+        })
+      ) {
         tablesLoaded.push("verifications")
-        totalFiles += selectedFiles.filter((f) => f.source === "verification").length
+        totalTables += 1
       }
 
-      // Load metadata
-      if (await loadTableFromSource("metadata", selectedFiles)) {
+      if (
+        await loadTableFromSource("metadata").catch(() => {
+          return false
+        })
+      ) {
         tablesLoaded.push("metadata")
-        totalFiles += selectedFiles.filter((f) => f.source === "metadata").length
+        totalTables += 1
       }
 
-      if (await loadTableFromSource("entitlement_snapshot", selectedFiles)) {
+      if (
+        await loadTableFromSource("entitlement_snapshot").catch(() => {
+          return false
+        })
+      ) {
         tablesLoaded.push("entitlement_snapshots")
-        totalFiles += selectedFiles.filter((f) => f.source === "entitlement_snapshot").length
+        totalTables += 1
       }
 
       await refreshTableSchemas()
-      loadedManifestFingerprintRef.current = manifestFingerprint
-      setLoadedFileCount(totalFiles)
+      loadedCatalogFingerprintRef.current = catalogFingerprint
+      setLoadedFileCount(totalTables)
       setLoadedTables(tablesLoaded)
 
       // Auto-execute default query after loading if we have usage
@@ -302,17 +284,23 @@ FROM ${readExpr}`
     } finally {
       setIsLoadingData(false)
     }
-  }, [manifestQuery.data, getConnector, refreshTableSchemas, loadedTables.length, loadedFileCount])
+  }, [
+    credentialsQuery.data,
+    getConnector,
+    refreshTableSchemas,
+    loadedTables.length,
+    loadedFileCount,
+  ])
 
   useEffect(() => {
-    if (manifestQuery.data && !isLoadingUrls) {
+    if (credentialsQuery.data && !isLoadingUrls) {
       void loadDataIntoDb()
     }
-  }, [manifestQuery.data, isLoadingUrls, loadDataIntoDb])
+  }, [credentialsQuery.data, isLoadingUrls, loadDataIntoDb])
 
   // Reset state when interval changes to force reload
   useEffect(() => {
-    loadedManifestFingerprintRef.current = null
+    loadedCatalogFingerprintRef.current = null
     setLoadedTables([])
     setLoadedFileCount(0)
     setExecutedQuery(null)
@@ -359,7 +347,6 @@ FROM ${readExpr}`
   // Handle refresh
   const handleRefresh = () => {
     void credentialsQuery.refetch()
-    void manifestQuery.refetch()
   }
 
   // Handle SQL editor change
@@ -472,36 +459,56 @@ WHERE u.deleted = 0`
 
   const usageTrendQuery = `WITH base AS (
   SELECT
-    CASE
-      WHEN "timestamp" > 1000000000000 THEN epoch_ms("timestamp")
-      ELSE to_timestamp("timestamp")
-    END AS ts,
+    TRY_CAST("timestamp" AS DOUBLE) AS ts_num,
+    TRY_CAST("timestamp" AS TIMESTAMP) AS ts_native,
     usage
   FROM usage
   WHERE deleted = 0
+),
+normalized AS (
+  SELECT
+    CASE
+      WHEN ts_native IS NOT NULL THEN CAST(ts_native AS TIMESTAMP)
+      WHEN ts_num IS NULL THEN NULL
+      WHEN ts_num > 10000000000 THEN epoch_ms(CAST(ts_num AS BIGINT))
+      ELSE epoch_ms(CAST(ts_num * 1000.0 AS BIGINT))
+    END AS ts,
+    usage
+  FROM base
 )
 SELECT
   strftime(CAST(date_trunc('minute', ts) AS TIMESTAMP), '%Y-%m-%d %H:%M') AS minute,
   COUNT(*) AS events,
   SUM(usage) AS total_usage
-FROM base
+FROM normalized
+WHERE ts IS NOT NULL
 GROUP BY minute
 ORDER BY minute`
 
   const verificationTrendQuery = `WITH base AS (
   SELECT
-    CASE
-      WHEN "timestamp" > 1000000000000 THEN epoch_ms("timestamp")
-      ELSE to_timestamp("timestamp")
-    END AS ts,
+    TRY_CAST("timestamp" AS DOUBLE) AS ts_num,
+    TRY_CAST("timestamp" AS TIMESTAMP) AS ts_native,
     allowed
   FROM verifications
+),
+normalized AS (
+  SELECT
+    CASE
+      WHEN ts_native IS NOT NULL THEN CAST(ts_native AS TIMESTAMP)
+      WHEN ts_num IS NULL THEN NULL
+      WHEN ts_num > 10000000000 THEN epoch_ms(CAST(ts_num AS BIGINT))
+      ELSE epoch_ms(CAST(ts_num * 1000.0 AS BIGINT))
+    END AS ts,
+    allowed
+  FROM base
 )
 SELECT
   strftime(CAST(date_trunc('minute', ts) AS TIMESTAMP), '%Y-%m-%d %H:%M') AS minute,
   SUM(CASE WHEN allowed = 1 THEN 1 ELSE 0 END) AS allowed,
   SUM(CASE WHEN allowed = 0 THEN 1 ELSE 0 END) AS denied
-FROM base
+FROM normalized
+WHERE ts IS NOT NULL
 GROUP BY minute
 ORDER BY minute`
 
@@ -773,7 +780,7 @@ LIMIT 1`
         <div className="space-y-1">
           <p className="text-muted-foreground text-sm">
             {tableReady
-              ? `${loadedFileCount} files loaded into ${loadedTables.length} tables (${loadedTables.join(", ")})`
+              ? `${loadedFileCount} catalog tables loaded (${loadedTables.join(", ")})`
               : isLoading
                 ? "Loading data..."
                 : "Waiting for data"}
@@ -829,7 +836,7 @@ LIMIT 1`
             <div>
               <p className="font-medium">Loading lakehouse data...</p>
               <p className="text-muted-foreground text-sm">
-                Fetching and importing data files into database
+                Connecting to Cloudflare catalog and importing tables
               </p>
             </div>
           </CardContent>
@@ -842,7 +849,7 @@ LIMIT 1`
           <CardHeader>
             <CardTitle>No lakehouse data yet</CardTitle>
             <CardDescription>
-              We didn&apos;t find any usage, verification, or metadata files for this interval.
+              We couldn&apos;t load usage, verification, or metadata tables from the catalog.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-muted-foreground text-sm">

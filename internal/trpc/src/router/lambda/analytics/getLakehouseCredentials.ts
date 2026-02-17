@@ -3,7 +3,7 @@ import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 import { unprice } from "#utils/unprice"
 
-export const getLakehouseUrls = protectedProjectProcedure
+export const getLakehouseCredentials = protectedProjectProcedure
   .input(
     z.object({
       interval: z.enum(["24h", "7d", "30d", "90d"]).optional(),
