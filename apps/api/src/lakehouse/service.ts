@@ -462,13 +462,9 @@ export async function issueLakehouseCatalogCredentials(
     if (params.customerId) partitionSpec.customer_id = params.customerId
     if (params.eventDate) partitionSpec.event_date = params.eventDate
 
-    console.log("partitionSpec", partitionSpec)
-
     const tableResults = await Promise.allSettled(
       tables.map(async (tableName) => {
         const result = await resolver.getPartitionPath(namespace, tableName, partitionSpec)
-
-        console.log("result", result)
         const metadataPrefix = ensureTrailingSlash(
           toR2Key(bucketName, `${result.tableLocation}/metadata/`)
         )
@@ -480,8 +476,6 @@ export async function issueLakehouseCatalogCredentials(
         }
       })
     )
-
-    console.log("tableResults", tableResults)
 
     const tablePrefixes: Record<string, string> = {}
     const tableUrls: Record<string, string> = {}

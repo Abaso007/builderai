@@ -1,6 +1,6 @@
 "use client"
 
-import { ChevronDown } from "lucide-react"
+import { ChevronDown, Edit } from "lucide-react"
 import { useParams } from "next/navigation"
 
 import type { RouterOutputs } from "@unprice/trpc/routes"
@@ -40,7 +40,10 @@ export function CustomerActions({
     <Dialog>
       <div className="button-primary flex items-center space-x-1 rounded-md">
         <DialogTrigger asChild>
-          <Button variant={"custom"}>Edit customer</Button>
+          <Button variant={"custom"}>
+            <Edit className="mr-2 h-4 w-4" />
+            Customer
+          </Button>
         </DialogTrigger>
 
         <DropdownMenu>

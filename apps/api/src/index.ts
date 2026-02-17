@@ -31,7 +31,9 @@ import { env } from "cloudflare:workers"
 import { getToken } from "@auth/core/jwt"
 import { ConsoleLogger } from "@unprice/logging"
 import { timing } from "hono/timing"
+import { verifyRealtimeTicket } from "~/auth/ticket"
 import { obs } from "~/middleware/obs"
+import { registerGetRealtimeTicketV1 } from "./routes/analitycs/getRealtimeTicketV1"
 import { registerGetRealtimeUsageV1 } from "./routes/analitycs/getRealtimeUsageV1"
 import { registerGetAnalyticsUsageV1 } from "./routes/analitycs/getUsageV1"
 import { registerGetAnalyticsVerificationsV1 } from "./routes/analitycs/getVerificationsV1"
@@ -45,6 +47,25 @@ app.use("*", cors())
 app.use("*", init())
 app.use("*", obs())
 
+const resolvePartyAndRoomFromPath = (pathname: string) => {
+  const pathParts = pathname.split("/").filter((part) => part.length > 0)
+  const broadcastIndex = pathParts.indexOf("broadcast")
+  if (broadcastIndex < 0) {
+    return {
+      party: null,
+      room: null,
+    }
+  }
+
+  const party = pathParts[broadcastIndex + 1] ?? null
+  const encodedRoom = pathParts.slice(broadcastIndex + 2).join("/")
+
+  return {
+    party,
+    room: encodedRoom ? decodeURIComponent(encodedRoom) : null,
+  }
+}
+
 // Handle websocket connections for Durable Objects
 app.use(
   "/broadcast/**",
@@ -54,8 +75,53 @@ app.use(
       prefix: "broadcast",
       onBeforeConnect: async (req) => {
         const url = new URL(req.url)
+        const { party, room } = resolvePartyAndRoomFromPath(url.pathname)
+
+        if (party === "usagelimit") {
+          const ticket = url.searchParams.get("ticket")
+          if (!ticket) {
+            return new Response("Unauthorized", { status: 401 })
+          }
+
+          try {
+            const payload = await verifyRealtimeTicket({
+              token: ticket,
+              secret: env.AUTH_SECRET,
+            })
+
+            if (!payload.userId.startsWith("usr_")) {
+              return new Response("Unauthorized", { status: 401 })
+            }
+
+            if (!room) {
+              return new Response("Forbidden", { status: 403 })
+            }
+
+            const roomParts = room.split(":")
+            if (roomParts.length < 3) {
+              return new Response("Forbidden", { status: 403 })
+            }
+
+            const roomProjectId = roomParts[roomParts.length - 2]
+            const roomCustomerId = roomParts[roomParts.length - 1]
+
+            if (payload.projectId !== roomProjectId || payload.customerId !== roomCustomerId) {
+              return new Response("Forbidden", { status: 403 })
+            }
+          } catch (error) {
+            if (error instanceof Error && error.message === "Ticket expired") {
+              return new Response("Ticket expired", { status: 401 })
+            }
+            return new Response("Unauthorized", { status: 401 })
+          }
+
+          return
+        }
 
         const sessionToken = url.searchParams.get("sessionToken")
+        if (!sessionToken) {
+          return new Response("Unauthorized", { status: 401 })
+        }
 
         const sessionName =
           env.NODE_ENV === "production" ? "__Secure-authjs.session-token" : "authjs.session-token"
@@ -116,6 +182,7 @@ registerStripeSetupV1(app)
 registerGetAnalyticsUsageV1(app)
 registerGetAnalyticsVerificationsV1(app)
 registerGetRealtimeUsageV1(app)
+registerGetRealtimeTicketV1(app)
 
 // Lakehouse routes
 registerGetCatalogCredentialsV1(app)
