@@ -20,7 +20,6 @@ import { FeatureComparison } from "../_components/pricing-comparision"
 import { PricingTable } from "../_components/pricing-table"
 
 // check shadcn landing page for inspiration
-export const runtime = "edge"
 export const revalidate = 3600 // 1 hour
 
 export async function generateStaticParams() {
