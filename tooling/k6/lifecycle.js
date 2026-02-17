@@ -11,11 +11,11 @@ const usageEventsLimitExceeded = new Counter("usage_events_limit_exceeded")
 const usageEventsRateLimited = new Counter("usage_events_rate_limited")
 const verifyEventsSent = new Counter("verify_events_sent")
 
-const BASE_URL = __ENV.BASE_URL || "http://host.docker.internal:8787"
-const API_TOKEN = __ENV.UNPRICE_TOKEN || "unprice_dev_1234567890"
+const BASE_URL = __ENV.BASE_URL || "https://preview-api.unprice.dev"
+const API_TOKEN = __ENV.UNPRICE_TOKEN || ""
 const BILLING_INTERVAL = __ENV.BILLING_INTERVAL || "month"
 const CURRENCY = __ENV.CURRENCY || "EUR"
-const PLAN_SLUG = __ENV.PLAN_SLUG || "FREE"
+const PLAN_SLUG = __ENV.PLAN_SLUG || "FOUNDATION"
 const SUCCESS_URL = __ENV.SUCCESS_URL || "https://example.com/success"
 const CANCEL_URL = __ENV.CANCEL_URL || "https://example.com/cancel"
 const CUSTOMER_TIMEZONE = __ENV.CUSTOMER_TIMEZONE || "UTC"

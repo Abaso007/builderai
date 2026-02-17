@@ -1,18 +1,19 @@
+import { lakehouseSourceSchemaRegistry } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logging"
 import { UnpriceApiError } from "~/errors"
+import { IcebergPathResolver } from "~/lakehouse/catalog"
 import {
   CloudflarePipelineLakehouseService,
   type LakehousePipelineBindingsBySource,
 } from "./pipeline"
 
 interface LakehouseServiceEnv {
-  APP_ENV?: "development" | "preview" | "production"
-  CLOUDFLARE_API_TOKEN?: string
-  LAKEHOUSE_STREAM_USAGE_URL?: string
-  LAKEHOUSE_STREAM_VERIFICATIONS_URL?: string
-  LAKEHOUSE_STREAM_METADATA_URL?: string
-  LAKEHOUSE_STREAM_ENTITLEMENTS_URL?: string
-  LAKEHOUSE_STREAM_AUTH_TOKEN?: string
+  APP_ENV: "development" | "preview" | "production"
+  LAKEHOUSE_STREAM_USAGE_URL: string
+  LAKEHOUSE_STREAM_VERIFICATIONS_URL: string
+  LAKEHOUSE_STREAM_METADATA_URL: string
+  LAKEHOUSE_STREAM_ENTITLEMENTS_URL: string
+  LAKEHOUSE_STREAM_AUTH_TOKEN: string
 }
 
 class HttpLakehousePipelineSender {
@@ -41,45 +42,15 @@ class HttpLakehousePipelineSender {
 }
 
 function createHttpStreamSenders(env: LakehouseServiceEnv): LakehousePipelineBindingsBySource {
-  const token = env.LAKEHOUSE_STREAM_AUTH_TOKEN ?? env.CLOUDFLARE_API_TOKEN
-  if (!token) {
-    throw new UnpriceApiError({
-      code: "INTERNAL_SERVER_ERROR",
-      message:
-        "Lakehouse HTTP ingest requires LAKEHOUSE_STREAM_AUTH_TOKEN (or CLOUDFLARE_API_TOKEN).",
-    })
-  }
-
-  const missing: string[] = []
-  if (!env.LAKEHOUSE_STREAM_USAGE_URL) missing.push("LAKEHOUSE_STREAM_USAGE_URL")
-  if (!env.LAKEHOUSE_STREAM_VERIFICATIONS_URL) missing.push("LAKEHOUSE_STREAM_VERIFICATIONS_URL")
-  if (!env.LAKEHOUSE_STREAM_METADATA_URL) missing.push("LAKEHOUSE_STREAM_METADATA_URL")
-  if (!env.LAKEHOUSE_STREAM_ENTITLEMENTS_URL) missing.push("LAKEHOUSE_STREAM_ENTITLEMENTS_URL")
-
-  if (missing.length > 0) {
-    throw new UnpriceApiError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: `Lakehouse HTTP ingest is missing stream URLs: ${missing.join(", ")}`,
-    })
-  }
-
-  const usageUrl = env.LAKEHOUSE_STREAM_USAGE_URL
-  const verificationUrl = env.LAKEHOUSE_STREAM_VERIFICATIONS_URL
-  const metadataUrl = env.LAKEHOUSE_STREAM_METADATA_URL
-  const entitlementUrl = env.LAKEHOUSE_STREAM_ENTITLEMENTS_URL
-
-  if (!usageUrl || !verificationUrl || !metadataUrl || !entitlementUrl) {
-    throw new UnpriceApiError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: "Lakehouse HTTP ingest stream URLs are invalid.",
-    })
-  }
-
+  const token = env.LAKEHOUSE_STREAM_AUTH_TOKEN
   return {
-    usage: new HttpLakehousePipelineSender(usageUrl, token),
-    verification: new HttpLakehousePipelineSender(verificationUrl, token),
-    metadata: new HttpLakehousePipelineSender(metadataUrl, token),
-    entitlement_snapshot: new HttpLakehousePipelineSender(entitlementUrl, token),
+    usage: new HttpLakehousePipelineSender(env.LAKEHOUSE_STREAM_USAGE_URL, token),
+    verification: new HttpLakehousePipelineSender(env.LAKEHOUSE_STREAM_VERIFICATIONS_URL, token),
+    metadata: new HttpLakehousePipelineSender(env.LAKEHOUSE_STREAM_METADATA_URL, token),
+    entitlement_snapshot: new HttpLakehousePipelineSender(
+      env.LAKEHOUSE_STREAM_ENTITLEMENTS_URL,
+      token
+    ),
   }
 }
 
@@ -114,11 +85,14 @@ type R2TempCredentialsResponse = {
 }
 
 export interface LakehouseCatalogCredentialEnv {
-  CLOUDFLARE_ACCOUNT_ID?: string
-  CLOUDFLARE_API_TOKEN_LAKEHOUSE?: string
-  CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID?: string
-  LAKEHOUSE_BUCKET_NAME?: string
-  LAKEHOUSE_ICEBERG_PREFIX?: string
+  APP_ENV: "development" | "preview" | "production"
+  NODE_ENV: "development" | "test" | "production"
+  CLOUDFLARE_ACCOUNT_ID: string
+  CLOUDFLARE_API_TOKEN_LAKEHOUSE: string
+  CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID: string
+  LAKEHOUSE_BUCKET_NAME: string
+  LAKEHOUSE_ICEBERG_PREFIX: string
+  LAKEHOUSE_STREAM_AUTH_TOKEN: string
 }
 
 export interface IssueLakehouseCatalogCredentialsInput {
@@ -134,6 +108,7 @@ export interface IssueLakehouseCatalogCredentialsResult {
   prefix: string
   prefixes: string[]
   tablePrefixes: Record<string, string>
+  tableUrls: Record<string, string>
   durationSeconds: number
   r2Endpoint: string
   catalogUrl: string
@@ -157,6 +132,44 @@ const lakehouseCredentialInflight = new Map<
   Promise<IssueLakehouseCatalogCredentialsResult>
 >()
 
+function buildCatalogRootPrefixes(basePrefix: string): {
+  tablePrefixes: Record<string, string>
+  prefixes: string[]
+} {
+  const normalized = normalizePrefix(basePrefix)
+  const rootPrefix = normalized ? `${normalized}/` : ""
+  if (!rootPrefix) {
+    return {
+      tablePrefixes: {},
+      prefixes: [],
+    }
+  }
+
+  return {
+    tablePrefixes: {},
+    prefixes: [rootPrefix],
+  }
+}
+
+function normalizePrefix(prefix: string): string {
+  return prefix.replace(/^\/+|\/+$/g, "")
+}
+
+function ensureTrailingSlash(value: string): string {
+  return value.endsWith("/") ? value : `${value}/`
+}
+
+function toR2Key(bucketName: string, location: string): string {
+  const s3Prefix = `s3://${bucketName}/`
+  if (location.startsWith(s3Prefix)) {
+    return location.slice(s3Prefix.length)
+  }
+  if (location.startsWith(`${bucketName}/`)) {
+    return location.slice(bucketName.length + 1)
+  }
+  return location
+}
+
 function cloneCredentialResult(
   value: IssueLakehouseCatalogCredentialsResult
 ): IssueLakehouseCatalogCredentialsResult {
@@ -164,6 +177,7 @@ function cloneCredentialResult(
     ...value,
     prefixes: [...value.prefixes],
     tablePrefixes: { ...value.tablePrefixes },
+    tableUrls: { ...value.tableUrls },
     credentials: { ...value.credentials },
   }
 }
@@ -251,17 +265,6 @@ function setCachedLakehouseCredential(
     value: cloneCredentialResult(value),
     validUntilMs,
   })
-}
-
-function requireEnvVar(value: string | undefined): string {
-  if (!value) {
-    throw new UnpriceApiError({
-      code: "INTERNAL_SERVER_ERROR",
-      message:
-        "Lakehouse credentials not configured (CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN_LAKEHOUSE, CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID, LAKEHOUSE_BUCKET_NAME required)",
-    })
-  }
-  return value
 }
 
 async function fetchR2TempCredentials(params: {
@@ -388,7 +391,7 @@ export function buildScopedPrefix(params: {
   customerId?: string
   eventDate?: string
 }): string {
-  const parts = [params.basePrefix.replace(/^\/+|\/+$/g, ""), ""]
+  const parts = [normalizePrefix(params.basePrefix), ""]
 
   if (params.projectId) {
     parts.push(`project_id=${params.projectId}`)
@@ -406,14 +409,15 @@ export function buildScopedPrefix(params: {
 export async function issueLakehouseCatalogCredentials(
   params: IssueLakehouseCatalogCredentialsInput
 ): Promise<IssueLakehouseCatalogCredentialsResult> {
-  const accountId = requireEnvVar(params.env.CLOUDFLARE_ACCOUNT_ID)
-  const apiToken = requireEnvVar(params.env.CLOUDFLARE_API_TOKEN_LAKEHOUSE)
-  const bucketName = requireEnvVar(params.env.LAKEHOUSE_BUCKET_NAME)
-  const parentAccessKeyId = requireEnvVar(params.env.CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID)
-  const icebergPrefix = requireEnvVar(params.env.LAKEHOUSE_ICEBERG_PREFIX)
+  const accountId = params.env.CLOUDFLARE_ACCOUNT_ID
+  const apiToken = params.env.CLOUDFLARE_API_TOKEN_LAKEHOUSE
+  const bucketName = params.env.LAKEHOUSE_BUCKET_NAME
+  const parentAccessKeyId = params.env.CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID
+  const icebergPrefix = params.env.LAKEHOUSE_ICEBERG_PREFIX
+  const catalogToken = params.env.LAKEHOUSE_STREAM_AUTH_TOKEN
 
   const namespace = LAKEHOUSE_DEFAULT_NAMESPACE
-  const fallbackPrefix = icebergPrefix ?? LAKEHOUSE_DEFAULT_PREFIX
+  const fallbackPrefix = normalizePrefix(icebergPrefix || LAKEHOUSE_DEFAULT_PREFIX)
   const catalogName = bucketName
   const catalogUrl = `https://catalog.cloudflarestorage.com/${accountId}/${catalogName}`
   const catalogWarehouse = `${accountId}_${bucketName}`
@@ -443,9 +447,85 @@ export async function issueLakehouseCatalogCredentials(
   }
 
   const generatedPromise = (async (): Promise<IssueLakehouseCatalogCredentialsResult> => {
-    const tablePrefixes: Record<string, string> = {}
+    const tables = Array.from(
+      new Set(Object.values(lakehouseSourceSchemaRegistry).map((entry) => entry.sinkTable))
+    )
+    const resolver = new IcebergPathResolver({
+      accountId,
+      bucketName,
+      warehouseId: catalogWarehouse,
+      token: catalogToken,
+    })
+    const partitionSpec: Record<string, string> = {
+      project_id: params.projectId,
+    }
+    if (params.customerId) partitionSpec.customer_id = params.customerId
+    if (params.eventDate) partitionSpec.event_date = params.eventDate
 
-    const prefixes: string[] = []
+    console.log("partitionSpec", partitionSpec)
+
+    const tableResults = await Promise.allSettled(
+      tables.map(async (tableName) => {
+        const result = await resolver.getPartitionPath(namespace, tableName, partitionSpec)
+
+        console.log("result", result)
+        const metadataPrefix = ensureTrailingSlash(
+          toR2Key(bucketName, `${result.tableLocation}/metadata/`)
+        )
+        return {
+          tableName,
+          dataPrefix: ensureTrailingSlash(result.r2Key),
+          metadataPrefix,
+          tableUrl: result.partitionUrl,
+        }
+      })
+    )
+
+    console.log("tableResults", tableResults)
+
+    const tablePrefixes: Record<string, string> = {}
+    const tableUrls: Record<string, string> = {}
+    const prefixSet = new Set<string>()
+
+    let resolvedCount = 0
+    tableResults.forEach((result, index) => {
+      const tableName = tables[index] ?? "unknown"
+      if (result.status === "fulfilled") {
+        resolvedCount += 1
+        tablePrefixes[result.value.tableName] = result.value.dataPrefix
+        tableUrls[result.value.tableName] = result.value.tableUrl
+        prefixSet.add(result.value.dataPrefix)
+        prefixSet.add(result.value.metadataPrefix)
+      } else {
+        console.warn("[lakehouse][catalog] failed to resolve table partition", {
+          tableName,
+          error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+        })
+      }
+    })
+
+    let prefixes = Array.from(prefixSet)
+    if (resolvedCount === 0) {
+      const allowFallback =
+        params.env.APP_ENV !== "production" && params.env.NODE_ENV !== "production"
+      if (allowFallback) {
+        const fallback = buildCatalogRootPrefixes(fallbackPrefix)
+        prefixes = fallback.prefixes
+      } else {
+        throw new UnpriceApiError({
+          code: "INTERNAL_SERVER_ERROR",
+          message:
+            "Lakehouse catalog lookup failed. Ensure R2 Data Catalog is enabled and LAKEHOUSE_STREAM_AUTH_TOKEN has Workers R2 Data Catalog permissions.",
+        })
+      }
+    }
+
+    if (prefixes.length === 0) {
+      throw new UnpriceApiError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Lakehouse catalog lookup returned no prefixes to scope credentials.",
+      })
+    }
 
     const credentials = await fetchR2TempCredentials({
       accountId,
@@ -454,6 +534,7 @@ export async function issueLakehouseCatalogCredentials(
       parentAccessKeyId,
       permission: "object-read-only",
       ttlSeconds: params.durationSeconds,
+      prefixes,
     })
 
     const result: IssueLakehouseCatalogCredentialsResult = {
@@ -461,6 +542,7 @@ export async function issueLakehouseCatalogCredentials(
       prefix: "",
       prefixes,
       tablePrefixes,
+      tableUrls,
       durationSeconds: params.durationSeconds,
       r2Endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
       catalogUrl,

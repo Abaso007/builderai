@@ -58,10 +58,12 @@ type LakehouseCatalogCredentials = {
   prefix: string
   prefixes: string[]
   tablePrefixes: Record<string, string>
+  tableUrls: Record<string, string>
   durationSeconds: number
   r2Endpoint: string
   catalogUrl: string
   catalogWarehouse: string
+  ticket: string
   credentials: {
     accessKeyId: string
     secretAccessKey: string
@@ -84,6 +86,8 @@ const tagsChartConfig = {
   events: { label: "Events", color: "var(--chart-3)" },
 } satisfies ChartConfig
 
+const CREDENTIAL_REFRESH_BUFFER_MS = 60_000
+
 type TableSource = keyof typeof TABLE_CONFIG
 
 // ============================================================================
@@ -102,6 +106,7 @@ function LakehouseDashboardInner() {
   const [loadedFileCount, setLoadedFileCount] = useState(0)
   const [loadedTables, setLoadedTables] = useState<string[]>([])
   const loadedCatalogFingerprintRef = useRef<string | null>(null)
+  const credentialRefreshRetryRef = useRef(false)
   const resultsRef = useRef<HTMLDivElement | null>(null)
   const sqlShellRef = useRef<HTMLDivElement | null>(null)
   const pendingScrollRef = useRef(false)
@@ -135,6 +140,11 @@ function LakehouseDashboardInner() {
 
   const isLoadingUrls = credentialsQuery.isLoading
   const urlsError = credentialsQuery.error
+
+  const isCredentialRefreshError = useCallback((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error)
+    return /expired|invalid.+token|accessdenied|forbidden|http\s*403|unauthorized/i.test(message)
+  }, [])
 
   const loadDataIntoDb = useCallback(async () => {
     const credentialsResult = credentialsQuery.data
@@ -259,6 +269,7 @@ FROM lakehouse_catalog.lakehouse.${config.catalogTable}`
 
       await refreshTableSchemas()
       loadedCatalogFingerprintRef.current = catalogFingerprint
+      credentialRefreshRetryRef.current = false
       setLoadedFileCount(totalTables)
       setLoadedTables(tablesLoaded)
 
@@ -280,13 +291,24 @@ FROM lakehouse_catalog.lakehouse.${config.catalogTable}`
       }
     } catch (err) {
       console.error("[LakehouseDashboardSqlrooms] Load error:", err)
+
+      if (isCredentialRefreshError(err) && !credentialRefreshRetryRef.current) {
+        credentialRefreshRetryRef.current = true
+        loadedCatalogFingerprintRef.current = null
+        void credentialsQuery.refetch()
+        return
+      }
+
+      credentialRefreshRetryRef.current = false
       setLoadError(err instanceof Error ? err.message : "Failed to load data")
     } finally {
       setIsLoadingData(false)
     }
   }, [
     credentialsQuery.data,
+    credentialsQuery.refetch,
     getConnector,
+    isCredentialRefreshError,
     refreshTableSchemas,
     loadedTables.length,
     loadedFileCount,
@@ -297,6 +319,29 @@ FROM lakehouse_catalog.lakehouse.${config.catalogTable}`
       void loadDataIntoDb()
     }
   }, [credentialsQuery.data, isLoadingUrls, loadDataIntoDb])
+
+  useEffect(() => {
+    const credentialsResult = credentialsQuery.data
+    if (!credentialsResult || credentialsResult.error || !credentialsResult.result) {
+      return
+    }
+
+    const rawExpiration = credentialsResult.result.credentials.expiration
+    if (rawExpiration === undefined || rawExpiration === null) return
+
+    const parsedExpiration = Number(rawExpiration)
+    if (!Number.isFinite(parsedExpiration) || parsedExpiration <= 0) return
+
+    const expirationMs =
+      parsedExpiration > 1_000_000_000_000 ? parsedExpiration : parsedExpiration * 1000
+    const refreshDelayMs = Math.max(0, expirationMs - Date.now() - CREDENTIAL_REFRESH_BUFFER_MS)
+
+    const refreshTimeout = window.setTimeout(() => {
+      void credentialsQuery.refetch()
+    }, refreshDelayMs)
+
+    return () => window.clearTimeout(refreshTimeout)
+  }, [credentialsQuery.data, credentialsQuery.refetch])
 
   // Reset state when interval changes to force reload
   useEffect(() => {

@@ -1,18 +1,9 @@
+import { verifyTicket } from "~/auth/ticket"
 import { UnpriceApiError } from "~/errors"
 import type { App } from "~/hono/app"
 
 const CLOUDFLARE_CATALOG_BASE = "https://catalog.cloudflarestorage.com"
 let cachedCatalogConfig: { body: string; updatedAt: number } | null = null
-
-function requireEnvVar(value: string | undefined, name: string): string {
-  if (!value) {
-    throw new UnpriceApiError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: `Missing required env var: ${name}`,
-    })
-  }
-  return value
-}
 
 export const registerProxyCatalogV1 = (app: App) => {
   app.all("/v1/lakehouse/catalog/proxy/*", async (c) => {
@@ -23,33 +14,74 @@ export const registerProxyCatalogV1 = (app: App) => {
       : requestUrl.pathname
     const suffixParts = rawSuffix.split("/").filter(Boolean)
 
-    let accountId = c.env.CLOUDFLARE_ACCOUNT_ID
-    let bucketName = c.env.LAKEHOUSE_BUCKET_NAME
     let suffixPath = rawSuffix
+    let tokenFromPath: string | undefined
+    let accountIdFromPath: string | undefined
+    let bucketNameFromPath: string | undefined
 
-    if (suffixParts.length >= 2) {
-      accountId = suffixParts[0]
-      bucketName = suffixParts[1]
+    const looksLikeJwt = (value: string) => value.split(".").length === 3
+
+    if (suffixParts.length > 0 && looksLikeJwt(suffixParts[0] ?? "")) {
+      tokenFromPath = suffixParts[0]
+      const remaining = suffixParts.slice(1).join("/")
+      suffixPath = remaining ? `/${remaining}` : ""
+    } else if (suffixParts.length >= 2) {
+      accountIdFromPath = suffixParts[0]
+      bucketNameFromPath = suffixParts[1]
       const remaining = suffixParts.slice(2).join("/")
       suffixPath = remaining ? `/${remaining}` : ""
     }
 
-    const resolvedAccountId = requireEnvVar(accountId, "CLOUDFLARE_ACCOUNT_ID")
-    const resolvedBucketName = requireEnvVar(bucketName, "LAKEHOUSE_BUCKET_NAME")
-    const apiToken = requireEnvVar(c.env.LAKEHOUSE_STREAM_AUTH_TOKEN, "LAKEHOUSE_STREAM_AUTH_TOKEN")
+    const method = c.req.method.toUpperCase()
+    const isConfigRequest = suffixPath.startsWith("/v1/config")
+
+    if (method !== "OPTIONS") {
+      const token =
+        tokenFromPath ??
+        requestUrl.searchParams.get("ticket") ??
+        c.req.header("authorization")?.replace("Bearer ", "")
+
+      if (!token) {
+        throw new UnpriceApiError({
+          code: "UNAUTHORIZED",
+          message: "Missing ticket",
+        })
+      }
+
+      const payload = await verifyTicket({ token, secret: c.env.AUTH_SECRET })
+
+      if (accountIdFromPath && payload.accountId !== accountIdFromPath) {
+        throw new UnpriceApiError({
+          code: "FORBIDDEN",
+          message: "Ticket does not match account",
+        })
+      }
+      if (bucketNameFromPath && payload.bucket !== bucketNameFromPath) {
+        throw new UnpriceApiError({
+          code: "FORBIDDEN",
+          message: "Ticket does not match bucket",
+        })
+      }
+
+      accountIdFromPath = payload.accountId
+      bucketNameFromPath = payload.bucket
+    }
+
+    const resolvedAccountId = accountIdFromPath ?? c.env.CLOUDFLARE_ACCOUNT_ID
+    const resolvedBucketName = bucketNameFromPath ?? c.env.LAKEHOUSE_BUCKET_NAME
+    const apiToken = c.env.LAKEHOUSE_STREAM_AUTH_TOKEN
 
     const upstreamUrl = new URL(
       `${CLOUDFLARE_CATALOG_BASE}/${resolvedAccountId}/${resolvedBucketName}${suffixPath}`
     )
     upstreamUrl.search = requestUrl.search
+    upstreamUrl.searchParams.delete("ticket")
 
     const headers = new Headers()
     headers.set("Authorization", `Bearer ${apiToken}`)
     const contentType = c.req.header("content-type")
     if (contentType) headers.set("content-type", contentType)
 
-    const method = c.req.method.toUpperCase()
-    const isConfigRequest = suffixPath.startsWith("/v1/config")
     const upstreamMethod = method === "HEAD" && isConfigRequest ? "GET" : method
     const body =
       upstreamMethod === "GET" || upstreamMethod === "HEAD" ? undefined : await c.req.arrayBuffer()

@@ -3,6 +3,7 @@ import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
 import { keyAuth } from "~/auth/key"
+import { createTicket } from "~/auth/ticket"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
@@ -19,10 +20,12 @@ const responseSchema = z.object({
   prefix: z.string(),
   prefixes: z.array(z.string()),
   tablePrefixes: z.record(z.string()),
+  tableUrls: z.record(z.string()),
   durationSeconds: z.number().int(),
   r2Endpoint: z.string().url(),
   catalogUrl: z.string().url(),
   catalogWarehouse: z.string(),
+  ticket: z.string(),
   credentials: z.object({
     accessKeyId: z.string(),
     secretAccessKey: z.string(),
@@ -87,7 +90,7 @@ export const registerGetCatalogCredentialsV1 = (app: App) =>
     })
     const scopedCustomerId = parseScopedId(body.customerId, "customerId")
 
-    const durationSeconds = body.durationSeconds ?? 86400 // 24 hours
+    const durationSeconds = body.durationSeconds ?? 3600 // 1 hour
     const credentials = await issueLakehouseCatalogCredentials({
       env: c.env,
       projectId: scopedProjectId,
@@ -97,22 +100,23 @@ export const registerGetCatalogCredentialsV1 = (app: App) =>
     })
 
     const requestUrl = new URL(c.req.url)
-    const accountId = (() => {
-      try {
-        const host = new URL(credentials.r2Endpoint).hostname
-        return host.split(".")[0] ?? ""
-      } catch {
-        return ""
-      }
-    })()
-    const catalogUrl = accountId
-      ? `${requestUrl.origin}/v1/lakehouse/catalog/proxy/${accountId}/${credentials.bucket}`
-      : `${requestUrl.origin}/v1/lakehouse/catalog/proxy`
+    const accountId = c.env.CLOUDFLARE_ACCOUNT_ID
+    const ticket = await createTicket({
+      secret: c.env.AUTH_SECRET,
+      projectId: scopedProjectId,
+      accountId,
+      bucket: credentials.bucket,
+      customerId: scopedCustomerId,
+      eventDate: body.date,
+      expiresInSeconds: durationSeconds,
+    })
+    const catalogUrl = `${requestUrl.origin}/v1/lakehouse/catalog/proxy/${ticket}`
 
     return c.json(
       {
         ...credentials,
         catalogUrl,
+        ticket,
       },
       HttpStatusCodes.OK
     )
