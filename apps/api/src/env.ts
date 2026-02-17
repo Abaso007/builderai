@@ -11,10 +11,6 @@ export const cloudflareRatelimiter = z.custom<{
   limit: (opts: { key: string }) => Promise<{ success: boolean }>
 }>((r) => !!r && typeof r.limit === "function")
 
-export const pipelinesBinding = z.custom<{ send: (records: unknown[]) => Promise<void> }>(
-  (binding) => !!binding && typeof binding === "object" && typeof binding.send === "function"
-)
-
 // This function should be called at the start of each request.
 export function createRuntimeEnv(workerEnv: Record<string, string | number | boolean | undefined>) {
   return createEnv({

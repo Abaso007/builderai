@@ -85,6 +85,7 @@ jobs:
           environment: ${{ inputs.env }}
           packageManager: "pnpm"
           workingDirectory: "apps/api"
+          accountId: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
           # Pass secrets to Worker
           secrets: |
             TINYBIRD_TOKEN
