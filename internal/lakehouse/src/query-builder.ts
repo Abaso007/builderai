@@ -228,7 +228,8 @@ function applyEvolutionDefaultProjection(column: ResolvedColumn): string {
 }
 
 function escapeSqlString(value: string): string {
-  return value.replaceAll("'", "''")
+  // Use split and join for broader Node compat (ES2015+)
+  return value.split("'").join("''")
 }
 
 function inlineSqlValue(value: unknown): string {

@@ -118,6 +118,7 @@ export interface LakehouseCatalogCredentialEnv {
   CLOUDFLARE_API_TOKEN_LAKEHOUSE?: string
   CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID?: string
   LAKEHOUSE_BUCKET_NAME?: string
+  LAKEHOUSE_ICEBERG_PREFIX?: string
 }
 
 export interface IssueLakehouseCatalogCredentialsInput {
@@ -409,9 +410,10 @@ export async function issueLakehouseCatalogCredentials(
   const apiToken = requireEnvVar(params.env.CLOUDFLARE_API_TOKEN_LAKEHOUSE)
   const bucketName = requireEnvVar(params.env.LAKEHOUSE_BUCKET_NAME)
   const parentAccessKeyId = requireEnvVar(params.env.CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID)
+  const icebergPrefix = requireEnvVar(params.env.LAKEHOUSE_ICEBERG_PREFIX)
 
   const namespace = LAKEHOUSE_DEFAULT_NAMESPACE
-  const fallbackPrefix = LAKEHOUSE_DEFAULT_PREFIX
+  const fallbackPrefix = icebergPrefix ?? LAKEHOUSE_DEFAULT_PREFIX
   const catalogName = bucketName
   const catalogUrl = `https://catalog.cloudflarestorage.com/${accountId}/${catalogName}`
   const catalogWarehouse = `${accountId}_${bucketName}`
