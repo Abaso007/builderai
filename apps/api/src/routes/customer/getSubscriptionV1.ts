@@ -42,6 +42,7 @@ export type GetSubscriptionResponse = z.infer<
 export const registerGetSubscriptionV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customerId } = c.req.valid("param")
+    const requestStartedAt = c.get("requestStartedAt")
     const { customer } = c.get("services")
 
     // validate the request
@@ -52,9 +53,9 @@ export const registerGetSubscriptionV1 = (app: App) =>
     const { val: subscription, err } = await customer.getActiveSubscription({
       customerId,
       projectId,
-      now: Date.now(),
+      now: requestStartedAt,
       opts: {
-        skipCache: true,
+        skipCache: false,
       },
     })
 
