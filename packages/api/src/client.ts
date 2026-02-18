@@ -1,5 +1,5 @@
 import { version } from "../package.json"
-import type { ErrorResponse } from "./errors"
+import type { ApiError, ErrorResponse } from "./errors"
 import type { paths } from "./openapi"
 import type { Telemetry } from "./telemetry"
 import { getTelemetry } from "./telemetry"
@@ -82,7 +82,7 @@ type Result<R> =
     }
   | {
       result?: never
-      error: ErrorResponse["error"]
+      error: ApiError
     }
 
 export class Unprice {
@@ -195,12 +195,13 @@ export class Unprice {
       return (await res.json()) as ErrorResponse
     }
 
+    const lastErr = err as Error | null
+    const message =
+      lastErr instanceof Error ? lastErr.message : lastErr != null ? String(lastErr) : "No response"
     return {
       error: {
-        // @ts-ignore
         code: "FETCH_ERROR",
-        // @ts-ignore I don't understand why `err` is `never`
-        message: err?.message ?? "No response",
+        message,
         docs: "https://developer.mozilla.org/en-US/docs/Web/API/fetch",
         requestId: "N/A",
       },

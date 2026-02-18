@@ -156,6 +156,35 @@ export interface components {
     }
   }
 }
+
+/** Union of all API error response bodies (e.g. 400, 401, 404, 429, 500). */
+export type ErrorResponse =
+  | components["schemas"]["ErrBadRequest"]
+  | components["schemas"]["ErrUnauthorized"]
+  | components["schemas"]["ErrForbidden"]
+  | components["schemas"]["ErrNotFound"]
+  | components["schemas"]["ErrConflict"]
+  | components["schemas"]["ErrTooManyRequests"]
+  | components["schemas"]["ErrInternalServerError"]
+
+/**
+ * Union of all API error payloads (the `error` field in error responses).
+ * Use this when narrowing on `result.error` to get typed `code`, `message`, `docs`, `requestId`.
+ */
+export type ApiError =
+  | components["schemas"]["ErrBadRequest"]["error"]
+  | components["schemas"]["ErrUnauthorized"]["error"]
+  | components["schemas"]["ErrForbidden"]["error"]
+  | components["schemas"]["ErrNotFound"]["error"]
+  | components["schemas"]["ErrConflict"]["error"]
+  | components["schemas"]["ErrTooManyRequests"]["error"]
+  | components["schemas"]["ErrInternalServerError"]["error"]
+  | {
+      code: "FETCH_ERROR"
+      message: string
+      docs: string
+      requestId: string
+    }
 export interface paths {
   "/test": {
     get: {
@@ -233,6 +262,3 @@ export interface paths {
     }
   }
 }
-
-// this is what a json body response looks like
-export type ErrorResponse = components["schemas"]["ErrInternalServerError"]

@@ -56,15 +56,25 @@ export const route = createRoute({
           metadata: z
             .object({
               source: z.string().optional(),
+              workspaceId: z.string().optional(),
+              projectId: z.string().optional(),
+              tenantId: z.string().optional(),
+              userId: z.string().optional(),
               resourceId: z.string().optional(),
               resourceType: z.string().optional(),
             })
+            .strict()
             .openapi({
-              description: "Additional metadata for the usage report",
+              description:
+                "Structured metadata for this verification (filtering and analytics). Only the listed keys are accepted.",
               example: {
                 source: "api",
                 resourceId: "123",
                 resourceType: "user",
+                workspaceId: "123",
+                projectId: "123",
+                tenantId: "123",
+                userId: "123",
               },
             })
             .optional(),

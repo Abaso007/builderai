@@ -62,7 +62,7 @@ export const registerStripeSetupV1 = (app: App) =>
     const { customer, db, logger } = c.get("services")
 
     // rate limit the request
-    const result = await c.env.RL_FREE_600_60s.limit({ key })
+    const result = await c.env.RL_FREE_1000_60s.limit({ key })
 
     if (!result) {
       throw new UnpriceApiError({
