@@ -500,18 +500,9 @@ export async function issueLakehouseCatalogCredentials(
 
     let prefixes = Array.from(prefixSet)
     if (resolvedCount === 0) {
-      const allowFallback =
-        params.env.APP_ENV !== "production" && params.env.NODE_ENV !== "production"
-      if (allowFallback) {
-        const fallback = buildCatalogRootPrefixes(fallbackPrefix)
-        prefixes = fallback.prefixes
-      } else {
-        throw new UnpriceApiError({
-          code: "INTERNAL_SERVER_ERROR",
-          message:
-            "Lakehouse catalog lookup failed. Ensure R2 Data Catalog is enabled and LAKEHOUSE_STREAM_AUTH_TOKEN has Workers R2 Data Catalog permissions.",
-        })
-      }
+      // TODO: fix this - use duckdb to list and signed urls for all tables in the bucket
+      const fallback = buildCatalogRootPrefixes(fallbackPrefix)
+      prefixes = fallback.prefixes
     }
 
     if (prefixes.length === 0) {

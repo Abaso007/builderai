@@ -4,9 +4,12 @@ import { exist } from "./exist"
 import { getByEmail } from "./getByEmail"
 import { getById } from "./getById"
 import { getByIdActiveProject } from "./getByIdActiveProject"
+import { getEntitlements } from "./getEntitlements"
 import { getInvoiceById } from "./getInvoiceById"
 import { getInvoices } from "./getInvoices"
+import { getSubscription } from "./getSubscription"
 import { getSubscriptions } from "./getSubscriptions"
+import { getUsage } from "./getUsage"
 import { listByActiveProject } from "./listByActiveProject"
 import { remove } from "./remove"
 import { update } from "./update"
@@ -19,6 +22,9 @@ export const customersRouter = createTRPCRouter({
   getByEmail: getByEmail,
   getById: getById,
   getByIdActiveProject: getByIdActiveProject,
+  getEntitlements: getEntitlements,
+  getSubscription: getSubscription,
+  getUsage: getUsage,
   getSubscriptions: getSubscriptions,
   listByActiveProject: listByActiveProject,
   getInvoices: getInvoices,

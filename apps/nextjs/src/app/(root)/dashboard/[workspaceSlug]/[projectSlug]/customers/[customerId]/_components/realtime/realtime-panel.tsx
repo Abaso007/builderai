@@ -2,7 +2,6 @@
 
 import { useMutation } from "@tanstack/react-query"
 import { API_DOMAIN } from "@unprice/config"
-import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
@@ -12,28 +11,11 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@unprice/ui/chart"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@unprice/ui/dialog"
 import { ScrollArea } from "@unprice/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { cn } from "@unprice/ui/utils"
 import { AnimatePresence, motion } from "framer-motion"
-import {
-  Activity,
-  BarChart2,
-  CircleHelp,
-  Clock,
-  Settings,
-  Shield,
-  ShieldCheck,
-  Zap,
-} from "lucide-react"
+import { Activity, BarChart2, CircleHelp, Clock, Shield, ShieldCheck, Zap } from "lucide-react"
 import { usePartySocket } from "partysocket/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
@@ -83,9 +65,6 @@ type RealtimeEvent = {
   latencyMs?: number
   deniedReason?: string
 }
-
-type PlanVersionFeature =
-  RouterOutputs["planVersions"]["getById"]["planVersion"]["planFeatures"][number]
 
 type CycleFeatureUsageRow = {
   featureSlug: string
@@ -191,7 +170,6 @@ export function RealtimePanel(props: {
   entitlementSlugs?: string[]
   cycleFeatureUsageRows?: CycleFeatureUsageRow[]
   currentPhaseBillingPeriod?: string | null
-  planVersionFeatures?: PlanVersionFeature[]
 }) {
   const {
     customerId,
@@ -206,7 +184,6 @@ export function RealtimePanel(props: {
     entitlementSlugs = [],
     cycleFeatureUsageRows = [],
     currentPhaseBillingPeriod,
-    planVersionFeatures = [],
   } = props
   const trpc = useTRPC()
   const [windowSeconds] = useRealtimeIntervalFilter()
@@ -543,10 +520,6 @@ export function RealtimePanel(props: {
     return Math.min(100, Math.max(0, (metrics.allowedCount / metrics.verificationCount) * 100))
   }, [metrics?.verificationCount, metrics?.allowedCount])
 
-  const planVersionFeaturesBySlug = useMemo(() => {
-    return new Map(planVersionFeatures.map((feature) => [feature.feature.slug, feature]))
-  }, [planVersionFeatures])
-
   const cycleFeatureUsageBySlug = useMemo(() => {
     return new Map(cycleFeatureUsageRows.map((feature) => [feature.featureSlug, feature]))
   }, [cycleFeatureUsageRows])
@@ -557,7 +530,6 @@ export function RealtimePanel(props: {
     )
 
     return uniqueSlugs.map((featureSlug) => {
-      const planVersionFeature = planVersionFeaturesBySlug.get(featureSlug)
       const cycleFeatureUsage = cycleFeatureUsageBySlug.get(featureSlug)
       const liveCycleUsage = liveCycleUsageBySlug[featureSlug]
 
@@ -566,11 +538,10 @@ export function RealtimePanel(props: {
         cycleUsage: liveCycleUsage ?? cycleFeatureUsage?.currentUsage ?? null,
         cycleLimitType: cycleFeatureUsage?.limitType,
         cycleFeatureType: cycleFeatureUsage?.featureType,
-        limit: planVersionFeature?.limit ?? null,
-        planVersionFeature,
+        limit: null,
       }
     })
-  }, [entitlementSlugs, planVersionFeaturesBySlug, cycleFeatureUsageBySlug, liveCycleUsageBySlug])
+  }, [entitlementSlugs, cycleFeatureUsageBySlug, liveCycleUsageBySlug])
 
   const maxVisibleEntitlementUsage = useMemo(() => {
     return entitlementRows.reduce((maxUsage, entitlement) => {
@@ -924,8 +895,7 @@ export function RealtimePanel(props: {
               ) : (
                 <div className="space-y-4">
                   {entitlementRows.map((entitlement, index) => {
-                    const featureType =
-                      entitlement.planVersionFeature?.featureType ?? entitlement.cycleFeatureType
+                    const featureType = entitlement.cycleFeatureType ?? "usage"
                     const isFlatFeature = featureType === "flat"
                     const limitValue =
                       typeof entitlement.limit === "number" && entitlement.limit > 0
@@ -933,8 +903,7 @@ export function RealtimePanel(props: {
                         : null
                     const hasLimit = limitValue !== null
                     const usageValue = entitlement.cycleUsage ?? 0
-                    const overageStrategy =
-                      entitlement.planVersionFeature?.metadata?.overageStrategy ?? "none"
+                    const overageStrategy = "none"
                     const effectiveLimitType =
                       entitlement.cycleLimitType ??
                       (hasLimit ? (overageStrategy === "none" ? "hard" : "soft") : "none")
@@ -981,83 +950,6 @@ export function RealtimePanel(props: {
                         <div className="flex items-center justify-between text-sm">
                           <div className="flex min-w-0 items-center gap-1.5">
                             <span className="truncate font-medium">{entitlement.featureSlug}</span>
-                            {entitlement.planVersionFeature && (
-                              <Dialog>
-                                <DialogTrigger asChild>
-                                  <Button
-                                    type="button"
-                                    variant="link"
-                                    size="icon"
-                                    className="size-4 text-muted-foreground hover:text-foreground"
-                                  >
-                                    <Settings className="size-3.5" />
-                                    <span className="sr-only">View entitlement configuration</span>
-                                  </Button>
-                                </DialogTrigger>
-                                <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-[620px]">
-                                  <DialogHeader>
-                                    <DialogTitle>
-                                      Entitlement: {entitlement.planVersionFeature.feature.title}
-                                    </DialogTitle>
-                                    <DialogDescription>
-                                      {entitlement.planVersionFeature.feature.description ??
-                                        "Plan version configuration for this entitlement."}
-                                    </DialogDescription>
-                                  </DialogHeader>
-
-                                  <div className="space-y-4">
-                                    <div className="grid grid-cols-2 gap-3 text-sm">
-                                      <div>
-                                        <p className="text-muted-foreground text-xs">
-                                          Feature type
-                                        </p>
-                                        <p className="font-medium">
-                                          {entitlement.planVersionFeature.featureType}
-                                        </p>
-                                      </div>
-                                      <div>
-                                        <p className="text-muted-foreground text-xs">Limit</p>
-                                        <p className="font-medium">
-                                          {typeof entitlement.planVersionFeature.limit === "number"
-                                            ? formatCompactNumber(
-                                                entitlement.planVersionFeature.limit
-                                              )
-                                            : "No limit"}
-                                        </p>
-                                      </div>
-                                    </div>
-
-                                    <div className="space-y-1">
-                                      <p className="text-muted-foreground text-xs">
-                                        Configuration JSON
-                                      </p>
-                                      <pre className="overflow-x-auto rounded-md border bg-muted/30 p-3 font-mono text-xs">
-                                        {JSON.stringify(
-                                          entitlement.planVersionFeature.config,
-                                          null,
-                                          2
-                                        )}
-                                      </pre>
-                                    </div>
-
-                                    {entitlement.planVersionFeature.resetConfig && (
-                                      <div className="space-y-1">
-                                        <p className="text-muted-foreground text-xs">
-                                          Reset config
-                                        </p>
-                                        <pre className="overflow-x-auto rounded-md border bg-muted/30 p-3 font-mono text-xs">
-                                          {JSON.stringify(
-                                            entitlement.planVersionFeature.resetConfig,
-                                            null,
-                                            2
-                                          )}
-                                        </pre>
-                                      </div>
-                                    )}
-                                  </div>
-                                </DialogContent>
-                              </Dialog>
-                            )}
                           </div>
                           <span className="text-muted-foreground text-xs">{usageSummaryText}</span>
                         </div>
@@ -1078,9 +970,6 @@ export function RealtimePanel(props: {
                         </div>
                         <div className="flex items-center justify-between text-muted-foreground text-xs">
                           <span>{isFlatFeature ? "flat feature" : ""}</span>
-                          {!isFlatFeature && typeof entitlement.limit === "number" && (
-                            <span>limit {formatCompactNumber(entitlement.limit)}</span>
-                          )}
                         </div>
                       </div>
                     )

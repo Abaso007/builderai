@@ -1,3 +1,4 @@
+import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
 import { Code } from "lucide-react"
@@ -6,14 +7,11 @@ import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 import { SuperLink } from "~/components/super-link"
-import { unprice } from "~/lib/unprice"
 import { api } from "~/trpc/server"
 import { CustomerActions } from "../../_components/customers/customer-actions"
 import { RealtimePanel } from "../_components/realtime/realtime-panel"
 
-type CustomerUsageResult = NonNullable<
-  Awaited<ReturnType<typeof unprice.customers.getUsage>>["result"]
->
+type CustomerUsageResult = NonNullable<RouterOutputs["customers"]["getUsage"]["usage"]>
 type CustomerUsageFeature = CustomerUsageResult["groups"][number]["features"][number]
 
 function buildRealtimeCycleUsageRows(usageData?: CustomerUsageResult | null) {
@@ -62,33 +60,6 @@ function buildRealtimeCycleUsageRows(usageData?: CustomerUsageResult | null) {
   return rows
 }
 
-function formatActivePhaseBillingPeriod(interval?: string, intervalCount?: number): string | null {
-  if (!interval) {
-    return null
-  }
-
-  if (intervalCount && intervalCount > 1) {
-    return `every ${intervalCount} ${interval}s`
-  }
-
-  switch (interval) {
-    case "month":
-      return "monthly"
-    case "year":
-      return "yearly"
-    case "week":
-      return "weekly"
-    case "day":
-      return "daily"
-    case "minute":
-      return "minutely"
-    case "onetime":
-      return "one-time"
-    default:
-      return interval
-  }
-}
-
 export default async function CustomerUsagePage({
   params,
 }: {
@@ -109,15 +80,9 @@ export default async function CustomerUsagePage({
     notFound()
   }
 
-  const { result: realtimeTicket, error: realtimeTicketError } =
-    await unprice.analytics.getRealtimeTicket({
-      customerId,
-      projectId: customer.projectId,
-    })
-
-  if (realtimeTicketError) {
-    throw new Error(realtimeTicketError.message)
-  }
+  const realtimeTicket = await api.analytics.getRealtimeTicket({
+    customerId,
+  })
 
   const currentSubscription =
     [...customer.subscriptions]
@@ -132,31 +97,19 @@ export default async function CustomerUsagePage({
         (b.currentCycleStartAt ?? b.createdAtM ?? 0) - (a.currentCycleStartAt ?? a.createdAtM ?? 0)
     )[0]
 
-  const currentPlanVersionId = currentSubscription?.phases[0]?.planVersionId
-
   const [
-    { result: entitlementResult },
-    { result: subscriptionResult },
-    { result: customerUsageResult },
-    currentPlanVersionResult,
+    { entitlements: entitlementResult },
+    { subscription: subscriptionResult },
+    { usage: customerUsageResult },
   ] = await Promise.all([
-    unprice.customers.getEntitlements(customer.id),
-    unprice.customers.getSubscription(customer.id),
-    unprice.customers.getUsage(customer.id),
-    currentPlanVersionId
-      ? api.planVersions.getById({ id: currentPlanVersionId }).catch(() => null)
-      : Promise.resolve(null),
+    api.customers.getEntitlements({ customerId: customer.id }),
+    api.customers.getSubscription({ customerId: customer.id }),
+    api.customers.getUsage({ customerId: customer.id }),
   ])
 
-  const currentPlanVersion = currentPlanVersionResult?.planVersion ?? null
-
+  const currentPhase = subscriptionResult?.activePhase ?? null
   const entitlementSlugs = entitlementResult?.map((entitlement) => entitlement.featureSlug) ?? []
   const cycleFeatureUsageRows = buildRealtimeCycleUsageRows(customerUsageResult)
-
-  const activePhaseBillingPeriod = formatActivePhaseBillingPeriod(
-    subscriptionResult?.activePhase?.planVersion.billingConfig.billingInterval,
-    subscriptionResult?.activePhase?.planVersion.billingConfig.billingIntervalCount
-  )
 
   return (
     <DashboardShell
@@ -206,8 +159,7 @@ export default async function CustomerUsagePage({
         cycleTimezone={currentSubscription?.timezone ?? null}
         entitlementSlugs={entitlementSlugs}
         cycleFeatureUsageRows={cycleFeatureUsageRows}
-        currentPhaseBillingPeriod={activePhaseBillingPeriod}
-        planVersionFeatures={currentPlanVersion?.planFeatures ?? []}
+        currentPhaseBillingPeriod={currentPhase?.planVersion?.billingConfig.billingInterval ?? null}
       />
     </DashboardShell>
   )
