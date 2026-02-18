@@ -1,5 +1,6 @@
 "use client"
 
+import { useMutation } from "@tanstack/react-query"
 import { API_DOMAIN } from "@unprice/config"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
@@ -40,6 +41,7 @@ import { NumberTicker } from "~/components/analytics/number-ticker"
 import { RealtimeIntervalFilter } from "~/components/analytics/realtime-interval-filter"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { useRealtimeIntervalFilter } from "~/hooks/use-filter"
+import { useTRPC } from "~/trpc/client"
 
 type Metrics = {
   usageCount: number
@@ -110,6 +112,14 @@ const verificationChartConfig = {
 } satisfies ChartConfig
 
 const SNAPSHOT_REQUEST_THROTTLE_MS = 1500
+
+function normalizeEpochSeconds(value: number | null): number | null {
+  if (typeof value !== "number") {
+    return null
+  }
+
+  return value > 1_000_000_000_000 ? Math.floor(value / 1000) : Math.floor(value)
+}
 
 function InfoTooltip({ content }: { content: string }) {
   return (
@@ -198,23 +208,53 @@ export function RealtimePanel(props: {
     currentPhaseBillingPeriod,
     planVersionFeatures = [],
   } = props
+  const trpc = useTRPC()
   const [windowSeconds] = useRealtimeIntervalFilter()
   const [metrics, setMetrics] = useState<Metrics | null>(null)
   const [events, setEvents] = useState<RealtimeEvent[]>([])
   const [liveCycleUsageBySlug, setLiveCycleUsageBySlug] = useState<Record<string, number>>({})
   const [browserTimezone, setBrowserTimezone] = useState<string | null>(null)
+  const [activeRealtimeTicket, setActiveRealtimeTicket] = useState<string | null>(realtimeTicket)
+  const [activeRealtimeTicketExpiresAt, setActiveRealtimeTicketExpiresAt] = useState<number | null>(
+    normalizeEpochSeconds(realtimeTicketExpiresAt)
+  )
+  const [isRefreshingTicket, setIsRefreshingTicket] = useState(false)
+  const [ticketRefreshError, setTicketRefreshError] = useState<string | null>(null)
   const [isTicketExpired, setIsTicketExpired] = useState<boolean>(() => {
-    if (!realtimeTicket || !realtimeTicketExpiresAt) {
+    if (!activeRealtimeTicket || !activeRealtimeTicketExpiresAt) {
       return true
     }
 
-    return realtimeTicketExpiresAt <= Math.floor(Date.now() / 1000)
+    return activeRealtimeTicketExpiresAt <= Math.floor(Date.now() / 1000)
   })
   const lastSnapshotRequestedAtRef = useRef(0)
 
-  const handleRefreshPage = useCallback(() => {
-    window.location.reload()
-  }, [])
+  const refreshRealtimeTicketMutation = useMutation(
+    trpc.analytics.getRealtimeTicket.mutationOptions()
+  )
+
+  const refreshRealtimeTicket = useCallback(async () => {
+    setIsRefreshingTicket(true)
+    setTicketRefreshError(null)
+
+    try {
+      const ticketResponse = await refreshRealtimeTicketMutation.mutateAsync({ customerId })
+      const nextExpiresAt = normalizeEpochSeconds(ticketResponse.expiresAt)
+
+      setActiveRealtimeTicket(ticketResponse.ticket)
+      setActiveRealtimeTicketExpiresAt(nextExpiresAt)
+      setIsTicketExpired(!nextExpiresAt || nextExpiresAt <= Math.floor(Date.now() / 1000))
+      setMetrics(null)
+      setEvents([])
+      setLiveCycleUsageBySlug({})
+    } catch (error) {
+      setTicketRefreshError(
+        error instanceof Error ? error.message : "Failed to refresh realtime ticket"
+      )
+    } finally {
+      setIsRefreshingTicket(false)
+    }
+  }, [customerId, refreshRealtimeTicketMutation])
 
   const requestSnapshot = useCallback(
     (
@@ -227,7 +267,7 @@ export function RealtimePanel(props: {
         return
       }
 
-      if (!realtimeTicket || isTicketExpired) {
+      if (!activeRealtimeTicket || isTicketExpired) {
         return
       }
 
@@ -249,24 +289,30 @@ export function RealtimePanel(props: {
         })
       )
     },
-    [windowSeconds, customerId, projectId, realtimeTicket, isTicketExpired]
+    [windowSeconds, customerId, projectId, activeRealtimeTicket, isTicketExpired]
   )
 
   useEffect(() => {
-    if (!realtimeTicket || !realtimeTicketExpiresAt) {
+    setActiveRealtimeTicket(realtimeTicket)
+    setActiveRealtimeTicketExpiresAt(normalizeEpochSeconds(realtimeTicketExpiresAt))
+    setTicketRefreshError(null)
+  }, [realtimeTicket, realtimeTicketExpiresAt])
+
+  useEffect(() => {
+    if (!activeRealtimeTicket || !activeRealtimeTicketExpiresAt) {
       setIsTicketExpired(true)
       return
     }
 
     const now = Math.floor(Date.now() / 1000)
-    if (realtimeTicketExpiresAt <= now) {
+    if (activeRealtimeTicketExpiresAt <= now) {
       setIsTicketExpired(true)
       return
     }
 
     setIsTicketExpired(false)
 
-    const timeoutMs = realtimeTicketExpiresAt * 1000 - Date.now()
+    const timeoutMs = activeRealtimeTicketExpiresAt * 1000 - Date.now()
     const timeoutId = window.setTimeout(() => {
       setIsTicketExpired(true)
     }, timeoutMs)
@@ -274,7 +320,7 @@ export function RealtimePanel(props: {
     return () => {
       window.clearTimeout(timeoutId)
     }
-  }, [realtimeTicket, realtimeTicketExpiresAt])
+  }, [activeRealtimeTicket, activeRealtimeTicketExpiresAt])
 
   useEffect(() => {
     const resolvedTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -284,13 +330,13 @@ export function RealtimePanel(props: {
   const roomName = `${runtimeEnv}:${projectId}:${customerId}`
 
   const socket = usePartySocket({
-    enabled: Boolean(realtimeTicket) && !isTicketExpired,
+    enabled: Boolean(activeRealtimeTicket) && !isTicketExpired,
     host: API_DOMAIN.replace("https://", "wss://").replace("http://", "ws://"),
     room: roomName,
     prefix: "broadcast",
     party: "usagelimit",
     query: {
-      ticket: realtimeTicket ?? "",
+      ticket: activeRealtimeTicket ?? "",
     },
     onOpen: (event) => {
       if (isTicketExpired) {
@@ -590,13 +636,13 @@ export function RealtimePanel(props: {
             <div className="inline-block">
               <div className="flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs shadow-sm">
                 <span className="relative flex h-2 w-2">
-                  {realtimeTicket && !isTicketExpired && (
+                  {activeRealtimeTicket && !isTicketExpired && (
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
                   )}
                   <span
                     className={cn(
                       "relative inline-flex h-2 w-2 rounded-full",
-                      !realtimeTicket
+                      !activeRealtimeTicket
                         ? "bg-muted-foreground/50"
                         : isTicketExpired
                           ? "bg-amber-500"
@@ -605,7 +651,11 @@ export function RealtimePanel(props: {
                   />
                 </span>
                 <span className="font-medium text-muted-foreground">
-                  {!realtimeTicket ? "Unavailable" : isTicketExpired ? "Refresh required" : "Live"}
+                  {!activeRealtimeTicket
+                    ? "Unavailable"
+                    : isTicketExpired
+                      ? "Refresh required"
+                      : "Live"}
                 </span>
               </div>
             </div>
@@ -619,7 +669,7 @@ export function RealtimePanel(props: {
         </div>
       </div>
 
-      {realtimeTicket && isTicketExpired && (
+      {activeRealtimeTicket && isTicketExpired && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/20">
           <p className="text-amber-800 text-sm dark:text-amber-200">
             Realtime token expired.{" "}
@@ -628,13 +678,16 @@ export function RealtimePanel(props: {
               variant="link"
               size="sm"
               className="h-auto p-0 text-amber-800 underline-offset-2 hover:text-amber-900 dark:text-amber-200 dark:hover:text-amber-100"
-              onClick={handleRefreshPage}
+              onClick={refreshRealtimeTicket}
+              disabled={isRefreshingTicket}
             >
-              Refresh to reconnect
+              {isRefreshingTicket ? "Refreshing..." : "Refresh to reconnect"}
             </Button>
           </p>
         </div>
       )}
+
+      {ticketRefreshError && <p className="text-destructive text-sm">{ticketRefreshError}</p>}
 
       <div className="grid gap-4 lg:grid-cols-[1.25fr_2fr]">
         <Card className="border-muted/60 bg-gradient-to-br from-background to-muted/30">
@@ -853,15 +906,15 @@ export function RealtimePanel(props: {
         </Card>
       </div>
 
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-        <Card className="border-muted/60 lg:w-[32%] lg:flex-none">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
+        <Card className="border-muted/60 lg:flex lg:w-[32%] lg:flex-none lg:flex-col">
           <CardHeader>
             <CardTitle className="text-base">Entitlements</CardTitle>
             <CardDescription>Usage in the current billing cycle</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="lg:flex-1">
             <ScrollArea
-              className="h-[455px] [&_[data-radix-scroll-area-scrollbar]]:hidden"
+              className="h-[455px] lg:h-full [&_[data-radix-scroll-area-scrollbar]]:hidden"
               hideScrollBar
             >
               {entitlementRows.length === 0 ? (
@@ -1038,7 +1091,7 @@ export function RealtimePanel(props: {
           </CardContent>
         </Card>
 
-        <Card className="min-w-0 border-muted/60 lg:w-[68%]">
+        <Card className="min-w-0 border-muted/60 lg:flex lg:w-[68%] lg:flex-col">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <div>
@@ -1050,7 +1103,7 @@ export function RealtimePanel(props: {
               </Badge>
             </div>
           </CardHeader>
-          <CardContent className="px-4 pt-0 pb-4">
+          <CardContent className="px-4 pt-0 pb-4 lg:flex-1">
             {events.length === 0 ? (
               <EmptyPlaceholder className="h-[240px] w-auto border border-dashed">
                 <EmptyPlaceholder.Icon>

@@ -11,6 +11,8 @@ import { api } from "~/trpc/server"
 import { CustomerActions } from "../../_components/customers/customer-actions"
 import { RealtimePanel } from "../_components/realtime/realtime-panel"
 
+export const dynamic = "force-dynamic"
+
 type CustomerUsageResult = NonNullable<
   Awaited<ReturnType<typeof unprice.customers.getUsage>>["result"]
 >
