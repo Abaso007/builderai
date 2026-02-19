@@ -24,20 +24,20 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  "/v1/customer/{customerId}/getEntitlements": {
+  "/v1/customer/getEntitlements": {
     parameters: {
       query?: never
       header?: never
       path?: never
       cookie?: never
     }
+    get?: never
+    put?: never
     /**
      * get minimal entitlements
      * @description Get minimal entitlements for a customer
      */
-    get: operations["customers.getEntitlements"]
-    put?: never
-    post?: never
+    post: operations["customers.getEntitlements"]
     delete?: never
     options?: never
     head?: never
@@ -64,40 +64,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  "/v1/customer/{customerId}/getSubscription": {
+  "/v1/customer/getSubscription": {
     parameters: {
       query?: never
       header?: never
       path?: never
       cookie?: never
     }
+    get?: never
+    put?: never
     /**
      * get subscription
      * @description Get subscription with the active phase for a customer
      */
-    get: operations["customers.getSubscription"]
-    put?: never
-    post?: never
+    post: operations["customers.getSubscription"]
     delete?: never
     options?: never
     head?: never
     patch?: never
     trace?: never
   }
-  "/v1/customer/{customerId}/getUsage": {
+  "/v1/customer/getUsage": {
     parameters: {
       query?: never
       header?: never
       path?: never
       cookie?: never
     }
+    get?: never
+    put?: never
     /**
      * get usage
      * @description Get usage for a customer
      */
-    get: operations["customers.getUsage"]
-    put?: never
-    post?: never
+    post: operations["customers.getUsage"]
     delete?: never
     options?: never
     head?: never
@@ -1081,12 +1081,26 @@ export interface operations {
     parameters: {
       query?: never
       header?: never
-      path: {
-        customerId: string
-      }
+      path?: never
       cookie?: never
     }
-    requestBody?: never
+    /** @description Body of the request */
+    requestBody: {
+      content: {
+        "application/json": {
+          /**
+           * @description The customer ID
+           * @example cus_1H7KQFLr7RepUyQBKdnvY
+           */
+          customerId: string
+          /**
+           * @description The project ID
+           * @example prj_1H7KQFLr7RepUyQBKdnvY
+           */
+          projectId?: string
+        }
+      }
+    }
     responses: {
       /** @description The result of the get minimal entitlements */
       200: {
@@ -1389,12 +1403,26 @@ export interface operations {
     parameters: {
       query?: never
       header?: never
-      path: {
-        customerId: string
-      }
+      path?: never
       cookie?: never
     }
-    requestBody?: never
+    /** @description Body of the request */
+    requestBody: {
+      content: {
+        "application/json": {
+          /**
+           * @description The customer ID
+           * @example cus_1H7KQFLr7RepUyQBKdnvY
+           */
+          customerId: string
+          /**
+           * @description The project ID
+           * @example prj_1H7KQFLr7RepUyQBKdnvY
+           */
+          projectId?: string
+        }
+      }
+    }
     responses: {
       /** @description The result of the get subscription */
       200: {
@@ -1648,12 +1676,26 @@ export interface operations {
     parameters: {
       query?: never
       header?: never
-      path: {
-        customerId: string
-      }
+      path?: never
       cookie?: never
     }
-    requestBody?: never
+    /** @description Body of the request */
+    requestBody: {
+      content: {
+        "application/json": {
+          /**
+           * @description The customer ID
+           * @example cus_1H7KQFLr7RepUyQBKdnvY
+           */
+          customerId: string
+          /**
+           * @description The project ID
+           * @example prj_1H7KQFLr7RepUyQBKdnvY
+           */
+          projectId?: string
+        }
+      }
+    }
     responses: {
       /** @description The result of the get usage */
       200: {

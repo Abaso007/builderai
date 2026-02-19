@@ -1,3 +1,4 @@
+import type { ApiKeyExtended } from "@unprice/db/validators"
 import { SchemaError } from "@unprice/error"
 import type { Context } from "hono"
 import { endTime, startTime } from "hono/timing"
@@ -23,13 +24,31 @@ export async function keyAuth(c: Context<HonoEnv>) {
   // start timer
   startTime(c, "verifyApiKey")
 
-  // verify the api key
-  const verifyRes = await apikey.verifyApiKey({ key: authorization })
+  const shouldAvoidRateLimit = c.env.APP_ENV === "development"
+
+  // quick off in parallel (reducing p95 latency)
+  const [rateLimited, verifyRes] = await Promise.all([
+    !shouldAvoidRateLimit
+      ? apikey.rateLimit({
+          key: authorization,
+          workspaceId: c.get("workspaceId") as string,
+          source: "cloudflare",
+          limiter: c.env.RL_FREE_6000_60s,
+        })
+      : Promise.resolve(false),
+    apikey.verifyApiKey({ key: authorization }),
+  ])
 
   // end timer
   endTime(c, "verifyApiKey")
 
   const { val: key, err } = verifyRes
+
+  // skip for internal and main projects
+  if (rateLimited && !key?.project.isInternal && !key?.project.isMain) {
+    wideEventHelpers.addRateLimited(true)
+    throw new UnpriceApiError({ code: "RATE_LIMITED", message: "apikey rate limit exceeded" })
+  }
 
   if (err) {
     switch (true) {
@@ -70,7 +89,7 @@ export async function keyAuth(c: Context<HonoEnv>) {
 }
 
 /**
- * Resolves which project ID to use for usage/analytics when the request targets a customer.
+ * Resolves which project ID to use when the request targets a customer.
  *
  * Most calls use the API key's project as context, so the project is already known. This
  * function handles the special case where the **customer being queried is Unprice's own
@@ -142,4 +161,29 @@ export async function resolveContextProjectId(
   endTime(c, "resolveContextProjectId")
 
   return defaultProjectId
+}
+
+export function validateIsAllowedToAccessProject({
+  isMain,
+  key,
+  requestedProjectId,
+}: {
+  isMain: boolean
+  key: ApiKeyExtended
+  requestedProjectId: string
+}) {
+  const projectID = isMain
+    ? requestedProjectId
+      ? requestedProjectId
+      : key.projectId
+    : key.projectId
+
+  if (!isMain && projectID !== key.projectId) {
+    throw new UnpriceApiError({
+      code: "FORBIDDEN",
+      message: "You are not allowed to access this app analytics.",
+    })
+  }
+
+  return projectID
 }

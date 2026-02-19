@@ -157,9 +157,11 @@ export default async function CustomerUsagePage({
         currentCycleStartAt={currentSubscription?.currentCycleStartAt ?? null}
         currentCycleEndAt={currentSubscription?.currentCycleEndAt ?? null}
         cycleTimezone={currentSubscription?.timezone ?? null}
-        entitlementSlugs={entitlementSlugs}
+        entitlementSlugs={currentPhase ? entitlementSlugs : []}
         cycleFeatureUsageRows={cycleFeatureUsageRows}
-        currentPhaseBillingPeriod={currentPhase?.planVersion?.billingConfig.billingInterval ?? null}
+        currentPhaseBillingPeriod={
+          currentPhase?.planVersion?.billingConfig.billingInterval ?? "No active phase"
+        }
       />
     </DashboardShell>
   )

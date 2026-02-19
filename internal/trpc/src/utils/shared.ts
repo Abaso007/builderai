@@ -80,7 +80,9 @@ export const createWorkspace = async ({
     })
   }
 
-  const { result, error } = await unprice.customers.getSubscription(unPriceCustomerId)
+  const { result, error } = await unprice.customers.getSubscription({
+    customerId: unPriceCustomerId,
+  })
 
   if (error) {
     throw new TRPCError({

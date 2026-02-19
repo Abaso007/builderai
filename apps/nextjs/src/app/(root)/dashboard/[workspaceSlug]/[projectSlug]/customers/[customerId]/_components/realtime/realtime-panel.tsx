@@ -169,7 +169,7 @@ export function RealtimePanel(props: {
   cycleTimezone?: string | null
   entitlementSlugs?: string[]
   cycleFeatureUsageRows?: CycleFeatureUsageRow[]
-  currentPhaseBillingPeriod?: string | null
+  currentPhaseBillingPeriod: string
 }) {
   const {
     customerId,
@@ -670,7 +670,7 @@ export function RealtimePanel(props: {
             </div>
             <div>
               <p className="flex items-center gap-1 text-muted-foreground text-xs">
-                Current billing period
+                billing period
                 {browserCyclePeriodLabel && (
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -889,9 +889,15 @@ export function RealtimePanel(props: {
               hideScrollBar
             >
               {entitlementRows.length === 0 ? (
-                <div className="flex h-[200px] items-center justify-center text-muted-foreground text-sm">
-                  No active entitlements
-                </div>
+                <EmptyPlaceholder className="h-[240px] w-auto border border-dashed">
+                  <EmptyPlaceholder.Icon>
+                    <BarChart2 className="h-8 w-8 opacity-30" />
+                  </EmptyPlaceholder.Icon>
+                  <EmptyPlaceholder.Title>No active entitlements</EmptyPlaceholder.Title>
+                  <EmptyPlaceholder.Description>
+                    Customer has no active entitlements.
+                  </EmptyPlaceholder.Description>
+                </EmptyPlaceholder>
               ) : (
                 <div className="space-y-4">
                   {entitlementRows.map((entitlement, index) => {
@@ -992,7 +998,7 @@ export function RealtimePanel(props: {
               </Badge>
             </div>
           </CardHeader>
-          <CardContent className="px-4 pt-0 pb-4 lg:flex-1">
+          <CardContent className="lg:flex-1">
             {events.length === 0 ? (
               <EmptyPlaceholder className="h-[240px] w-auto border border-dashed">
                 <EmptyPlaceholder.Icon>

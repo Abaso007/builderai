@@ -49,6 +49,8 @@ export const customers = pgTableProject(
     externalId: uniqueIndex("cp_external_id_idx")
       .on(table.projectId, table.externalId)
       .where(sql`${table.externalId} IS NOT NULL`),
+    // improve performance when querying by customer id only
+    customerId: index("customer_id").on(table.id),
     primary: primaryKey({
       columns: [table.id, table.projectId],
       name: "pk_customer",

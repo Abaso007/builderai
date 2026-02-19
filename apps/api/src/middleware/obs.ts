@@ -25,18 +25,23 @@ export function obs(): MiddlewareHandler<HonoEnv> {
       wideEventLogger.add("request.status", status)
       wideEventLogger.add("request.duration", duration)
 
-      // flush metrics and logger
+      // flush metrics and logger with a timeout so waitUntil completes within
+      // Cloudflare's allowed post-response window and we avoid cancellation warnings
+      const FLUSH_TIMEOUT_MS = 2000
       c.executionCtx.waitUntil(
         (async () => {
           try {
-            await Promise.all([
-              wideEventLogger.emit(),
-              metrics.flush().catch((err: Error) => {
-                console.error("Failed to flush metrics", { error: err.message })
-              }),
-              logger.flush().catch((err: Error) => {
-                console.error("Failed to flush logger", { error: err.message })
-              }),
+            await Promise.race([
+              Promise.all([
+                wideEventLogger.emit(),
+                metrics.flush().catch((err: Error) => {
+                  console.error("Failed to flush metrics", { error: err.message })
+                }),
+                logger.flush().catch((err: Error) => {
+                  console.error("Failed to flush logger", { error: err.message })
+                }),
+              ]),
+              new Promise<void>((resolve) => setTimeout(() => resolve(), FLUSH_TIMEOUT_MS)),
             ])
           } catch (error) {
             console.error("Error during background flush", error)

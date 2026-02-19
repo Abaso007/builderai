@@ -58,6 +58,7 @@ export const registerGetPaymentMethodsV1 = (app: App) =>
     // validate the request
     await keyAuth(c)
 
+    // TODO: check this an identify key can query all customers
     const { err: customerDataErr, val: customerData } = await customer.getCustomer(customerId)
 
     if (customerDataErr) {

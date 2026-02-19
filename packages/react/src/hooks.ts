@@ -11,7 +11,9 @@ export function useCustomerEntitlements(customerId?: string) {
     queryKey: ["customers", "entitlements", customerId],
     queryFn: async () => {
       if (!customerId) throw new Error("Customer ID is required")
-      const response = await client.customers.getEntitlements(customerId)
+      const response = await client.customers.getEntitlements({
+        customerId: customerId!,
+      })
       if (response.error) {
         throw new Error(response.error.message)
       }

@@ -798,7 +798,8 @@ export class SubscriptionService {
             })
           })
 
-        // update the units for the entitlements
+        // TODO: update the units for the entitlements and recompute the entitlements
+        // we need to cut access if needed or extend the access if needed
         // await this.computeGrantsForPhase({
         //   itemsIds: itemsToChange.map((item) => item.id),
         //   projectId,

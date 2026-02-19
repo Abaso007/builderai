@@ -1,4 +1,3 @@
-import { TRPCError } from "@trpc/server"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 import { unprice } from "#utils/unprice"
@@ -22,21 +21,14 @@ export const getSubscription = protectedProjectProcedure
     const { customerId } = opts.input
     const { project } = opts.ctx
 
-    const customer = await opts.ctx.db.query.customers.findFirst({
-      where: (table, { and, eq }) => and(eq(table.id, customerId), eq(table.projectId, project.id)),
-      columns: {
-        id: true,
-      },
+    const { result, error } = await unprice.customers.getSubscription({
+      customerId,
+      projectId: project.id,
     })
 
-    if (!customer) {
-      throw new TRPCError({
-        code: "NOT_FOUND",
-        message: "Customer not found",
-      })
+    if (error) {
+      opts.ctx.wideEventHelpers.addError(error)
     }
-
-    const { result } = await unprice.customers.getSubscription(customerId)
 
     return {
       subscription: result ?? null,

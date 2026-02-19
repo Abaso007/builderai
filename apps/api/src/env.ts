@@ -28,6 +28,7 @@ export function createRuntimeEnv(workerEnv: Record<string, string | number | boo
         (ns) => typeof ns === "object"
       ),
       RL_FREE_1000_60s: cloudflareRatelimiter,
+      RL_FREE_6000_60s: cloudflareRatelimiter,
       CLOUDFLARE_ZONE_ID: z.string().optional(),
       CLOUDFLARE_API_TOKEN: z.string().optional(),
       CLOUDFLARE_CACHE_DOMAIN: z.string().optional(),

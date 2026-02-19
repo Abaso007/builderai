@@ -226,28 +226,30 @@ export class Unprice {
       },
 
       getEntitlements: async (
-        customerId: string
+        req: paths["/v1/customer/getEntitlements"]["post"]["requestBody"]["content"]["application/json"]
       ): Promise<
         Result<
-          paths["/v1/customer/{customerId}/getEntitlements"]["get"]["responses"]["200"]["content"]["application/json"]
+          paths["/v1/customer/getEntitlements"]["post"]["responses"]["200"]["content"]["application/json"]
         >
       > => {
         return await this.fetch({
-          path: ["v1", "customer", customerId, "getEntitlements"],
-          method: "GET",
+          path: ["v1", "customer", "getEntitlements"],
+          method: "POST",
+          body: req,
         })
       },
 
       getSubscription: async (
-        customerId: string
+        req: paths["/v1/customer/getSubscription"]["post"]["requestBody"]["content"]["application/json"]
       ): Promise<
         Result<
-          paths["/v1/customer/{customerId}/getSubscription"]["get"]["responses"]["200"]["content"]["application/json"]
+          paths["/v1/customer/getSubscription"]["post"]["responses"]["200"]["content"]["application/json"]
         >
       > => {
         return await this.fetch({
-          path: ["v1", "customer", customerId, "getSubscription"],
-          method: "GET",
+          path: ["v1", "customer", "getSubscription"],
+          method: "POST",
+          body: req,
         })
       },
 
@@ -279,15 +281,16 @@ export class Unprice {
       },
 
       getUsage: async (
-        customerId: string
+        req: paths["/v1/customer/getUsage"]["post"]["requestBody"]["content"]["application/json"]
       ): Promise<
         Result<
-          paths["/v1/customer/{customerId}/getUsage"]["get"]["responses"]["200"]["content"]["application/json"]
+          paths["/v1/customer/getUsage"]["post"]["responses"]["200"]["content"]["application/json"]
         >
       > => {
         return await this.fetch({
-          path: ["v1", "customer", customerId, "getUsage"],
-          method: "GET",
+          path: ["v1", "customer", "getUsage"],
+          method: "POST",
+          body: req,
         })
       },
 

@@ -57,6 +57,13 @@
       "when": 1771194563360,
       "tag": "0007_great_romulus",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1771502866158,
+      "tag": "0008_glamorous_morbius",
+      "breakpoints": true
     }
   ]
 }
