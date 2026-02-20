@@ -1,13 +1,13 @@
 {
   "fields": [
     {
-      "name": "id",
-      "type": "string",
+      "name": "event_date",
+      "type": "timestamp",
       "required": true
     },
     {
-      "name": "event_date",
-      "type": "timestamp",
+      "name": "id",
+      "type": "string",
       "required": true
     },
     {
@@ -27,7 +27,7 @@
     },
     {
       "name": "timestamp",
-      "type": "int64",
+      "type": "timestamp",
       "required": true
     },
     {

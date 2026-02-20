@@ -92,7 +92,6 @@ export const registerGetCatalogCredentialsV1 = (app: App) =>
 
     const durationSeconds = body.durationSeconds ?? 3600 // 1 hour
     const credentials = await issueLakehouseCatalogCredentials({
-      env: c.env,
       projectId: scopedProjectId,
       customerId: scopedCustomerId,
       eventDate: body.date,

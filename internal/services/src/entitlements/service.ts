@@ -594,16 +594,6 @@ export class EntitlementService {
     }
   }
 
-  public async flush(): Promise<
-    Result<void, UnPriceEntitlementError | UnPriceEntitlementStorageError>
-  > {
-    const result = await this.storage.flush()
-    if (result.err) {
-      return Err(result.err)
-    }
-    return Ok(undefined)
-  }
-
   /* we cannot trust in the storage since it could be not initilize yet.
    */
   /**

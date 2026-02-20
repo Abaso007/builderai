@@ -271,6 +271,7 @@ export class WideEventLogger {
   add<K extends WideEventKey>(key: K, value: WideEventAttributes[K]): this {
     const ctx = this.storage.getStore()
     if (!ctx || value === undefined) return this
+    if (this.shouldSkipAttribute(key)) return this
     ctx.attributes.set(key, value)
     return this
   }
@@ -303,6 +304,7 @@ export class WideEventLogger {
     if (!ctx) return this
 
     for (const [k, v] of Object.entries(this.flatten(attrs as Record<string, unknown>))) {
+      if (this.shouldSkipAttribute(k)) continue
       if (v !== undefined) ctx.attributes.set(k, v)
     }
     return this
@@ -387,6 +389,14 @@ export class WideEventLogger {
   // EMIT
   // ============================================
 
+  public shouldLog(): boolean {
+    if (this.config["service.environment"] === "production") {
+      return this.sample()
+    }
+
+    return true
+  }
+
   /**
    * Determines whether the current event should be sampled (emitted).
    *
@@ -400,7 +410,7 @@ export class WideEventLogger {
    *
    * @returns true if the event should be emitted, false to skip
    */
-  public shouldSample(): boolean {
+  public sample(): boolean {
     const status = (this.get("request.status") as number) || 200
     const duration = (this.get("request.duration") as number) || 0
 
@@ -444,6 +454,7 @@ export class WideEventLogger {
    */
   emit(message?: string): void {
     const ctx = this.storage.getStore()
+
     if (!ctx) return
 
     const event = {
@@ -451,14 +462,9 @@ export class WideEventLogger {
     } as WideEvent
 
     try {
-      const shouldSample = this.shouldSample()
+      const shouldLog = this.shouldLog()
 
-      // only sample in production
-      if (this.config["service.environment"] !== "production") {
-        return
-      }
-
-      if (shouldSample) {
+      if (shouldLog) {
         const status = (this.get("request.status") as number) || 200
         if (status >= 400) {
           if (status === 429) {
@@ -493,6 +499,12 @@ export class WideEventLogger {
   // ============================================
   // HELPERS
   // ============================================
+  private shouldSkipAttribute(key: string): boolean {
+    return (
+      this.config["service.environment"] === "development" &&
+      (key.startsWith("service.") || key.startsWith("cloud.") || key.startsWith("geo."))
+    )
+  }
 
   /**
    * Recursively flattens a nested object into dot-notation keys.

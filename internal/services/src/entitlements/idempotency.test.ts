@@ -181,7 +181,7 @@ describe("EntitlementService - Idempotency & Flush", () => {
     expect(res2.usage).toBe(5) // Still 5 because of idempotency key check
 
     // Now let's flush and verify analytics only receives ONE event
-    await service.flush()
+    await mockStorage.flush()
 
     expect(mockAnalytics.ingestFeaturesUsage).toHaveBeenCalledTimes(1)
     // The argument to ingestFeaturesUsage should be an array with 1 element (deduplicated)
@@ -217,7 +217,7 @@ describe("EntitlementService - Idempotency & Flush", () => {
     expect(pending.val).toHaveLength(5)
 
     // Flush
-    await service.flush()
+    await mockStorage.flush()
 
     // Analytics should be called with 5 items
     expect(mockAnalytics.ingestFeaturesVerification).toHaveBeenCalledTimes(1)
@@ -253,7 +253,7 @@ describe("EntitlementService - Idempotency & Flush", () => {
     }
 
     // Flush
-    await service.flush()
+    await mockStorage.flush()
 
     // Analytics called with 3 items
     expect(mockAnalytics.ingestFeaturesUsage).toHaveBeenCalledTimes(1)

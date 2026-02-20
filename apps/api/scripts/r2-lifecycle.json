@@ -1,11 +1,11 @@
 {
   "rules": [
     {
-      "id": "abort-incomplete-multipart-7-days",
+      "id": "abort-incomplete-multipart-1-day",
       "enabled": true,
       "conditions": { "prefix": "" },
       "abortMultipartUploadsTransition": {
-        "condition": { "maxAge": 604800, "type": "Age" }
+        "condition": { "maxAge": 86400, "type": "Age" }
       }
     }
   ]

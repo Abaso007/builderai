@@ -26,7 +26,7 @@ import { EntitlementService } from "@unprice/services/entitlements"
 import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/metrics"
 import { type Connection, Server } from "partyserver"
 import type { Env } from "~/env"
-import { createCloudflareLakehouseService } from "~/lakehouse/service"
+import { LakehousePipelineService } from "~/lakehouse/pipeline"
 import type { BufferMetricsResponse } from "./interface"
 import { type FlushPressureStats, SqliteDOStorageProvider } from "./sqlite-do-provider"
 
@@ -41,7 +41,6 @@ type UsageInputSummary = {
   featureSlug: string
   usage?: number
   timestamp: number
-  flushTime?: number
   sync?: boolean
   action?: string
   keyId?: string
@@ -79,7 +78,6 @@ const summarizeUsageInput = (data: VerifyRequest | ReportUsageRequest): UsageInp
     featureSlug: data.featureSlug,
     usage: data.usage,
     timestamp: data.timestamp,
-    flushTime: data.flushTime,
     sync: "sync" in data ? data.sync : undefined,
     action: data.action,
     keyId: data.keyId,
@@ -174,12 +172,12 @@ export class DurableObjectUsagelimiter extends Server {
     this._env = env
 
     if (env.APP_ENV === "development") {
-      this.TTL_ANALYTICS = 1000 * 10 // 10 seconds
+      this.TTL_ANALYTICS = 1000 * 60 // 60 seconds
       this.SAMPLE_RATE = 1
     }
 
     if (env.APP_ENV === "preview") {
-      this.TTL_ANALYTICS = 1000 * 60 // 1 minute
+      this.TTL_ANALYTICS = 1000 * 60 * 5 // 5 minutes
       this.SAMPLE_RATE = 0.1
     }
 
@@ -266,9 +264,14 @@ export class DurableObjectUsagelimiter extends Server {
       singleton: false, // Don't use singleton for hibernating DOs
     })
 
-    const lakehouseService = createCloudflareLakehouseService({
+    const lakehousePipelineService = new LakehousePipelineService({
       logger: this.logger,
-      env,
+      pipelines: {
+        usage: env.PIPELINE_USAGE,
+        verification: env.PIPELINE_VERIFICATIONS,
+        metadata: env.PIPELINE_METADATA,
+        entitlement_snapshot: env.PIPELINE_ENTITLEMENTS,
+      },
     })
 
     // initialize the storage provider
@@ -282,7 +285,7 @@ export class DurableObjectUsagelimiter extends Server {
         tinybirdUrl: env.TINYBIRD_URL,
         logger: this.logger,
       }),
-      lakehouseService,
+      lakehouseService: lakehousePipelineService,
     })
 
     // initialize the storage provider - must block until complete
@@ -483,7 +486,7 @@ export class DurableObjectUsagelimiter extends Server {
         const result = await this.entitlementService.verify(data)
         wideEventLogger.add("usagelimiter.result", summarizeUsageResult(result))
         // Set alarm to flush buffers
-        await this.ensureAlarmIsSet(wideEventLogger, data.flushTime)
+        await this.ensureAlarmIsSet(wideEventLogger)
 
         this.ctx.waitUntil(
           this.broadcastEvents({
@@ -569,7 +572,7 @@ export class DurableObjectUsagelimiter extends Server {
         const result = await this.entitlementService.reportUsage(data)
         wideEventLogger.add("usagelimiter.result", summarizeUsageResult(result))
         // Set alarm to flush buffers
-        await this.ensureAlarmIsSet(wideEventLogger, data.flushTime)
+        await this.ensureAlarmIsSet(wideEventLogger)
 
         this.ctx.waitUntil(
           this.broadcastEvents({
@@ -619,14 +622,21 @@ export class DurableObjectUsagelimiter extends Server {
   }
 
   // ensure the alarm is set to flush the usage records and verifications
-  private async ensureAlarmIsSet(
-    wideEventLogger: WideEventLogger,
-    flushTime?: number
-  ): Promise<void> {
+  private async ensureAlarmIsSet(wideEventLogger: WideEventLogger): Promise<void> {
     const alarm = await this.ctx.storage.getAlarm()
     const now = Date.now()
 
-    const fallbackFlushSec = this.normalizeFlushSeconds(flushTime)
+    const fallbackFlushSec = this.normalizeFlushSeconds()
+
+    // if alarm is in the past, set it to the future
+    if (alarm && alarm < now) {
+      this.ctx.storage.setAlarm(now + fallbackFlushSec * 1000)
+      wideEventLogger.add(
+        "usagelimiter.next_alarm",
+        new Date(now + fallbackFlushSec * 1000).toISOString()
+      )
+      return
+    }
 
     if (alarm && alarm <= now + fallbackFlushSec * 1000) {
       wideEventLogger.add("usagelimiter.next_alarm", new Date(alarm).toISOString())
@@ -647,11 +657,8 @@ export class DurableObjectUsagelimiter extends Server {
     }
   }
 
-  private normalizeFlushSeconds(flushTime?: number): number {
-    return Math.min(
-      Math.max(flushTime ?? this.TTL_ANALYTICS / 1000, this.FLUSH_SEC_MIN),
-      this.FLUSH_SEC_MAX
-    )
+  private normalizeFlushSeconds(): number {
+    return Math.min(Math.max(this.TTL_ANALYTICS / 1000, this.FLUSH_SEC_MIN), this.FLUSH_SEC_MAX)
   }
 
   private getAdaptiveFlushSeconds(
@@ -846,7 +853,7 @@ export class DurableObjectUsagelimiter extends Server {
   async onAlarm(): Promise<void> {
     this.logger.debug("Triggering alarm flush")
     // flush the usage records
-    const flushResult = await this.entitlementService.flush()
+    const flushResult = await this.storage.flush()
 
     if (flushResult.err) {
       this.logger.error("Alarm flush failed", { error: flushResult.err.message })

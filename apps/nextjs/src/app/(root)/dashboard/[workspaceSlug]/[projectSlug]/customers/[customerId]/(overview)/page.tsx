@@ -22,6 +22,7 @@ function buildRealtimeCycleUsageRows(usageData?: CustomerUsageResult | null) {
   const rows: Array<{
     featureSlug: string
     currentUsage: number
+    limit: number | null
     limitType: "hard" | "soft" | "none"
     featureType: CustomerUsageFeature["type"]
   }> = []
@@ -29,9 +30,14 @@ function buildRealtimeCycleUsageRows(usageData?: CustomerUsageResult | null) {
   for (const group of usageData.groups) {
     for (const feature of group.features) {
       if (feature.type === "usage") {
+        const limit =
+          typeof feature.usageBar.limit === "number" && feature.usageBar.limit > 0
+            ? feature.usageBar.limit
+            : null
         rows.push({
           featureSlug: feature.id,
           currentUsage: feature.usageBar.current,
+          limit,
           limitType: feature.usageBar.limitType,
           featureType: feature.type,
         })
@@ -39,9 +45,13 @@ function buildRealtimeCycleUsageRows(usageData?: CustomerUsageResult | null) {
       }
 
       if (feature.type === "tiered") {
+        const tieredMax = feature.tieredDisplay.tiers.find((t) => t.isActive)?.max
+        const limit =
+          typeof tieredMax === "number" && tieredMax > 0 ? tieredMax : null
         rows.push({
           featureSlug: feature.id,
           currentUsage: feature.tieredDisplay.currentUsage,
+          limit,
           limitType: "none",
           featureType: feature.type,
         })
@@ -51,6 +61,7 @@ function buildRealtimeCycleUsageRows(usageData?: CustomerUsageResult | null) {
       rows.push({
         featureSlug: feature.id,
         currentUsage: 0,
+        limit: null,
         limitType: "none",
         featureType: feature.type,
       })

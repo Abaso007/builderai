@@ -11,7 +11,8 @@ const usageEventsLimitExceeded = new Counter("usage_events_limit_exceeded")
 const usageEventsRateLimited = new Counter("usage_events_rate_limited")
 const verifyEventsSent = new Counter("verify_events_sent")
 
-const BASE_URL = __ENV.BASE_URL || "https://preview-api.unprice.dev"
+// const BASE_URL = __ENV.BASE_URL || "https://preview-api.unprice.dev"
+const BASE_URL = __ENV.BASE_URL || "http://localhost:8787"
 const API_TOKEN = __ENV.UNPRICE_TOKEN || ""
 const BILLING_INTERVAL = __ENV.BILLING_INTERVAL || "month"
 const CURRENCY = __ENV.CURRENCY || "EUR"

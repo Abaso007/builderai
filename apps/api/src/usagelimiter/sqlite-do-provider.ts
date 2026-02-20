@@ -21,6 +21,7 @@ import { type UsageRecord, type Verification, schema } from "~/db/types"
 import {
   buildLakehouseMetadataProcessingResult,
   buildLakehousePreparedPayload,
+  toEventDate,
 } from "~/lakehouse/pipeline"
 import migrations from "../../drizzle/migrations"
 
@@ -60,10 +61,6 @@ function isEntitlementState(value: unknown): value is EntitlementState {
     typeof obj.projectId === "string" &&
     typeof obj.featureSlug === "string"
   )
-}
-
-function toEventDate(timestamp: number): string {
-  return new Date(timestamp).toISOString().slice(0, 10)
 }
 
 function normalizeJsonValue(value: unknown): LakehouseJsonValue {
@@ -499,6 +496,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           lastR2VerificationId: this.cursors.lastR2VerificationId,
         },
       })
+
       const entitlementSnapshots = await this.buildEntitlementSnapshots({
         prepared: lakehousePrepared,
         seenSnapshotSet,
@@ -916,24 +914,24 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       const normalizedMetadata = normalizeJsonValue(state.metadata ?? null)
 
       snapshots.push({
-        id: state.id,
-        event_date: toEventDate(timestamp),
-        project_id: state.projectId,
-        customer_id: state.customerId,
-        timestamp,
-        feature_slug: state.featureSlug,
-        feature_type: state.featureType,
-        unit_of_measure: state.unitOfMeasure || "unit",
+        id: String(state.id),
+        event_date: toEventDate(timestamp), // Pipeline expects timestamp (int64), not date string
+        project_id: String(state.projectId),
+        customer_id: String(state.customerId),
+        timestamp: Number(timestamp), // Ensure it's a number (int64)
+        feature_slug: String(state.featureSlug),
+        feature_type: String(state.featureType),
+        unit_of_measure: String(state.unitOfMeasure || "unit"),
         reset_config: normalizedResetConfig,
-        aggregation_method: state.aggregationMethod,
-        merging_policy: state.mergingPolicy,
-        limit: state.limit ?? undefined,
-        effective_at: state.effectiveAt,
-        expires_at: state.expiresAt ?? undefined,
-        version: state.version,
+        aggregation_method: String(state.aggregationMethod),
+        merging_policy: state.mergingPolicy ? String(state.mergingPolicy) : undefined,
+        limit: state.limit != null ? Number(state.limit) : undefined, // Ensure it's a number (int64)
+        effective_at: Number(state.effectiveAt), // Ensure it's a number (timestamp)
+        expires_at: state.expiresAt != null ? Number(state.expiresAt) : undefined, // Ensure it's a number (timestamp)
+        version: state.version ? String(state.version) : undefined,
         grants: normalizedGrants,
         metadata: normalizedMetadata,
-        schema_version: ENTITLEMENT_SNAPSHOT_SCHEMA_VERSION,
+        schema_version: Number(ENTITLEMENT_SNAPSHOT_SCHEMA_VERSION), // Ensure it's a number (int32)
       })
 
       params.seenSnapshotSet.add(entitlementId)
@@ -953,6 +951,15 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     entitlementSnapshots: LakehouseEntitlementSnapshotEvent[]
   ): Promise<{ success: boolean; cursorState: LakehouseCursorState }> {
     try {
+      this.logger.info("Flushing lakehouse payload", {
+        usage_records: prepared.usageRecords.length,
+        verification_records: prepared.verificationRecords.length,
+        metadata_records: prepared.metadataRecords.length,
+        entitlement_snapshot_records: entitlementSnapshots.length,
+        cursor_lastR2UsageId: prepared.cursorState.lastR2UsageId,
+        cursor_lastR2VerificationId: prepared.cursorState.lastR2VerificationId,
+      })
+
       if (
         prepared.usageRecords.length === 0 &&
         prepared.verificationRecords.length === 0 &&
@@ -970,13 +977,37 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         entitlementSnapshots,
       })
 
+      this.logger.info("Lakehouse payload flush result", {
+        success: lakehouseResult.success,
+        usage_records_sent: prepared.usageRecords.length,
+        verification_records_sent: prepared.verificationRecords.length,
+        metadata_records_sent: prepared.metadataRecords.length,
+        entitlement_snapshot_records_sent: entitlementSnapshots.length,
+      })
+
+      if (!lakehouseResult.success) {
+        this.logger.error("Lakehouse flush returned success=false", {
+          cursor_lastR2UsageId: prepared.cursorState.lastR2UsageId,
+          cursor_lastR2VerificationId: prepared.cursorState.lastR2VerificationId,
+        })
+      }
+
       return {
         success: lakehouseResult.success,
         cursorState: lakehouseResult.cursorState,
       }
     } catch (error) {
-      this.logger.error("Failed to flush to R2", { error: this.errorMessage(error) })
-      return { success: false, cursorState: prepared.cursorState }
+      this.logger.error("Failed to flush to R2", {
+        error: this.errorMessage(error),
+        error_stack: error instanceof Error ? error.stack : undefined,
+        error_name: error instanceof Error ? error.name : undefined,
+        usage_records_count: prepared.usageRecords.length,
+        verification_records_count: prepared.verificationRecords.length,
+        metadata_records_count: prepared.metadataRecords.length,
+        entitlement_snapshot_records_count: entitlementSnapshots.length,
+      })
+      // Don't swallow the error - let it propagate so we can see what's wrong
+      throw error
     }
   }
 

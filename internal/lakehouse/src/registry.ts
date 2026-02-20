@@ -78,20 +78,20 @@ export const lakehouseSourceSchemaRegistry = {
     partitionColumns: LAKEHOUSE_PARTITION_COLUMNS,
     fields: [
       {
-        name: "id",
-        type: "string",
-        required: true,
-        addedInVersion: 1,
-        defaultValue: null,
-        description: "Unique usage event identifier.",
-      },
-      {
         name: "event_date",
         type: "datetime",
         required: true,
         addedInVersion: 1,
         defaultValue: null,
         description: "UTC date partition key formatted as YYYY-MM-DD.",
+      },
+      {
+        name: "id",
+        type: "string",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Unique usage event identifier.",
       },
       {
         name: "request_id",
@@ -119,7 +119,7 @@ export const lakehouseSourceSchemaRegistry = {
       },
       {
         name: "timestamp",
-        type: "int64",
+        type: "timestamp",
         required: true,
         addedInVersion: 1,
         defaultValue: null,
@@ -267,20 +267,20 @@ export const lakehouseSourceSchemaRegistry = {
     partitionColumns: LAKEHOUSE_PARTITION_COLUMNS,
     fields: [
       {
-        name: "id",
-        type: "string",
-        required: true,
-        addedInVersion: 1,
-        defaultValue: null,
-        description: "Unique verification event identifier.",
-      },
-      {
         name: "event_date",
         type: "datetime",
         required: true,
         addedInVersion: 1,
         defaultValue: null,
         description: "UTC date partition key formatted as YYYY-MM-DD.",
+      },
+      {
+        name: "id",
+        type: "string",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Unique verification event identifier.",
       },
       {
         name: "project_id",
@@ -464,20 +464,20 @@ export const lakehouseSourceSchemaRegistry = {
     partitionColumns: LAKEHOUSE_PARTITION_COLUMNS,
     fields: [
       {
-        name: "id",
-        type: "string",
-        required: true,
-        addedInVersion: 1,
-        defaultValue: null,
-        description: "Metadata payload stable hash identifier.",
-      },
-      {
         name: "event_date",
         type: "datetime",
         required: true,
         addedInVersion: 1,
         defaultValue: null,
         description: "UTC date partition key formatted as YYYY-MM-DD.",
+      },
+      {
+        name: "id",
+        type: "string",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Metadata payload stable hash identifier.",
       },
       {
         name: "project_id",
@@ -533,20 +533,20 @@ export const lakehouseSourceSchemaRegistry = {
     partitionColumns: LAKEHOUSE_PARTITION_COLUMNS,
     fields: [
       {
-        name: "id",
-        type: "string",
-        required: true,
-        addedInVersion: 1,
-        defaultValue: null,
-        description: "Immutable entitlement snapshot identifier.",
-      },
-      {
         name: "event_date",
         type: "datetime",
         required: true,
         addedInVersion: 1,
         defaultValue: null,
         description: "UTC date partition key formatted as YYYY-MM-DD.",
+      },
+      {
+        name: "id",
+        type: "string",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Immutable entitlement snapshot identifier.",
       },
       {
         name: "project_id",

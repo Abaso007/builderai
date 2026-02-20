@@ -69,7 +69,7 @@ export const registerProxyCatalogV1 = (app: App) => {
 
     const resolvedAccountId = accountIdFromPath ?? c.env.CLOUDFLARE_ACCOUNT_ID
     const resolvedBucketName = bucketNameFromPath ?? c.env.LAKEHOUSE_BUCKET_NAME
-    const apiToken = c.env.LAKEHOUSE_STREAM_AUTH_TOKEN
+    const apiToken = c.env.LAKEHOUSE_CREDENTIAL_TOKEN
 
     const upstreamUrl = new URL(
       `${CLOUDFLARE_CATALOG_BASE}/${resolvedAccountId}/${resolvedBucketName}${suffixPath}`

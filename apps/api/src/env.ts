@@ -1,3 +1,4 @@
+import type { Pipeline } from "cloudflare:pipelines"
 import { type StandardSchemaV1, createEnv } from "@t3-oss/env-core"
 import { env as envAnalytics } from "@unprice/analytics/env"
 import { env as envDb } from "@unprice/db/env"
@@ -11,8 +12,18 @@ export const cloudflareRatelimiter = z.custom<{
   limit: (opts: { key: string }) => Promise<{ success: boolean }>
 }>((r) => !!r && typeof r.limit === "function")
 
+function isCloudflarePipeline(value: unknown): value is Pipeline {
+  if (!value || typeof value !== "object") {
+    return false
+  }
+
+  return "send" in value && typeof value.send === "function"
+}
+
+export const cloudflarePipeline = z.custom<Pipeline>(isCloudflarePipeline)
+
 // This function should be called at the start of each request.
-export function createRuntimeEnv(workerEnv: Record<string, string | number | boolean | undefined>) {
+export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
   return createEnv({
     shared: {
       NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -35,16 +46,16 @@ export function createRuntimeEnv(workerEnv: Record<string, string | number | boo
       CLOUDFLARE_API_TOKEN_LAKEHOUSE: z.string(),
       CLOUDFLARE_ACCOUNT_ID: z.string(),
       CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID: z.string(),
-      LAKEHOUSE_STREAM_USAGE_URL: z.string(),
-      LAKEHOUSE_STREAM_VERIFICATIONS_URL: z.string(),
-      LAKEHOUSE_STREAM_METADATA_URL: z.string(),
-      LAKEHOUSE_STREAM_ENTITLEMENTS_URL: z.string(),
-      LAKEHOUSE_STREAM_AUTH_TOKEN: z.string(),
+      PIPELINE_USAGE: cloudflarePipeline,
+      PIPELINE_VERIFICATIONS: cloudflarePipeline,
+      PIPELINE_METADATA: cloudflarePipeline,
+      PIPELINE_ENTITLEMENTS: cloudflarePipeline,
+      LAKEHOUSE_CREDENTIAL_TOKEN: z.string(),
       LAKEHOUSE_BUCKET_NAME: z.string(),
       LAKEHOUSE_ICEBERG_PREFIX: z.string(),
     },
     emptyStringAsUndefined: true,
-    runtimeEnv: workerEnv,
+    runtimeEnv: workerEnv as Record<string, string | number | boolean | undefined>,
     extends: [envServices, envDb, envAnalytics, envLogging],
     skipValidation: !!process.env.SKIP_ENV_VALIDATION || process.env.npm_lifecycle_event === "lint",
     onValidationError: (issues: readonly StandardSchemaV1.Issue[]) => {

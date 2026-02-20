@@ -3,7 +3,6 @@ import { reportUsageResultSchema } from "@unprice/db/validators"
 import { endTime, startTime } from "hono/timing"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
-
 import { z } from "zod"
 import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
@@ -168,8 +167,6 @@ export const registerReportUsageV1 = (app: App) =>
       // timestamp of the record (stabilized at request start)
       timestamp: requestStartedAt,
       idempotenceKey,
-      // short ttl for dev
-      flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
       projectId,
       requestId,
       performanceStart,

@@ -64,7 +64,6 @@ export const reportUsageSchema = z.object({
   featureSlug: z.string(),
   usage: z.number(),
   idempotenceKey: z.string(),
-  flushTime: z.number().optional(),
   timestamp: z.number(),
   projectId: z.string(),
   sync: z.boolean().optional(),
@@ -86,7 +85,6 @@ export const verifySchema = z.object({
   projectId: z.string(),
   requestId: z.string(),
   metadata: z.record(z.string(), z.any()).nullable(),
-  flushTime: z.number().optional(),
   performanceStart: z.number(),
   // first-class analytics fields
   country: z.string().optional(),

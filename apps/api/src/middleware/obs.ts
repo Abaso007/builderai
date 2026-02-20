@@ -27,7 +27,7 @@ export function obs(): MiddlewareHandler<HonoEnv> {
 
       // flush metrics and logger with a timeout so waitUntil completes within
       // Cloudflare's allowed post-response window and we avoid cancellation warnings
-      const FLUSH_TIMEOUT_MS = 2000
+      const FLUSH_TIMEOUT_MS = 10_000 // 10 seconds
       c.executionCtx.waitUntil(
         (async () => {
           try {

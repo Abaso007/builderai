@@ -15,11 +15,11 @@ import { CustomerService } from "@unprice/services/customers"
 import { LogdrainMetrics, NoopMetrics } from "@unprice/services/metrics"
 import type { MiddlewareHandler } from "hono"
 import type { HonoEnv } from "~/hono/env"
-import { createCloudflareLakehouseService } from "~/lakehouse/service"
 import { ApiProjectService } from "~/project"
 import { UsageLimiterService } from "~/usagelimiter/service"
 
 import { SubscriptionService } from "@unprice/services/subscriptions"
+import { LakehousePipelineService } from "~/lakehouse/pipeline"
 import { NoopUsageLimiter } from "~/usagelimiter/noop"
 
 /**
@@ -78,7 +78,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
           apiKey: c.env.AXIOM_API_TOKEN,
           dataset: c.env.AXIOM_DATASET,
           requestId,
-          environment: c.env.NODE_ENV,
+          environment: c.env.APP_ENV,
           service: "api",
           logLevel: c.env.APP_ENV === "production" ? "warn" : "info",
           defaultFields: {
@@ -88,7 +88,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
         })
       : new ConsoleLogger({
           requestId,
-          environment: c.env.NODE_ENV,
+          environment: c.env.APP_ENV,
           service: "api",
           logLevel: c.env.APP_ENV === "production" ? "warn" : "info",
           defaultFields: {
@@ -100,8 +100,8 @@ export function init(): MiddlewareHandler<HonoEnv> {
     const wideEventLogger = createWideEventLogger({
       "service.name": "api",
       "service.version": c.env.VERSION,
-      "service.environment": c.env.NODE_ENV,
-      sampleRate: c.env.NODE_ENV === "production" ? 0.1 : 1,
+      "service.environment": c.env.APP_ENV,
+      sampleRate: c.env.APP_ENV === "production" ? 0.1 : 1,
       emitter: (level, message, event) => logger.emit(level, message, event),
     })
 
@@ -114,7 +114,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
     const metrics = emitMetrics
       ? new LogdrainMetrics({
           requestId,
-          environment: c.env.NODE_ENV,
+          environment: c.env.APP_ENV,
           logger,
           service: "api",
           colo: stats.colo,
@@ -161,7 +161,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
     const cache = cacheService.getCache()
 
     const db = createConnection({
-      env: c.env.NODE_ENV,
+      env: c.env.APP_ENV,
       primaryDatabaseUrl: c.env.DATABASE_URL,
       read1DatabaseUrl: c.env.DATABASE_READ1_URL,
       read2DatabaseUrl: c.env.DATABASE_READ2_URL,
@@ -236,9 +236,14 @@ export function init(): MiddlewareHandler<HonoEnv> {
       hashCache,
     })
 
-    const lakehouse = createCloudflareLakehouseService({
+    const lakehouse = new LakehousePipelineService({
       logger,
-      env: c.env,
+      pipelines: {
+        usage: c.env.PIPELINE_USAGE,
+        verification: c.env.PIPELINE_VERIFICATIONS,
+        metadata: c.env.PIPELINE_METADATA,
+        entitlement_snapshot: c.env.PIPELINE_ENTITLEMENTS,
+      },
     })
 
     c.set("services", {

@@ -74,14 +74,14 @@ jobs:
       - name: Install Wrangler
         shell: bash
         run: |
-          npm i -g wrangler@4.66.0
+          npm i -g wrangler@4.67.0
           wrangler --version
 
       - name: Deploy with Wrangler
         uses: cloudflare/wrangler-action@v3.14.1
         with:
           apiToken: ${{ env.CLOUDFLARE_API_TOKEN }}
-          wranglerVersion: "4.66.0"
+          wranglerVersion: "4.67.0"
           environment: ${{ inputs.env }}
           packageManager: "pnpm"
           workingDirectory: "apps/api"
@@ -98,10 +98,6 @@ jobs:
             CLOUDFLARE_ACCOUNT_ID
             CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID
             LAKEHOUSE_STREAM_AUTH_TOKEN
-            LAKEHOUSE_STREAM_USAGE_URL
-            LAKEHOUSE_STREAM_VERIFICATIONS_URL
-            LAKEHOUSE_STREAM_METADATA_URL
-            LAKEHOUSE_STREAM_ENTITLEMENTS_URL
             DATABASE_URL
             DATABASE_READ1_URL
             DATABASE_READ2_URL
@@ -124,11 +120,6 @@ jobs:
           CLOUDFLARE_API_TOKEN_LAKEHOUSE: ${{ env.CLOUDFLARE_API_TOKEN_LAKEHOUSE }}
           CLOUDFLARE_ACCOUNT_ID: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID: ${{ env.CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID }}
-          LAKEHOUSE_STREAM_AUTH_TOKEN: ${{ env.LAKEHOUSE_STREAM_AUTH_TOKEN }}
-          LAKEHOUSE_STREAM_USAGE_URL: ${{ env.LAKEHOUSE_STREAM_USAGE_URL }}
-          LAKEHOUSE_STREAM_VERIFICATIONS_URL: ${{ env.LAKEHOUSE_STREAM_VERIFICATIONS_URL }}
-          LAKEHOUSE_STREAM_METADATA_URL: ${{ env.LAKEHOUSE_STREAM_METADATA_URL }}
-          LAKEHOUSE_STREAM_ENTITLEMENTS_URL: ${{ env.LAKEHOUSE_STREAM_ENTITLEMENTS_URL }}
           TINYBIRD_TOKEN: ${{ env.TINYBIRD_TOKEN }}
           TINYBIRD_URL: ${{ env.TINYBIRD_URL }}
           AUTH_SECRET: ${{ env.AUTH_SECRET }}

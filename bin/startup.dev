@@ -164,7 +164,7 @@ if [ "$MODE_ID" = "dev" ]; then
   while ! curl -s http://localhost:7181 > /dev/null 2>&1; do
     if [ $attempt = 1 -a $TB_RESTARTED = "false" ]; then
       echo "Starting Tinybird"
-      tb local start
+      tb local start -d
     fi
 
     if [ $attempt -ge $max_attempts ]; then

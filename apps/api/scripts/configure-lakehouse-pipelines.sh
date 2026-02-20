@@ -90,11 +90,131 @@ find_resource_id() {
 const fs = require("node:fs")
 const input = fs.readFileSync(0, "utf8")
 const needle = process.argv[1]
-let parsed
-try {
-  parsed = JSON.parse(input)
-} catch {
-  process.stdout.write("")
+const SINGLE_QUOTE = String.fromCharCode(39)
+const JSON_BLOCK_KEYS = ["result", "results", "items", "data", "pipelines", "streams", "sinks"]
+
+function extractBalancedBlocks(text) {
+  const blocks = []
+  const closeToOpen = { "]": "[", "}": "{" }
+  const stack = []
+  let start = -1
+  let inSingle = false
+  let inDouble = false
+  let escaping = false
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i]
+
+    if (escaping) {
+      escaping = false
+      continue
+    }
+
+    if (char === "\\") {
+      escaping = true
+      continue
+    }
+
+    if (!inDouble && char === SINGLE_QUOTE) {
+      inSingle = !inSingle
+      continue
+    }
+
+    if (!inSingle && char === "\"") {
+      inDouble = !inDouble
+      continue
+    }
+
+    if (inSingle || inDouble) continue
+
+    if (char === "[" || char === "{") {
+      if (stack.length === 0) start = i
+      stack.push(char)
+      continue
+    }
+
+    if (char === "]" || char === "}") {
+      if (stack.length === 0) continue
+      const expectedOpen = closeToOpen[char]
+      const actualOpen = stack[stack.length - 1]
+      if (actualOpen !== expectedOpen) continue
+      stack.pop()
+      if (stack.length === 0 && start >= 0) {
+        blocks.push(text.slice(start, i + 1))
+        start = -1
+      }
+    }
+  }
+
+  return blocks
+}
+
+function normalizeJsonLike(text) {
+  return text
+    .replace(/\[\s*Object\s*\]/g, "null")
+    .replace(/\[\s*Array\s*\]/g, "[]")
+    .replace(/([{,]\s*)([A-Za-z_$][A-Za-z0-9_$-]*)(\s*:)/g, "$1\"$2\"$3")
+    .replace(/\x27([^\x27\\]*(?:\\.[^\x27\\]*)*)\x27/g, (_, value) => {
+      const unescaped = value.replace(/\\\x27/g, "\x27")
+      const escaped = unescaped.replace(/\\/g, "\\\\").replace(/\"/g, "\\\"")
+      return `\"${escaped}\"`
+    })
+    .replace(/,\s*([}\]])/g, "$1")
+}
+
+function parseWithCandidates(text) {
+  const trimmed = text.trim()
+  const candidates = [trimmed, ...extractBalancedBlocks(text).map((block) => block.trim())].filter(Boolean)
+  const seen = new Set()
+
+  for (const candidate of candidates) {
+    if (seen.has(candidate)) continue
+    seen.add(candidate)
+    try {
+      return JSON.parse(candidate)
+    } catch {
+    }
+  }
+
+  for (const candidate of candidates) {
+    const normalized = normalizeJsonLike(candidate)
+    if (seen.has(normalized)) continue
+    seen.add(normalized)
+    try {
+      return JSON.parse(normalized)
+    } catch {
+    }
+  }
+
+  return null
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function findIdNearNeedle(text, targetName) {
+  if (!targetName) return ""
+  const escapedNeedle = escapeRegExp(targetName)
+  const namePattern = new RegExp(`[\\x27\\\"]${escapedNeedle}[\\x27\\\"]`)
+  const lines = text.split(/\r?\n/)
+
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!namePattern.test(lines[i])) continue
+
+    const start = Math.max(0, i - 12)
+    const end = Math.min(lines.length, i + 13)
+    const window = lines.slice(start, end).join("\n")
+    const idMatch = window.match(/(?:id|uuid|pipeline_id|stream_id|sink_id)\s*:\s*[\x27\"]?([A-Za-z0-9_-]+)[\x27\"]?/)
+    if (idMatch && idMatch[1]) return idMatch[1]
+  }
+
+  return ""
+}
+
+const parsed = parseWithCandidates(input)
+if (!parsed) {
+  process.stdout.write(findIdNearNeedle(input, needle))
   process.exit(0)
 }
 
@@ -102,12 +222,23 @@ function toArray(value) {
   if (Array.isArray(value)) return value
   if (!value || typeof value !== "object") return []
 
-  for (const key of ["result", "results", "items", "data", "pipelines", "streams", "sinks"]) {
-    if (Array.isArray(value[key])) return value[key]
-  }
+  const queue = [value]
+  const seen = new Set()
 
-  for (const item of Object.values(value)) {
-    if (Array.isArray(item)) return item
+  while (queue.length > 0) {
+    const current = queue.shift()
+    if (!current || typeof current !== "object") continue
+    if (seen.has(current)) continue
+    seen.add(current)
+
+    for (const key of JSON_BLOCK_KEYS) {
+      if (Array.isArray(current[key])) return current[key]
+    }
+
+    for (const item of Object.values(current)) {
+      if (Array.isArray(item)) return item
+      if (item && typeof item === "object") queue.push(item)
+    }
   }
 
   return []
@@ -304,141 +435,28 @@ STREAM_SPECS=(
   "entitlements:entitlements:entitlement_snapshot"
 )
 
-STREAM_ENV_SPECS=(
-  "usage:LAKEHOUSE_STREAM_USAGE_URL"
-  "verifications:LAKEHOUSE_STREAM_VERIFICATIONS_URL"
-  "metadata:LAKEHOUSE_STREAM_METADATA_URL"
-  "entitlements:LAKEHOUSE_STREAM_ENTITLEMENTS_URL"
+STREAM_BINDING_SPECS=(
+  "usage:PIPELINE_USAGE"
+  "verifications:PIPELINE_VERIFICATIONS"
+  "metadata:PIPELINE_METADATA"
+  "entitlements:PIPELINE_ENTITLEMENTS"
 )
 
 print_stream_env_block() {
-  local args=()
   local source
-  local env_key
+  local binding_name
   local stream_name
-  local streams_json
-  local env_lines
 
-  for spec in "${STREAM_ENV_SPECS[@]}"; do
+  echo "Copy/paste for wrangler bindings:"
+  for spec in "${STREAM_BINDING_SPECS[@]}"; do
     source="${spec%%:*}"
-    env_key="${spec##*:}"
+    binding_name="${spec##*:}"
     stream_name="$(resource_name "$source" "stream")"
-    args+=("${stream_name}=${env_key}")
+    printf "%s=%s\n" "$binding_name" "$stream_name"
   done
 
-  if ! streams_json="$(npx wrangler pipelines streams list --json --per-page 1000 2>/dev/null)"; then
-    echo "Could not fetch stream ingest URLs automatically."
-    echo "Run: npx wrangler pipelines streams list"
-    return 0
-  fi
-
-  env_lines="$(
-    printf "%s" "$streams_json" | node -e '
-const fs = require("node:fs")
-const input = fs.readFileSync(0, "utf8")
-const specs = process.argv.slice(1).map((entry) => {
-  const idx = entry.indexOf("=")
-  if (idx === -1) return { streamName: entry, envName: entry }
-  return {
-    streamName: entry.slice(0, idx),
-    envName: entry.slice(idx + 1),
-  }
-})
-
-let parsed
-try {
-  parsed = JSON.parse(input)
-} catch {
-  process.exit(0)
+  printf "LAKEHOUSE_CREDENTIAL_TOKEN=\${WRANGLER_R2_SQL_AUTH_TOKEN}\n"
 }
-
-function toArray(value) {
-  if (Array.isArray(value)) return value
-  if (!value || typeof value !== "object") return []
-
-  for (const key of ["result", "results", "items", "data", "streams"]) {
-    if (Array.isArray(value[key])) return value[key]
-  }
-
-  for (const candidate of Object.values(value)) {
-    if (Array.isArray(candidate)) return candidate
-  }
-
-  return []
-}
-
-function streamName(row) {
-  if (!row || typeof row !== "object") return ""
-  return (
-    row.name ??
-    row.stream ??
-    row.stream_name ??
-    row.pipeline ??
-    row.pipeline_name ??
-    ""
-  )
-}
-
-function firstUrl(value) {
-  if (typeof value === "string" && /^https?:\/\//i.test(value)) return value
-  if (!value || typeof value !== "object") return ""
-
-  const directKeys = [
-    "url",
-    "endpoint",
-    "http_url",
-    "httpUrl",
-    "http_endpoint",
-    "ingest_url",
-    "ingestUrl",
-  ]
-
-  for (const key of directKeys) {
-    const candidate = value[key]
-    if (typeof candidate === "string" && /^https?:\/\//i.test(candidate)) return candidate
-  }
-
-  if (value.http && typeof value.http === "object") {
-    const candidate = firstUrl(value.http)
-    if (candidate) return candidate
-  }
-
-  const stack = Object.values(value)
-  while (stack.length > 0) {
-    const current = stack.pop()
-    if (!current || typeof current !== "object") continue
-    for (const item of Object.values(current)) {
-      if (typeof item === "string" && /^https?:\/\//i.test(item)) return item
-      if (item && typeof item === "object") stack.push(item)
-    }
-  }
-
-  return ""
-}
-
-const rows = toArray(parsed)
-const lines = specs.map(({ streamName: targetStreamName, envName }) => {
-  const row = rows.find((candidate) => streamName(candidate) === targetStreamName)
-  const url = row ? firstUrl(row) : ""
-  return `${envName}=${url}`
-})
-
-process.stdout.write(lines.join("\n"))
-' "${args[@]}"
-  )"
-
-  echo "Copy/paste for .env:"
-  if [[ -n "$env_lines" ]]; then
-    printf "%s\n" "$env_lines"
-  else
-    printf "LAKEHOUSE_STREAM_USAGE_URL=\n"
-    printf "LAKEHOUSE_STREAM_VERIFICATIONS_URL=\n"
-    printf "LAKEHOUSE_STREAM_METADATA_URL=\n"
-    printf "LAKEHOUSE_STREAM_ENTITLEMENTS_URL=\n"
-  fi
-  printf "LAKEHOUSE_STREAM_AUTH_TOKEN=\${WRANGLER_R2_SQL_AUTH_TOKEN}\n"
-}
-
 if [[ "$RECREATE" == true || "$DELETE_ONLY" == true ]]; then
   echo ">>> Cleanup mode: deleting existing pipelines/sinks/streams for this environment naming scheme"
   for spec in "${STREAM_SPECS[@]}"; do
@@ -548,7 +566,7 @@ done
 # --- 6. Apply R2 lifecycle rules ---
 if [[ "$SKIP_LIFECYCLE" != true ]]; then
   echo ">>> Applying R2 lifecycle rules"
-  "$SCRIPT_DIR/setup-r2-lifecycle.sh" "$ENV"
+  "$SCRIPT_DIR/setup-r2.sh" "$ENV"
   echo ""
 fi
 

@@ -27,6 +27,14 @@ export class ConsoleLogger implements Logger {
   }
 
   private withMetadata(fields?: Fields, defaultLogType: LogType = "normal"): Fields {
+    // skip in development mode
+    if (this.environment === "development") {
+      return {
+        ...this.defaultFields,
+        ...fields,
+      }
+    }
+
     const enriched: Fields = {
       ...this.defaultFields,
       ...fields,
@@ -56,7 +64,7 @@ export class ConsoleLogger implements Logger {
     message: string,
     fields?: Fields
   ): string {
-    return new Log({
+    const log = new Log({
       type: "log",
       requestId: this.requestId,
       time: Date.now(),
@@ -65,7 +73,14 @@ export class ConsoleLogger implements Logger {
       context: this.withMetadata(fields),
       environment: this.environment,
       service: this.service,
-    }).toString()
+    })
+
+    // one line to human readable format in development mode
+    if (this.environment === "development") {
+      return `${new Date(log.log.time).toISOString()} - ${log.log.level} - ${log.log.message} - ${JSON.stringify(log.log.context, null, 2)}`
+    }
+
+    return log.toString()
   }
 
   public debug(message: string, fields?: Fields): void {
@@ -101,8 +116,7 @@ export class ConsoleLogger implements Logger {
       coloredOutput ? `${color}%s\x1b[0m` : "",
       level,
       "-",
-      message,
-      this.withMetadata(fields)
+      this.marshal(level, message, this.withMetadata(fields))
     )
   }
 

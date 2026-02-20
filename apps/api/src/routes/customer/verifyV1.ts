@@ -4,7 +4,6 @@ import { endTime } from "hono/timing"
 import { startTime } from "hono/timing"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
-
 import { z } from "zod"
 import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
@@ -132,6 +131,7 @@ export const registerVerifyV1 = (app: App) =>
     if (customerId) {
       resolvedCustomerId = customerId
     } else {
+      // if there is a external id, resolve the customer id from
       const { err: resolveCustomerErr, val: customerContext } = await customer.resolveCustomerId({
         projectId,
         externalId,
@@ -159,8 +159,6 @@ export const registerVerifyV1 = (app: App) =>
       requestId,
       performanceStart,
       usage,
-      // short ttl for dev
-      flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
       // timestamp of the record (stabilized at request start)
       timestamp: requestStartedAt,
       // first-class analytics fields

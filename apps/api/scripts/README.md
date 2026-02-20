@@ -164,8 +164,8 @@ Data catalog namespace: **`lakehouse`**. Tables: **`usage`**, **`verification`**
    ```
 
 3. **Sending events**  
-   POST JSON events to the stream HTTP endpoint with header:
-   `Authorization: Bearer $WRANGLER_R2_SQL_AUTH_TOKEN`.
+   API runtime should send events through Workers Pipeline bindings (`LAKEHOUSE_*_STREAM`) when `createCloudflareLakehouseService` is initialized.
+   In Cloudflare dev/preview/prod environments this is automatic after `wrangler deploy` with updated `pipelines` bindings.
 
 ## Idempotency
 
@@ -173,5 +173,5 @@ Re-running `configure-lakehouse-pipelines.sh` is safe: existing resources are de
 
 ## Related
 
-- **Wrangler config** – `apps/api/wrangler.jsonc` defines R2 bucket bindings (`LAKEHOUSE`). `preview`/`prod` also define `LAKEHOUSE_PIPELINE_*` bindings that point to stream resources (`lakehouse_<source>_stream_<environment>`). Local `dev` can ingest over HTTP stream endpoints via `LAKEHOUSE_STREAM_*_URL` and `LAKEHOUSE_STREAM_AUTH_TOKEN`.
+- **Wrangler config** – `apps/api/wrangler.jsonc` defines R2 bucket bindings (`LAKEHOUSE`) and `LAKEHOUSE_*_STREAM` pipeline bindings that point to stream resources (`lakehouse_<source>_stream_<environment>`).
 - **Lakehouse types/registry** – `internal/lakehouse/src/interface.ts` and `internal/lakehouse/src/registry.ts` define the shared event contracts that `scripts/schemas/` align with.

@@ -23,6 +23,7 @@ import { NumberTicker } from "~/components/analytics/number-ticker"
 import { RealtimeIntervalFilter } from "~/components/analytics/realtime-interval-filter"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { useRealtimeIntervalFilter } from "~/hooks/use-filter"
+import { formatNumber } from "~/lib/numbers"
 import { useTRPC } from "~/trpc/client"
 
 type Metrics = {
@@ -69,6 +70,7 @@ type RealtimeEvent = {
 type CycleFeatureUsageRow = {
   featureSlug: string
   currentUsage: number
+  limit: number | null
   limitType: "hard" | "soft" | "none"
   featureType: "flat" | "tiered" | "usage" | "package"
 }
@@ -115,13 +117,6 @@ function InfoTooltip({ content }: { content: string }) {
       <TooltipContent className="max-w-[280px] text-xs">{content}</TooltipContent>
     </Tooltip>
   )
-}
-
-function formatCompactNumber(value: number): string {
-  return new Intl.NumberFormat([], {
-    notation: value >= 10_000 ? "compact" : "standard",
-    maximumFractionDigits: value >= 10_000 ? 1 : 0,
-  }).format(value)
 }
 
 function resolveBucketSizeSeconds(windowSeconds: number): number {
@@ -538,7 +533,7 @@ export function RealtimePanel(props: {
         cycleUsage: liveCycleUsage ?? cycleFeatureUsage?.currentUsage ?? null,
         cycleLimitType: cycleFeatureUsage?.limitType,
         cycleFeatureType: cycleFeatureUsage?.featureType,
-        limit: null,
+        limit: cycleFeatureUsage?.limit ?? null,
       }
     })
   }, [entitlementSlugs, cycleFeatureUsageBySlug, liveCycleUsageBySlug])
@@ -924,10 +919,14 @@ export function RealtimePanel(props: {
 
                     const rawUsagePercent = isFlatFeature
                       ? 100
-                      : (usageValue / usageReference) * 100
+                      : hasLimit
+                        ? (usageValue / usageReference) * 100
+                        : 50
                     const usageProgressPercent = isFlatFeature
                       ? 100
-                      : Math.min(100, Math.max(rawUsagePercent, 0))
+                      : hasLimit
+                        ? Math.min(100, Math.max(rawUsagePercent, 0))
+                        : 50
                     const overagePercent =
                       !isFlatFeature && hasLimit && allowsOverage
                         ? Math.min(100, Math.max(rawUsagePercent - 100, 0))
@@ -936,7 +935,7 @@ export function RealtimePanel(props: {
                     const usageStatusText = isFlatFeature
                       ? "Flat feature"
                       : hasLimit
-                        ? `${rawUsagePercent.toFixed(1)}% of limit`
+                        ? `${formatNumber(usageValue)} used of ${formatNumber(limitValue)}`
                         : "No limit"
 
                     const usageBarColor = isFlatFeature
@@ -947,9 +946,7 @@ export function RealtimePanel(props: {
                           : "hsl(var(--destructive))"
                         : `var(--chart-${(index % 5) + 1})`
 
-                    const usageSummaryText = isFlatFeature
-                      ? "Flat feature"
-                      : `${formatCompactNumber(usageValue)} used · ${usageStatusText}`
+                    const usageSummaryText = isFlatFeature ? "Flat feature" : `${usageStatusText}`
 
                     return (
                       <div key={entitlement.featureSlug} className="space-y-1.5">

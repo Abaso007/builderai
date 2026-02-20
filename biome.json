@@ -58,7 +58,9 @@
       "./internal/lakehouse/lakenv",
       "./internal/lakehouse/.ipynb_checkpoints",
       "./internal/lakehouse/lakehouse.ipynb",
-      "./apps/api/scripts/*"
+      "./apps/api/scripts/*",
+      "**/__pycache__/**",
+      "apps/lakehouse-api/**"
     ]
   },
   "formatter": {
@@ -86,7 +88,9 @@
       "./internal/lakehouse/lakenv",
       "./internal/lakehouse/.ipynb_checkpoints",
       "./internal/lakehouse/lakehouse.ipynb",
-      "./apps/api/scripts/*"
+      "./apps/api/scripts/*",
+      "**/__pycache__/**",
+      "apps/lakehouse-api/**"
     ]
   },
   "organizeImports": {
@@ -109,7 +113,9 @@
       "./internal/lakehouse/lakenv",
       "./internal/lakehouse/.ipynb_checkpoints",
       "./internal/lakehouse/lakehouse.ipynb",
-      "./apps/api/scripts/*"
+      "./apps/api/scripts/*",
+      "**/__pycache__/**",
+      "apps/lakehouse-api/**"
     ]
   },
   "javascript": {

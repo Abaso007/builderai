@@ -38,8 +38,6 @@ export const reportUsageEvents = async (
     projectId: projectId,
     requestId,
     usage: 1,
-    // short ttl for dev
-    flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
     idempotenceKey: `${requestId}:${unPriceCustomerId}`,
     timestamp: Date.now(),
     metadata,

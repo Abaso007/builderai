@@ -1,75 +1,7 @@
+import { env } from "cloudflare:workers"
 import { lakehouseSourceSchemaRegistry } from "@unprice/lakehouse"
-import type { Logger } from "@unprice/logging"
 import { UnpriceApiError } from "~/errors"
 import { IcebergPathResolver } from "~/lakehouse/catalog"
-import {
-  CloudflarePipelineLakehouseService,
-  type LakehousePipelineBindingsBySource,
-} from "./pipeline"
-
-interface LakehouseServiceEnv {
-  APP_ENV: "development" | "preview" | "production"
-  LAKEHOUSE_STREAM_USAGE_URL: string
-  LAKEHOUSE_STREAM_VERIFICATIONS_URL: string
-  LAKEHOUSE_STREAM_METADATA_URL: string
-  LAKEHOUSE_STREAM_ENTITLEMENTS_URL: string
-  LAKEHOUSE_STREAM_AUTH_TOKEN: string
-}
-
-class HttpLakehousePipelineSender {
-  constructor(
-    private readonly url: string,
-    private readonly token: string
-  ) {}
-
-  async send(records: unknown[]): Promise<void> {
-    const res = await fetch(this.url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(records),
-    })
-
-    if (!res.ok) {
-      const body = await res.text()
-      throw new Error(
-        `Lakehouse stream ingest failed (${res.status}): ${body.slice(0, 1000) || "no response body"}`
-      )
-    }
-  }
-}
-
-function createHttpStreamSenders(env: LakehouseServiceEnv): LakehousePipelineBindingsBySource {
-  const token = env.LAKEHOUSE_STREAM_AUTH_TOKEN
-  return {
-    usage: new HttpLakehousePipelineSender(env.LAKEHOUSE_STREAM_USAGE_URL, token),
-    verification: new HttpLakehousePipelineSender(env.LAKEHOUSE_STREAM_VERIFICATIONS_URL, token),
-    metadata: new HttpLakehousePipelineSender(env.LAKEHOUSE_STREAM_METADATA_URL, token),
-    entitlement_snapshot: new HttpLakehousePipelineSender(
-      env.LAKEHOUSE_STREAM_ENTITLEMENTS_URL,
-      token
-    ),
-  }
-}
-
-export function createCloudflareLakehouseService(params: {
-  logger: Logger
-  env: LakehouseServiceEnv
-}): CloudflarePipelineLakehouseService {
-  const pipelines = createHttpStreamSenders(params.env)
-
-  params.logger.debug("Lakehouse sender mode selected", {
-    mode: "http-stream",
-    appEnv: params.env.APP_ENV ?? "unknown",
-  })
-
-  return new CloudflarePipelineLakehouseService({
-    logger: params.logger,
-    pipelines,
-  })
-}
 
 const CLOUDFLARE_API_BASE = "https://api.cloudflare.com/client/v4"
 const LAKEHOUSE_DEFAULT_NAMESPACE = "lakehouse"
@@ -84,19 +16,7 @@ type R2TempCredentialsResponse = {
   sessionToken?: string
 }
 
-export interface LakehouseCatalogCredentialEnv {
-  APP_ENV: "development" | "preview" | "production"
-  NODE_ENV: "development" | "test" | "production"
-  CLOUDFLARE_ACCOUNT_ID: string
-  CLOUDFLARE_API_TOKEN_LAKEHOUSE: string
-  CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID: string
-  LAKEHOUSE_BUCKET_NAME: string
-  LAKEHOUSE_ICEBERG_PREFIX: string
-  LAKEHOUSE_STREAM_AUTH_TOKEN: string
-}
-
 export interface IssueLakehouseCatalogCredentialsInput {
-  env: LakehouseCatalogCredentialEnv
   projectId: string
   customerId?: string
   eventDate?: string
@@ -309,7 +229,7 @@ async function fetchR2TempCredentials(params: {
       throw new UnpriceApiError({
         code: "INTERNAL_SERVER_ERROR",
         message:
-          "Cloudflare authentication failed for R2 temp credentials. Check CLOUDFLARE_API_TOKEN_LAKEHOUSE has access to CLOUDFLARE_ACCOUNT_ID.",
+          "Cloudflare authentication failed for R2 temp credentials. Check LAKEHOUSE_CREDENTIAL_TOKEN has access to CLOUDFLARE_ACCOUNT_ID.",
       })
     }
 
@@ -409,12 +329,11 @@ export function buildScopedPrefix(params: {
 export async function issueLakehouseCatalogCredentials(
   params: IssueLakehouseCatalogCredentialsInput
 ): Promise<IssueLakehouseCatalogCredentialsResult> {
-  const accountId = params.env.CLOUDFLARE_ACCOUNT_ID
-  const apiToken = params.env.CLOUDFLARE_API_TOKEN_LAKEHOUSE
-  const bucketName = params.env.LAKEHOUSE_BUCKET_NAME
-  const parentAccessKeyId = params.env.CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID
-  const icebergPrefix = params.env.LAKEHOUSE_ICEBERG_PREFIX
-  const catalogToken = params.env.LAKEHOUSE_STREAM_AUTH_TOKEN
+  const accountId = env.CLOUDFLARE_ACCOUNT_ID
+  const apiToken = env.CLOUDFLARE_API_TOKEN_LAKEHOUSE
+  const bucketName = env.LAKEHOUSE_BUCKET_NAME!
+  const parentAccessKeyId = env.CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID
+  const icebergPrefix = env.LAKEHOUSE_ICEBERG_PREFIX!
 
   const namespace = LAKEHOUSE_DEFAULT_NAMESPACE
   const fallbackPrefix = normalizePrefix(icebergPrefix || LAKEHOUSE_DEFAULT_PREFIX)
@@ -454,7 +373,7 @@ export async function issueLakehouseCatalogCredentials(
       accountId,
       bucketName,
       warehouseId: catalogWarehouse,
-      token: catalogToken,
+      token: "lakehouse-stream-auth-token",
     })
     const partitionSpec: Record<string, string> = {
       project_id: params.projectId,

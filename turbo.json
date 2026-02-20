@@ -12,6 +12,10 @@
     "install": {
       "outputs": ["node_modules/**", "pnpm-lock.yaml", "yarn.lock"]
     },
+    "setup": {
+      "cache": true,
+      "outputs": ["**/.venv/**"]
+    },
     "build": {
       "dependsOn": ["fmt", "^build"],
       "outputs": [
@@ -34,11 +38,6 @@
         "CLOUDFLARE_API_TOKEN_LAKEHOUSE",
         "CLOUDFLARE_ACCOUNT_ID",
         "CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID",
-        "LAKEHOUSE_STREAM_AUTH_TOKEN",
-        "LAKEHOUSE_STREAM_USAGE_URL",
-        "LAKEHOUSE_STREAM_VERIFICATIONS_URL",
-        "LAKEHOUSE_STREAM_METADATA_URL",
-        "LAKEHOUSE_STREAM_ENTITLEMENTS_URL",
         "AUTH_SECRET",
         "AUTH_GITHUB_CLIENT_ID",
         "AUTH_GITHUB_CLIENT_SECRET",
@@ -97,11 +96,6 @@
         "CLOUDFLARE_API_TOKEN_LAKEHOUSE",
         "CLOUDFLARE_ACCOUNT_ID",
         "CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID",
-        "LAKEHOUSE_STREAM_AUTH_TOKEN",
-        "LAKEHOUSE_STREAM_USAGE_URL",
-        "LAKEHOUSE_STREAM_VERIFICATIONS_URL",
-        "LAKEHOUSE_STREAM_METADATA_URL",
-        "LAKEHOUSE_STREAM_ENTITLEMENTS_URL",
         "TRIGGER_SECRET_KEY",
         "VERCEL_PROJECT_UNPRICE_ID",
         "VERCEL_TEAM_ID",

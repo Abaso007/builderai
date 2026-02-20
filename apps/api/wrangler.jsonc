@@ -50,6 +50,24 @@
           }
         ]
       },
+      "pipelines": [
+        {
+          "pipeline": "09e14fee72ab4b7c85a3dd67ced13f72",
+          "binding": "PIPELINE_VERIFICATIONS"
+        },
+        {
+          "pipeline": "09e14fee72ab4b7c85a3dd67ced13f72",
+          "binding": "PIPELINE_USAGE"
+        },
+        {
+          "pipeline": "09e14fee72ab4b7c85a3dd67ced13f72",
+          "binding": "PIPELINE_METADATA"
+        },
+        {
+          "pipeline": "09e14fee72ab4b7c85a3dd67ced13f72",
+          "binding": "PIPELINE_ENTITLEMENTS"
+        }
+      ],
       "durable_objects": {
         "bindings": [
           {
@@ -117,6 +135,24 @@
           }
         ]
       },
+      "pipelines": [
+        {
+          "pipeline": "09e14fee72ab4b7c85a3dd67ced13f72",
+          "binding": "PIPELINE_VERIFICATIONS"
+        },
+        {
+          "pipeline": "09e14fee72ab4b7c85a3dd67ced13f72",
+          "binding": "PIPELINE_USAGE"
+        },
+        {
+          "pipeline": "09e14fee72ab4b7c85a3dd67ced13f72",
+          "binding": "PIPELINE_METADATA"
+        },
+        {
+          "pipeline": "09e14fee72ab4b7c85a3dd67ced13f72",
+          "binding": "PIPELINE_ENTITLEMENTS"
+        }
+      ],
       "durable_objects": {
         "bindings": [
           {
@@ -144,7 +180,8 @@
       "r2_buckets": [
         {
           "binding": "LAKEHOUSE",
-          "bucket_name": "unprice-lakehouse-dev"
+          "bucket_name": "unprice-lakehouse-dev",
+          "remote": true
         }
       ],
       "vars": {
@@ -188,6 +225,28 @@
           }
         ]
       },
+      "pipelines": [
+        {
+          "pipeline": "75cfca9093854dd88f4d46e2088f235b",
+          "binding": "PIPELINE_VERIFICATIONS",
+          "remote": true
+        },
+        {
+          "pipeline": "a636dd5b2ca3485aab7de834efccf099",
+          "binding": "PIPELINE_USAGE",
+          "remote": true
+        },
+        {
+          "pipeline": "c0c1af506adb4e0c9394dde8e0c66241",
+          "binding": "PIPELINE_METADATA",
+          "remote": true
+        },
+        {
+          "pipeline": "ac1eb44429dc40f9992d38e5daff6c6c",
+          "binding": "PIPELINE_ENTITLEMENTS",
+          "remote": true
+        }
+      ],
       "migrations": [
         {
           "tag": "v1",
@@ -216,14 +275,12 @@
    * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
    */
   // "placement": { "mode": "smart" },
-
   /**
    * Bindings
    * Bindings allow your Worker to interact with resources on the Cloudflare Developer Platform, including
    * databases, object storage, AI inference, real-time communication and more.
    * https://developers.cloudflare.com/workers/runtime-apis/bindings/
    */
-
   /**
    * Environment Variables
    * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
@@ -233,13 +290,11 @@
    * Note: Use secrets to store sensitive data.
    * https://developers.cloudflare.com/workers/configuration/secrets/
    */
-
   /**
    * Static Assets
    * https://developers.cloudflare.com/workers/static-assets/binding/
    */
   // "assets": { "directory": "./public/", "binding": "ASSETS" },
-
   /**
    * Service Bindings (communicate between multiple Workers)
    * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
