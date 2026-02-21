@@ -15,6 +15,15 @@ INTERVAL_ALIASES = {
     "30d": 30,
     "90d": 90,
 }
+TARGET_ENV_NORMALIZATION = {
+    "non_prod": "non_prod",
+    "non-prod": "non_prod",
+    "nonprod": "non_prod",
+    "dev": "non_prod",
+    "preview": "non_prod",
+    "prod": "prod",
+    "production": "prod",
+}
 ALLOWED_TABLES = {"usage", "verification", "metadata", "entitlement_snapshot"}
 DEV_ENV_VALUES = {"dev", "development", "local"}
 
@@ -31,6 +40,7 @@ class FilePlanRequest(BaseModel):
     )
     tables: list[str] = Field(default_factory=lambda: sorted(ALLOWED_TABLES), validation_alias=AliasChoices("tables", "table"))
     interval: str
+    target_env: str = Field(default="non_prod", validation_alias=AliasChoices("target_env", "targetEnv", "env"))
 
     model_config = ConfigDict(extra="forbid")
 
@@ -129,6 +139,19 @@ class FilePlanRequest(BaseModel):
             raise ValueError("interval must be one of 1d, 7d, 30d, 90d")
         return interval
 
+    @field_validator("target_env", mode="before")
+    @classmethod
+    def normalize_target_env(cls, value: Any) -> str:
+        if value in (None, ""):
+            return "non_prod"
+        if not isinstance(value, str):
+            raise ValueError("target_env must be one of non_prod or prod")
+        target_env = value.strip().lower().replace(" ", "_")
+        normalized = TARGET_ENV_NORMALIZATION.get(target_env)
+        if normalized is None:
+            raise ValueError("target_env must be one of non_prod or prod")
+        return normalized
+
 
 def _coerce_utc_datetime(value: datetime) -> datetime:
     if value.tzinfo is None:
@@ -185,11 +208,6 @@ def _require_env(env: Any, key: str) -> str:
     if value is None or not value.strip():
         raise HTTPException(status_code=500, detail=f"Missing required environment variable: {key}")
     return value.strip()
-
-
-def _is_development_env(env: Any) -> bool:
-    env_name = (_get_env_value(env, "ENV", "") or "").strip().lower()
-    return env_name in DEV_ENV_VALUES
 
 
 def _create_catalog(*, account_id: str, catalog_name: str, warehouse: str, catalog_token: str) -> RestCatalog:

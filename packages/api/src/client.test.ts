@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest"
+import { Unprice } from "./client"
 
-// dummy test for now
-describe("dummy test", () => {
-  it("should pass", () => {
-    expect(true).toBe(true)
+describe("Unprice client", () => {
+  it("exposes lakehouse.getFilePlan", () => {
+    const client = new Unprice({
+      token: "test-token",
+      baseUrl: "https://example.com",
+      disableTelemetry: true,
+      retry: { attempts: 0 },
+    })
+
+    expect(typeof client.lakehouse.getFilePlan).toBe("function")
   })
 })
 

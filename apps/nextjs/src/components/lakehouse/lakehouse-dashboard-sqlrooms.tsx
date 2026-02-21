@@ -35,42 +35,21 @@ import { Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from "rec
 import { useIntervalFilter } from "~/hooks/use-filter"
 import { useMounted } from "~/hooks/use-mounted"
 import { useTRPC } from "~/trpc/client"
-import { roomStore, useRoomStore } from "./sqlrooms-store"
+import { type LakehouseFilePlan, roomStore, useRoomStore } from "./sqlrooms-store"
 
 // Table configurations for each data source
 const TABLE_CONFIG = {
-  usage: { tableName: "usage", catalogTable: "usage", label: "Usage Events" },
+  usage: { tableName: "usage", label: "Usage Events" },
   verification: {
     tableName: "verifications",
-    catalogTable: "verification",
     label: "Verifications",
   },
-  metadata: { tableName: "metadata", catalogTable: "metadata", label: "Metadata" },
+  metadata: { tableName: "metadata", label: "Metadata" },
   entitlement_snapshot: {
     tableName: "entitlement_snapshots",
-    catalogTable: "entitlement_snapshot",
     label: "Entitlement Snapshots",
   },
 } as const
-
-type LakehouseCatalogCredentials = {
-  bucket: string
-  prefix: string
-  prefixes: string[]
-  tablePrefixes: Record<string, string>
-  tableUrls: Record<string, string>
-  durationSeconds: number
-  r2Endpoint: string
-  catalogUrl: string
-  catalogWarehouse: string
-  ticket: string
-  credentials: {
-    accessKeyId: string
-    secretAccessKey: string
-    sessionToken: string
-    expiration?: string | number
-  }
-}
 
 const usageTrendChartConfig = {
   events: { label: "Events", color: "var(--chart-2)" },
@@ -129,10 +108,11 @@ function LakehouseDashboardInner() {
   // Get store actions and state
   const getConnector = useRoomStore((state) => state.db.getConnector)
   const refreshTableSchemas = useRoomStore((state) => state.db.refreshTableSchemas)
+  const setFilePlan = useRoomStore((state) => state.setFilePlan)
   const tables = useRoomStore((state) => state.db.tables)
 
   const credentialsQuery = useQuery(
-    trpc.analytics.getLakehouseCredentials.queryOptions(
+    trpc.analytics.getLakehouseFilePlan.queryOptions(
       { interval: interval.name },
       { staleTime: 1000 * 60 * 5 }
     )
@@ -156,14 +136,16 @@ function LakehouseDashboardInner() {
     setLoadError(null)
 
     try {
-      const credentials = credentialsResult.result as LakehouseCatalogCredentials
-      const expireToken = credentials.credentials.expiration ?? ""
+      const filePlan = credentialsResult.result as LakehouseFilePlan
+      setFilePlan(filePlan)
+      const expireToken = filePlan.credentials.expiration ?? ""
       const catalogFingerprint = [
-        credentials.catalogWarehouse,
-        credentials.catalogUrl,
-        credentials.r2Endpoint,
-        credentials.credentials.accessKeyId,
+        filePlan.targetEnv,
+        filePlan.interval,
+        filePlan.credentials.r2Endpoint,
+        filePlan.credentials.accessKeyId,
         String(expireToken),
+        String(filePlan.urls.length),
       ].join("|")
 
       if (
@@ -180,18 +162,14 @@ function LakehouseDashboardInner() {
       const escapeSqlString = (value: string) => value.replaceAll("'", "''")
       const endpointHost = (() => {
         try {
-          return new URL(credentials.r2Endpoint).host
+          return new URL(filePlan.credentials.r2Endpoint).host
         } catch {
-          return credentials.r2Endpoint.replace(/^https?:\/\//, "")
+          return filePlan.credentials.r2Endpoint.replace(/^https?:\/\//, "")
         }
       })()
 
       await connector.query("INSTALL httpfs")
       await connector.query("LOAD httpfs")
-      await connector.query("INSTALL iceberg")
-      await connector.query("LOAD iceberg")
-
-      await connector.query("DETACH DATABASE IF EXISTS lakehouse_catalog")
 
       for (const source of Object.keys(TABLE_CONFIG) as TableSource[]) {
         const config = TABLE_CONFIG[source]
@@ -202,75 +180,70 @@ function LakehouseDashboardInner() {
 
       await connector.query(`CREATE OR REPLACE SECRET lakehouse_r2_secret (
   TYPE S3,
-  KEY_ID '${escapeSqlString(credentials.credentials.accessKeyId)}',
-  SECRET '${escapeSqlString(credentials.credentials.secretAccessKey)}',
-  SESSION_TOKEN '${escapeSqlString(credentials.credentials.sessionToken)}',
+  KEY_ID '${escapeSqlString(filePlan.credentials.accessKeyId)}',
+  SECRET '${escapeSqlString(filePlan.credentials.secretAccessKey)}',
+  SESSION_TOKEN '${escapeSqlString(filePlan.credentials.sessionToken)}',
   ENDPOINT '${escapeSqlString(endpointHost)}',
   URL_STYLE 'path',
   REGION 'auto'
 )`)
 
-      await connector.query(`ATTACH '${escapeSqlString(credentials.catalogWarehouse)}' AS lakehouse_catalog (
-  TYPE ICEBERG,
-  ENDPOINT '${escapeSqlString(credentials.catalogUrl)}',
-  AUTHORIZATION_TYPE 'none'
-)`)
+      const createReadParquetExpression = (fileUrls: string[]) => {
+        const escapedPaths = fileUrls.map((fileUrl) => `'${escapeSqlString(fileUrl)}'`).join(", ")
+        return `read_parquet([${escapedPaths}], union_by_name = true)`
+      }
 
       const loadTableFromSource = async (source: TableSource) => {
         const config = TABLE_CONFIG[source]
+        const tableFiles = filePlan.tableFiles[source] ?? []
+        if (tableFiles.length === 0) {
+          return 0
+        }
+
+        const parquetSource = createReadParquetExpression(tableFiles)
         const sourceSelect =
           source === "verification"
             ? `SELECT * REPLACE (CAST(denied_reason AS VARCHAR) AS denied_reason)
-FROM lakehouse_catalog.lakehouse.${config.catalogTable}`
-            : `SELECT * FROM lakehouse_catalog.lakehouse.${config.catalogTable}`
+FROM ${parquetSource}`
+            : `SELECT * FROM ${parquetSource}`
 
         await connector.query(`CREATE TABLE ${config.tableName} AS ${sourceSelect}`)
-        return true
+        return tableFiles.length
       }
 
       const tablesLoaded: string[] = []
-      let totalTables = 0
+      let totalFiles = 0
 
-      if (
-        await loadTableFromSource("usage").catch(() => {
-          return false
-        })
-      ) {
+      const usageFiles = await loadTableFromSource("usage").catch(() => 0)
+      if (usageFiles > 0) {
         tablesLoaded.push("usage")
-        totalTables += 1
+        totalFiles += usageFiles
       }
 
-      if (
-        await loadTableFromSource("verification").catch(() => {
-          return false
-        })
-      ) {
+      const verificationFiles = await loadTableFromSource("verification").catch(() => 0)
+      if (verificationFiles > 0) {
         tablesLoaded.push("verifications")
-        totalTables += 1
+        totalFiles += verificationFiles
       }
 
-      if (
-        await loadTableFromSource("metadata").catch(() => {
-          return false
-        })
-      ) {
+      const metadataFiles = await loadTableFromSource("metadata").catch(() => 0)
+      if (metadataFiles > 0) {
         tablesLoaded.push("metadata")
-        totalTables += 1
+        totalFiles += metadataFiles
       }
 
-      if (
-        await loadTableFromSource("entitlement_snapshot").catch(() => {
-          return false
-        })
-      ) {
+      const entitlementSnapshotFiles = await loadTableFromSource("entitlement_snapshot").catch(
+        () => 0
+      )
+      if (entitlementSnapshotFiles > 0) {
         tablesLoaded.push("entitlement_snapshots")
-        totalTables += 1
+        totalFiles += entitlementSnapshotFiles
       }
 
       await refreshTableSchemas()
       loadedCatalogFingerprintRef.current = catalogFingerprint
       credentialRefreshRetryRef.current = false
-      setLoadedFileCount(totalTables)
+      setLoadedFileCount(totalFiles)
       setLoadedTables(tablesLoaded)
 
       // Auto-execute default query after loading if we have usage
@@ -310,6 +283,7 @@ FROM lakehouse_catalog.lakehouse.${config.catalogTable}`
     getConnector,
     isCredentialRefreshError,
     refreshTableSchemas,
+    setFilePlan,
     loadedTables.length,
     loadedFileCount,
   ])
@@ -350,7 +324,8 @@ FROM lakehouse_catalog.lakehouse.${config.catalogTable}`
     setLoadedFileCount(0)
     setExecutedQuery(null)
     setManualQueryError(null)
-  }, [interval])
+    setFilePlan(null)
+  }, [interval, setFilePlan])
 
   // Check if any tables are ready
   const tableReady = loadedTables.length > 0
@@ -825,7 +800,7 @@ LIMIT 1`
         <div className="space-y-1">
           <p className="text-muted-foreground text-sm">
             {tableReady
-              ? `${loadedFileCount} catalog tables loaded (${loadedTables.join(", ")})`
+              ? `${loadedFileCount} files loaded across ${loadedTables.length} tables (${loadedTables.join(", ")})`
               : isLoading
                 ? "Loading data..."
                 : "Waiting for data"}
@@ -854,7 +829,9 @@ LIMIT 1`
           <Button
             variant="outline"
             size="icon"
-            onClick={handleRefresh}
+            onClick={() => {
+              handleRefresh()
+            }}
             disabled={isLoading}
             title="Refresh data"
           >
@@ -881,7 +858,7 @@ LIMIT 1`
             <div>
               <p className="font-medium">Loading lakehouse data...</p>
               <p className="text-muted-foreground text-sm">
-                Connecting to Cloudflare catalog and importing tables
+                Fetching file plan and importing parquet files
               </p>
             </div>
           </CardContent>
@@ -894,7 +871,7 @@ LIMIT 1`
           <CardHeader>
             <CardTitle>No lakehouse data yet</CardTitle>
             <CardDescription>
-              We couldn&apos;t load usage, verification, or metadata tables from the catalog.
+              We couldn&apos;t load usage, verification, or metadata tables from the file plan.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-muted-foreground text-sm">

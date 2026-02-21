@@ -26,9 +26,7 @@ from src.lakehouse_utils import (
     _dedupe,
     _extract_files_from_scan,
     _get_env_value,
-    _is_development_env,
     _issue_temp_credentials,
-    _require_env,
     _utc_iso,
 )
 
@@ -39,6 +37,12 @@ load_dotenv(".env", override=False)
 
 app = FastAPI()
 bearer_scheme = HTTPBearer(auto_error=False)
+
+CATALOG_NAMESPACE = "lakehouse"
+TARGET_ENV_CATALOG_NAME = {
+    "non_prod": "unprice-lakehouse-dev",
+    "prod": "unprice-lakehouse-prod",
+}
 
 DEFAULT_RESPONSE_CACHE_SWR_SECONDS = 300
 MIN_RESPONSE_CACHE_SWR_SECONDS = 30
@@ -60,6 +64,46 @@ _response_cache_refreshing: set[str] = set()
 def _runtime_env(req: Request):
     scope_env = req.scope.get("env")
     return scope_env if scope_env is not None else os.environ
+
+
+def _require_env_any(env: Any, keys: list[str]) -> str:
+    for key in keys:
+        value = _get_env_value(env, key)
+        if value is not None and value.strip():
+            return value.strip()
+    raise HTTPException(status_code=500, detail=f"Missing required environment variable: {' or '.join(keys)}")
+
+
+def _resolve_target_env_config(env: Any, *, target_env: str) -> dict[str, str]:
+    prefix = target_env.upper()
+    catalog_name = TARGET_ENV_CATALOG_NAME[target_env]
+    return {
+        "target_env": target_env,
+        "account_id": _require_env_any(env, [f"{prefix}_CLOUDFLARE_ACCOUNT_ID"]),
+        "catalog_name": catalog_name,
+        "namespace": CATALOG_NAMESPACE,
+        "bucket_name": catalog_name,
+        "auth_api_token": _require_env_any(
+            env,
+            [
+                f"{prefix}_LAKEHOUSE_API_TOKEN",
+                f"{prefix}_AUTH_API_TOKEN",
+            ],
+        ),
+        "catalog_token": _require_env_any(env, [f"{prefix}_CATALOG_TOKEN"]),
+        "credential_api_token": _require_env_any(env, [f"{prefix}_CLOUDFLARE_API_TOKEN_LAKEHOUSE"]),
+        "parent_access_key_id": _require_env_any(env, [f"{prefix}_CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID"]),
+    }
+
+
+def _require_bearer_token(*, credentials: HTTPAuthorizationCredentials | None, expected_token: str) -> None:
+    provided_token = credentials.credentials if credentials and credentials.scheme.lower() == "bearer" else None
+    if provided_token != expected_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 def _parse_int_env(
@@ -190,6 +234,7 @@ def _build_lakehouse_files_response(
     )
 
     urls: list[str] = []
+    table_files: dict[str, list[str]] = {table_name: [] for table_name in payload.tables}
     all_prefixes: list[str] = []
     errors: list[dict[str, str]] = []
 
@@ -204,6 +249,7 @@ def _build_lakehouse_files_response(
             errors.append({"table": table_identifier, "error": f"scan_error: {exc}"})
             continue
 
+        table_files[table_name] = table_urls
         urls.extend(table_urls)
         all_prefixes.extend(table_prefixes)
 
@@ -253,6 +299,7 @@ def _build_lakehouse_files_response(
             "ttl_seconds": credentials["ttl_seconds"],
             "prefixes": credentials["prefixes"],
         },
+        "table_files": table_files,
         "urls": urls,
         "errors": errors,
     }
@@ -270,6 +317,7 @@ def _response_cache_max_entries(env: Any) -> int:
 
 def _build_response_cache_key(
     *,
+    target_env: str,
     account_id: str,
     catalog_name: str,
     namespace: str,
@@ -277,6 +325,7 @@ def _build_response_cache_key(
     payload: FilePlanRequest,
 ) -> str:
     key_payload = {
+        "target_env": target_env,
         "account_id": account_id,
         "catalog_name": catalog_name,
         "namespace": namespace,
@@ -339,26 +388,8 @@ def _set_cached_response(
         _prune_response_cache(now_monotonic=now_monotonic, max_entries=max_entries)
 
 
-def _require_api_token(req: Request, credentials: HTTPAuthorizationCredentials | None = Security(bearer_scheme)):
-    env = _runtime_env(req)
-    expected_token = _require_env(env, "LAKEHOUSE_API_TOKEN")
-    provided_token = credentials.credentials if credentials and credentials.scheme.lower() == "bearer" else None
-
-    if provided_token != expected_token:
-        raise HTTPException(
-            status_code=401,
-            detail="Unauthorized",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-
 @app.middleware("http")
 async def docs_only_in_development(req: Request, call_next):
-    is_local_host = (req.url.hostname or "").lower() in {"localhost", "127.0.0.1", "::1"}
-    if req.url.path in {"/docs", "/openapi.json", "/redoc"} and not (
-        _is_development_env(_runtime_env(req)) or is_local_host
-    ):
-        return JSONResponse(status_code=404, content={"detail": "Not Found"})
     return await call_next(req)
 
 
@@ -372,24 +403,26 @@ async def get_matching_files(
     req: Request,
     payload: FilePlanRequest,
     response: Response,
-    _token: None = Security(_require_api_token),
+    credentials: HTTPAuthorizationCredentials | None = Security(bearer_scheme),
 ):
     env = _runtime_env(req)
+    target_config = _resolve_target_env_config(env, target_env=payload.target_env)
 
-    account_id = _require_env(env, "CLOUDFLARE_ACCOUNT_ID")
-    catalog_name = _require_env(env, "CATALOG")
-    namespace = _require_env(env, "CATALOG_NAMESPACE")
-    catalog_token = _require_env(env, "CATALOG_TOKEN")
+    _require_bearer_token(credentials=credentials, expected_token=target_config["auth_api_token"])
 
-    # Same credential flow as apps/api/src/lakehouse/service.ts::issueLakehouseCatalogCredentials
-    credential_api_token = _require_env(env, "CLOUDFLARE_API_TOKEN_LAKEHOUSE")
-    parent_access_key_id = _require_env(env, "CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID")
-    bucket_name = _get_env_value(env, "LAKEHOUSE_BUCKET_NAME", catalog_name) or catalog_name
+    account_id = target_config["account_id"]
+    catalog_name = target_config["catalog_name"]
+    namespace = target_config["namespace"]
+    catalog_token = target_config["catalog_token"]
+    credential_api_token = target_config["credential_api_token"]
+    parent_access_key_id = target_config["parent_access_key_id"]
+    bucket_name = target_config["bucket_name"]
     cache_swr_seconds = _response_cache_swr_seconds(env)
     cache_stale_seconds = _response_cache_stale_seconds(env, min_value=cache_swr_seconds)
     cache_max_entries = _response_cache_max_entries(env)
 
     cache_key = _build_response_cache_key(
+        target_env=payload.target_env,
         account_id=account_id,
         catalog_name=catalog_name,
         namespace=namespace,

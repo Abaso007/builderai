@@ -31,38 +31,38 @@ From `apps/lakehouse-api`:
 
 ```bash
 fly auth login
-fly apps create unprice-lakehouse-api-dev
+fly apps create unprice-lakehouse-api
 fly secrets set \
-  LAKEHOUSE_API_TOKEN=... \
-  CATALOG_TOKEN=... \
-  CLOUDFLARE_API_TOKEN_LAKEHOUSE=... \
-  CLOUDFLARE_ACCOUNT_ID=... \
-  CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID=...
+  NON_PROD_LAKEHOUSE_API_TOKEN=... \
+  NON_PROD_CATALOG_TOKEN=... \
+  NON_PROD_CLOUDFLARE_API_TOKEN_LAKEHOUSE=... \
+  NON_PROD_CLOUDFLARE_ACCOUNT_ID=... \
+  NON_PROD_CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID=... \
+  PROD_LAKEHOUSE_API_TOKEN=... \
+  PROD_CATALOG_TOKEN=... \
+  PROD_CLOUDFLARE_API_TOKEN_LAKEHOUSE=... \
+  PROD_CLOUDFLARE_ACCOUNT_ID=... \
+  PROD_CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID=...
 pnpm deploy
 ```
 
-`fly.toml` is configured for a dev-only app (`unprice-lakehouse-api-dev`) and sets:
+This deployment now serves two runtime groups from one app:
 
-- `ENV=dev`
-- `CATALOG=unprice-lakehouse-dev`
-- `CATALOG_NAMESPACE=lakehouse`
-- `LAKEHOUSE_BUCKET_NAME=unprice-lakehouse-dev`
+- `non_prod` (shared for dev + preview)
+- `prod`
 
 ## Environment Variables
 
 Required secrets:
 
-- `LAKEHOUSE_API_TOKEN`: Bearer token required by `POST /v1/lakehouse/files`
-- `CATALOG_TOKEN`: Cloudflare R2 Data Catalog token
-- `CLOUDFLARE_API_TOKEN_LAKEHOUSE`: Cloudflare API token with R2 temp credential permissions
-- `CLOUDFLARE_ACCOUNT_ID`: Cloudflare account id
-- `CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID`: parent R2 access key id used for temp credentials
+- `NON_PROD_LAKEHOUSE_API_TOKEN`, `PROD_LAKEHOUSE_API_TOKEN`: Bearer token for each runtime group
+- `NON_PROD_CATALOG_TOKEN`, `PROD_CATALOG_TOKEN`
+- `NON_PROD_CLOUDFLARE_API_TOKEN_LAKEHOUSE`, `PROD_CLOUDFLARE_API_TOKEN_LAKEHOUSE`
+- `NON_PROD_CLOUDFLARE_ACCOUNT_ID`, `PROD_CLOUDFLARE_ACCOUNT_ID`
+- `NON_PROD_CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID`, `PROD_CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID`
 
 Required non-secret vars:
 
-- `CATALOG`: e.g. `unprice-lakehouse-dev`
-- `CATALOG_NAMESPACE`: e.g. `lakehouse`
-- `LAKEHOUSE_BUCKET_NAME`: R2 bucket name (defaults to `CATALOG` if omitted)
 - `ENV`: use `dev` for development environments (enables FastAPI docs)
 - `LAKEHOUSE_RESPONSE_CACHE_SWR_SECONDS` (optional): fresh window for SWR in seconds. Default `300` (5 min), max `3540`.
 - `LAKEHOUSE_RESPONSE_CACHE_STALE_SECONDS` (optional): maximum stale window in seconds. Default `3300` (55 min), max `3540`.
@@ -79,26 +79,34 @@ Request body:
   "project_id": ["proj_11STWG6AokEni2F3eQugHb"],
   "customer_id": ["cus_11TqNF6bCebUjnx55pk6vs"],
   "tables": ["verification", "usage"],
-  "interval": "7d"
+  "interval": "7d",
+  "target_env": "non_prod"
 }
 ```
 
 Notes:
 
 - Only `project_id` and `interval` are required.
+- `target_env` is optional and defaults to `non_prod` (`non_prod | prod`).
+- `dev` and `preview` are accepted and normalized to `non_prod`.
 - `project_id` accepts a string or an array (at least one project id).
 - `customer_id` is optional and accepts `null`, empty string, empty array, a single string, or an array of strings.
 - `tables` is optional and accepts a string or an array. If omitted/empty, all allowed tables are used.
 - Allowed table names: `usage`, `verification`, `metadata`, `entitlement_snapshot`.
+- `catalog` is derived as:
+- `unprice-lakehouse-dev` for `non_prod` (and aliases `dev`/`preview`)
+- `unprice-lakehouse-prod` for `prod`
+- `catalog_namespace` is fixed to `lakehouse`.
+- `bucket` matches catalog (`unprice-lakehouse-dev` or `unprice-lakehouse-prod`).
 - `interval` is required and supports only `1d`, `7d`, `30d`, `90d`.
 - Query window is always `now() - interval` to `now()` (UTC).
 - Response includes `credentials` (temporary R2 access keys) plus `urls` (unsigned catalog-derived `s3://...` paths).
 - Temporary credential TTL is fixed to 1 hour.
 - Requests with the same effective parameters use SWR in-memory cache (`X-Lakehouse-Cache: MISS|HIT|STALE`).
 - Default behavior: fresh cache for 5 min, then serve stale and refresh in background, with max stale 55 min.
-- Table names are always normalized to `{CATALOG_NAMESPACE}.{table}`.
+- Table names are always normalized to `lakehouse.{table}`.
 - FastAPI docs endpoints (`/docs`, `/openapi.json`, `/redoc`) are available only when `ENV` is `dev`, `development`, or `local`.
-- In docs (`/docs`), click `Authorize` and paste `LAKEHOUSE_API_TOKEN` as Bearer token to test the endpoint.
+- In docs (`/docs`), click `Authorize` and paste the token for the selected `target_env`.
 
 ## Quick Test (curl)
 
@@ -110,7 +118,8 @@ curl -i -sS -X POST "http://localhost:4000/v1/lakehouse/files" \
   -H "Content-Type: application/json" \
   -d '{
     "project_id": ["proj_11STWG6AokEni2F3eQugHb"],
-    "interval": "7d"
+    "interval": "7d",
+    "target_env": "non_prod"
   }'
 ```
 

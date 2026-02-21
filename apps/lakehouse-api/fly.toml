@@ -5,10 +5,7 @@ primary_region = "fra"
   dockerfile = "Dockerfile"
 
 [env]
-  ENV = "dev"
-  CATALOG = "unprice-lakehouse-dev"
-  CATALOG_NAMESPACE = "lakehouse"
-  LAKEHOUSE_BUCKET_NAME = "unprice-lakehouse-dev"
+  ENV = "production"
 
 [http_service]
   internal_port = 8080

@@ -12,7 +12,7 @@
     "prod": {
       "observability": {
         "enabled": true,
-        "head_sampling_rate": 1.0 // 100% of requests
+        "head_sampling_rate": 0.1 // 10% of requests
       },
       "route": {
         "pattern": "api.unprice.dev",
@@ -25,8 +25,7 @@
         }
       ],
       "vars": {
-        "LAKEHOUSE_BUCKET_NAME": "unprice-lakehouse-prod",
-        "LAKEHOUSE_ICEBERG_PREFIX": "__r2_data_catalog"
+        "LAKEHOUSE_FILE_PLAN_BASE_URL": "https://unprice-lakehouse-api.fly.dev"
       },
       "unsafe": {
         "bindings": [
@@ -103,12 +102,11 @@
       "r2_buckets": [
         {
           "binding": "LAKEHOUSE",
-          "bucket_name": "unprice-lakehouse-preview"
+          "bucket_name": "unprice-lakehouse-dev"
         }
       ],
       "vars": {
-        "LAKEHOUSE_BUCKET_NAME": "unprice-lakehouse-preview",
-        "LAKEHOUSE_ICEBERG_PREFIX": "__r2_data_catalog"
+        "LAKEHOUSE_FILE_PLAN_BASE_URL": "https://unprice-lakehouse-api.fly.dev"
       },
       "unsafe": {
         // # Limit: the number of tokens allowed within a given period in a single
@@ -137,20 +135,24 @@
       },
       "pipelines": [
         {
-          "pipeline": "09e14fee72ab4b7c85a3dd67ced13f72",
-          "binding": "PIPELINE_VERIFICATIONS"
+          "pipeline": "75cfca9093854dd88f4d46e2088f235b",
+          "binding": "PIPELINE_VERIFICATIONS",
+          "remote": true
         },
         {
-          "pipeline": "09e14fee72ab4b7c85a3dd67ced13f72",
-          "binding": "PIPELINE_USAGE"
+          "pipeline": "a636dd5b2ca3485aab7de834efccf099",
+          "binding": "PIPELINE_USAGE",
+          "remote": true
         },
         {
-          "pipeline": "09e14fee72ab4b7c85a3dd67ced13f72",
-          "binding": "PIPELINE_METADATA"
+          "pipeline": "c0c1af506adb4e0c9394dde8e0c66241",
+          "binding": "PIPELINE_METADATA",
+          "remote": true
         },
         {
-          "pipeline": "09e14fee72ab4b7c85a3dd67ced13f72",
-          "binding": "PIPELINE_ENTITLEMENTS"
+          "pipeline": "ac1eb44429dc40f9992d38e5daff6c6c",
+          "binding": "PIPELINE_ENTITLEMENTS",
+          "remote": true
         }
       ],
       "durable_objects": {
@@ -185,8 +187,7 @@
         }
       ],
       "vars": {
-        "LAKEHOUSE_BUCKET_NAME": "unprice-lakehouse-dev",
-        "LAKEHOUSE_ICEBERG_PREFIX": "__r2_data_catalog"
+        "LAKEHOUSE_FILE_PLAN_BASE_URL": "https://unprice-lakehouse-api.fly.dev"
       },
       "unsafe": {
         // # Limit: the number of tokens allowed within a given period in a single

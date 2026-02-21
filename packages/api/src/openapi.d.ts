@@ -592,7 +592,7 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  "/v1/lakehouse/catalog/credentials": {
+  "/v1/lakehouse/file-plan": {
     parameters: {
       query?: never
       header?: never
@@ -602,10 +602,10 @@ export interface paths {
     get?: never
     put?: never
     /**
-     * get scoped lakehouse credentials
-     * @description Issue short-lived, workspace-scoped temporary R2 credentials for direct DuckDB-Iceberg access
+     * get scoped lakehouse file plan
+     * @description Return temporary R2 credentials and matching lakehouse parquet files in one response.
      */
-    post: operations["lakehouse.getCatalogCredentials"]
+    post: operations["lakehouse.getFilePlan"]
     delete?: never
     options?: never
     head?: never
@@ -4581,54 +4581,61 @@ export interface operations {
       }
     }
   }
-  "lakehouse.getCatalogCredentials": {
+  "lakehouse.getFilePlan": {
     parameters: {
       query?: never
       header?: never
       path?: never
       cookie?: never
     }
-    /** @description Scoped credential request payload */
+    /** @description Lakehouse file plan request payload */
     requestBody: {
       content: {
         "application/json": {
-          /** @default 60 */
-          durationSeconds: number
           projectId?: string
           customerId?: string
-          date?: string
+          tables?: ("usage" | "verification" | "metadata" | "entitlement_snapshot")[]
+          /** @default 30d */
+          interval?: "1d" | "7d" | "30d" | "90d"
+          /** @default non_prod */
+          targetEnv?: "non_prod" | "prod"
         }
       }
     }
     responses: {
-      /** @description Scoped temporary credentials */
+      /** @description Lakehouse file plan */
       200: {
         headers: {
           [name: string]: unknown
         }
         content: {
           "application/json": {
-            bucket: string
-            prefix: string
-            prefixes: string[]
-            tablePrefixes: {
-              [key: string]: string | undefined
+            projectIds: string[]
+            customerIds: string[]
+            interval: "1d" | "7d" | "30d" | "90d"
+            intervalDays: number
+            targetEnv: "non_prod" | "prod"
+            window: {
+              start: string
+              end: string
             }
-            tableUrls: {
-              [key: string]: string | undefined
+            tableFiles: {
+              [key: string]: string[] | undefined
             }
-            durationSeconds: number
-            /** Format: uri */
-            r2Endpoint: string
-            /** Format: uri */
-            catalogUrl: string
-            catalogWarehouse: string
-            ticket: string
+            urls: string[]
+            errors: {
+              table: string
+              error: string
+            }[]
             credentials: {
+              bucket: string
+              r2Endpoint: string
               accessKeyId: string
               secretAccessKey: string
               sessionToken: string
-              expiration?: string | number
+              expiration: string | number
+              ttlSeconds: number
+              prefixes: string[]
             }
           }
         }

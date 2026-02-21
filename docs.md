@@ -11,6 +11,3 @@ This repo uses **pnpm 10** (`packageManager` in root `package.json`). To avoid `
 1. In the Vercel project: **Settings → Environment Variables**
 2. Add: `ENABLE_EXPERIMENTAL_COREPACK` = `1` (all environments)
 3. Redeploy
-
-# Linux: `openssl rand -base64 32` or go to https://generate-secret.vercel.app/32
-

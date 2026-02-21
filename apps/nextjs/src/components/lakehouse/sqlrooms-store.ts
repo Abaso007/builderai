@@ -6,6 +6,36 @@ import {
 } from "@sqlrooms/room-shell"
 import { type SqlEditorSliceState, createSqlEditorSlice } from "@sqlrooms/sql-editor"
 
+export type LakehouseFilePlan = {
+  projectIds: string[]
+  customerIds: string[]
+  interval: "1d" | "7d" | "30d" | "90d"
+  intervalDays: number
+  targetEnv: "non_prod" | "prod"
+  window: {
+    start: string
+    end: string
+  }
+  tableFiles: Record<string, string[]>
+  urls: string[]
+  errors: Array<{ table: string; error: string }>
+  credentials: {
+    bucket: string
+    r2Endpoint: string
+    accessKeyId: string
+    secretAccessKey: string
+    sessionToken: string
+    expiration: string | number
+    ttlSeconds: number
+    prefixes: string[]
+  }
+}
+
+export type LakehouseDataSliceState = {
+  filePlan: LakehouseFilePlan | null
+  setFilePlan: (value: LakehouseFilePlan | null) => void
+}
+
 const duckDbConnector = createWasmDuckDbConnector({
   allowUnsignedExtensions: true,
 })
@@ -14,7 +44,7 @@ const duckDbConnector = createWasmDuckDbConnector({
  * Combined room state type for the Lakehouse dashboard.
  * Includes the base room shell state plus SQL editor capabilities.
  */
-export type LakehouseRoomState = RoomShellSliceState & SqlEditorSliceState
+export type LakehouseRoomState = RoomShellSliceState & SqlEditorSliceState & LakehouseDataSliceState
 
 /**
  * Create the room store for the Lakehouse dashboard.
@@ -37,6 +67,15 @@ export const { roomStore, useRoomStore } = createRoomStore<LakehouseRoomState>(
 
     // SQL editor slice - provides query tabs, execution, results
     ...createSqlEditorSlice()(set, get, store),
+
+    // Lakehouse file plan slice - file list + short-lived credentials from API.
+    filePlan: null,
+    setFilePlan: (value) => {
+      set((state) => ({
+        ...state,
+        filePlan: value,
+      }))
+    },
   })
 )
 
