@@ -210,7 +210,9 @@ function normalizeTableFiles(params: {
     }
   }
 
-  const unresolved = new Set(requestedTables.filter((tableName) => tableFiles[tableName].length === 0))
+  const unresolved = new Set(
+    requestedTables.filter((tableName) => tableFiles[tableName].length === 0)
+  )
   if (params.urls.length > 0 && unresolved.size > 0) {
     for (const url of params.urls) {
       const tableName = inferTableFromUrl(url)

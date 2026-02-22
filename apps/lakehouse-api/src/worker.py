@@ -8,7 +8,6 @@ from time import monotonic
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, Response, Security
-from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 try:
@@ -44,7 +43,7 @@ TARGET_ENV_CATALOG_NAME = {
     "prod": "unprice-lakehouse-prod",
 }
 
-DEFAULT_RESPONSE_CACHE_SWR_SECONDS = 60 # revalidate every 60 seconds
+DEFAULT_RESPONSE_CACHE_SWR_SECONDS = 60
 MIN_RESPONSE_CACHE_SWR_SECONDS = 30
 MAX_RESPONSE_CACHE_SWR_SECONDS = max(MIN_RESPONSE_CACHE_SWR_SECONDS, DEFAULT_CREDENTIAL_TTL_SECONDS - 60)
 
@@ -154,6 +153,66 @@ def _cache_entry_state(*, now_monotonic: float, fresh_until: float, stale_until:
     return "STALE"
 
 
+def _normalize_urls(urls: Any) -> list[str]:
+    if not isinstance(urls, list):
+        return []
+    return sorted(_dedupe([item for item in urls if isinstance(item, str) and item]))
+
+
+def _credentials_from_response(response_payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(response_payload, dict):
+        return None
+    credentials = response_payload.get("credentials")
+    return credentials if isinstance(credentials, dict) else None
+
+
+def _parse_utc_iso(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _credentials_expired(credentials: dict[str, Any] | None) -> bool:
+    if not credentials:
+        return True
+    expiration_dt = _parse_utc_iso(credentials.get("expiration"))
+    if expiration_dt is None:
+        return True
+    return expiration_dt <= datetime.now(timezone.utc)
+
+
+def _cache_stale_until_monotonic(
+    *,
+    response_payload: dict[str, Any],
+    now_monotonic: float,
+    stale_seconds: int,
+) -> float:
+    stale_until = now_monotonic + stale_seconds
+    credentials = _credentials_from_response(response_payload)
+    if not credentials:
+        return stale_until
+
+    expiration_dt = _parse_utc_iso(credentials.get("expiration"))
+    if expiration_dt is None:
+        return stale_until
+
+    seconds_until_expiration = (expiration_dt - datetime.now(timezone.utc)).total_seconds()
+    credential_expiration_monotonic = now_monotonic + max(0.0, seconds_until_expiration)
+    return min(stale_until, credential_expiration_monotonic)
+
+
 def _start_background_refresh_if_needed(*, cache_key: str) -> bool:
     with _response_cache_lock:
         if cache_key in _response_cache_refreshing:
@@ -204,6 +263,7 @@ def _build_lakehouse_files_response(
     parent_access_key_id: str,
     bucket_name: str,
     payload: FilePlanRequest,
+    previous_response: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     warehouse = f"{account_id}_{catalog_name}"
 
@@ -268,17 +328,38 @@ def _build_lakehouse_files_response(
             },
         )
 
-    try:
-        credentials = _issue_temp_credentials(
-            account_id=account_id,
-            api_token=credential_api_token,
-            bucket=bucket_name,
-            parent_access_key_id=parent_access_key_id,
-            ttl_seconds=DEFAULT_CREDENTIAL_TTL_SECONDS,
-            prefixes=all_prefixes,
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to issue temporary credentials: {exc}") from exc
+    previous_urls = _normalize_urls(previous_response.get("urls") if previous_response else None)
+    current_urls = _normalize_urls(urls)
+    previous_credentials = _credentials_from_response(previous_response)
+    urls_changed = previous_urls != current_urls
+    should_issue_credentials = urls_changed or _credentials_expired(previous_credentials)
+
+    credentials_payload: dict[str, Any]
+    if should_issue_credentials:
+        try:
+            credentials = _issue_temp_credentials(
+                account_id=account_id,
+                api_token=credential_api_token,
+                bucket=bucket_name,
+                parent_access_key_id=parent_access_key_id,
+                ttl_seconds=DEFAULT_CREDENTIAL_TTL_SECONDS,
+                prefixes=all_prefixes,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to issue temporary credentials: {exc}") from exc
+
+        credentials_payload = {
+            "bucket": bucket_name,
+            "r2_endpoint": f"https://{account_id}.r2.cloudflarestorage.com",
+            "access_key_id": credentials["access_key_id"],
+            "secret_access_key": credentials["secret_access_key"],
+            "session_token": credentials["session_token"],
+            "expiration": credentials["expiration"],
+            "ttl_seconds": credentials["ttl_seconds"],
+            "prefixes": credentials["prefixes"],
+        }
+    else:
+        credentials_payload = deepcopy(previous_credentials)
 
     return {
         "project_ids": payload.project_ids,
@@ -289,16 +370,7 @@ def _build_lakehouse_files_response(
             "start": _utc_iso(start_dt),
             "end": _utc_iso(end_dt),
         },
-        "credentials": {
-            "bucket": bucket_name,
-            "r2_endpoint": f"https://{account_id}.r2.cloudflarestorage.com",
-            "access_key_id": credentials["access_key_id"],
-            "secret_access_key": credentials["secret_access_key"],
-            "session_token": credentials["session_token"],
-            "expiration": credentials["expiration"],
-            "ttl_seconds": credentials["ttl_seconds"],
-            "prefixes": credentials["prefixes"],
-        },
+        "credentials": credentials_payload,
         "table_files": table_files,
         "urls": urls,
         "errors": errors,
@@ -378,11 +450,16 @@ def _set_cached_response(
     max_entries: int,
 ) -> None:
     now_monotonic = monotonic()
+    stale_until_monotonic = _cache_stale_until_monotonic(
+        response_payload=response_payload,
+        now_monotonic=now_monotonic,
+        stale_seconds=stale_seconds,
+    )
     with _response_cache_lock:
         _prune_response_cache(now_monotonic=now_monotonic, max_entries=max_entries)
         _response_cache[cache_key] = (
             now_monotonic + swr_seconds,
-            now_monotonic + stale_seconds,
+            stale_until_monotonic,
             deepcopy(response_payload),
         )
         _prune_response_cache(now_monotonic=now_monotonic, max_entries=max_entries)
@@ -435,6 +512,7 @@ async def get_matching_files(
 
         if cache_state == "STALE":
             refresh_payload = payload.model_copy(deep=True)
+            refresh_previous_response = deepcopy(cached_response)
 
             def _refresh_fn():
                 return _build_lakehouse_files_response(
@@ -446,6 +524,7 @@ async def get_matching_files(
                     parent_access_key_id=parent_access_key_id,
                     bucket_name=bucket_name,
                     payload=refresh_payload,
+                    previous_response=refresh_previous_response,
                 )
 
             _spawn_background_refresh(
