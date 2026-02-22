@@ -22,19 +22,19 @@ export const getLatestEvents = protectedProjectProcedure
           description: z.string(),
         })
         .array(),
-      projectId: z.string(),
+      project_id: z.string(),
     })
   )
   .query(async (opts) => {
     const { action, interval_days } = opts.input
-    const projectId = opts.ctx.project.id
+    const project_id = opts.ctx.project.id
 
     try {
       const data = await withTimeout(
         opts.ctx.analytics.getLatestEvents({
           action,
           interval_days,
-          project_id: projectId,
+          project_id: project_id,
         }),
         TIMEOUTS.ANALYTICS,
         "getLatestEvents analytics request timeout"
@@ -84,17 +84,17 @@ export const getLatestEvents = protectedProjectProcedure
         }
       })
 
-      return { data: result, projectId }
+      return { data: result, project_id }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error"
 
       opts.ctx.logger.error("getLatestEvents failed", {
         error: errorMessage,
-        projectId,
+        project_id,
         isTimeout: errorMessage.includes("timeout"),
       })
 
       // Return empty data as fallback
-      return { data: [], projectId }
+      return { data: [], project_id }
     }
   })

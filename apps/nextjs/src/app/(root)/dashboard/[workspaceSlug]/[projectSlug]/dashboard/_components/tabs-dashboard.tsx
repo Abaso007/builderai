@@ -9,7 +9,7 @@ import { SuperLink } from "~/components/super-link"
 import { useFlags } from "~/hooks/use-flags"
 import { useMounted } from "~/hooks/use-mounted"
 
-export const tabs = ["overview", "latency", "plans", "pages"] as const
+export const tabs = ["overview", "plans", "pages"] as const
 
 const TabsDashboard = ({
   baseUrl,
@@ -25,9 +25,9 @@ const TabsDashboard = ({
   const allParams = params.toString()
   const router = useRouter()
 
-  const tabs = showPages ? ["overview", "latency", "plans", "pages"] : ["overview", "latency"]
+  const visibleTabs = showPages ? ["overview", "plans", "pages"] : ["overview"]
 
-  const tabKeys = showPages ? ["1", "2", "3", "4"] : ["1", "2"]
+  const tabKeys = showPages ? ["1", "2", "3"] : ["1"]
 
   // handle hotkeys
   useHotkeys(
@@ -36,7 +36,7 @@ const TabsDashboard = ({
       const key = handler.keys?.at(0) as string
       if (!key) return
 
-      const tab = tabs[Number(key) - 1]
+      const tab = visibleTabs[Number(key) - 1]
 
       if (tab) {
         if (tab === activeTab) return
@@ -68,20 +68,12 @@ const TabsDashboard = ({
           </Kbd>
         </SuperLink>
       </TabNavigationLink>
-      <TabNavigationLink active={activeTab === "latency"} asChild>
-        <SuperLink href={`${baseUrl}/dashboard/latency${allParams ? `?${allParams}` : ""}`}>
-          Latency{" "}
-          <Kbd abbrTitle="2" className="ml-2">
-            2
-          </Kbd>
-        </SuperLink>
-      </TabNavigationLink>
       {showPages && (
         <TabNavigationLink active={activeTab === "plans"} asChild>
           <SuperLink href={`${baseUrl}/dashboard/plans${allParams ? `?${allParams}` : ""}`}>
             Plans{" "}
-            <Kbd abbrTitle="3" className="ml-2">
-              3
+            <Kbd abbrTitle="2" className="ml-2">
+              2
             </Kbd>
           </SuperLink>
         </TabNavigationLink>
@@ -90,8 +82,8 @@ const TabsDashboard = ({
         <TabNavigationLink active={activeTab === "pages"} asChild>
           <SuperLink href={`${baseUrl}/dashboard/pages${allParams ? `?${allParams}` : ""}`}>
             Pages{" "}
-            <Kbd abbrTitle="4" className="ml-2">
-              4
+            <Kbd abbrTitle="3" className="ml-2">
+              3
             </Kbd>
           </SuperLink>
         </TabNavigationLink>

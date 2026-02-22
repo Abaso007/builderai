@@ -1,6 +1,6 @@
 import type { PaymentProvider } from "@unprice/db/validators"
 import { Err, FetchError, type Result } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import type { Logger, WideEventHelpers } from "@unprice/logging"
 import type { Stripe } from "@unprice/stripe"
 import type { UnPricePaymentProviderError } from "./errors"
 import type {
@@ -19,22 +19,27 @@ import type {
   UpdateInvoiceItemOpts,
   UpdateInvoiceOpts,
 } from "./interface"
+import { SandboxPaymentProvider } from "./sandbox"
 import { StripePaymentProvider } from "./stripe"
 
 export class PaymentProviderService implements PaymentProviderInterface {
   private readonly logger: Logger
   private readonly paymentProvider: PaymentProvider
-  private readonly stripe: StripePaymentProvider
+  private readonly stripe?: StripePaymentProvider
+  private readonly sandbox?: SandboxPaymentProvider
   private readonly providerCustomerId?: string
+  private readonly wideEventHelpers?: WideEventHelpers
 
   constructor(opts: {
     token: string
     providerCustomerId?: string
     logger: Logger
     paymentProvider: PaymentProvider
+    wideEventHelpers?: WideEventHelpers
   }) {
     this.logger = opts.logger
     this.paymentProvider = opts.paymentProvider
+    this.wideEventHelpers = opts.wideEventHelpers
 
     switch (this.paymentProvider) {
       case "stripe": {
@@ -44,6 +49,15 @@ export class PaymentProviderService implements PaymentProviderInterface {
           token: opts.token,
           providerCustomerId: this.providerCustomerId,
           logger: this.logger,
+        })
+        break
+      }
+      case "sandbox": {
+        this.providerCustomerId = opts.providerCustomerId ?? undefined
+
+        this.sandbox = new SandboxPaymentProvider({
+          logger: this.logger,
+          providerCustomerId: this.providerCustomerId,
         })
         break
       }
@@ -59,7 +73,11 @@ export class PaymentProviderService implements PaymentProviderInterface {
   public setCustomerId(customerId: string) {
     switch (this.paymentProvider) {
       case "stripe": {
-        this.stripe.setCustomerId(customerId)
+        this.stripe?.setCustomerId(customerId)
+        break
+      }
+      case "sandbox": {
+        this.sandbox?.setCustomerId(customerId)
         break
       }
       default: {
@@ -73,8 +91,11 @@ export class PaymentProviderService implements PaymentProviderInterface {
   ): Promise<Result<PaymentProviderGetSession, FetchError>> {
     switch (this.paymentProvider) {
       case "stripe": {
-        const result = await this.stripe.getSession(opts)
+        const result = await this.stripe!.getSession(opts)
         return result
+      }
+      case "sandbox": {
+        return await this.sandbox!.getSession(opts)
       }
       default: {
         return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
@@ -87,8 +108,11 @@ export class PaymentProviderService implements PaymentProviderInterface {
   ): Promise<Result<PaymentProviderCreateSession, FetchError>> {
     switch (this.paymentProvider) {
       case "stripe": {
-        const result = await this.stripe.createSession(opts)
+        const result = await this.stripe!.createSession(opts)
         return result
+      }
+      case "sandbox": {
+        return await this.sandbox!.createSession(opts)
       }
       default: {
         return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
@@ -99,7 +123,10 @@ export class PaymentProviderService implements PaymentProviderInterface {
   public async signUp(opts: SignUpOpts): Promise<Result<PaymentProviderCreateSession, FetchError>> {
     switch (this.paymentProvider) {
       case "stripe": {
-        return await this.stripe.signUp(opts)
+        return await this.stripe!.signUp(opts)
+      }
+      case "sandbox": {
+        return await this.sandbox!.signUp(opts)
       }
       default: {
         return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
@@ -112,7 +139,10 @@ export class PaymentProviderService implements PaymentProviderInterface {
   ): Promise<Result<{ productId: string }, FetchError>> {
     switch (this.paymentProvider) {
       case "stripe": {
-        return await this.stripe.upsertProduct(props)
+        return await this.stripe!.upsertProduct(props)
+      }
+      case "sandbox": {
+        return await this.sandbox!.upsertProduct(props)
       }
       default: {
         return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
@@ -125,7 +155,10 @@ export class PaymentProviderService implements PaymentProviderInterface {
   > {
     switch (this.paymentProvider) {
       case "stripe": {
-        return await this.stripe.listPaymentMethods(opts)
+        return await this.stripe!.listPaymentMethods(opts)
+      }
+      case "sandbox": {
+        return await this.sandbox!.listPaymentMethods(opts)
       }
       default: {
         return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
@@ -138,7 +171,10 @@ export class PaymentProviderService implements PaymentProviderInterface {
   ): Promise<Result<PaymentProviderInvoice, FetchError | UnPricePaymentProviderError>> {
     switch (this.paymentProvider) {
       case "stripe": {
-        return await this.stripe.createInvoice(opts)
+        return await this.stripe!.createInvoice(opts)
+      }
+      case "sandbox": {
+        return await this.sandbox!.createInvoice(opts)
       }
       default: {
         return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
@@ -151,7 +187,10 @@ export class PaymentProviderService implements PaymentProviderInterface {
   ): Promise<Result<PaymentProviderInvoice, FetchError | UnPricePaymentProviderError>> {
     switch (this.paymentProvider) {
       case "stripe": {
-        return await this.stripe.updateInvoice(opts)
+        return await this.stripe!.updateInvoice(opts)
+      }
+      case "sandbox": {
+        return await this.sandbox!.updateInvoice(opts)
       }
       default: {
         return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
@@ -164,7 +203,10 @@ export class PaymentProviderService implements PaymentProviderInterface {
   ): Promise<Result<void, FetchError | UnPricePaymentProviderError>> {
     switch (this.paymentProvider) {
       case "stripe": {
-        return await this.stripe.addInvoiceItem(opts)
+        return await this.stripe!.addInvoiceItem(opts)
+      }
+      case "sandbox": {
+        return await this.sandbox!.addInvoiceItem(opts)
       }
       default: {
         return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
@@ -177,7 +219,10 @@ export class PaymentProviderService implements PaymentProviderInterface {
   ): Promise<Result<void, FetchError | UnPricePaymentProviderError>> {
     switch (this.paymentProvider) {
       case "stripe": {
-        return await this.stripe.updateInvoiceItem(opts)
+        return await this.stripe!.updateInvoiceItem(opts)
+      }
+      case "sandbox": {
+        return await this.sandbox!.updateInvoiceItem(opts)
       }
       default: {
         return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
@@ -190,7 +235,10 @@ export class PaymentProviderService implements PaymentProviderInterface {
   > {
     switch (this.paymentProvider) {
       case "stripe": {
-        return await this.stripe.getDefaultPaymentMethodId()
+        return await this.stripe!.getDefaultPaymentMethodId()
+      }
+      case "sandbox": {
+        return await this.sandbox!.getDefaultPaymentMethodId()
       }
       default: {
         return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
@@ -203,7 +251,10 @@ export class PaymentProviderService implements PaymentProviderInterface {
   }): Promise<Result<{ invoiceId: string }, FetchError | UnPricePaymentProviderError>> {
     switch (this.paymentProvider) {
       case "stripe": {
-        return await this.stripe.finalizeInvoice(opts)
+        return await this.stripe!.finalizeInvoice(opts)
+      }
+      case "sandbox": {
+        return await this.sandbox!.finalizeInvoice(opts)
       }
       default: {
         return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
@@ -216,7 +267,10 @@ export class PaymentProviderService implements PaymentProviderInterface {
   }): Promise<Result<void, FetchError | UnPricePaymentProviderError>> {
     switch (this.paymentProvider) {
       case "stripe": {
-        return await this.stripe.sendInvoice(opts)
+        return await this.stripe!.sendInvoice(opts)
+      }
+      case "sandbox": {
+        return await this.sandbox!.sendInvoice(opts)
       }
       default: {
         return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
@@ -235,7 +289,10 @@ export class PaymentProviderService implements PaymentProviderInterface {
   > {
     switch (this.paymentProvider) {
       case "stripe": {
-        return await this.stripe.collectPayment(opts)
+        return await this.stripe!.collectPayment(opts)
+      }
+      case "sandbox": {
+        return await this.sandbox!.collectPayment(opts)
       }
       default: {
         return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
@@ -248,7 +305,10 @@ export class PaymentProviderService implements PaymentProviderInterface {
   }): Promise<Result<GetStatusInvoice, FetchError | UnPricePaymentProviderError>> {
     switch (this.paymentProvider) {
       case "stripe": {
-        return await this.stripe.getStatusInvoice(opts)
+        return await this.stripe!.getStatusInvoice(opts)
+      }
+      case "sandbox": {
+        return await this.sandbox!.getStatusInvoice(opts)
       }
       default: {
         return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
@@ -261,7 +321,10 @@ export class PaymentProviderService implements PaymentProviderInterface {
   }): Promise<Result<PaymentProviderInvoice, FetchError | UnPricePaymentProviderError>> {
     switch (this.paymentProvider) {
       case "stripe": {
-        return await this.stripe.getInvoice(opts)
+        return await this.stripe!.getInvoice(opts)
+      }
+      case "sandbox": {
+        return await this.sandbox!.getInvoice(opts)
       }
       default: {
         return Err(new FetchError({ message: "Payment provider not supported", retry: false }))

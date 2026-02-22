@@ -9,7 +9,7 @@ import UpgradePlanError from "~/components/layout/error"
 import { entitlementFlag } from "~/lib/flags"
 import { intervalParams } from "~/lib/searchParams"
 import { HydrateClient, batchPrefetch, trpc } from "~/trpc/server"
-import { ANALYTICS_STALE_TIME } from "~/trpc/shared"
+import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
 import { PlansConversion, PlansConversionSkeleton } from "../_components/plans-convertion"
 import PlansStats, { PlansStatsSkeleton } from "../_components/plans-stats"
 import TabsDashboard from "../_components/tabs-dashboard"
@@ -36,15 +36,15 @@ export default async function DashboardPlans(props: {
     trpc.analytics.getPlansStats.queryOptions(
       { interval: filter.intervalFilter },
       {
-        staleTime: ANALYTICS_STALE_TIME,
+        ...ANALYTICS_CONFIG_REALTIME,
       }
     ),
     trpc.analytics.getPlansConversion.queryOptions(
       {
-        intervalDays: interval.intervalDays,
+        interval_days: interval.intervalDays,
       },
       {
-        staleTime: ANALYTICS_STALE_TIME,
+        ...ANALYTICS_CONFIG_REALTIME,
       }
     ),
   ])

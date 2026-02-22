@@ -50,7 +50,7 @@ const trackPageHit = async (
       return "Bot detected"
     }
 
-    const ip = env.VERCEL_ENV === "production" ? ipAddress(req) : LOCALHOST_IP
+    const ip = env.APP_ENV === "production" ? ipAddress(req) : LOCALHOST_IP
 
     // get continent, region & geolocation data
     // interesting, geolocation().region is Vercel's edge region – NOT the actual region
@@ -93,7 +93,6 @@ const trackPageHit = async (
       os: ua.os.name || "Unknown",
       os_version: ua.os.version || "Unknown",
       cpu_architecture: ua.cpu?.architecture || "Unknown",
-      ua: ua.ua || "Unknown",
       bot: ua.isBot,
       referrer: payload.referrer ? getDomainWithoutWWW(payload.referrer) || "(direct)" : "(direct)",
       referrer_url: payload.referrer || "(direct)",
@@ -102,6 +101,7 @@ const trackPageHit = async (
       url: payload.url,
     }
 
+    // TODO: lets send to DO for bashing instead of Tinybird directly
     const response = await analytics.ingestPageEvents(event)
     return response
   } catch (error) {

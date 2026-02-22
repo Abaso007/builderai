@@ -60,10 +60,9 @@ export const registerStripeSetupV1 = (app: App) =>
     const { sessionId, projectId } = c.req.valid("param")
     const key = c.req.header("cf-connecting-ip") ?? c.req.header("x-forwarded-for") ?? projectId
     const { customer, db, logger } = c.get("services")
-    const stats = c.get("stats")
 
     // rate limit the request
-    const result = await c.env.RL_FREE_600_60s.limit({ key })
+    const result = await c.env.RL_FREE_1000_60s.limit({ key })
 
     if (!result) {
       throw new UnpriceApiError({
@@ -140,13 +139,6 @@ export const registerStripeSetupV1 = (app: App) =>
           ...customerData?.metadata,
           stripeSubscriptionId: stripeSession.subscriptionId ?? "",
           stripeDefaultPaymentMethodId: defaultPaymentMethodId ?? "",
-          // analytics
-          colo: stats.colo,
-          country: stats.country,
-          city: stats.city,
-          isEUCountry: stats.isEUCountry,
-          region: stats.region,
-          continent: stats.continent,
         },
       })
       .where(and(eq(customers.id, customerData.id), eq(customers.projectId, projectId)))

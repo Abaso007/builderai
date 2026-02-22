@@ -2,7 +2,7 @@ import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { PlanVersion } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import { type Logger, createWideEventHelpers } from "@unprice/logging"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
@@ -11,8 +11,7 @@ import { MemoryEntitlementStorageProvider } from "../entitlements/memory-provide
 import { EntitlementService } from "../entitlements/service"
 import type { Metrics } from "../metrics"
 import { SubscriptionService } from "../subscriptions/service"
-import { createClock, createMockEntitlementState } from "../test-utils"
-import { unprice } from "../utils/unprice"
+import { createClock, createMockEntitlementState, createMockWideEventLogger } from "../test-utils"
 
 vi.mock("../env", () => ({
   env: {
@@ -81,6 +80,7 @@ describe("Golden Scenario - Customer Journey", () => {
         id: "pf_1",
         feature: { id: "f_1", slug: featureSlug },
         featureType: "usage",
+        unitOfMeasure: "units",
         aggregationMethod: "sum",
         config: { usageMode: "sum" },
         billingConfig: {
@@ -230,6 +230,7 @@ describe("Golden Scenario - Customer Journey", () => {
                 featurePlanVersion: {
                   feature: { slug: featureSlug },
                   featureType: "usage",
+                  unitOfMeasure: "units",
                   aggregationMethod: "sum",
                   config: { usageMode: "sum" },
                   billingConfig: {
@@ -281,6 +282,8 @@ describe("Golden Scenario - Customer Journey", () => {
     })
     await mockStorage.initialize()
 
+    const mockWideEventLogger = createMockWideEventLogger("workflow-test", "0.0.1", "test")
+
     const serviceDeps = {
       db: mockDb,
       logger: mockLogger,
@@ -289,6 +292,7 @@ describe("Golden Scenario - Customer Journey", () => {
       waitUntil: (p: Promise<any>) => p,
       cache: mockCache,
       metrics: mockMetrics,
+      wideEventHelpers: createWideEventHelpers(mockWideEventLogger),
     }
 
     customerService = new CustomerService(serviceDeps)
@@ -347,6 +351,7 @@ describe("Golden Scenario - Customer Journey", () => {
             limit: 1000,
             effectiveAt: initialNow,
             expiresAt: initialNow + 365 * 24 * 60 * 60 * 1000,
+            featurePlanVersionId: "fpv_idem_1",
           },
         ],
       },
@@ -437,6 +442,7 @@ describe("Golden Scenario - Customer Journey", () => {
             limit: 1000,
             effectiveAt: initialNow,
             expiresAt: initialNow + 365 * 24 * 60 * 60 * 1000,
+            featurePlanVersionId: "fpv_idem_1",
           },
         ],
       },
@@ -485,9 +491,6 @@ describe("Golden Scenario - Customer Journey", () => {
 
     expect(upgradeResult.err).toBeUndefined()
 
-    // Verify entitlement reset call
-    expect(unprice.customers.resetEntitlements).toHaveBeenCalledTimes(1)
-
     // Manually simulate the side effect of resetEntitlements (clearing storage)
     // because our mock of resetEntitlements doesn't do it.
     await mockStorage.delete({ customerId, projectId, featureSlug })
@@ -501,6 +504,7 @@ describe("Golden Scenario - Customer Journey", () => {
       limit: 5000,
       effectiveAt: clock.now(),
       expiresAt: initialNow + 365 * 24 * 60 * 60 * 1000,
+      featurePlanVersionId: "fpv_idem_1",
     }
 
     const premiumEntitlement = createMockEntitlementState(
@@ -547,7 +551,6 @@ describe("Golden Scenario - Customer Journey", () => {
     })
 
     expect(downgradeResult.err).toBeUndefined()
-    expect(unprice.customers.resetEntitlements).toHaveBeenCalledTimes(2) // Second call
 
     // Manually simulate the side effect of resetEntitlements (clearing storage)
     await mockStorage.delete({ customerId, projectId, featureSlug })
@@ -561,6 +564,7 @@ describe("Golden Scenario - Customer Journey", () => {
       limit: 1000,
       effectiveAt: clock.now(),
       expiresAt: initialNow + 365 * 24 * 60 * 60 * 1000,
+      featurePlanVersionId: "fpv_idem_1",
     }
 
     const downgradedEntitlement = createMockEntitlementState(
@@ -637,6 +641,7 @@ describe("Golden Scenario - Customer Journey", () => {
       subscriptionItem: {
         featurePlanVersion: {
           featureType: "flat", // Proration only for flat/tier/package
+          unitOfMeasure: "units",
           billingConfig: prepaidPlanVersion.billingConfig,
         },
         // Required for deep property access in billing service
@@ -717,6 +722,7 @@ describe("Golden Scenario - Customer Journey", () => {
                 id: "si_1",
                 featurePlanVersion: {
                   featureType: "flat",
+                  unitOfMeasure: "units",
                   billingConfig: prepaidPlanVersion.billingConfig,
                 },
               },

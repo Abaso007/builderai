@@ -30,7 +30,7 @@ Check if a customer has access to a feature, and optionally check if they have e
 Checking usage *before* performing an action (and before reporting it) allows you to fail gracefully without creating negative usage or partial transactions if the customer is over their limit.
 
 ```typescript
-const { result, error } = await unprice.customers.can({
+const { result, error } = await unprice.customers.verify({
   customerId: "cust_123",
   featureSlug: "ai-generations",
   usage: 5 // Check if customer can consume 5 units

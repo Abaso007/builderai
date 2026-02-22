@@ -14,7 +14,7 @@ import {
   getAnchor,
 } from "@unprice/db/validators"
 import { Err, Ok, type Result, type SchemaError } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import type { Logger, WideEventHelpers } from "@unprice/logging"
 import { env } from "../../env"
 import { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
@@ -38,6 +38,7 @@ export class SubscriptionService {
   private customerService: CustomerService
   private billingService: BillingService
   private grantService: GrantsManager
+  private wideEventHelpers?: WideEventHelpers
 
   constructor({
     db,
@@ -46,6 +47,7 @@ export class SubscriptionService {
     waitUntil,
     cache,
     metrics,
+    wideEventHelpers,
   }: {
     db: Database
     logger: Logger
@@ -54,6 +56,7 @@ export class SubscriptionService {
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
     metrics: Metrics
+    wideEventHelpers?: WideEventHelpers
   }) {
     this.db = db
     this.logger = logger
@@ -68,6 +71,7 @@ export class SubscriptionService {
       waitUntil,
       cache,
       metrics,
+      wideEventHelpers,
     })
     this.billingService = new BillingService({
       db,
@@ -76,12 +80,26 @@ export class SubscriptionService {
       waitUntil,
       cache,
       metrics,
+      wideEventHelpers,
     })
 
     this.grantService = new GrantsManager({
       db: db ?? this.db,
       logger: this.logger,
     })
+
+    this.wideEventHelpers = wideEventHelpers
+  }
+
+  /**
+   * Sets the wide event helpers for request-scoped logging context.
+   * This should be called inside the wideEventLogger.runAsync() context.
+   * Propagates to nested services (customerService, billingService).
+   */
+  public setWideEventHelpers(wideEventHelpers?: WideEventHelpers) {
+    this.wideEventHelpers = wideEventHelpers
+    this.customerService.setWideEventHelpers(wideEventHelpers)
+    this.billingService.setWideEventHelpers(wideEventHelpers)
   }
 
   private validatePhasesAction({
@@ -276,6 +294,7 @@ export class SubscriptionService {
     const activePhase = subscriptionWithPhases.phases.find((p) => {
       return p.startAt <= now && (p.endAt ?? Number.POSITIVE_INFINITY) >= now
     })
+    const isFirstPhase = subscriptionWithPhases.phases.length === 0
 
     if (activePhase?.planVersionId === planVersionId) {
       return Err(
@@ -373,9 +392,15 @@ export class SubscriptionService {
     // if (billingAnchorToUse === "dayOfCreation") {
     //   billingAnchorToUse = getDate(toZonedTime(startAtToUse, subscriptionTimezone))
     // }
+    // let's skip the payment method validation if the payment provider is sandbox
+    const paymentProvider = versionData.paymentProvider
 
     // validate payment method is required and if not provided
-    if (paymentMethodRequired && (!paymentMethodId || paymentMethodId === "")) {
+    if (
+      paymentMethodRequired &&
+      paymentProvider !== "sandbox" &&
+      (!paymentMethodId || paymentMethodId === "")
+    ) {
       return Err(
         new UnPriceSubscriptionError({
           message: "Payment method is required for this plan version",
@@ -393,6 +418,7 @@ export class SubscriptionService {
       })
 
       if (err) {
+        this.wideEventHelpers?.addError(err)
         return Err(
           new UnPriceSubscriptionError({
             message: err.message,
@@ -518,14 +544,16 @@ export class SubscriptionService {
           })
         )
 
-        // reset entitlements for the customer
-        // TODO: change this when implementing webhooks service + qstash
-        this.waitUntil(
-          unprice.customers.resetEntitlements({
-            customerId: subscriptionWithPhases.customerId,
-            projectId,
-          })
-        )
+        // reset entitlements if the phase is not the first one and the phase is active
+        if (!isFirstPhase && isActivePhase) {
+          // TODO: change this when implementing webhooks service + qstash
+          this.waitUntil(
+            unprice.customers.resetEntitlements({
+              customerId: subscriptionWithPhases.customerId,
+              projectId,
+            })
+          )
+        }
       }
 
       return Ok(phase)
@@ -541,7 +569,7 @@ export class SubscriptionService {
       //     subscriptionId,
       //   },
       // })
-      env.NODE_ENV !== "test"
+      !["test"].includes(env.NODE_ENV)
         ? this.billingService.generateBillingPeriods({
             subscriptionId,
             projectId,
@@ -770,7 +798,8 @@ export class SubscriptionService {
             })
           })
 
-        // update the units for the entitlements
+        // TODO: update the units for the entitlements and recompute the entitlements
+        // we need to cut access if needed or extend the access if needed
         // await this.computeGrantsForPhase({
         //   itemsIds: itemsToChange.map((item) => item.id),
         //   projectId,
@@ -958,6 +987,21 @@ export class SubscriptionService {
         staleTakeoverMs: 120_000,
         ownerStaleMs: ttlMs,
       })
+      this.wideEventHelpers?.addLock({
+        type: "normal",
+        resource: "subscription",
+        action: "acquire",
+        acquired,
+        ttl_ms: ttlMs,
+      })
+
+      if (!acquired) {
+        this.logger.warn("subscription lock acquire returned false; lock may be held", {
+          subscriptionId,
+          projectId,
+          ttlMs,
+        })
+      }
       if (!acquired) throw new UnPriceSubscriptionError({ message: "SUBSCRIPTION_BUSY" })
     }
 
@@ -973,6 +1017,14 @@ export class SubscriptionService {
             if (stopped) return
             const elapsed = Date.now() - startedAt
             if (elapsed > maxHoldMs) {
+              this.wideEventHelpers?.addLock({
+                type: "normal",
+                resource: "subscription",
+                action: "heartbeat_stopped",
+                acquired: false,
+                ttl_ms: ttlMs,
+                max_hold_ms: maxHoldMs,
+              })
               this.logger.warn("subscription lock heartbeat maxHoldMs reached; stopping renew", {
                 subscriptionId,
                 projectId,
@@ -986,12 +1038,26 @@ export class SubscriptionService {
             try {
               const ok = await lock.extend({ ttlMs })
               if (!ok) {
+                this.wideEventHelpers?.addLock({
+                  type: "normal",
+                  resource: "subscription",
+                  action: "extend",
+                  acquired: false,
+                  ttl_ms: ttlMs,
+                })
                 this.logger.warn("subscription lock extend returned false; lock may be lost", {
                   subscriptionId,
                   projectId,
                 })
               }
             } catch (e) {
+              this.wideEventHelpers?.addLock({
+                type: "normal",
+                resource: "subscription",
+                action: "extend_error",
+                acquired: false,
+                ttl_ms: ttlMs,
+              })
               this.logger.error("subscription lock heartbeat extend failed", {
                 error: e instanceof Error ? e.message : String(e),
                 subscriptionId,

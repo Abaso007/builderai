@@ -27,11 +27,11 @@ export const route = createRoute({
   request: {
     body: jsonContentRequired(
       z.object({
-        customerId: z.string().optional().openapi({
+        customer_id: z.string().optional().openapi({
           description: "The customer ID if you want to get the usage for a specific customer",
           example: "cus_1H7KQFLr7RepUyQBKdnvY",
         }),
-        projectId: z.string().openapi({
+        project_id: z.string().openapi({
           description: "The project ID (optional, only available for main projects)",
           example: "project_1H7KQFLr7RepUyQBKdnvY",
         }),
@@ -62,7 +62,7 @@ export type GetAnalyticsUsageResponse = z.infer<
 >
 export const registerGetAnalyticsUsageV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId, range, projectId } = c.req.valid("json")
+    const { customer_id: customerId, range, project_id: projectId } = c.req.valid("json")
     const { analytics, cache } = c.get("services")
 
     // validate the request
@@ -89,8 +89,8 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
     const { err, val: data } = await cache.getUsage.swr(cacheKey, async () => {
       const result = analytics
         .getFeaturesUsagePeriod({
-          customerId,
-          projectId: projectID,
+          customer_id: customerId,
+          project_id: projectID,
           start,
           end,
         })
@@ -102,9 +102,7 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
     const usage = data ?? []
 
     // send analytics event for the unprice customer
-    c.executionCtx.waitUntil(
-      reportUsageEvents(c, { action: "getUsage", status: err ? "error" : "success" })
-    )
+    c.executionCtx.waitUntil(reportUsageEvents(c, {}, "get-usage"))
 
     // end the timer
     endTime(c, "getUsage")

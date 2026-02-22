@@ -1,11 +1,11 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { Ok } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import { type Logger, createWideEventHelpers } from "@unprice/logging"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
-import { createClock, createMockEntitlementState } from "../test-utils"
+import { createClock, createMockEntitlementState, createMockWideEventLogger } from "../test-utils"
 import { MemoryEntitlementStorageProvider } from "./memory-provider"
 import { EntitlementService } from "./service"
 
@@ -41,6 +41,7 @@ describe("EntitlementService - Idempotency & Flush", () => {
       {
         id: "grant_idem_1",
         type: "subscription",
+        featurePlanVersionId: "fpv_idem_1",
         effectiveAt: now - 10000,
         expiresAt: now + 10000,
         limit: 100,
@@ -124,6 +125,8 @@ describe("EntitlementService - Idempotency & Flush", () => {
     })
     await mockStorage.initialize()
 
+    const mockWideEventLogger = createMockWideEventLogger("entitlements-test", "0.0.1", "test")
+
     service = new EntitlementService({
       db: mockDb,
       storage: mockStorage,
@@ -132,6 +135,7 @@ describe("EntitlementService - Idempotency & Flush", () => {
       waitUntil: vi.fn((promise) => promise),
       cache: mockCache,
       metrics: mockMetrics,
+      wideEventHelpers: createWideEventHelpers(mockWideEventLogger),
     })
   })
 
@@ -177,14 +181,14 @@ describe("EntitlementService - Idempotency & Flush", () => {
     expect(res2.usage).toBe(5) // Still 5 because of idempotency key check
 
     // Now let's flush and verify analytics only receives ONE event
-    await service.flush()
+    await mockStorage.flush()
 
     expect(mockAnalytics.ingestFeaturesUsage).toHaveBeenCalledTimes(1)
     // The argument to ingestFeaturesUsage should be an array with 1 element (deduplicated)
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     const callArgs = (mockAnalytics.ingestFeaturesUsage as any).mock.calls[0][0]
     expect(callArgs).toHaveLength(1)
-    expect(callArgs[0].idempotenceKey).toBe(idempotenceKey)
+    expect(callArgs[0].idempotence_key).toBe(idempotenceKey)
   })
 
   it("should flush verifications correctly", async () => {
@@ -204,7 +208,7 @@ describe("EntitlementService - Idempotency & Flush", () => {
         timestamp: clock.now() + i,
         requestId: `req_ver_${i}`,
         metadata: null,
-        performanceStart: performance.now(),
+        performanceStart: clock.now(),
       })
     }
 
@@ -213,7 +217,7 @@ describe("EntitlementService - Idempotency & Flush", () => {
     expect(pending.val).toHaveLength(5)
 
     // Flush
-    await service.flush()
+    await mockStorage.flush()
 
     // Analytics should be called with 5 items
     expect(mockAnalytics.ingestFeaturesVerification).toHaveBeenCalledTimes(1)
@@ -249,7 +253,7 @@ describe("EntitlementService - Idempotency & Flush", () => {
     }
 
     // Flush
-    await service.flush()
+    await mockStorage.flush()
 
     // Analytics called with 3 items
     expect(mockAnalytics.ingestFeaturesUsage).toHaveBeenCalledTimes(1)

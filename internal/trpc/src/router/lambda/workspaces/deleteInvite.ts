@@ -30,9 +30,7 @@ export const deleteInvite = protectedWorkspaceProcedure
       customerId: workspace.unPriceCustomerId,
       featureSlug: FEATURE_SLUGS.ACCESS_PRO.SLUG,
       isMain: workspace.isMain,
-      metadata: {
-        action: "deleteInvite",
-      },
+      action: "deleteInvite",
     })
 
     if (!result.success) {

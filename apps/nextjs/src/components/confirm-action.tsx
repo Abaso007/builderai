@@ -15,17 +15,19 @@ export function ConfirmAction({
   confirmAction,
   children,
   message,
+  title,
 }: {
   confirmAction: () => void
   children: React.ReactNode
   message?: string
+  title?: string
 }) {
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>{children}</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+          <AlertDialogTitle>{title ?? "Are you absolutely sure?"}</AlertDialogTitle>
           <AlertDialogDescription>
             {message
               ? message

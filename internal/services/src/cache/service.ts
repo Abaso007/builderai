@@ -79,6 +79,10 @@ export class CacheService {
 
     this.cache = createCache({
       apiKeyByHash: new Namespace<CacheNamespaces["apiKeyByHash"]>(this.context, defaultOpts),
+      customersProject: new Namespace<CacheNamespaces["customersProject"]>(
+        this.context,
+        defaultOpts
+      ),
       customerEntitlement: new Namespace<CacheNamespaces["customerEntitlement"]>(this.context, {
         ...defaultOpts,
         fresh: 1000 * 60 * 60 * 24, // 24 hours
@@ -109,6 +113,10 @@ export class CacheService {
         defaultOpts
       ),
       customer: new Namespace<CacheNamespaces["customer"]>(this.context, defaultOpts),
+      customerByExternalId: new Namespace<CacheNamespaces["customerByExternalId"]>(
+        this.context,
+        defaultOpts
+      ),
       planVersionList: new Namespace<CacheNamespaces["planVersionList"]>(this.context, defaultOpts),
       planVersion: new Namespace<CacheNamespaces["planVersion"]>(this.context, defaultOpts),
       projectFeatures: new Namespace<CacheNamespaces["projectFeatures"]>(this.context, defaultOpts),
@@ -140,22 +148,12 @@ export class CacheService {
         fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
         stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
       }),
-      getFeatureHeatmap: new Namespace<CacheNamespaces["getFeatureHeatmap"]>(this.context, {
-        ...defaultOpts,
-        fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
-        stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
-      }),
       getFeaturesOverview: new Namespace<CacheNamespaces["getFeaturesOverview"]>(this.context, {
         ...defaultOpts,
         fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
         stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
       }),
       getPlansStats: new Namespace<CacheNamespaces["getPlansStats"]>(this.context, {
-        ...defaultOpts,
-        fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
-        stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
-      }),
-      getPlansConversion: new Namespace<CacheNamespaces["getPlansConversion"]>(this.context, {
         ...defaultOpts,
         fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
         stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour

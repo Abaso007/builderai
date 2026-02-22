@@ -171,6 +171,17 @@ export const columns: ColumnDef<PlanVersion>[] = [
     size: 40,
   },
   {
+    accessorKey: "paymentProvider",
+    enableResizing: true,
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Provider" />,
+    cell: ({ row }) => (
+      <Badge className="text-xs" variant="secondary">
+        {row.original.paymentProvider}
+      </Badge>
+    ),
+    size: 40,
+  },
+  {
     accessorKey: "planType",
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="plan Type" />,
@@ -184,20 +195,6 @@ export const columns: ColumnDef<PlanVersion>[] = [
       <div className="flex items-center space-x-1 whitespace-nowrap">
         <Typography variant="p" affects="removePaddingMargin">
           {formatDate(row.original.createdAtM)}
-        </Typography>
-      </div>
-    ),
-    enableSorting: true,
-    enableHiding: true,
-    size: 40,
-  },
-  {
-    accessorKey: "updatedAtM",
-    header: ({ column }) => <DataTableColumnHeader column={column} title="Updated At" />,
-    cell: ({ row }) => (
-      <div className="flex items-center space-x-1 whitespace-nowrap">
-        <Typography variant="p" affects="removePaddingMargin">
-          {formatDate(row.original.updatedAtM)}
         </Typography>
       </div>
     ),

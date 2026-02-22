@@ -30,9 +30,7 @@ export const remove = protectedWorkspaceProcedure
       customerId,
       featureSlug,
       isMain: workspace.isMain,
-      metadata: {
-        action: "remove",
-      },
+      action: "remove",
     })
 
     if (!result.success) {
@@ -86,9 +84,7 @@ export const remove = protectedWorkspaceProcedure
           featureSlug,
           usage: -1,
           isMain: workspace.isMain,
-          metadata: {
-            action: "remove",
-          },
+          action: "remove",
         })
       )
     }

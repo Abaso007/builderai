@@ -5,7 +5,6 @@ import { authRouter } from "./auth"
 import { customersRouter } from "./customers"
 import { domainRouter } from "./domains"
 import { featureRouter } from "./features"
-import { ingestionRouter } from "./ingestions"
 import { pageRouter } from "./pages"
 import { paymentProviderRouter } from "./paymentProvider"
 import { planVersionFeatureRouter } from "./planVersionFeatures"
@@ -21,7 +20,6 @@ import { workspaceRouter } from "./workspaces"
 // I'll migrate to cloudflare workers in the future
 export const lambdaEndpoints = {
   planVersionFeatures: planVersionFeatureRouter,
-  ingestions: ingestionRouter,
   workspaces: workspaceRouter,
   projects: projectRouter,
   plans: planRouter,

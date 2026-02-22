@@ -23,9 +23,7 @@ export const exist = protectedProjectProcedure
       customerId,
       featureSlug,
       isMain: workspace.isMain,
-      metadata: {
-        action: "exist",
-      },
+      action: "exist",
     })
 
     if (!result.success) {

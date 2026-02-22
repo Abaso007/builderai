@@ -30,9 +30,7 @@ export const rename = protectedProjectProcedure
       customerId,
       featureSlug,
       isMain: workspace.isMain,
-      metadata: {
-        action: "rename",
-      },
+      action: "rename",
     })
 
     if (!result.success) {

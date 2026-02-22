@@ -16,12 +16,14 @@ export const reportUsageFeature = async ({
   usage,
   isMain,
   metadata,
+  action,
 }: {
   customerId: string
   featureSlug: string
   usage: number
   isMain?: boolean
   metadata?: Record<string, string | undefined>
+  action?: string
 }) => {
   // if the feature is main, we don't need to report usage
   if (isMain) {
@@ -37,6 +39,7 @@ export const reportUsageFeature = async ({
       usage,
       idempotenceKey: uuid(),
       metadata,
+      action,
     })
 
     if (error) {
@@ -77,22 +80,18 @@ export const createWorkspace = async ({
     })
   }
 
-  // TODO: use sdk to verify if the customer exists
-  const customer = await db.query.customers.findFirst({
-    where: (customer, { eq }) => eq(customer.id, unPriceCustomerId),
+  const { result, error } = await unprice.customers.getSubscription({
+    customerId: unPriceCustomerId,
   })
 
-  if (!customer) {
+  if (error) {
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: "Customer unprice not found",
+      message: error.message,
     })
   }
 
-  // get the subscription of the customer
-  const subscription = await db.query.subscriptions.findFirst({
-    where: (subscription, { eq }) => eq(subscription.customerId, unPriceCustomerId),
-  })
+  const subscription = result
 
   if (!subscription) {
     throw new TRPCError({

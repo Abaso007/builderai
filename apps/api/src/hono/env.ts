@@ -1,6 +1,7 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Stats } from "@unprice/analytics/utils"
 import type { Database } from "@unprice/db"
+import type { LakehouseService } from "@unprice/lakehouse"
 import type { Logger, WideEventHelpers, WideEventLogger } from "@unprice/logging"
 import type { ApiKeysService } from "@unprice/services/apikey"
 import type { Cache } from "@unprice/services/cache"
@@ -22,6 +23,7 @@ export type ServiceContext = {
   project: ApiProjectService
   customer: CustomerService
   subscription: SubscriptionService
+  lakehouse: LakehouseService
   db: Database
   wideEventHelpers: WideEventHelpers
 }

@@ -1,9 +1,8 @@
 import { INVOICE_STATUS } from "@unprice/db/utils"
 import { Button } from "@unprice/ui/button"
-import { Separator } from "@unprice/ui/separator"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
 import { Typography } from "@unprice/ui/typography"
-import { Code, Plus } from "lucide-react"
+import { Code } from "lucide-react"
 import { notFound } from "next/navigation"
 import { Suspense } from "react"
 import { CodeApiSheet } from "~/components/code-api-sheet"
@@ -15,7 +14,6 @@ import { SuperLink } from "~/components/super-link"
 import { api } from "~/trpc/server"
 import { CustomerActions } from "../../_components/customers/customer-actions"
 import { columns as invoicesColumns } from "../../_components/invoices/table-invoices/columns"
-import { SubscriptionSheet } from "../../_components/subscriptions/subscription-sheet"
 
 export default async function CustomerPage({
   params,
@@ -53,27 +51,7 @@ export default async function CustomerPage({
                   API
                 </Button>
               </CodeApiSheet>
-              <div className="button-primary flex items-center space-x-1 rounded-md">
-                <div className="sm:col-span-full">
-                  <SubscriptionSheet
-                    defaultValues={{
-                      customerId: customer.id,
-                      projectId: customer.projectId,
-                      timezone: customer.timezone,
-                      phases: [],
-                    }}
-                  >
-                    <Button variant={"custom"}>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Subscription
-                    </Button>
-                  </SubscriptionSheet>
-                </div>
-
-                <Separator orientation="vertical" className="h-[20px] p-0" />
-
-                <CustomerActions customer={customer} />
-              </div>
+              <CustomerActions customer={customer} />
             </div>
           }
         />
@@ -82,9 +60,12 @@ export default async function CustomerPage({
       <TabNavigation>
         <div className="flex items-center">
           <TabNavigationLink asChild>
-            <SuperLink href={`${baseUrl}`}>Subscriptions</SuperLink>
+            <SuperLink href={`${baseUrl}`}>Overview</SuperLink>
           </TabNavigationLink>
-          <TabNavigationLink active asChild>
+          <TabNavigationLink asChild>
+            <SuperLink href={`${baseUrl}/subscriptions`}>Subscriptions</SuperLink>
+          </TabNavigationLink>
+          <TabNavigationLink asChild active>
             <SuperLink href={`${baseUrl}/invoices`}>Invoices</SuperLink>
           </TabNavigationLink>
         </div>

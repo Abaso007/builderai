@@ -3,10 +3,10 @@ DESCRIPTION >
 
 SCHEMA >
     `date` DateTime,
-    `projectId` String,
+    `project_id` String,
     `region` String,
-    `customerId` String,
-    `featureSlug` LowCardinality(String),
+    `customer_id` String,
+    `feature_slug` LowCardinality(String),
     `count` AggregateFunction(count, Int32),
     `p50_latency` AggregateFunction(quantileTDigestState(0.50), Float32),
     `p95_latency` AggregateFunction(quantileTDigestState(0.95), Float32),
@@ -14,5 +14,5 @@ SCHEMA >
 
 ENGINE AggregatingMergeTree
 ENGINE_PARTITION_KEY toYYYYMM(date)
-ENGINE_SORTING_KEY (date, projectId, region, customerId, featureSlug)
+ENGINE_SORTING_KEY (date, project_id, region, customer_id, feature_slug)
 ENGINE_TTL date + INTERVAL 6 MONTH

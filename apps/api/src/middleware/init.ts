@@ -8,6 +8,7 @@ import {
   createWideEventHelpers,
   createWideEventLogger,
 } from "@unprice/logging"
+import { shouldEmitLogsToBackend, shouldEmitMetrics } from "@unprice/logging/env"
 import { ApiKeysService } from "@unprice/services/apikey"
 import { CacheService } from "@unprice/services/cache"
 import { CustomerService } from "@unprice/services/customers"
@@ -18,6 +19,7 @@ import { ApiProjectService } from "~/project"
 import { UsageLimiterService } from "~/usagelimiter/service"
 
 import { SubscriptionService } from "@unprice/services/subscriptions"
+import { LakehousePipelineService } from "~/lakehouse/pipeline"
 import { NoopUsageLimiter } from "~/usagelimiter/noop"
 
 /**
@@ -59,7 +61,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       newId("request")
 
     const requestStartedAt = Date.now()
-    const performanceStart = performance.now()
+    const performanceStart = Date.now()
     // start a new timer
 
     c.set("isolateId", isolateId)
@@ -68,55 +70,29 @@ export function init(): MiddlewareHandler<HonoEnv> {
     c.set("requestStartedAt", requestStartedAt)
     c.set("performanceStart", performanceStart)
 
-    const emitMetrics = c.env.EMIT_METRICS_LOGS.toString() === "true"
+    const emitLogsToBackend = shouldEmitLogsToBackend(c.env)
+    const emitMetrics = shouldEmitMetrics(c.env)
 
-    const logger = emitMetrics
+    const logger = emitLogsToBackend
       ? new AxiomLogger({
           apiKey: c.env.AXIOM_API_TOKEN,
           dataset: c.env.AXIOM_DATASET,
           requestId,
-          environment: c.env.NODE_ENV,
+          environment: c.env.APP_ENV,
           service: "api",
-          logLevel: c.env.VERCEL_ENV === "production" ? "warn" : "info",
+          logLevel: c.env.APP_ENV === "production" ? "warn" : "info",
           defaultFields: {
-            isolateId,
-            isolateCreatedAt,
-            requestId,
-            requestStartedAt,
-            performanceStart,
-            workspaceId: c.get("workspaceId"),
-            projectId: c.get("projectId"),
-            location: stats.colo,
-            userAgent: stats.ua,
             path: c.req.path,
-            region: stats.region,
-            country: stats.country,
-            source: stats.source,
-            ip: stats.ip,
-            pathname: c.req.path,
+            version: c.env.VERSION,
           },
         })
       : new ConsoleLogger({
           requestId,
-          environment: c.env.NODE_ENV,
+          environment: c.env.APP_ENV,
           service: "api",
-          logLevel: c.env.VERCEL_ENV === "production" ? "warn" : "info",
+          logLevel: c.env.APP_ENV === "production" ? "warn" : "info",
           defaultFields: {
-            isolateId,
-            isolateCreatedAt,
-            requestId,
-            requestStartedAt,
-            performanceStart,
-            workspaceId: c.get("workspaceId"),
-            projectId: c.get("projectId"),
-            location: stats.colo,
-            userAgent: stats.ua,
             path: c.req.path,
-            region: stats.region,
-            country: stats.country,
-            source: stats.source,
-            ip: stats.ip,
-            pathname: c.req.path,
             version: c.env.VERSION,
           },
         })
@@ -124,8 +100,8 @@ export function init(): MiddlewareHandler<HonoEnv> {
     const wideEventLogger = createWideEventLogger({
       "service.name": "api",
       "service.version": c.env.VERSION,
-      "service.environment": c.env.NODE_ENV,
-      sampleRate: c.env.NODE_ENV === "production" ? 0.1 : 1,
+      "service.environment": c.env.APP_ENV,
+      sampleRate: c.env.APP_ENV === "production" ? 0.1 : 1,
       emitter: (level, message, event) => logger.emit(level, message, event),
     })
 
@@ -138,7 +114,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
     const metrics = emitMetrics
       ? new LogdrainMetrics({
           requestId,
-          environment: c.env.NODE_ENV,
+          environment: c.env.APP_ENV,
           logger,
           service: "api",
           colo: stats.colo,
@@ -185,7 +161,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
     const cache = cacheService.getCache()
 
     const db = createConnection({
-      env: c.env.NODE_ENV,
+      env: c.env.APP_ENV,
       primaryDatabaseUrl: c.env.DATABASE_URL,
       read1DatabaseUrl: c.env.DATABASE_READ1_URL,
       read2DatabaseUrl: c.env.DATABASE_READ2_URL,
@@ -194,7 +170,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
     })
 
     const analytics = new Analytics({
-      emit: c.env.EMIT_ANALYTICS.toString() === "true",
+      emit: true,
       tinybirdToken: c.env.TINYBIRD_TOKEN,
       tinybirdUrl: c.env.TINYBIRD_URL,
       logger,
@@ -260,6 +236,16 @@ export function init(): MiddlewareHandler<HonoEnv> {
       hashCache,
     })
 
+    const lakehouse = new LakehousePipelineService({
+      logger,
+      pipelines: {
+        usage: c.env.PIPELINE_USAGE,
+        verification: c.env.PIPELINE_VERIFICATIONS,
+        metadata: c.env.PIPELINE_METADATA,
+        entitlement_snapshot: c.env.PIPELINE_ENTITLEMENTS,
+      },
+    })
+
     c.set("services", {
       version: "1.0.0",
       usagelimiter: usageLimiterService,
@@ -272,11 +258,21 @@ export function init(): MiddlewareHandler<HonoEnv> {
       apikey,
       db,
       customer,
+      lakehouse,
       wideEventHelpers,
     })
 
     // Run within the wide event context so add() and emit() see the same store
     await wideEventLogger.runAsync(async () => {
+      // Set wide event helpers on all services inside the runAsync context
+      // This ensures AsyncLocalStorage context is properly propagated
+      customer.setWideEventHelpers(wideEventHelpers)
+      subscription.setWideEventHelpers(wideEventHelpers)
+      project.setWideEventHelpers(wideEventHelpers)
+      apikey.setWideEventHelpers(wideEventHelpers)
+      analytics.setWideEventHelpers(wideEventHelpers)
+      usageLimiterService.setWideEventHelpers(wideEventHelpers)
+
       wideEventLogger.addMany({
         request: {
           id: requestId,
@@ -307,7 +303,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
 
       metrics.emit({
         metric: "metric.init",
-        duration: performance.now() - performanceStart,
+        duration: Date.now() - performanceStart,
       })
 
       await next()

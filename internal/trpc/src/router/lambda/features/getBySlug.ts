@@ -16,10 +16,8 @@ export const getBySlug = protectedProjectProcedure
       customerId: project.workspace.unPriceCustomerId,
       featureSlug: FEATURE_SLUGS.PLANS.SLUG,
       isMain: project.workspace.isMain,
-      metadata: {
-        action: "getBySlug",
-        module: "feature",
-      },
+      action: "getBySlug",
+      metadata: { module: "feature" },
     })
 
     if (!result.success) {

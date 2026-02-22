@@ -16,7 +16,7 @@ import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { useIntervalFilter } from "~/hooks/use-filter"
 import { useQueryInvalidation } from "~/hooks/use-query-invalidation"
 import { useTRPC } from "~/trpc/client"
-import { ANALYTICS_STALE_TIME } from "~/trpc/shared"
+import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
 
 const chartConfig = {
   usage: {
@@ -69,10 +69,10 @@ export function UsageChart() {
   } = useSuspenseQuery(
     trpc.analytics.getUsage.queryOptions(
       {
-        intervalDays: intervalFilter.intervalDays,
+        interval_days: intervalFilter.intervalDays,
       },
       {
-        staleTime: ANALYTICS_STALE_TIME,
+        ...ANALYTICS_CONFIG_REALTIME,
       }
     )
   )
@@ -86,7 +86,7 @@ export function UsageChart() {
       ["analytics", "getUsage"],
       {
         input: {
-          intervalDays: param,
+          interval_days: param,
         },
         type: "query",
       },
@@ -98,7 +98,7 @@ export function UsageChart() {
   }
 
   const chartData = usage.usage.map((v) => ({
-    feature: v.featureSlug,
+    feature: v.feature_slug,
     usage: v.sum,
   }))
 

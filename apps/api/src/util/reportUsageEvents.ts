@@ -4,7 +4,8 @@ import type { HonoEnv } from "~/hono/env"
 
 export const reportUsageEvents = async (
   c: Context<HonoEnv>,
-  metadata: Record<string, string | undefined>
+  metadata: Record<string, string | undefined>,
+  action?: string
 ) => {
   const unPriceCustomerId = c.get("unPriceCustomerId")
   const isInternal = c.get("isInternal")
@@ -37,23 +38,12 @@ export const reportUsageEvents = async (
     projectId: projectId,
     requestId,
     usage: 1,
-    // short ttl for dev
-    flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
     idempotenceKey: `${requestId}:${unPriceCustomerId}`,
     timestamp: Date.now(),
-    metadata: {
-      ...metadata,
-      ip: stats.ip,
-      country: stats.country,
-      region: stats.region,
-      colo: stats.colo,
-      city: stats.city,
-      latitude: stats.latitude,
-      longitude: stats.longitude,
-      ua: stats.ua,
-      continent: stats.continent,
-      source: stats.source,
-    },
+    metadata,
+    country: stats.country,
+    region: stats.region,
+    action: action,
   })
 
   if (err) {

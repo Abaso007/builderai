@@ -1,23 +1,15 @@
 "use client"
 
-import { nFormatter } from "@unprice/db/utils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@unprice/ui/tooltip"
 import { Typography } from "@unprice/ui/typography"
 import { BarChart3, Check, Clock, Layers } from "lucide-react"
+import { formatNumber } from "~/lib/numbers"
 import type { unprice } from "~/lib/unprice"
 import { UsageBar } from "./usage-bar"
 
 type UsageConfig = NonNullable<Awaited<ReturnType<typeof unprice.customers.getUsage>>["result"]>
 type FeatureDisplay = UsageConfig["groups"][number]["features"][number]
 type TieredDisplay = Extract<FeatureDisplay, { type: "tiered" }>["tieredDisplay"]
-
-function formatNumber(num: number | null | undefined, unit = ""): string {
-  if (num === null || num === undefined || num === Number.POSITIVE_INFINITY) {
-    return unit ? `∞ ${unit}s` : "∞"
-  }
-  const formatted = nFormatter(num, { digits: 1 })
-  return unit ? `${formatted} ${unit}${Number(formatted) > 1 ? "s" : ""}` : formatted
-}
 
 interface FeatureItemProps {
   feature: FeatureDisplay

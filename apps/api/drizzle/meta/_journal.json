@@ -5,78 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1742993200332,
-      "tag": "0000_breezy_iron_fist",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1742993478338,
-      "tag": "0001_nasty_baron_zemo",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1742993651262,
-      "tag": "0002_loud_robbie_robertson",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1744203145687,
-      "tag": "0003_rare_talon",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1744478757883,
-      "tag": "0004_unknown_black_crow",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1756566910810,
-      "tag": "0005_mute_peter_parker",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1757409210313,
-      "tag": "0006_tricky_squirrel_girl",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "6",
-      "when": 1763915187205,
-      "tag": "0007_strange_jocasta",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "6",
-      "when": 1763921301469,
-      "tag": "0008_fresh_wind_dancer",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "6",
-      "when": 1765055208398,
-      "tag": "0009_fantastic_norrin_radd",
-      "breakpoints": true
-    },
-    {
-      "idx": 10,
-      "version": "6",
-      "when": 1766578267533,
-      "tag": "0010_mysterious_inhumans",
+      "when": 1771264840314,
+      "tag": "0000_cynical_puff_adder",
       "breakpoints": true
     }
   ]

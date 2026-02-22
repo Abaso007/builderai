@@ -5,12 +5,15 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader } from "@unp
 import { Separator } from "@unprice/ui/separator"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { Typography } from "@unprice/ui/typography"
+import { PlanVersionPublish } from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/plans/_components/plan-version-actions"
 import { PricingItem } from "~/components/forms/pricing-item"
 
 export function PricingCard({
   planVersion,
+  onPublish,
 }: {
   planVersion: RouterOutputs["planVersions"]["getById"]["planVersion"]
+  onPublish?: () => void
 }) {
   if (!planVersion) return null
 
@@ -23,10 +26,12 @@ export function PricingCard({
     return <>Error calculating price</>
   }
 
+  const isPublished = planVersion.status === "published"
+
   return (
     <Card className="flex w-[300px] flex-col">
       <CardHeader className="space-y-6">
-        <Typography variant="h2">{planVersion.plan.slug}</Typography>
+        <Typography variant="h2">{planVersion.plan.title}</Typography>
 
         {/* // only show the price if it's not an enterprise plan */}
         {!planVersion.plan.enterprisePlan && (
@@ -39,9 +44,10 @@ export function PricingCard({
 
       <CardContent className="flex flex-col gap-4">
         <CardDescription className="line-clamp-2">{planVersion.description}*</CardDescription>
-        <Button className="w-full">
-          {planVersion.plan.enterprisePlan ? "Contact Us" : "Get Started"}
-        </Button>
+        {!isPublished && (
+          <PlanVersionPublish planVersionId={planVersion.id} onConfirmAction={onPublish} />
+        )}
+        {isPublished && <Button className="w-full">Get Started</Button>}
       </CardContent>
 
       <CardFooter className="flex w-full flex-col border-t px-6 py-6">

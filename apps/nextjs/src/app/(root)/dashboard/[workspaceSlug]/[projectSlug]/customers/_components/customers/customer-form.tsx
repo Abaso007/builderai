@@ -6,17 +6,11 @@ import { startTransition } from "react"
 import type { InsertCustomer } from "@unprice/db/validators"
 import { customerInsertBaseSchema } from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@unprice/ui/form"
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
+import { HelpCircle } from "@unprice/ui/icons"
 import { Input } from "@unprice/ui/input"
 import { Textarea } from "@unprice/ui/text-area"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 
 import { useMutation } from "@tanstack/react-query"
 import { CURRENCIES } from "@unprice/db/utils"
@@ -142,9 +136,17 @@ export function CustomerForm({
               name="active"
               render={({ field }) => (
                 <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
-                  <div className="space-y-0.5">
-                    <FormLabel className="text-base">Active</FormLabel>
-                    <FormDescription>Is this customer active?</FormDescription>
+                  <div className="flex items-center gap-2">
+                    <FormLabel className="font-semibold text-sm">Active</FormLabel>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <HelpCircle className="size-3.5 text-muted-foreground" />
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="max-w-[250px]">
+                        Toggle to activate or deactivate this customer. Inactive customers cannot
+                        create new subscriptions or report usage.
+                      </TooltipContent>
+                    </Tooltip>
                   </div>
                   <FormControl>
                     <Switch checked={field.value ?? false} onCheckedChange={field.onChange} />
@@ -158,8 +160,19 @@ export function CustomerForm({
           {editMode && (
             <div className="flex items-center justify-between">
               <div>
-                <FormLabel>Customer ID</FormLabel>
-                <FormDescription>{defaultValues.id}</FormDescription>
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-sm">Customer ID</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="size-3.5 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="max-w-[250px]">
+                      Unique identifier for this customer. Use this ID when integrating with the
+                      API.
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <span className="text-muted-foreground text-sm">{defaultValues.id}</span>
               </div>
               <CopyButton value={defaultValues.id ?? ""} className="size-4" />
             </div>
@@ -170,10 +183,20 @@ export function CustomerForm({
             name="name"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>name</FormLabel>
-                <FormDescription>Name of the customer.</FormDescription>
+                <div className="flex items-center gap-2">
+                  <FormLabel className="font-semibold text-sm">Name</FormLabel>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="size-3.5 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="max-w-[250px]">
+                      Display name for this customer. Used in dashboards, invoices, and
+                      communications.
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
                 <FormControl>
-                  <Input {...field} />
+                  <Input {...field} placeholder="Acme Inc." />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -185,10 +208,20 @@ export function CustomerForm({
             name="email"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>email</FormLabel>
-                <FormDescription>Main email address of the customer.</FormDescription>
+                <div className="flex items-center gap-2">
+                  <FormLabel className="font-semibold text-sm">Email</FormLabel>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="size-3.5 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="max-w-[250px]">
+                      Primary contact email for this customer. Used for invoices, notifications, and
+                      account communications.
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
                 <FormControl>
-                  <Input {...field} placeholder="email" />
+                  <Input {...field} placeholder="customer@example.com" />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -200,11 +233,18 @@ export function CustomerForm({
             name="defaultCurrency"
             render={({ field }) => (
               <FormItem className="flex flex-col justify-end">
-                <FormLabel>Currency</FormLabel>
-
-                <FormDescription>
-                  This customer will use this currency for all its invoices.
-                </FormDescription>
+                <div className="flex items-center gap-2">
+                  <FormLabel className="font-semibold text-sm">Currency</FormLabel>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="size-3.5 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="max-w-[250px]">
+                      Default currency for this customer's invoices and billing. All prices and
+                      charges will be displayed in this currency.
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
                 <Select onValueChange={field.onChange} value={field.value ?? ""}>
                   <FormControl>
                     <SelectTrigger>
@@ -231,10 +271,24 @@ export function CustomerForm({
             name="description"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Description</FormLabel>
-                <FormDescription>Description of the customer.</FormDescription>
+                <div className="flex items-center gap-2">
+                  <FormLabel className="font-semibold text-sm">Description</FormLabel>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="size-3.5 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="max-w-[250px]">
+                      Optional notes about this customer. Useful for internal reference, special
+                      requirements, or account details.
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
                 <FormControl>
-                  <Textarea {...field} value={field.value ?? ""} />
+                  <Textarea
+                    {...field}
+                    value={field.value ?? ""}
+                    placeholder="Add notes about this customer..."
+                  />
                 </FormControl>
                 <FormMessage />
               </FormItem>

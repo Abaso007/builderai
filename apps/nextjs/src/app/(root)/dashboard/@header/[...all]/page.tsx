@@ -78,7 +78,9 @@ export default async function Page(props: {
 
       // prefetch entitlements only for non-main workspaces
       if (!atw.isMain) {
-        const { result: featuresEntitlements } = await unprice.customers.getEntitlements(customerId)
+        const { result: featuresEntitlements } = await unprice.customers.getEntitlements({
+          customerId,
+        })
 
         const features = featuresEntitlements ?? []
 

@@ -1,5 +1,6 @@
 import { Balancer } from "react-wrap-balancer"
 
+import { getSession } from "@unprice/auth/server-rsc"
 import { FEATURE_SLUGS } from "@unprice/config"
 import { Button } from "@unprice/ui/button"
 import { Typography } from "@unprice/ui/typography"
@@ -12,11 +13,15 @@ import { SuperLink } from "~/components/super-link"
 import { entitlementFlag } from "~/lib/flags"
 import { api } from "~/trpc/server"
 import { ProjectCard, ProjectCardSkeleton } from "../_components/project-card"
+import { ProjectDialog } from "../_components/project-dialog"
 
 export default async function WorkspaceOverviewPage(props: {
   params: { workspaceSlug: string }
 }) {
   const isProjectsEnabled = await entitlementFlag(FEATURE_SLUGS.PROJECTS.SLUG)
+
+  const session = await getSession()
+  const onboardingCompleted = session?.user?.onboardingCompleted ?? false
 
   if (!isProjectsEnabled) {
     return <UpgradePlanError />
@@ -33,12 +38,28 @@ export default async function WorkspaceOverviewPage(props: {
           title="Projects"
           description="All your projects for this Workspace"
           action={
-            <SuperLink href={`/${props.params.workspaceSlug}/onboarding`}>
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                Project
-              </Button>
-            </SuperLink>
+            !onboardingCompleted ? (
+              <SuperLink href={`/${props.params.workspaceSlug}/onboarding`}>
+                <Button>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Project
+                </Button>
+              </SuperLink>
+            ) : (
+              <ProjectDialog
+                defaultValues={{
+                  defaultCurrency: "USD",
+                  timezone: "UTC",
+                  name: "Acme project",
+                  url: "https://acme.com",
+                }}
+              >
+                <Button>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Project
+                </Button>
+              </ProjectDialog>
+            )
           }
         />
       }

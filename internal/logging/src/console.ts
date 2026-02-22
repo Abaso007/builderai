@@ -1,5 +1,5 @@
 import { Log, type LogSchema } from "@unprice/logs"
-import type { Fields, Logger } from "./interface"
+import type { Fields, LogType, Logger } from "./interface"
 
 export class ConsoleLogger implements Logger {
   private requestId: string
@@ -26,21 +26,61 @@ export class ConsoleLogger implements Logger {
     this.console = opts.logLevel === "off" ? () => {} : console.log
   }
 
+  private withMetadata(fields?: Fields, defaultLogType: LogType = "normal"): Fields {
+    // skip in development mode
+    if (this.environment === "development") {
+      return {
+        ...this.defaultFields,
+        ...fields,
+      }
+    }
+
+    const enriched: Fields = {
+      ...this.defaultFields,
+      ...fields,
+    }
+
+    if (!enriched["service.name"]) {
+      enriched["service.name"] = this.service
+    }
+    if (!enriched["service.environment"]) {
+      enriched["service.environment"] = this.environment
+    }
+    if (!enriched.service) {
+      enriched.service = this.service
+    }
+    if (!enriched.environment) {
+      enriched.environment = this.environment
+    }
+    if (!enriched["log.type"]) {
+      enriched["log.type"] = defaultLogType
+    }
+
+    return enriched
+  }
+
   private marshal(
     level: "debug" | "info" | "warn" | "error" | "fatal",
     message: string,
     fields?: Fields
   ): string {
-    return new Log({
+    const log = new Log({
       type: "log",
       requestId: this.requestId,
       time: Date.now(),
       level,
       message,
-      context: { ...this.defaultFields, ...fields },
+      context: this.withMetadata(fields),
       environment: this.environment,
       service: this.service,
-    }).toString()
+    })
+
+    // one line to human readable format in development mode
+    if (this.environment === "development") {
+      return `${new Date(log.log.time).toISOString()} - ${log.log.level} - ${log.log.message} - ${JSON.stringify(log.log.context, null, 2)}`
+    }
+
+    return log.toString()
   }
 
   public debug(message: string, fields?: Fields): void {
@@ -72,7 +112,12 @@ export class ConsoleLogger implements Logger {
     // don't show colored output in production mode because it's not readable
     const coloredOutput = this.environment !== "production"
     const color = this.getColor(level)
-    this.console(coloredOutput ? `${color}%s\x1b[0m` : "", level, "-", message, fields)
+    this.console(
+      coloredOutput ? `${color}%s\x1b[0m` : "",
+      level,
+      "-",
+      this.marshal(level, message, this.withMetadata(fields))
+    )
   }
 
   public info(message: string, fields?: Fields): void {

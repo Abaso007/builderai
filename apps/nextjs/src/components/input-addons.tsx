@@ -1,6 +1,7 @@
 import * as React from "react"
 
 import { cn } from "@unprice/ui/utils"
+import { truncate } from "~/lib/truncate"
 
 export interface InputWithAddonsProps extends React.InputHTMLAttributes<HTMLInputElement> {
   leading?: React.ReactNode
@@ -27,7 +28,7 @@ const InputWithAddons = React.forwardRef<HTMLInputElement, InputWithAddonsProps>
         />
         {trailing ? (
           <div className="rounded-s-none rounded-e-md border-input border-l bg-background-bg px-3 py-2">
-            {trailing}
+            {trailing.toString().length > 8 ? truncate(trailing.toString(), 8) : trailing}
           </div>
         ) : null}
       </div>

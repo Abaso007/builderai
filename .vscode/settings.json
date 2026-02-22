@@ -92,7 +92,7 @@
   ],
   "search.exclude": {
     "**/.git": true,
-    "**/node_modules": true,
+    "**/node_modules/**": true,
     "**/bower_components": true,
     "**/**/.next": true,
     "**/tmp": true,
@@ -103,7 +103,12 @@
     "**/.vercel": true,
     "**/.nitro": true,
     "**/tsconfig.tsbuildinfo": true,
-    "**/.venv": true
+    "**/.venv": true,
+    "**/.venv-workers": true,
+    "**/.wrangler": true,
+    "**/__pycache__": true,
+    "**/python_modules/**": true,
+    "**/lakenv/**": true
   },
   "typescript.tsserver.maxTsServerMemory": 8192,
   "typescript.tsserver.watchOptions": {

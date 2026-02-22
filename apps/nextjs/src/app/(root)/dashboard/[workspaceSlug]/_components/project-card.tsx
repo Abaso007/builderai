@@ -7,7 +7,7 @@ function ProjectTierIndicator(props: { tier: string; isInternal?: boolean }) {
   return (
     <span
       className={cn(
-        "ml-2 rounded-md px-2 py-1 font-mono text-xs no-underline group-hover:no-underline",
+        "ml-2 whitespace-nowrap rounded-md px-2 py-1 font-mono text-xs no-underline group-hover:no-underline",
         {
           danger: props.isInternal,
           "bg-blue-100 dark:bg-blue-800": props.tier === "PRO" && !props.isInternal,
@@ -16,7 +16,8 @@ function ProjectTierIndicator(props: { tier: string; isInternal?: boolean }) {
         }
       )}
     >
-      {props.tier} {props.isInternal && " - INTERNAL"}
+      {`${props.tier.length > 4 ? `${props.tier.slice(0, 4)}.` : props.tier}`}{" "}
+      {props.isInternal && " - INTER."}
     </span>
   )
 }
@@ -32,7 +33,7 @@ export function ProjectCard(props: {
         <div className="h-32" style={project.styles} />
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
-            <span>{project.name}</span>
+            <span className="whitespace-nowrap">{project.name}</span>
             <ProjectTierIndicator
               tier={project.workspace.plan ?? "FREE"}
               isInternal={project.isInternal}
@@ -53,7 +54,7 @@ export function ProjectCardSkeleton(props: { pulse?: boolean }) {
       <CardHeader>
         <CardTitle className="flex items-center justify-between">
           <span className={cn("flex-1 bg-muted", pulse && "animate-pulse")}>&nbsp;</span>
-          <ProjectTierIndicator tier="" />
+          <ProjectTierIndicator tier="FREE" />
         </CardTitle>
         <CardDescription className={cn("bg-muted", pulse && "animate-pulse")}>
           &nbsp;

@@ -8,11 +8,28 @@ import type {
 } from "@unprice/db/validators"
 import type { CurrentUsage } from "@unprice/db/validators"
 import { type BaseError, Ok, type Result } from "@unprice/error"
+import type { WideEventHelpers } from "@unprice/logging"
 import type { CacheNamespaces } from "@unprice/services/cache"
-import type { GetEntitlementsRequest, GetUsageRequest, UsageLimiter } from "./interface"
+import type {
+  BufferMetricsResponse,
+  GetEntitlementsRequest,
+  GetUsageRequest,
+  UsageLimiter,
+} from "./interface"
 
 export class NoopUsageLimiter implements UsageLimiter {
+  public setWideEventHelpers(_wideEventHelpers?: WideEventHelpers): void {
+    return
+  }
+
   public async resetEntitlements(_params: {
+    customerId: string
+    projectId: string
+  }): Promise<Result<void, BaseError>> {
+    return Ok(undefined)
+  }
+
+  public async resetUsage(_params: {
     customerId: string
     projectId: string
   }): Promise<Result<void, BaseError>> {
@@ -89,5 +106,36 @@ export class NoopUsageLimiter implements UsageLimiter {
       renewalDate: undefined,
       daysRemaining: undefined,
     } as unknown as CurrentUsage)
+  }
+
+  public async getBufferMetrics(_data: {
+    customerId: string
+    projectId: string
+    windowSeconds?: 300 | 3600 | 86400 | 604800
+  }): Promise<Result<BufferMetricsResponse, BaseError>> {
+    const windowSeconds = _data.windowSeconds ?? 300
+    const bucketSizeSeconds =
+      windowSeconds <= 300
+        ? 60
+        : windowSeconds <= 3600
+          ? 300
+          : windowSeconds <= 86400
+            ? 3600
+            : 86400
+
+    return Ok({
+      usageCount: 0,
+      verificationCount: 0,
+      totalUsage: 0,
+      allowedCount: 0,
+      deniedCount: 0,
+      limitExceededCount: 0,
+      bucketSizeSeconds,
+      featureStats: [],
+      usageSeries: [],
+      verificationSeries: [],
+      oldestTimestamp: null,
+      newestTimestamp: null,
+    })
   }
 }

@@ -25,26 +25,52 @@ extendZodWithOpenApi(z)
 export const priceSchema = z.coerce
   .string()
   .regex(/^\d{1,10}(\.\d{1,10})?$/, "Invalid price format")
+  .describe(
+    "Price value as a decimal string. Supports up to 10 digits before and after the decimal point. Examples: '9.99', '100', '0.50', '1234.56'"
+  )
 
-export const dineroSnapshotSchema = z.object({
-  amount: z.number().describe("The amount of the dinero object"),
-  currency: z.object({
-    code: z.string().describe("The currency code of the dinero object"),
-    base: z
-      .union([z.number(), z.number().array().readonly()])
-      .describe("The base of the dinero object"),
-    exponent: z.number().describe("The exponent of the dinero object"),
-  }),
-  scale: z.number().describe("The scale of the dinero object"),
-})
+export const dineroSnapshotSchema = z
+  .object({
+    amount: z
+      .number()
+      .describe(
+        "The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99"
+      ),
+    currency: z
+      .object({
+        code: z.string().describe("ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP'"),
+        base: z
+          .union([z.number(), z.number().array().readonly()])
+          .describe("The base of the currency system. Usually 10 for decimal currencies"),
+        exponent: z
+          .number()
+          .describe(
+            "Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY"
+          ),
+      })
+      .describe("Currency configuration following ISO 4217 standards"),
+    scale: z
+      .number()
+      .describe(
+        "The precision scale for the monetary value. Determines how many decimal places are stored"
+      ),
+  })
+  .describe("Internal representation of a monetary value using the Dinero.js library format")
 
 export type DineroSnapshot = z.infer<typeof dineroSnapshotSchema>
 
 export const dineroSchema = z
   .object({
-    dinero: dineroSnapshotSchema,
-    displayAmount: priceSchema,
+    dinero: dineroSnapshotSchema.describe(
+      "The internal Dinero.js representation of the price for precise calculations"
+    ),
+    displayAmount: priceSchema.describe(
+      "Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99'"
+    ),
   })
+  .describe(
+    "Price object containing both the display value and internal monetary representation for precise currency calculations"
+  )
   .transform((data, ctx) => {
     if (!data.dinero) {
       ctx.addIssue({
@@ -91,31 +117,103 @@ export const dineroSchema = z
     }
   })
 
-export const planVersionFeatureMetadataSchema = z.object({
-  realtime: z.boolean().optional().default(false),
-  notifyUsageThreshold: z.number().int().optional().default(95),
-  overageStrategy: overageStrategySchema.optional().default("none"),
-  blockCustomer: z.boolean().optional().default(false),
-  hidden: z.boolean().optional().default(false),
-})
+export const planVersionFeatureMetadataSchema = z
+  .object({
+    realtime: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe(
+        "Whether usage should be tracked and verified in real-time. When true, usage checks happen synchronously. Default: false"
+      ),
+    notifyUsageThreshold: z
+      .number()
+      .int()
+      .optional()
+      .default(95)
+      .describe(
+        "Percentage threshold (0-100) at which to notify the customer about approaching usage limits. Default: 95 (notify at 95% usage)"
+      ),
+    overageStrategy: overageStrategySchema
+      .optional()
+      .default("none")
+      .describe(
+        "How to handle usage that exceeds the feature limit. Options: 'none' (deny access), 'charge' (bill for overage), 'allow' (permit without extra charge)"
+      ),
+    blockCustomer: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe(
+        "Whether to completely block the customer when they exceed their limit. When true, access is denied until the next billing period. Default: false"
+      ),
+    hidden: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe(
+        "Whether to hide this feature from customer-facing displays like pricing pages. Useful for internal or technical features. Default: false"
+      ),
+  })
+  .describe(
+    "Additional configuration options controlling feature behavior, notifications, and visibility"
+  )
 
-export const tiersSchema = z.object({
-  unitPrice: dineroSchema,
-  flatPrice: dineroSchema,
-  firstUnit: z.coerce.number().int().min(1),
-  lastUnit: z.coerce.number().int().min(1).nullable(),
-  // label for the tier - used to display the tier in the UI
-  label: z.string().optional(),
-})
+export const tiersSchema = z
+  .object({
+    unitPrice: dineroSchema.describe(
+      "Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier"
+    ),
+    flatPrice: dineroSchema.describe(
+      "Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier"
+    ),
+    firstUnit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .describe(
+        "The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers"
+      ),
+    lastUnit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .nullable()
+      .describe(
+        "The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units"
+      ),
+    label: z
+      .string()
+      .optional()
+      .describe(
+        "Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units'"
+      ),
+  })
+  .describe("Configuration for a single pricing tier defining unit ranges and associated pricing")
 
 export const configTierSchema = z
   .object({
-    price: dineroSchema.optional(),
-    tierMode: tierModeSchema,
-    tiers: z.array(tiersSchema),
-    usageMode: usageModeSchema.optional(),
-    units: unitSchema.optional(),
+    price: dineroSchema
+      .optional()
+      .describe("Base price for the feature. Not typically used in tier pricing mode"),
+    tierMode: tierModeSchema.describe(
+      "How tier pricing is calculated: 'volume' (all units priced at the tier they fall into) or 'graduated' (each unit priced at its respective tier)"
+    ),
+    tiers: z
+      .array(tiersSchema)
+      .describe(
+        "Array of pricing tiers defining price brackets. Tiers must be consecutive (no gaps or overlaps). The last tier's lastUnit should be null for unlimited"
+      ),
+    usageMode: usageModeSchema
+      .optional()
+      .describe("Usage calculation mode. Not typically used in tier-type features"),
+    units: unitSchema
+      .optional()
+      .describe("Number of units included. Not typically used in tier-type features"),
   })
+  .describe(
+    "Configuration for tier-based pricing where different price rates apply to different volume ranges"
+  )
   .superRefine((data, ctx) => {
     const tiers = data.tiers
 
@@ -185,12 +283,34 @@ export const configTierSchema = z
 
 export const configUsageSchema = z
   .object({
-    price: dineroSchema.optional(),
-    usageMode: usageModeSchema,
-    tierMode: tierModeSchema.optional(),
-    tiers: z.array(tiersSchema).optional(),
-    units: unitSchema.optional(),
+    price: dineroSchema
+      .optional()
+      .describe(
+        "Price per unit when usageMode is 'unit' or 'package'. Required for unit/package modes, not used for tier mode"
+      ),
+    usageMode: usageModeSchema.describe(
+      "How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (volume-based tiers), or 'package' (bundle of units)"
+    ),
+    tierMode: tierModeSchema
+      .optional()
+      .describe(
+        "Tier calculation method when usageMode is 'tier': 'volume' or 'graduated'. Only applicable when usageMode is 'tier'"
+      ),
+    tiers: z
+      .array(tiersSchema)
+      .optional()
+      .describe(
+        "Pricing tiers for tier-based usage. Required when usageMode is 'tier'. Must be consecutive with no gaps"
+      ),
+    units: unitSchema
+      .optional()
+      .describe(
+        "Number of units in a package when usageMode is 'package'. Required for package mode. Example: 100 API calls per package"
+      ),
   })
+  .describe(
+    "Configuration for usage-based (pay-as-you-go) pricing with support for per-unit, tiered, or package billing"
+  )
   .superRefine((data, ctx) => {
     if (data.usageMode === USAGE_MODES_MAP.unit.code) {
       if (!data.price) {
@@ -308,39 +428,104 @@ export const configUsageSchema = z
     return true
   })
 
-export const configFlatSchema = z.object({
-  tiers: z.array(tiersSchema).optional(),
-  price: dineroSchema,
-  usageMode: usageModeSchema.optional(),
-  tierMode: tierModeSchema.optional(),
-  units: unitSchema.optional(),
-})
+export const configFlatSchema = z
+  .object({
+    tiers: z
+      .array(tiersSchema)
+      .optional()
+      .describe("Not used for flat pricing. Will be removed during validation"),
+    price: dineroSchema.describe(
+      "The fixed price for this feature. This is the single price charged regardless of usage"
+    ),
+    usageMode: usageModeSchema
+      .optional()
+      .describe("Not used for flat pricing. Will be removed during validation"),
+    tierMode: tierModeSchema
+      .optional()
+      .describe("Not used for flat pricing. Will be removed during validation"),
+    units: unitSchema
+      .optional()
+      .describe("Not used for flat pricing. Will be removed during validation"),
+  })
+  .describe(
+    "Configuration for flat-rate pricing where a single fixed price is charged regardless of consumption"
+  )
 
-export const configPackageSchema = z.object({
-  tiers: z.array(tiersSchema).optional(),
-  price: dineroSchema,
-  usageMode: usageModeSchema.optional(),
-  tierMode: tierModeSchema.optional(),
-  units: unitSchema.describe("Units for the package"),
-})
+export const configPackageSchema = z
+  .object({
+    tiers: z
+      .array(tiersSchema)
+      .optional()
+      .describe("Not used for package pricing. Will be removed during validation"),
+    price: dineroSchema.describe(
+      "The price per package. Example: $10 per package of 100 API calls"
+    ),
+    usageMode: usageModeSchema
+      .optional()
+      .describe("Not used for package pricing. Will be removed during validation"),
+    tierMode: tierModeSchema
+      .optional()
+      .describe("Not used for package pricing. Will be removed during validation"),
+    units: unitSchema.describe(
+      "Number of units included in each package. Required. Example: 100 means each package includes 100 units"
+    ),
+  })
+  .describe(
+    "Configuration for package pricing where customers purchase bundles of units at a fixed price per bundle"
+  )
 
-export const configFeatureSchema = z.union([
-  configFlatSchema,
-  configTierSchema,
-  configUsageSchema,
-  configPackageSchema,
-])
+export const configFeatureSchema = z
+  .union([configFlatSchema, configTierSchema, configUsageSchema, configPackageSchema])
+  .describe(
+    "Feature pricing configuration. The schema used depends on the featureType: 'flat' uses configFlatSchema, 'tier' uses configTierSchema, 'usage' uses configUsageSchema, 'package' uses configPackageSchema"
+  )
+
+export type ConfigFeatureVersionType = z.infer<typeof configFeatureSchema>
 
 // TODO: use discriminated union
 export const planVersionFeatureSelectBaseSchema = createSelectSchema(planVersionFeatures, {
-  config: configFeatureSchema,
-  resetConfig: resetConfigSchema,
-  metadata: planVersionFeatureMetadataSchema,
-  defaultQuantity: z.coerce.number().int().optional().default(1),
-  aggregationMethod: aggregationMethodSchema.default("sum"),
-  limit: z.coerce.number().int().optional(),
-  featureType: typeFeatureSchema,
-  billingConfig: billingConfigSchema,
+  config: configFeatureSchema.describe(
+    "Pricing configuration for this feature. Structure depends on featureType"
+  ),
+  resetConfig: resetConfigSchema
+    .optional()
+    .describe(
+      "Configuration for resetting usage counters. Defines when and how usage limits reset (e.g., monthly, yearly)"
+    ),
+  metadata: planVersionFeatureMetadataSchema.describe(
+    "Additional feature settings including real-time tracking, notifications, and visibility options"
+  ),
+  defaultQuantity: z.coerce
+    .number()
+    .int()
+    .optional()
+    .default(1)
+    .describe(
+      "Default quantity of this feature included when a customer subscribes. Example: 5 for '5 team members included'. Default: 1"
+    ),
+  aggregationMethod: aggregationMethodSchema
+    .default("sum")
+    .describe(
+      "How usage events are aggregated: 'sum' (total all values), 'count' (count events), 'max' (highest value), 'last_during_period' (most recent). Default: 'sum'"
+    ),
+  limit: z.coerce
+    .number()
+    .int()
+    .optional()
+    .describe(
+      "Maximum allowed usage for this feature per billing period. Null or undefined means unlimited. Example: 10000 for 10,000 API calls/month"
+    ),
+  featureType: typeFeatureSchema.describe(
+    "The pricing model type: 'flat' (fixed price), 'tier' (volume-based tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)"
+  ),
+  unitOfMeasure: z
+    .string()
+    .describe(
+      "Unit of measurement captured for this plan version feature. Used for display and billing context without relying on mutable feature definitions"
+    ),
+  billingConfig: billingConfigSchema.describe(
+    "Billing cycle configuration including interval (month/year), billing anchor date, and plan type (recurring/onetime)"
+  ),
 })
 
 export const parseFeaturesConfig = (feature: PlanVersionFeature) => {
@@ -360,14 +545,52 @@ export const parseFeaturesConfig = (feature: PlanVersionFeature) => {
 // also zod is planning to deprecated it
 // TODO: improve this when switch api is available
 export const planVersionFeatureInsertBaseSchema = createInsertSchema(planVersionFeatures, {
-  config: configFeatureSchema.optional(),
-  metadata: planVersionFeatureMetadataSchema.optional(),
-  aggregationMethod: aggregationMethodSchema.default("count"),
-  billingConfig: billingConfigSchema,
-  resetConfig: resetConfigSchema.optional(),
-  defaultQuantity: z.coerce.number().int(),
-  limit: z.coerce.number().int().optional(),
-  type: featureConfigType.optional(),
+  config: configFeatureSchema
+    .optional()
+    .describe(
+      "Pricing configuration for this feature. Required structure depends on featureType. See configFlatSchema, configTierSchema, configUsageSchema, or configPackageSchema"
+    ),
+  metadata: planVersionFeatureMetadataSchema
+    .optional()
+    .describe(
+      "Optional additional settings for the feature including real-time tracking, usage notifications, overage handling, and visibility"
+    ),
+  aggregationMethod: aggregationMethodSchema
+    .default("count")
+    .describe(
+      "How to aggregate usage events for billing: 'sum', 'count', 'max', 'last_during_period', 'sum_all', 'count_all', 'max_all'. Default: 'count'"
+    ),
+  billingConfig: billingConfigSchema.describe(
+    "Required billing cycle settings: billingInterval ('month', 'year', 'week', 'day'), billingIntervalCount, billingAnchor, and planType ('recurring', 'onetime')"
+  ),
+  resetConfig: resetConfigSchema
+    .optional()
+    .describe(
+      "Optional configuration for when usage counters reset. Useful for features with usage limits that refresh periodically"
+    ),
+  unitOfMeasure: z
+    .string()
+    .default("units")
+    .optional()
+    .describe("Unit of measurement snapshot for this plan version feature. Defaults to 'units'"),
+  defaultQuantity: z.coerce
+    .number()
+    .int()
+    .describe(
+      "Default quantity included with subscription. Must be a positive integer. Example: 5 for '5 seats included'"
+    ),
+  limit: z.coerce
+    .number()
+    .int()
+    .optional()
+    .describe(
+      "Maximum usage allowed per billing period. Leave undefined for unlimited. Example: 10000 for max 10,000 API calls"
+    ),
+  type: featureConfigType
+    .optional()
+    .describe(
+      "Feature configuration type for categorization. Options vary based on system configuration"
+    ),
 })
   .omit({
     createdAtM: true,
@@ -476,9 +699,15 @@ export const planVersionFeatureInsertBaseSchema = createInsertSchema(planVersion
     return true
   })
 
-export const planVersionFeatureDragDropSchema = planVersionFeatureSelectBaseSchema.extend({
-  feature: featureSelectBaseSchema,
-})
+export const planVersionFeatureDragDropSchema = planVersionFeatureSelectBaseSchema
+  .extend({
+    feature: featureSelectBaseSchema.describe(
+      "The base feature definition including title, slug, unit of measure, and description"
+    ),
+  })
+  .describe(
+    "Extended plan version feature schema that includes the base feature data, used for UI drag-and-drop functionality"
+  )
 
 export type PlanVersionFeature = z.infer<typeof planVersionFeatureSelectBaseSchema>
 export type PlanVersionFeatureInsert = z.infer<typeof planVersionFeatureInsertBaseSchema>

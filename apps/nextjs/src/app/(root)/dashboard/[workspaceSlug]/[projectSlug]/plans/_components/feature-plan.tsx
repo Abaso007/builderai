@@ -3,7 +3,7 @@
 import type { VariantProps } from "class-variance-authority"
 import { cva } from "class-variance-authority"
 import { dinero, toDecimal } from "dinero.js"
-import { EyeOff, Settings, Trash2, X, Zap } from "lucide-react"
+import { CalendarClock, EyeOff, RotateCw, Settings, Trash2, X, Zap } from "lucide-react"
 import type React from "react"
 import type { ElementRef } from "react"
 import { forwardRef, useState } from "react"
@@ -53,6 +53,7 @@ export interface FeaturePlanProps
 
 const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref) => {
   const { mode, variant, className, planFeatureVersion, ...rest } = props
+
   const [isDelete, setConfirmDelete] = useState<boolean>(false)
 
   const [active, setActiveFeature] = useActiveFeature()
@@ -115,7 +116,7 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
           </span>
         </div>
       ) : mode === "FeaturePlan" ? (
-        <PlanVersionFeatureSheet>
+        <PlanVersionFeatureSheet planFeatureVersion={planFeatureVersion}>
           <div className="flex w-full flex-col gap-2">
             <div className="flex w-full flex-col gap-1">
               <div className="flex items-center justify-between">
@@ -154,12 +155,39 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
                   {planFeatureVersion.featureType === "usage" &&
                     activePlanVersion?.billingConfig.name !==
                       planFeatureVersion.billingConfig.name && (
-                      <Badge variant={"secondary"}>{planFeatureVersion.billingConfig.name}</Badge>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="flex items-center justify-center rounded-md bg-secondary p-1 text-secondary-foreground">
+                            <CalendarClock className="h-3 w-3" />
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent
+                          className="bg-background-bg font-normal text-xs"
+                          align="center"
+                        >
+                          Billing: {planFeatureVersion.billingConfig.name}
+                          <TooltipArrow className="fill-background-bg" />
+                        </TooltipContent>
+                      </Tooltip>
                     )}
                   {planFeatureVersion.featureType === "usage" &&
-                    planFeatureVersion.resetConfig?.name !==
+                    planFeatureVersion.resetConfig?.name &&
+                    planFeatureVersion.resetConfig.name !==
                       activePlanVersion?.billingConfig?.name && (
-                      <Badge variant={"secondary"}>{planFeatureVersion?.resetConfig?.name}</Badge>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="flex items-center justify-center rounded-md bg-secondary p-1 text-secondary-foreground">
+                            <RotateCw className="h-3 w-3" />
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent
+                          className="bg-background-bg font-normal text-xs"
+                          align="center"
+                        >
+                          Resets: {planFeatureVersion.resetConfig.name}
+                          <TooltipArrow className="fill-background-bg" />
+                        </TooltipContent>
+                      </Tooltip>
                     )}
 
                   {planFeatureVersion.metadata?.realtime && (
@@ -276,7 +304,7 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
                           ? `${toDecimal(
                               dinero(planFeatureVersion?.config?.price.dinero),
                               ({ value, currency }) => `${currencySymbol(currency.code)}${value}`
-                            )} per ${planFeatureVersion?.config?.units} ${planFeatureVersion?.feature.unit ?? "units"}`
+                            )} per ${planFeatureVersion?.config?.units} ${planFeatureVersion?.unitOfMeasure ?? "units"}`
                           : toDecimal(
                               dinero(planFeatureVersion?.config?.price.dinero),
                               ({ value, currency }) => `${currencySymbol(currency.code)}${value}`

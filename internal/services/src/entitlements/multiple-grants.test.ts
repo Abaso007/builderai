@@ -2,10 +2,11 @@ import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { EntitlementState } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import { type Logger, createWideEventHelpers } from "@unprice/logging"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
+import { createMockWideEventLogger } from "../test-utils"
 import { MemoryEntitlementStorageProvider } from "./memory-provider"
 import { EntitlementService } from "./service"
 
@@ -31,6 +32,7 @@ describe("EntitlementService - Multiple Grants", () => {
     effectiveAt: now - 10000,
     expiresAt: now + 10000,
     overageStrategy: "none" as const,
+    unitOfMeasure: "units",
     featurePlanVersionId: "fpv_A",
     subjectType: "customer",
     subjectId: customerId,
@@ -45,6 +47,7 @@ describe("EntitlementService - Multiple Grants", () => {
     effectiveAt: now - 10000,
     expiresAt: now + 10000,
     overageStrategy: "none" as const,
+    unitOfMeasure: "units",
     featurePlanVersionId: "fpv_B",
     subjectType: "customer",
     subjectId: customerId,
@@ -57,6 +60,7 @@ describe("EntitlementService - Multiple Grants", () => {
     projectId,
     featureSlug,
     featureType: "usage",
+    unitOfMeasure: "units",
     limit: 150, // Sum of limits (100 + 50)
     aggregationMethod: "sum",
     mergingPolicy: "sum",
@@ -153,6 +157,8 @@ describe("EntitlementService - Multiple Grants", () => {
     })
     await mockStorage.initialize()
 
+    const mockWideEventLogger = createMockWideEventLogger("entitlements-test", "0.0.1", "test")
+
     service = new EntitlementService({
       db: mockDb,
       storage: mockStorage,
@@ -161,6 +167,7 @@ describe("EntitlementService - Multiple Grants", () => {
       waitUntil: vi.fn((promise) => promise),
       cache: mockCache,
       metrics: mockMetrics,
+      wideEventHelpers: createWideEventHelpers(mockWideEventLogger),
     })
   })
 

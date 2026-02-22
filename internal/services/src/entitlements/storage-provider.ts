@@ -68,6 +68,14 @@ export interface UnPriceEntitlementStorage {
     record: AnalyticsVerification
   ): Promise<Result<void, UnPriceEntitlementStorageError>>
 
+  insertReportUsageDeniedEvent?: (record: {
+    project_id: string
+    customer_id: string
+    feature_slug: string
+    timestamp: number
+    denied_reason: string
+  }) => Promise<Result<void, UnPriceEntitlementStorageError>>
+
   /**
    * Flush usage records and verifications
    * fire and forget

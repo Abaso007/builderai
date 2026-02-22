@@ -7,16 +7,16 @@ TAGS "verifications"
 
 SCHEMA >
     `timestamp` Int64 `json:$.timestamp`,
-    `createdAt` Int64 `json:$.createdAt`,
-    `featureSlug` LowCardinality(String) `json:$.featureSlug`,
-    `customerId` String `json:$.customerId`,
+    `created_at` Int64 `json:$.created_at`,
+    `feature_slug` LowCardinality(String) `json:$.feature_slug`,
+    `customer_id` String `json:$.customer_id`,
     `latency` Float32 `json:$.latency`,
-    `requestId` String `json:$.requestId`,
-    `projectId` String `json:$.projectId`,
-    `deniedReason` LowCardinality(Nullable(String)) `json:$.deniedReason`,
+    `project_id` String `json:$.project_id`,
+    `denied_reason` LowCardinality(Nullable(String)) `json:$.denied_reason`,
     `allowed` UInt8 `json:$.allowed`,
-    `metadata` Map(String, String) `json:$.metadata`
+    `region` LowCardinality(String) `json:$.region` DEFAULT 'UNK'
 
 ENGINE MergeTree
 ENGINE_PARTITION_KEY toYYYYMM(fromUnixTimestamp64Milli(timestamp, 'UTC'))
-ENGINE_SORTING_KEY projectId, customerId, featureSlug, timestamp
+ENGINE_SORTING_KEY project_id, customer_id, feature_slug, timestamp
+ENGINE_TTL toDateTime(fromUnixTimestamp64Milli(timestamp, 'UTC')) + INTERVAL 90 DAY

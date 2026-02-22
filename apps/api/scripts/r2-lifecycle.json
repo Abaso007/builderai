@@ -1,0 +1,12 @@
+{
+  "rules": [
+    {
+      "id": "abort-incomplete-multipart-1-day",
+      "enabled": true,
+      "conditions": { "prefix": "" },
+      "abortMultipartUploadsTransition": {
+        "condition": { "maxAge": 86400, "type": "Age" }
+      }
+    }
+  ]
+}

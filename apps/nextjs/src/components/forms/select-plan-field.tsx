@@ -10,18 +10,12 @@ import {
   CommandList,
   CommandLoading,
 } from "@unprice/ui/command"
-import {
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@unprice/ui/form"
+import { FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
 import { LoadingAnimation } from "@unprice/ui/loading-animation"
 import { Popover, PopoverContent, PopoverTrigger } from "@unprice/ui/popover"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { cn } from "@unprice/ui/utils"
-import { CheckIcon, ChevronDown } from "lucide-react"
+import { CheckIcon, ChevronDown, HelpCircle } from "lucide-react"
 import { useState } from "react"
 import type { FieldPath, FieldValues, UseFormReturn } from "react-hook-form"
 import { FilterScroll } from "~/components/filter-scroll"
@@ -54,11 +48,18 @@ export default function SelectPlanFormField<TFieldValues extends FormValues>({
       name={"planVersionId" as FieldPath<TFieldValues>}
       render={({ field }) => (
         <FormItem className="flex flex-col">
-          <FormLabel>Plan Version</FormLabel>
-          <FormDescription>
-            Select the plan version to create the subscription phase. Only plan versions that are
-            published and active are shown.
-          </FormDescription>
+          <div className="flex items-center gap-1">
+            <FormLabel>Plan Version</FormLabel>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <HelpCircle className="size-3.5 text-muted-foreground" />
+              </TooltipTrigger>
+              <TooltipContent side="right" className="max-w-[250px]">
+                Select the plan version to create the subscription phase. Only plan versions that
+                are published and active are shown.
+              </TooltipContent>
+            </Tooltip>
+          </div>
 
           <Popover
             modal={true}

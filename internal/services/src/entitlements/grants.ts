@@ -519,12 +519,32 @@ export class GrantsManager {
       return Err(new UnPriceGrantError({ message: "All grants must have the same feature slug" }))
     }
 
+    const normalizeUnit = (unit: string | null | undefined) => {
+      const trimmed = unit?.trim()
+      return trimmed && trimmed.length > 0 ? trimmed : "units"
+    }
+
     // Sort by priority (higher first) to preserve consumption order and get the best priority grant
     // This determines the "intent" (feature type) of the entitlement configuration
     const ordered = [...grants].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
     const bestPriorityGrant = ordered[0]!
+    const winningUnitOfMeasure = normalizeUnit(bestPriorityGrant.featurePlanVersion.unitOfMeasure)
 
-    const grantsSnapshot = ordered.map((g) => ({
+    const unitScopedGrants = ordered.filter(
+      (g) => normalizeUnit(g.featurePlanVersion.unitOfMeasure) === winningUnitOfMeasure
+    )
+
+    if (unitScopedGrants.length !== ordered.length) {
+      this.logger.warn("Dropping grants with mismatched unit of measure", {
+        featureSlug,
+        customerId,
+        projectId,
+        winningUnitOfMeasure,
+        droppedGrants: ordered.length - unitScopedGrants.length,
+      })
+    }
+
+    const grantsSnapshot = unitScopedGrants.map((g) => ({
       id: g.id,
       type: g.type,
       name: g.name,
@@ -532,7 +552,9 @@ export class GrantsManager {
       expiresAt: g.expiresAt,
       limit: g.limit,
       priority: g.priority,
+      unitOfMeasure: normalizeUnit(g.featurePlanVersion.unitOfMeasure),
       config: g.featurePlanVersion.config, // Keep config for pricing calculations
+      featurePlanVersionId: g.featurePlanVersionId,
     }))
 
     // Merge grants according to merging policy derived from feature type
@@ -548,23 +570,26 @@ export class GrantsManager {
     // for the winning grant ID to get full configuration (resetConfig etc).
 
     const winningGrantSnapshot = merged.grants[0] ?? grantsSnapshot[0]!
-    const winningGrant = grants.find((g) => g.id === winningGrantSnapshot.id) ?? bestPriorityGrant
+    const winningGrant =
+      unitScopedGrants.find((g) => g.id === winningGrantSnapshot.id) ?? bestPriorityGrant
 
     // Merge overage strategy from all grants based on merging policy
     let overageStrategy = winningGrant.featurePlanVersion.metadata?.overageStrategy ?? "none"
     if (merged.mergingPolicy === "sum" || merged.mergingPolicy === "max") {
-      if (grants.some((g) => g.featurePlanVersion.metadata?.overageStrategy === "always")) {
+      if (
+        unitScopedGrants.some((g) => g.featurePlanVersion.metadata?.overageStrategy === "always")
+      ) {
         overageStrategy = "always"
       } else if (
-        grants.some((g) => g.featurePlanVersion.metadata?.overageStrategy === "last-call")
+        unitScopedGrants.some((g) => g.featurePlanVersion.metadata?.overageStrategy === "last-call")
       ) {
         overageStrategy = "last-call"
       }
     } else if (merged.mergingPolicy === "min") {
-      if (grants.some((g) => g.featurePlanVersion.metadata?.overageStrategy === "none")) {
+      if (unitScopedGrants.some((g) => g.featurePlanVersion.metadata?.overageStrategy === "none")) {
         overageStrategy = "none"
       } else if (
-        grants.some((g) => g.featurePlanVersion.metadata?.overageStrategy === "last-call")
+        unitScopedGrants.some((g) => g.featurePlanVersion.metadata?.overageStrategy === "last-call")
       ) {
         overageStrategy = "last-call"
       } else {
@@ -627,6 +652,7 @@ export class GrantsManager {
       resetConfig: defaultResetConfig,
       featureType: bestPriorityGrant.featurePlanVersion.featureType,
       aggregationMethod: bestPriorityGrant.featurePlanVersion.aggregationMethod,
+      unitOfMeasure: winningUnitOfMeasure,
       grants: merged.grants,
       featureSlug,
       customerId,
@@ -697,6 +723,7 @@ export class GrantsManager {
       customerId,
       featureSlug: computedState.featureSlug,
       featureType: computedState.featureType,
+      unitOfMeasure: computedState.unitOfMeasure,
       limit: computedState.limit,
       aggregationMethod: computedState.aggregationMethod,
       resetConfig: computedState.resetConfig,
@@ -772,8 +799,18 @@ export class GrantsManager {
       }
     }
 
+    const normalizeUnit = (unit: string | null | undefined) => {
+      const trimmed = unit?.trim()
+      return trimmed && trimmed.length > 0 ? trimmed : "units"
+    }
+
     // Sort by priority (higher priority first)
     const sorted = [...grants].sort((a, b) => b.priority - a.priority)
+    const winningUnitOfMeasure = normalizeUnit(sorted[0]?.unitOfMeasure)
+    const unitScoped = sorted.filter(
+      (grant) => normalizeUnit(grant.unitOfMeasure) === winningUnitOfMeasure
+    )
+    const scopedGrants = unitScoped.length > 0 ? unitScoped : sorted
 
     let policy = explicitPolicy
 
@@ -818,32 +855,34 @@ export class GrantsManager {
 
     switch (policy) {
       case "sum": {
-        const limit = sorted.reduce((sum, g) => sum + (g.limit ?? 0), 0)
+        const hasUnlimited = scopedGrants.some((g) => g.limit === null)
+        const limit = hasUnlimited ? null : scopedGrants.reduce((sum, g) => sum + (g.limit ?? 0), 0)
 
         // For sum, the validity range is the union of all grants
-        const minStart = Math.min(...sorted.map((g) => g.effectiveAt))
-        // max end or null if no expires at
-        const maxEnd = Math.max(...sorted.map((g) => g.expiresAt ?? Number.NEGATIVE_INFINITY))
+        const minStart = Math.min(...scopedGrants.map((g) => g.effectiveAt))
+        const hasNoExpiry = scopedGrants.some((g) => g.expiresAt === null)
+        const maxEnd = Math.max(...scopedGrants.map((g) => g.expiresAt ?? Number.NEGATIVE_INFINITY))
 
         result = {
-          limit: limit > 0 ? limit : null,
+          limit,
           // we take all the grants that were used to calculate the limit
-          grants: sorted,
+          grants: scopedGrants,
           effectiveAt: minStart,
-          expiresAt: maxEnd === Number.NEGATIVE_INFINITY ? null : maxEnd,
+          expiresAt: hasNoExpiry || maxEnd === Number.NEGATIVE_INFINITY ? null : maxEnd,
           mergingPolicy: policy,
         }
         break
       }
 
       case "max": {
-        const limits = sorted.map((g) => g.limit).filter((l): l is number => l !== null)
+        const hasUnlimited = scopedGrants.some((g) => g.limit === null)
+        const limits = scopedGrants.map((g) => g.limit).filter((l): l is number => l !== null)
 
-        const maxLimit = limits.length > 0 ? Math.max(...limits) : null
+        const maxLimit = hasUnlimited ? null : limits.length > 0 ? Math.max(...limits) : null
 
         // Filter grants: keep only the highest priority grant that offers the max limit
         // This ensures we have a single deterministic configuration source
-        const winningGrant = sorted.find((g) => g.limit === maxLimit) || sorted[0]!
+        const winningGrant = scopedGrants.find((g) => g.limit === maxLimit) || scopedGrants[0]!
 
         result = {
           limit: maxLimit,
@@ -857,12 +896,12 @@ export class GrantsManager {
       }
 
       case "min": {
-        const limits = sorted.map((g) => g.limit).filter((l): l is number => l !== null)
+        const limits = scopedGrants.map((g) => g.limit).filter((l): l is number => l !== null)
 
         const minLimit = limits.length > 0 ? Math.min(...limits) : null
 
         // Filter grants: keep only the highest priority grant that offers the min limit
-        const winningGrant = sorted.find((g) => g.limit === minLimit) || sorted[0]!
+        const winningGrant = scopedGrants.find((g) => g.limit === minLimit) || scopedGrants[0]!
 
         result = {
           limit: minLimit,
@@ -877,7 +916,7 @@ export class GrantsManager {
 
       case "replace": {
         // Highest priority grant replaces all others
-        const highest = sorted[0]!
+        const highest = scopedGrants[0]!
         result = {
           limit: highest.limit,
           // grants are replaced, so we take the highest priority grant
@@ -891,7 +930,7 @@ export class GrantsManager {
 
       default: {
         // Fallback to replace
-        const highest = sorted[0]!
+        const highest = scopedGrants[0]!
         result = {
           limit: highest.limit ?? null,
           // grants are replaced, so we take the highest priority grant

@@ -5,6 +5,7 @@ import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { customerPaymentMethodSchema, paymentProviderSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { keyAuth } from "~/auth/key"
+import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 
@@ -55,13 +56,24 @@ export const registerGetPaymentMethodsV1 = (app: App) =>
     const { customer } = c.get("services")
 
     // validate the request
-    const key = await keyAuth(c)
+    await keyAuth(c)
+
+    // TODO: check this an identify key can query all customers
+    const { err: customerDataErr, val: customerData } = await customer.getCustomer(customerId)
+
+    if (customerDataErr) {
+      throw customerDataErr
+    }
+
+    if (!customerData) {
+      throw new UnpriceApiError({ code: "NOT_FOUND", message: "Customer not found" })
+    }
 
     // get payment methods from service
     const result = await customer.getPaymentMethods({
-      customerId,
+      customerId: customerData.id,
       provider,
-      projectId: key.projectId,
+      projectId: customerData.projectId,
     })
 
     if (result.err) {

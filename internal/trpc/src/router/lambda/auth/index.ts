@@ -1,6 +1,6 @@
 import { createTRPCRouter } from "#trpc"
-import { listOrganizations } from "./listOrganizations"
+import { setOnboardingCompleted } from "./setOnboardingCompleted"
 
 export const authRouter = createTRPCRouter({
-  listOrganizations: listOrganizations,
+  setOnboardingCompleted: setOnboardingCompleted,
 })

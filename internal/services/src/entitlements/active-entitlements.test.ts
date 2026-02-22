@@ -2,10 +2,11 @@ import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { EntitlementState, MinimalEntitlement } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import { type Logger, createWideEventHelpers } from "@unprice/logging"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
+import { createMockWideEventLogger } from "../test-utils"
 import { MemoryEntitlementStorageProvider } from "./memory-provider"
 import { EntitlementService } from "./service"
 
@@ -24,12 +25,15 @@ describe("EntitlementService - Active Entitlements & Cycle Changes", () => {
   const featureSlugB = "feature-b"
   const now = Date.now()
 
+  const mockWideEventLogger = createMockWideEventLogger("entitlements-test", "0.0.1", "test")
+
   const mockEntitlementState: EntitlementState = {
     id: "ent_1",
     customerId,
     projectId,
     featureSlug,
     featureType: "usage",
+    unitOfMeasure: "units",
     limit: 100,
     aggregationMethod: "sum",
     mergingPolicy: "sum",
@@ -74,7 +78,7 @@ describe("EntitlementService - Active Entitlements & Cycle Changes", () => {
       getFeaturesUsageCursor: vi.fn().mockResolvedValue(
         Ok({
           usage: 0,
-          lastRecordId: "rec_initial",
+          last_record_id: "rec_initial",
         })
       ),
     } as unknown as Analytics
@@ -134,6 +138,7 @@ describe("EntitlementService - Active Entitlements & Cycle Changes", () => {
       waitUntil: vi.fn((promise) => promise),
       cache: mockCache,
       metrics: mockMetrics,
+      wideEventHelpers: createWideEventHelpers(mockWideEventLogger),
     })
   })
 
@@ -217,6 +222,7 @@ describe("EntitlementService - Active Entitlements & Cycle Changes", () => {
         projectId,
         featureSlug,
         featureType: "usage" as const,
+        unitOfMeasure: "units",
         limit: 100,
         allowOverage: false,
         aggregationMethod: "sum" as const,
@@ -227,6 +233,7 @@ describe("EntitlementService - Active Entitlements & Cycle Changes", () => {
             priority: 10,
             effectiveAt: now - 10000,
             expiresAt: now + 10000,
+            unitOfMeasure: "units",
           },
         ],
         version: "v2",

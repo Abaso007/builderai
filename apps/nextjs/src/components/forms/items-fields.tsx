@@ -302,18 +302,18 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
 
                       const showUnits =
                         feature.featureType === "usage" &&
-                        !feature.feature.slug.includes(feature.feature.unit)
+                        !feature.feature.slug.includes(feature.unitOfMeasure ?? "units")
 
                       const freeUnitsText =
                         freeUnits === Number.POSITIVE_INFINITY
                           ? feature.limit
-                            ? `Up to ${nFormatter(feature.limit)} ${showUnits ? feature.feature.unit : ""}`
+                            ? `Up to ${nFormatter(feature.limit)} ${showUnits ? (feature.unitOfMeasure ?? "units") : ""}`
                             : "Unlimited"
                           : freeUnits === 0
                             ? feature.limit
-                              ? `Up to ${nFormatter(feature.limit)} ${showUnits ? feature.feature.unit : ""}`
+                              ? `Up to ${nFormatter(feature.limit)} ${showUnits ? (feature.unitOfMeasure ?? "units") : ""}`
                               : "Starts at 0"
-                            : `${nFormatter(freeUnits)} ${showUnits ? feature.feature.unit : ""}`
+                            : `${nFormatter(freeUnits)} ${showUnits ? (feature.unitOfMeasure ?? "units") : ""}`
 
                       return (
                         <TableRow key={item.id} className="border-b bg-transparent">

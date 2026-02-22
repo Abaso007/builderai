@@ -37,7 +37,7 @@ const unprice = new Unprice({
 Before performing an action, check if the customer has access and if they have enough balance for the specific operation.
 
 ```typescript
-const { result } = await unprice.customers.can({
+const { result } = await unprice.customers.verify({
   customerId: "cust_123",
   featureSlug: "ai-generations",
   usage: 5 // Check if they can consume 5 units right now

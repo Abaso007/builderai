@@ -64,13 +64,17 @@ export const reportUsageSchema = z.object({
   featureSlug: z.string(),
   usage: z.number(),
   idempotenceKey: z.string(),
-  flushTime: z.number().optional(),
   timestamp: z.number(),
   projectId: z.string(),
   sync: z.boolean().optional(),
   requestId: z.string(),
   metadata: z.record(z.string(), z.any()).nullable(),
   performanceStart: z.number().optional(),
+  // first-class analytics fields
+  country: z.string().optional(),
+  region: z.string().optional(),
+  action: z.string().optional(),
+  keyId: z.string().optional(),
 })
 
 export const verifySchema = z.object({
@@ -81,8 +85,12 @@ export const verifySchema = z.object({
   projectId: z.string(),
   requestId: z.string(),
   metadata: z.record(z.string(), z.any()).nullable(),
-  flushTime: z.number().optional(),
   performanceStart: z.number(),
+  // first-class analytics fields
+  country: z.string().optional(),
+  region: z.string().optional(),
+  action: z.string().optional(),
+  keyId: z.string().optional(),
 })
 
 export type ReportUsageRequest = z.infer<typeof reportUsageSchema>
@@ -99,6 +107,8 @@ export const verificationResultSchema = z.object({
   usage: z.number().optional(),
   cost: z.number().optional(),
   latency: z.number().optional(),
+  degraded: z.boolean().optional(),
+  degradedReason: z.string().optional(),
 })
 export type VerificationResult = z.infer<typeof verificationResultSchema>
 
@@ -123,16 +133,22 @@ export const reportUsageResultSchema = z.object({
   notifiedOverLimit: z.boolean().optional(),
   remaining: z.number().optional(),
   deniedReason: deniedReasonSchema.optional(),
+  degraded: z.boolean().optional(),
+  degradedReason: z.string().optional(),
+  cacheHit: z.boolean().optional(),
 })
 export type ReportUsageResult = z.infer<typeof reportUsageResultSchema>
 
 export const entitlementGrantsSnapshotSchema = z.object({
   id: z.string(),
   type: grantTypeSchema,
+  name: z.string().optional(),
   priority: z.number(),
   effectiveAt: z.number(),
   expiresAt: z.number().nullable(),
   limit: z.number().nullable(),
+  unitOfMeasure: z.string().optional(),
+  featurePlanVersionId: z.string().optional(),
   config: configFeatureSchema.optional(), // Added for pricing calculations
 })
 
@@ -145,6 +161,11 @@ export const entitlementSchema = createSelectSchema(schema.entitlements, {
   aggregationMethod: aggregationMethodSchema,
   featureType: typeFeatureSchema,
   mergingPolicy: entitlementMergingPolicySchema,
+  unitOfMeasure: z
+    .string()
+    .describe(
+      "Unit of measurement for this entitlement, computed from the winning grants. Example: 'calls', 'GB', 'seats'"
+    ),
 })
 
 export const meterStateSchema = z.object({

@@ -14,6 +14,7 @@ export const getById = protectedProjectProcedure
   .input(
     z.object({
       id: z.string(),
+      projectSlug: z.string().optional(),
     })
   )
   .output(
@@ -38,10 +39,8 @@ export const getById = protectedProjectProcedure
       customerId: workspace.unPriceCustomerId,
       featureSlug: FEATURE_SLUGS.PLANS.SLUG,
       isMain: workspace.isMain,
-      metadata: {
-        action: "getById",
-        module: "planVersion",
-      },
+      action: "getById",
+      metadata: { module: "planVersion" },
     })
 
     if (!result.success) {

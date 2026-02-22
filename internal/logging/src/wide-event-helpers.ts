@@ -1,4 +1,11 @@
-import type { BusinessSchema, EntitlementsSchema } from "@unprice/logs"
+import type {
+  BusinessSchema,
+  CustomerSchema,
+  EntitlementsSchema,
+  LockSchema,
+  WideEventAttributes,
+  WideEventKey,
+} from "@unprice/logs"
 import type { CloudSchema } from "@unprice/logs"
 import type { z } from "zod"
 import type { WideEventLogger } from "./wide-events"
@@ -9,10 +16,25 @@ import type { WideEventLogger } from "./wide-events"
  */
 export interface WideEventHelpers {
   /**
+   * Add attributes to the wide event.
+  /**
+   * Add attributes to the wide event.
+   * @param key - The key to add
+   * @param value - The value to add
+   */
+  add(key: WideEventKey, value: WideEventAttributes[WideEventKey]): void
+
+  /**
    * Add cloud context to the wide event.
    * @param context - Cloud-related attributes
    */
   addCloud(context: z.infer<typeof CloudSchema>): void
+
+  /**
+   * Add lock context to the wide event.
+   * @param context - Lock-related attributes
+   */
+  addLock(context: z.infer<typeof LockSchema>): void
 
   /**
    * Add business context to the wide event.
@@ -25,6 +47,12 @@ export interface WideEventHelpers {
    * @param context - Entitlement-related attributes
    */
   addEntitlement(context: z.infer<typeof EntitlementsSchema>): void
+
+  /**
+   * Add customer context to the wide event.
+   * @param context - Customer-related attributes
+   */
+  addCustomer(context: z.infer<typeof CustomerSchema>): void
 
   /**
    * Add rate limit status to the wide event.
@@ -54,6 +82,12 @@ export interface WideEventHelpers {
    * Check if the helpers have a valid logger instance.
    */
   hasLogger(): boolean
+
+  /**
+   * Add error to the wide event.
+   * @param error - The error to add
+   */
+  addError(error: unknown): void
 }
 
 /**
@@ -88,9 +122,29 @@ export function createWideEventHelpers(
   logger: WideEventLogger | null | undefined
 ): WideEventHelpers {
   return {
+    add(key: WideEventKey, value: WideEventAttributes[WideEventKey]): void {
+      if (!logger) return
+      logger.add(key, value)
+    },
+
+    addError(error: unknown): void {
+      if (!logger) return
+      logger.addError(error)
+    },
+
+    addCustomer(context: z.infer<typeof CustomerSchema>): void {
+      if (!logger) return
+      logger.addMany({ customers: context })
+    },
+
     addCloud(context: z.infer<typeof CloudSchema>): void {
       if (!logger) return
       logger.addMany({ cloud: context })
+    },
+
+    addLock(context: z.infer<typeof LockSchema>): void {
+      if (!logger) return
+      logger.addMany({ lock: context })
     },
 
     addBusiness(context: z.infer<typeof BusinessSchema>): void {

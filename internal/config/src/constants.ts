@@ -6,74 +6,83 @@ const MAIN_DOMAIN = "unprice.dev"
 const SITES_DOMAIN = "builderai.sh"
 
 // sometimes we need to use the vercel env from the client
-const VERCEL_ENV = env.NEXT_PUBLIC_VERCEL_ENV || env.VERCEL_ENV
+const APP_ENV = env.NEXT_PUBLIC_APP_ENV || env.APP_ENV
+
+const DEV_APP_DOMAIN = env.NEXT_PUBLIC_APP_DOMAIN
 
 export const BASE_DOMAIN =
-  VERCEL_ENV === "production"
+  APP_ENV === "production"
     ? MAIN_DOMAIN
-    : VERCEL_ENV === "preview"
+    : APP_ENV === "preview"
       ? `${env.NEXT_PUBLIC_APP_DOMAIN}`
-      : "localhost:3000"
+      : DEV_APP_DOMAIN
 
 export const BASE_URL =
-  VERCEL_ENV === "production"
+  APP_ENV === "production"
     ? `https://${MAIN_DOMAIN}`
-    : VERCEL_ENV === "preview"
+    : APP_ENV === "preview"
       ? `https://${env.NEXT_PUBLIC_APP_DOMAIN}`
-      : "http://localhost:3000"
+      : `http://${DEV_APP_DOMAIN}`
 
 export const APP_BASE_DOMAIN = `app.${BASE_DOMAIN}`
 
 export const SITES_BASE_DOMAIN =
-  VERCEL_ENV === "production"
-    ? SITES_DOMAIN
-    : VERCEL_ENV === "preview"
-      ? SITES_DOMAIN
-      : "localhost:3000"
+  APP_ENV === "production" ? SITES_DOMAIN : APP_ENV === "preview" ? SITES_DOMAIN : DEV_APP_DOMAIN
+
+/** In development, matches any app.localhost:<port> so multiple ports work without env changes */
+export const APP_HOSTNAME_DEV_REGEX = /^app\.localhost:\d+$/
 
 export const APP_HOSTNAMES = new Set([
   `app.${MAIN_DOMAIN}`,
   `app.${env.NEXT_PUBLIC_APP_DOMAIN}`,
   // for preview deployments
   `app-${env.NEXT_PUBLIC_APP_DOMAIN}`,
-  "app.localhost:3000",
+  `app.${DEV_APP_DOMAIN}`,
 ])
 
+/** Use this instead of APP_HOSTNAMES.has(domain) to support any app.localhost port in dev */
+export function isAppHostname(domain: string): boolean {
+  if (APP_HOSTNAMES.has(domain)) return true
+  if (APP_ENV !== "production" && APP_ENV !== "preview" && APP_HOSTNAME_DEV_REGEX.test(domain))
+    return true
+  return false
+}
+
 export const APP_DOMAIN =
-  VERCEL_ENV === "production"
+  APP_ENV === "production"
     ? `https://app.${MAIN_DOMAIN}/`
-    : VERCEL_ENV === "preview"
+    : APP_ENV === "preview"
       ? `https://app-${env.NEXT_PUBLIC_APP_DOMAIN}/`
-      : "http://app.localhost:3000/"
+      : `http://app.${DEV_APP_DOMAIN}/`
 
 export const API_HOSTNAMES = new Set([
   `api.${MAIN_DOMAIN}`,
   `api.${env.NEXT_PUBLIC_APP_DOMAIN}`,
   // for preview deployments
-  `api-preview.${MAIN_DOMAIN}`,
+  `preview-api.${MAIN_DOMAIN}`,
   "localhost:8787",
 ])
 
 export const API_DOMAIN =
-  VERCEL_ENV === "production"
+  APP_ENV === "production"
     ? `https://api.${MAIN_DOMAIN}/`
-    : VERCEL_ENV === "preview"
-      ? `https://api-preview.${MAIN_DOMAIN}/`
+    : APP_ENV === "preview"
+      ? `https://preview-api.${MAIN_DOMAIN}/`
       : "http://localhost:8787/"
 
 export const DOCS_DOMAIN =
-  VERCEL_ENV === "production"
+  APP_ENV === "production"
     ? `https://docs.${MAIN_DOMAIN}/`
-    : VERCEL_ENV === "preview"
+    : APP_ENV === "preview"
       ? `https://docs.${MAIN_DOMAIN}/`
       : "http://localhost:3333/docs"
 
 export const PRICING_DOMAIN =
-  VERCEL_ENV === "production"
+  APP_ENV === "production"
     ? `https://price.${MAIN_DOMAIN}/`
-    : VERCEL_ENV === "preview"
+    : APP_ENV === "preview"
       ? `https://price.${MAIN_DOMAIN}/`
-      : "http://price.localhost:3000/"
+      : `http://price.${DEV_APP_DOMAIN}/`
 
 export const AUTH_ROUTES = {
   SIGNIN: "/auth/signin",

@@ -26,9 +26,7 @@ export const create = protectedWorkspaceProcedure
       customerId,
       featureSlug,
       isMain: workspace.isMain,
-      metadata: {
-        action: "create",
-      },
+      action: "create",
     })
 
     if (!result.success) {
@@ -81,9 +79,7 @@ export const create = protectedWorkspaceProcedure
           featureSlug,
           usage: 1,
           isMain: workspace.isMain,
-          metadata: {
-            action: "create",
-          },
+          action: "create",
         })
       )
     }

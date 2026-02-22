@@ -2,7 +2,12 @@
 import { prepareInterval, preparePage } from "@unprice/analytics"
 import { useQueryStates } from "nuqs"
 import { useMemo } from "react"
-import { intervalParser, pageParser } from "~/lib/searchParams"
+import {
+  type RealtimeWindowSeconds,
+  intervalParser,
+  pageParser,
+  realtimeIntervalParser,
+} from "~/lib/searchParams"
 
 export function useIntervalFilter() {
   const [intervalFilter, setIntervalFilter] = useQueryStates(intervalParser, {
@@ -34,4 +39,23 @@ export function usePageFilter() {
   }, [pageFilter.pageId])
 
   return [parsedPage, setPageFilter] as const
+}
+
+export function useRealtimeIntervalFilter() {
+  const [realtimeIntervalFilter, setRealtimeIntervalFilter] = useQueryStates(
+    realtimeIntervalParser,
+    {
+      history: "replace",
+      shallow: true,
+      scroll: false,
+      clearOnDefault: true,
+      throttleMs: 1000,
+    }
+  )
+
+  const parsedWindowSeconds = useMemo<RealtimeWindowSeconds>(() => {
+    return Number(realtimeIntervalFilter.realtimeInterval) as RealtimeWindowSeconds
+  }, [realtimeIntervalFilter.realtimeInterval])
+
+  return [parsedWindowSeconds, setRealtimeIntervalFilter] as const
 }

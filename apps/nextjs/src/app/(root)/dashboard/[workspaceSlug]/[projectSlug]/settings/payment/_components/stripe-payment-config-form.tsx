@@ -6,7 +6,6 @@ import type {
   PaymentProviderConfig,
 } from "@unprice/db/validators"
 import { insertPaymentProviderConfigSchema } from "@unprice/db/validators"
-import { Button } from "@unprice/ui/button"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
 import { Input } from "@unprice/ui/input"
 import { useParams, useSearchParams } from "next/navigation"
@@ -22,12 +21,16 @@ export function StripePaymentConfigForm({
   setDialogOpen,
   onSuccess,
   skip,
+  onSkip,
+  isOnboarding,
 }: {
   provider?: PaymentProviderConfig
   paymentProvider: PaymentProvider
   setDialogOpen?: (open: boolean) => void
   onSuccess?: (key: string) => void
   skip?: boolean
+  onSkip?: () => void
+  isOnboarding?: boolean
 }) {
   const params = useParams()
   const searchParams = useSearchParams()
@@ -41,10 +44,10 @@ export function StripePaymentConfigForm({
 
   const saveConfig = useMutation(
     trpc.paymentProvider.saveConfig.mutationOptions({
-      onSuccess: () => {
+      onSuccess: (data) => {
         toastAction("saved")
         setDialogOpen?.(false)
-        onSuccess?.("")
+        onSuccess?.(data.paymentProviderConfig.paymentProvider)
         revalidateAppPath(`/${workspaceSlug}/${projectSlug}/settings/payment`, "page")
       },
     })
@@ -105,16 +108,28 @@ export function StripePaymentConfigForm({
 
         <div className="flex items-end justify-end gap-2 pt-4">
           {skip && (
-            <Button
+            <SubmitButton
               variant="ghost"
-              onClick={(e) => {
-                e.preventDefault()
+              onClick={() => {
                 setDialogOpen?.(false)
-                onSuccess?.("")
+
+                if (isOnboarding) {
+                  // create a default config for the onboarding
+                  saveConfig.mutate({
+                    paymentProvider: "sandbox",
+                    key: "onboarding-key",
+                    keyIv: "",
+                    active: true,
+                  })
+                  return
+                }
+
+                onSkip?.()
               }}
-            >
-              Skip
-            </Button>
+              isDisabled={form.formState.isSubmitting}
+              isSubmitting={form.formState.isSubmitting}
+              label={isOnboarding ? "Use sandbox" : "Skip"}
+            />
           )}
 
           <SubmitButton

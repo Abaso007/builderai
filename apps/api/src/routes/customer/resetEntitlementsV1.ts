@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers"
 import { createRoute } from "@hono/zod-openapi"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
@@ -18,6 +19,7 @@ export const route = createRoute({
   summary: "reset entitlements",
   description: "Reset entitlements for a customer",
   method: "post",
+  hide: env.APP_ENV === "production",
   tags,
   request: {
     body: jsonContentRequired(
@@ -58,19 +60,17 @@ export const registerResetEntitlementsV1 = (app: App) =>
     const { usagelimiter } = c.get("services")
 
     // validate the request
-    const key = await keyAuth(c)
+    await keyAuth(c)
 
     const isMain = c.get("isMain")
-    // only main projects can assume the main project id
-    const finalProjectId = isMain ? projectId : key.projectId
-
-    // only main keys can reset entitlements for other projects other than their own
-    if (isMain && projectId !== finalProjectId) {
+    if (!isMain) {
       throw new UnpriceApiError({
         code: "FORBIDDEN",
-        message: "You are not allowed to reset entitlements for other projects.",
+        message: "Only main keys can reset entitlements.",
       })
     }
+
+    const finalProjectId = projectId
 
     // start a timer
     startTime(c, "resetEntitlements")

@@ -19,7 +19,11 @@ export const getBaseUrl = () => {
   return "http://localhost:3000"
 }
 
-export const ANALYTICS_STALE_TIME = 1000 * 30 // 30 seconds
+export const ANALYTICS_CONFIG_REALTIME = {
+  staleTime: 30 * 1000, // 30 seconds
+  refetchInterval: 30 * 1000, // 30 seconds
+  refetchOnWindowFocus: true,
+}
 
 export const createQueryClient = () =>
   new QueryClient({

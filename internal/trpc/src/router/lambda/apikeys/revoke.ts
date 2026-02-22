@@ -23,9 +23,7 @@ export const revoke = protectedProjectProcedure
       featureSlug,
       usage: -ids.length,
       isMain: project.workspace.isMain,
-      metadata: {
-        action: "revoke",
-      },
+      action: "revoke",
     })
 
     if (!result.success) {
@@ -61,9 +59,7 @@ export const revoke = protectedProjectProcedure
             featureSlug,
             usage: -data.length,
             isMain: project.workspace.isMain,
-            metadata: {
-              action: "revoke",
-            },
+            action: "revoke",
           }),
       ])
     )

@@ -2,11 +2,11 @@ import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { currencies, dinero } from "@unprice/db/utils"
 import { Ok } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import { type Logger, createWideEventHelpers } from "@unprice/logging"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
-import { createClock, createMockEntitlementState } from "../test-utils"
+import { createClock, createMockEntitlementState, createMockWideEventLogger } from "../test-utils"
 import { MemoryEntitlementStorageProvider } from "./memory-provider"
 import { EntitlementService } from "./service"
 
@@ -85,6 +85,7 @@ describe("EntitlementService - Pricing", () => {
         limit: 100,
         priority: 10,
         config: pricingConfig,
+        featurePlanVersionId: "fpv_idem_1",
       },
     ],
   })
@@ -151,6 +152,8 @@ describe("EntitlementService - Pricing", () => {
     })
     await mockStorage.initialize()
 
+    const mockWideEventLogger = createMockWideEventLogger("entitlements-test", "0.0.1", "test")
+
     service = new EntitlementService({
       db: mockDb,
       storage: mockStorage,
@@ -159,6 +162,7 @@ describe("EntitlementService - Pricing", () => {
       waitUntil: (p) => p, // Execute immediately for tests
       cache: mockCache,
       metrics: mockMetrics,
+      wideEventHelpers: createWideEventHelpers(mockWideEventLogger),
     })
   })
 
@@ -240,6 +244,7 @@ describe("EntitlementService - Pricing", () => {
           limit: 100,
           priority: 10,
           config: unitPricingConfig,
+          featurePlanVersionId: "fpv_unit_1",
         },
       ],
     })

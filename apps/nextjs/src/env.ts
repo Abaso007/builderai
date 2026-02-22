@@ -9,7 +9,7 @@ export const env = createEnv({
   shared: {
     VERCEL: z.enum(["1", "0"]).default("0"),
     NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
-    VERCEL_ENV: z.enum(["development", "preview", "production"]).default("development"),
+    APP_ENV: z.enum(["development", "preview", "production"]).default("development"),
   },
   server: {
     VERCEL_PROJECT_UNPRICE_ID: z.string(),
@@ -18,6 +18,7 @@ export const env = createEnv({
     ENCRYPTION_KEY: z.string(),
     AXIOM_API_TOKEN: z.string(),
     AXIOM_DATASET: z.string(),
+    OPENROUTER_API_KEY: z.string(),
     USERJOT_ID: z.string().describe("The UserJot ID"),
     USERJOT_SECRET: z
       .string()

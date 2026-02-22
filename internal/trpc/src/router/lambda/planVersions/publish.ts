@@ -31,10 +31,8 @@ export const publish = protectedProjectProcedure
       customerId: workspace.unPriceCustomerId,
       featureSlug: FEATURE_SLUGS.PLANS.SLUG,
       isMain: workspace.isMain,
-      metadata: {
-        action: "publish",
-        module: "planVersion",
-      },
+      action: "publish",
+      metadata: { module: "planVersion" },
     })
 
     if (!result.success) {
@@ -205,45 +203,6 @@ export const publish = protectedProjectProcedure
         })
       }
     })
-
-    // ingest the plan version to tinybird
-    opts.ctx.waitUntil(
-      Promise.all([
-        opts.ctx.analytics.ingestPlanVersions({
-          id: planVersionDataUpdated.id,
-          project_id: planVersionDataUpdated.projectId,
-          plan_id: planVersionDataUpdated.planId,
-          plan_slug: planVersionData.plan.slug,
-          plan_version: planVersionDataUpdated.version,
-          currency: planVersionDataUpdated.currency,
-          payment_provider: planVersionDataUpdated.paymentProvider,
-          billing_interval: planVersionDataUpdated.billingConfig.billingInterval,
-          billing_interval_count: planVersionDataUpdated.billingConfig.billingIntervalCount,
-          billing_anchor: planVersionDataUpdated.billingConfig.billingAnchor.toString(),
-          plan_type: planVersionDataUpdated.billingConfig.planType,
-          trial_units: planVersionDataUpdated.trialUnits,
-          payment_method_required: planVersionDataUpdated.paymentMethodRequired,
-          timestamp: new Date(planVersionDataUpdated.publishedAt ?? Date.now()).toISOString(),
-        }),
-
-        // ingest the plan version features
-        opts.ctx.analytics.ingestPlanVersionFeatures(
-          planVersionData.planFeatures.map((feature) => ({
-            id: feature.id,
-            project_id: feature.projectId,
-            plan_version_id: feature.planVersionId,
-            feature_id: feature.id,
-            feature_type: feature.featureType,
-            config: JSON.stringify(feature.config),
-            metadata: feature.metadata,
-            aggregation_method: feature.aggregationMethod,
-            default_quantity: feature.defaultQuantity,
-            limit: feature.limit,
-            timestamp: new Date(feature.createdAtM).toISOString(),
-          }))
-        ),
-      ])
-    )
 
     return {
       planVersion: planVersionDataUpdated,

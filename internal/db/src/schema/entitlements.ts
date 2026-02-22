@@ -42,7 +42,8 @@ import { projects } from "./projects"
 //   - featureType
 //   - resetConfig
 //   - aggregationMethod
-// Only limit, units, and hardLimit can differ (merged by priority)
+//   - unitOfMeasure
+// Only limit and hardLimit can differ (merged by priority)
 // The effective values are stored directly in the entitlement for performance
 export const entitlements = pgTableProject(
   "entitlements",
@@ -55,6 +56,8 @@ export const entitlements = pgTableProject(
     // Effective configuration (must be same across all grants)
     // if grants don't share the same config then we take the highest priority grant config
     featureType: typeFeatureEnum("feature_type").notNull(),
+    // unit of measurement for the entitlement (computed winner from grants)
+    unitOfMeasure: varchar("unit_of_measure", { length: 24 }).notNull().default("units"),
     // null here mean the entitlement never resets
     resetConfig: json("reset_config").$type<
       z.infer<typeof resetConfigSchema> & { resetAnchor: number }

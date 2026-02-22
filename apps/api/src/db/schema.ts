@@ -1,6 +1,14 @@
-import { index, integer, numeric, sqliteTableCreator, text, unique } from "drizzle-orm/sqlite-core"
+import {
+  index,
+  integer,
+  numeric,
+  primaryKey,
+  sqliteTableCreator,
+  text,
+  unique,
+} from "drizzle-orm/sqlite-core"
 
-export const version = "unpricedo_v1"
+export const version = "usagelimiter_v2"
 
 export const pgTableProject = sqliteTableCreator((name) => `${version}_${name}`)
 
@@ -23,24 +31,33 @@ export const usageRecords = pgTableProject(
     // First 10 chars encode timestamp, rest is random
     // Lexicographic sort = chronological sort
     id: text("id").primaryKey(), // ULID
-    idempotenceKey: text().notNull(),
-    requestId: text().notNull(),
-    featureSlug: text().notNull(),
-    customerId: text().notNull(),
-    projectId: text().notNull(),
+    idempotence_key: text().notNull(),
+    request_id: text().notNull(),
+    feature_slug: text().notNull(),
+    customer_id: text().notNull(),
+    project_id: text().notNull(),
     // time when the usage should be reported
     timestamp: integer().notNull(),
-    createdAt: integer().notNull(),
+    created_at: integer().notNull(),
     usage: numeric(),
     metadata: text(),
+    cost: numeric(),
+    rate_amount: numeric(),
+    rate_currency: text(),
+    entitlement_id: text().notNull(),
     // 0 = not deleted, 1 = deleted
     deleted: integer().notNull().default(0),
+    // first-class analytics columns
+    country: text().default("UNK"),
+    region: text().default("UNK"),
+    action: text(),
+    key_id: text(),
   },
   (table) => [
     // Indexes for common queries
-    index("usage_records_feature_idx").on(table.featureSlug),
+    index("usage_records_feature_idx").on(table.feature_slug),
     index("usage_records_timestamp_idx").on(table.timestamp),
-    unique("usage_idempotence_key_idx").on(table.idempotenceKey),
+    unique("usage_idempotence_key_idx").on(table.idempotence_key),
   ]
 )
 
@@ -48,16 +65,79 @@ export const verifications = pgTableProject(
   "verifications",
   {
     id: integer().primaryKey({ autoIncrement: true }),
-    requestId: text().notNull(),
-    projectId: text().notNull(),
-    deniedReason: text(),
+    request_id: text().notNull(),
+    project_id: text().notNull(),
+    denied_reason: text(),
     timestamp: integer().notNull(),
-    createdAt: integer().notNull(),
+    created_at: integer().notNull(),
     latency: numeric(),
-    featureSlug: text().notNull(),
-    customerId: text().notNull(),
+    feature_slug: text().notNull(),
+    customer_id: text().notNull(),
     metadata: text(),
+    usage: numeric(),
+    remaining: numeric(),
+    entitlement_id: text().notNull(),
     allowed: integer().notNull().default(0),
+    // first-class analytics columns
+    country: text().default("UNK"),
+    region: text().default("UNK"),
+    action: text(),
+    key_id: text(),
   },
-  (table) => [index("verifications_feature_idx").on(table.featureSlug)]
+  (table) => [index("verifications_feature_idx").on(table.feature_slug)]
+)
+
+export const usageAggregates = pgTableProject(
+  "usage_aggregates",
+  {
+    bucket_start: integer().notNull(),
+    bucket_size_seconds: integer().notNull(),
+    feature_slug: text().notNull(),
+    usage_count: integer().notNull().default(0),
+    total_usage: numeric().notNull().default("0"),
+    updated_at: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.bucket_start, table.bucket_size_seconds, table.feature_slug],
+    }),
+    index("usage_aggregates_bucket_idx").on(table.bucket_size_seconds, table.bucket_start),
+  ]
+)
+
+export const verificationAggregates = pgTableProject(
+  "verification_aggregates",
+  {
+    bucket_start: integer().notNull(),
+    bucket_size_seconds: integer().notNull(),
+    feature_slug: text().notNull(),
+    verification_count: integer().notNull().default(0),
+    allowed_count: integer().notNull().default(0),
+    denied_count: integer().notNull().default(0),
+    updated_at: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.bucket_start, table.bucket_size_seconds, table.feature_slug],
+    }),
+    index("verification_aggregates_bucket_idx").on(table.bucket_size_seconds, table.bucket_start),
+  ]
+)
+
+export const reportUsageAggregates = pgTableProject(
+  "report_usage_aggregates",
+  {
+    bucket_start: integer().notNull(),
+    bucket_size_seconds: integer().notNull(),
+    feature_slug: text().notNull(),
+    report_usage_count: integer().notNull().default(0),
+    limit_exceeded_count: integer().notNull().default(0),
+    updated_at: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.bucket_start, table.bucket_size_seconds, table.feature_slug],
+    }),
+    index("report_usage_aggregates_bucket_idx").on(table.bucket_size_seconds, table.bucket_start),
+  ]
 )

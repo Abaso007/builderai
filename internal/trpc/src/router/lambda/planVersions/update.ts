@@ -53,9 +53,7 @@ export const update = protectedProjectProcedure
       customerId,
       featureSlug,
       isMain: workspace.isMain,
-      metadata: {
-        action: "update",
-      },
+      action: "update",
     })
 
     if (!result.success) {

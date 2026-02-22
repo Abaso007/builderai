@@ -2,9 +2,9 @@ NODE features_usage_hourly_mv_node
 SQL >
     SELECT
         toStartOfHour(fromUnixTimestamp64Milli(timestamp, 'UTC')) AS date,
-        projectId,
-        customerId,
-        featureSlug,
+        project_id,
+        customer_id,
+        feature_slug,
         countState() AS count,
         sumState(usage) AS sum,
         maxState(usage) AS max,
@@ -14,9 +14,9 @@ SQL >
     WHERE deleted = 0
     GROUP BY
         date,
-        projectId,
-        customerId,
-        featureSlug
+        project_id,
+        customer_id,
+        feature_slug
 
 TYPE MATERIALIZED
 DATASOURCE unprice_feature_usage_hourly_mv

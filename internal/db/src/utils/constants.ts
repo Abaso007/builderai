@@ -3,11 +3,11 @@ import type { OverageStrategy, PlanType } from "../validators/shared"
 export const TIER_MODES_MAP = {
   volume: {
     label: "Volume",
-    description: "All units priced based on final tier reached",
+    description: "All units are charged at the same price based on the total quantity",
   },
   graduated: {
     label: "Graduated",
-    description: "Tiers applies progressively as quantity increases",
+    description: "Each tier has its own price — units in lower tiers stay at lower prices",
   },
 } as const
 
@@ -15,22 +15,23 @@ export const FEATURE_TYPES_MAPS = {
   flat: {
     code: "flat",
     label: "Flat",
-    description: "Fixed price for a single unit or package",
+    description: "One fixed price — quantity is set when the customer subscribes",
   },
   tier: {
     code: "tier",
     label: "Tier",
-    description: "Offers different prices based on unit quantity",
+    description: "Price varies by quantity — quantity is set when the customer subscribes",
   },
   package: {
     code: "package",
     label: "Package",
-    description: "Price by package, bundle or group of units",
+    description: "Price per bundle of units — quantity is set when the customer subscribes",
   },
   usage: {
     code: "usage",
     label: "Usage",
-    description: "Pay as you go based on usage",
+    description:
+      "Price based on actual consumption — tracked automatically during the billing period",
   },
 } as const
 
@@ -38,52 +39,53 @@ export const USAGE_MODES_MAP = {
   tier: {
     code: "tier",
     label: "Tier",
-    description: "Price based on quantity of units",
+    description:
+      "Price changes based on how much was consumed — higher usage may unlock better rates",
   },
   package: {
     code: "package",
     label: "Package",
-    description: "Price by package, bundle or group of units",
+    description: "Charged in bundles — e.g., every 100 API calls counts as one package",
   },
   unit: {
     code: "unit",
     label: "Unit",
-    description: "Price by number of units, like seats, users, etc",
+    description: "Charged per individual unit consumed — e.g., per API call, per message sent",
   },
 } as const
 
 export const AGGREGATION_METHODS_MAP = {
   none: {
     label: "None",
-    description: "No usage aggregation method",
+    description: "No aggregation — usage is not tracked",
   },
   sum: {
-    label: "Sum",
-    description: "Adds up all events values within the current cycle period",
+    label: "Sum (per period)",
+    description: "Total of all reported values — resets to zero each billing cycle",
   },
   sum_all: {
-    label: "Sum all",
-    description: "Adds up all events values ever",
+    label: "Sum (lifetime)",
+    description: "Total of all reported values — accumulates forever, never resets",
   },
   last_during_period: {
-    label: "Last during period",
-    description: "Last event value during the current cycle period",
+    label: "Last value (per period)",
+    description: "Only the most recent value counts — resets each billing cycle",
   },
   count: {
-    label: "Count",
-    description: "Counts the number of events within the current cycle period",
+    label: "Count (per period)",
+    description: "Number of events reported — resets to zero each billing cycle",
   },
   count_all: {
-    label: "Count all",
-    description: "Counts the number of events ever",
+    label: "Count (lifetime)",
+    description: "Number of events reported — accumulates forever, never resets",
   },
   max: {
-    label: "Maximum",
-    description: "Maximum event value within the current cycle period",
+    label: "Maximum (per period)",
+    description: "Highest value reported — resets each billing cycle",
   },
   max_all: {
-    label: "Maximum all",
-    description: "Maximum event value ever",
+    label: "Maximum (lifetime)",
+    description: "Highest value ever reported — never resets",
   },
 } as const
 
@@ -215,7 +217,7 @@ export type TierMode = keyof typeof TIER_MODES_MAP
 export type UsageMode = keyof typeof USAGE_MODES_MAP
 export type FeatureType = keyof typeof FEATURE_TYPES_MAPS
 
-export const PAYMENT_PROVIDERS = ["stripe", "square"] as const
+export const PAYMENT_PROVIDERS = ["stripe", "square", "sandbox"] as const
 export const CURRENCIES = ["USD", "EUR"] as const
 export const STAGES = ["prod", "test", "dev"] as const
 export const STATUS_PLAN = ["draft", "published"] as const

@@ -10,19 +10,19 @@ import { featureGuard } from "#utils/feature-guard"
 import { reportUsageFeature } from "#utils/shared"
 
 export const create = protectedProjectProcedure
-  .meta({
-    span: "customers.create",
-    openapi: {
-      method: "POST",
-      path: "/lambda/customers.create",
-      protect: true,
-    },
-  })
   .input(customerInsertBaseSchema)
   .output(z.object({ customer: customerSelectSchema }))
   .mutation(async (opts) => {
-    const { description, name, email, metadata, defaultCurrency, stripeCustomerId, timezone } =
-      opts.input
+    const {
+      description,
+      name,
+      email,
+      metadata,
+      defaultCurrency,
+      stripeCustomerId,
+      timezone,
+      externalId,
+    } = opts.input
     const { project } = opts.ctx
 
     const unPriceCustomerId = project.workspace.unPriceCustomerId
@@ -33,9 +33,7 @@ export const create = protectedProjectProcedure
       customerId: unPriceCustomerId,
       featureSlug,
       isMain: project.workspace.isMain,
-      metadata: {
-        action: "create",
-      },
+      action: "create",
     })
 
     if (!result.success) {
@@ -63,6 +61,7 @@ export const create = protectedProjectProcedure
         timezone: timezone || "UTC",
         active: true,
         ...(metadataWithGeolocation && { metadata: metadataWithGeolocation }),
+        ...(externalId && { externalId }),
         ...(defaultCurrency && { defaultCurrency }),
         ...(stripeCustomerId && { stripeCustomerId }),
       })
@@ -85,9 +84,7 @@ export const create = protectedProjectProcedure
           featureSlug,
           usage: 1,
           isMain: project.workspace.isMain,
-          metadata: {
-            action: "create",
-          },
+          action: "create",
         })
       )
     }

@@ -1,29 +1,39 @@
 import { createRoute } from "@hono/zod-openapi"
 import { subscriptionCacheSchema } from "@unprice/db/validators"
 import * as HttpStatusCodes from "stoker/http-status-codes"
-import { jsonContent } from "stoker/openapi/helpers"
+import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 
 import { z } from "zod"
-import { keyAuth } from "~/auth/key"
+import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 
 const tags = ["customer"]
 
 export const route = createRoute({
-  path: "/v1/customer/{customerId}/getSubscription",
+  path: "/v1/customer/getSubscription",
   operationId: "customers.getSubscription",
   summary: "get subscription",
   description: "Get subscription with the active phase for a customer",
-  method: "get",
+  method: "post",
   tags,
   request: {
-    params: z.object({
-      customerId: z.string().openapi({
-        description: "The customer ID",
-        example: "cus_1H7KQFLr7RepUyQBKdnvY",
+    body: jsonContentRequired(
+      z.object({
+        customerId: z.string().openapi({
+          description: "The customer ID",
+          example: "cus_1H7KQFLr7RepUyQBKdnvY",
+        }),
+        projectId: z
+          .string()
+          .openapi({
+            description: "The project ID",
+            example: "prj_1H7KQFLr7RepUyQBKdnvY",
+          })
+          .optional(),
       }),
-    }),
+      "Body of the request"
+    ),
   },
   responses: {
     [HttpStatusCodes.OK]: jsonContent(
@@ -34,25 +44,34 @@ export const route = createRoute({
   },
 })
 
-export type GetSubscriptionRequest = z.infer<typeof route.request.params>
+export type GetSubscriptionRequest = z.infer<
+  (typeof route.request.body)["content"]["application/json"]["schema"]
+>
 export type GetSubscriptionResponse = z.infer<
   (typeof route.responses)[200]["content"]["application/json"]["schema"]
 >
 
 export const registerGetSubscriptionV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId } = c.req.valid("param")
+    const { customerId, projectId } = c.req.valid("json")
+    const requestStartedAt = c.get("requestStartedAt")
     const { customer } = c.get("services")
 
     // validate the request
     const key = await keyAuth(c)
 
+    const finalProjectId = validateIsAllowedToAccessProject({
+      isMain: key.project.isMain ?? false,
+      key,
+      requestedProjectId: projectId ?? key.project.id ?? "",
+    })
+
     const { val: subscription, err } = await customer.getActiveSubscription({
       customerId,
-      projectId: key.projectId,
-      now: Date.now(),
+      projectId: finalProjectId,
+      now: requestStartedAt,
       opts: {
-        skipCache: true,
+        skipCache: false,
       },
     })
 

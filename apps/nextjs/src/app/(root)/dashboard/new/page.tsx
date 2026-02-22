@@ -60,10 +60,8 @@ async function Content({
         <div className="flex flex-col items-center justify-center">
           <Card className="max-w-xl" variant="ghost">
             <CardHeader>
-              <CardTitle>Establish Workspace</CardTitle>
-              <CardDescription>
-                Notice how easily you can establish your revenue foundation.
-              </CardDescription>
+              <CardTitle>Create Workspace</CardTitle>
+              <CardDescription>Create a new workspace to get started.</CardDescription>
             </CardHeader>
             <CardContent className="py-4">
               <NewWorkspaceForm
@@ -108,7 +106,6 @@ async function Content({
 
   // create the workspace
   const newWorkspace = await api.workspaces.create({
-    id: customer.metadata?.externalId,
     name: customer.name,
     unPriceCustomerId: customer.id,
   })

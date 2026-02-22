@@ -95,18 +95,18 @@ export class PlanService {
 
       const showUnits =
         planFeature.featureType === "usage" &&
-        !planFeature.feature.slug.includes(planFeature.feature.unit)
+        !planFeature.feature.slug.includes(planFeature.unitOfMeasure ?? "units")
 
       const freeUnitsText =
         freeUnits === Number.POSITIVE_INFINITY
           ? planFeature.limit
-            ? `Up to ${nFormatter(planFeature.limit)} ${showUnits ? planFeature.feature.unit : ""}`
+            ? `Up to ${nFormatter(planFeature.limit)} ${showUnits ? (planFeature.unitOfMeasure ?? "units") : ""}`
             : "Unlimited"
           : freeUnits === 0
             ? planFeature.limit
-              ? `Up to ${nFormatter(planFeature.limit)} ${showUnits ? planFeature.feature.unit : ""}`
+              ? `Up to ${nFormatter(planFeature.limit)} ${showUnits ? (planFeature.unitOfMeasure ?? "units") : ""}`
               : "Starts at 0"
-            : `${nFormatter(freeUnits)} ${showUnits ? planFeature.feature.unit : ""}`
+            : `${nFormatter(freeUnits)} ${showUnits ? (planFeature.unitOfMeasure ?? "units") : ""}`
 
       switch (planFeature.featureType) {
         case "flat": {

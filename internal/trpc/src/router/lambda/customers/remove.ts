@@ -29,9 +29,7 @@ export const remove = protectedProjectProcedure
       customerId: unPriceCustomerId,
       featureSlug: FEATURE_SLUGS.CUSTOMERS.SLUG,
       isMain: project.workspace.isMain,
-      metadata: {
-        action: "remove",
-      },
+      action: "remove",
     })
 
     if (!result.success) {
@@ -62,9 +60,7 @@ export const remove = protectedProjectProcedure
           featureSlug: "customers",
           usage: -1,
           isMain: project.workspace.isMain,
-          metadata: {
-            action: "remove",
-          },
+          action: "remove",
         })
       )
     }

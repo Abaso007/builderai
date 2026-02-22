@@ -70,6 +70,19 @@ export const CloudSchema = z.object({
   runtime_version: z.string().optional(),
 })
 
+export const LogMetadataSchema = z.object({
+  type: z.enum(["metric", "normal", "wide_event"]).optional(),
+})
+
+export const LockSchema = z.object({
+  type: z.enum(["metric", "normal", "wide_event"]).optional(),
+  resource: z.string().optional(),
+  action: z.string().optional(),
+  acquired: z.boolean().optional(),
+  ttl_ms: z.number().optional(),
+  max_hold_ms: z.number().optional(),
+})
+
 // ============================================
 // COMBINED NESTED SCHEMA
 // ============================================
@@ -78,7 +91,7 @@ export const UsageLimiterSchema = z.object({
   operation: z.string().optional(),
   input: z.unknown().optional(),
   result: z.unknown().optional(),
-  next_alarm: z.number().optional(),
+  next_alarm: z.string().datetime().optional(),
 })
 
 export const EntitlementsSchema = z.object({
@@ -97,15 +110,33 @@ export const EntitlementsSchema = z.object({
   already_recorded: z.boolean().optional(),
 })
 
+export const CustomerSchema = z.object({
+  operation: z.string().optional(),
+  email: z.string().email(),
+  name: z.string().optional(),
+  currency: z.string().optional(),
+  plan_version_id: z.string().optional(),
+  plan_slug: z.string().optional(),
+  success_url: z.string().optional(),
+  cancel_url: z.string().optional(),
+  session_id: z.string().optional(),
+  customer_id: z.string().optional(),
+  subscription_id: z.string().optional(),
+  subscription_phase_id: z.string().optional(),
+})
+
 export const WideEventNestedSchema = z.object({
+  log: LogMetadataSchema.optional(),
   service: ServiceSchema,
   request: RequestSchema.partial(),
   business: BusinessSchema.optional(),
   error: ErrorSchema.optional(),
   geo: GeoSchema.optional(),
   cloud: CloudSchema.optional(),
+  lock: LockSchema.optional(),
   usagelimiter: UsageLimiterSchema.optional(),
   entitlements: EntitlementsSchema.optional(),
+  customers: CustomerSchema.optional(),
 })
 
 export type WideEventNested = z.infer<typeof WideEventNestedSchema>
@@ -149,6 +180,8 @@ export type WideEventKey = keyof WideEventAttributes
 export type WideEventInput = {
   [K in keyof WideEventNested]?: Partial<WideEventNested[K]>
 }
+
+export type LockType = NonNullable<z.infer<typeof LockSchema>["type"]>
 
 // Final emitted event
 export type WideEvent = Partial<WideEventAttributes> & {

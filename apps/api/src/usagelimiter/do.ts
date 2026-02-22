@@ -1,11 +1,9 @@
-import { type Connection, Server } from "partyserver"
-
-import { env } from "cloudflare:workers"
 import { CloudflareStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
 import type {
   CurrentUsage,
+  EntitlementState,
   MinimalEntitlement,
   ReportUsageRequest,
   ReportUsageResult,
@@ -21,29 +19,128 @@ import {
   createWideEventHelpers,
   createWideEventLogger,
 } from "@unprice/logging"
+import { shouldEmitLogsToBackend, shouldEmitMetrics } from "@unprice/logging/env"
 import { CacheService } from "@unprice/services/cache"
 import type { DenyReason } from "@unprice/services/customers"
 import { EntitlementService } from "@unprice/services/entitlements"
 import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/metrics"
+import { type Connection, Server } from "partyserver"
 import type { Env } from "~/env"
-import { SqliteDOStorageProvider } from "./sqlite-do-provider"
+import { LakehousePipelineService } from "~/lakehouse/pipeline"
+import type { BufferMetricsResponse } from "./interface"
+import { type FlushPressureStats, SqliteDOStorageProvider } from "./sqlite-do-provider"
 
 // colo never change after the object is created
 interface UsageLimiterConfig {
   colo: string
 }
 
+type UsageInputSummary = {
+  customerId: string
+  projectId: string
+  featureSlug: string
+  usage?: number
+  timestamp: number
+  sync?: boolean
+  action?: string
+  keyId?: string
+  country?: string
+  region?: string
+  metadataKeyCount?: number
+  metadataKeySample?: string
+}
+
+type UsageResultSummary = {
+  allowed: boolean
+  message?: string
+  deniedReason?: string
+  featureType?: string
+  cacheHit?: boolean
+  remaining?: number
+  limit?: number
+  usage?: number
+  cost?: number
+  latency?: number
+  notifiedOverLimit?: boolean
+  degraded?: boolean
+  degradedReason?: string
+}
+
+const METADATA_KEY_SAMPLE_LIMIT = 10
+
+const summarizeUsageInput = (data: VerifyRequest | ReportUsageRequest): UsageInputSummary => {
+  const metadataKeys = data.metadata ? Object.keys(data.metadata) : []
+  const metadataKeySample = metadataKeys.slice(0, METADATA_KEY_SAMPLE_LIMIT).join(",")
+
+  return {
+    customerId: data.customerId,
+    projectId: data.projectId,
+    featureSlug: data.featureSlug,
+    usage: data.usage,
+    timestamp: data.timestamp,
+    sync: "sync" in data ? data.sync : undefined,
+    action: data.action,
+    keyId: data.keyId,
+    country: data.country,
+    region: data.region,
+    metadataKeyCount: metadataKeys.length || undefined,
+    metadataKeySample: metadataKeySample || undefined,
+  }
+}
+
+const summarizeUsageResult = (
+  result: VerificationResult | ReportUsageResult
+): UsageResultSummary => {
+  return {
+    allowed: result.allowed,
+    message: result.message,
+    deniedReason: result.deniedReason,
+    featureType: "featureType" in result ? result.featureType : undefined,
+    cacheHit: result.cacheHit,
+    remaining: result.remaining,
+    limit: result.limit,
+    usage: result.usage,
+    cost: result.cost,
+    latency: "latency" in result ? result.latency : undefined,
+    notifiedOverLimit: "notifiedOverLimit" in result ? result.notifiedOverLimit : undefined,
+    degraded: result.degraded,
+    degradedReason: result.degradedReason,
+  }
+}
+
+const buildUsageByFeature = (params: {
+  states: EntitlementState[]
+  customerId: string
+  projectId: string
+}): Record<string, number> => {
+  const { states, customerId, projectId } = params
+  const usageByFeature: Record<string, number> = {}
+
+  for (const state of states) {
+    if (state.customerId !== customerId || state.projectId !== projectId) {
+      continue
+    }
+
+    usageByFeature[state.featureSlug] = Number(state.meter.usage ?? 0)
+  }
+
+  return usageByFeature
+}
+
 // This durable object takes care of handling the usage of every feature per customer.
 // It is used to validate the usage of a feature and to report the usage to tinybird.
 // think of it as a queue that will be flushed to the db periodically
 export class DurableObjectUsagelimiter extends Server {
+  // environment variables
+  private readonly _env: Env
   // logger service
   private logger: Logger
   // entitlement service
   private entitlementService: EntitlementService
+  // storage provider
+  private storage: SqliteDOStorageProvider
   // metrics service
   private metrics: Metrics
-  // default ttl for the usage records and verifications
   private TTL_ANALYTICS = 1000 * 60 // 1 minute
   // last broadcast message time
   private LAST_BROADCAST_MSG = Date.now()
@@ -51,6 +148,18 @@ export class DurableObjectUsagelimiter extends Server {
   private readonly DEBOUNCE_DELAY = 1000 * 1 // 1 second (1 per second)
   // sample rate for the wide event
   private SAMPLE_RATE = 0.1
+  private readonly FLUSH_SEC_MIN = 5
+  private readonly FLUSH_SEC_MAX = 30 * 60
+  private readonly ADAPTIVE_PROFILE_ALPHA = 0.2
+  private readonly SLO_PENDING_WARN = 5000
+  private readonly SLO_PENDING_ERROR = 20000
+  private readonly SLO_OLDEST_AGE_WARN_SEC = 120
+  private readonly SLO_OLDEST_AGE_ERROR_SEC = 600
+  private adaptiveProfile = {
+    emaPendingTotal: 0,
+    emaOldestAgeSeconds: 0,
+    samples: 0,
+  }
 
   // hibernate the do when no websocket nor connections are active
   static options = {
@@ -60,40 +169,42 @@ export class DurableObjectUsagelimiter extends Server {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
 
-    // set a revalidation period of 5 secs for development
-    if (env.VERCEL_ENV === "development") {
-      this.TTL_ANALYTICS = 1000 * 10 // 10 seconds
+    this._env = env
+
+    if (env.APP_ENV === "development") {
+      this.TTL_ANALYTICS = 1000 * 60 // 60 seconds
       this.SAMPLE_RATE = 1
     }
 
-    // set a revalidation period of 5 mins for preview
-    if (env.VERCEL_ENV === "preview") {
-      this.TTL_ANALYTICS = 1000 * 60 // 1 minute
+    if (env.APP_ENV === "preview") {
+      this.TTL_ANALYTICS = 1000 * 60 * 5 // 5 minutes
       this.SAMPLE_RATE = 0.1
     }
 
-    const emitMetrics = env.EMIT_METRICS_LOGS.toString() === "true"
+    const emitLogsToBackend = shouldEmitLogsToBackend(env)
+    const emitMetrics = shouldEmitMetrics(env)
 
-    this.logger = emitMetrics
+    this.logger = emitLogsToBackend
       ? new AxiomLogger({
           apiKey: env.AXIOM_API_TOKEN,
           dataset: env.AXIOM_DATASET,
           requestId: this.ctx.id.toString(),
-          logLevel: env.VERCEL_ENV === "production" ? "warn" : "info",
+          logLevel: env.APP_ENV === "production" ? "warn" : "info",
           environment: env.NODE_ENV,
           service: "usagelimiter",
-          // TODO: add version
           defaultFields: {
             durableObjectId: this.ctx.id.toString(),
+            version: this._env.VERSION,
           },
         })
       : new ConsoleLogger({
           requestId: this.ctx.id.toString(),
           service: "usagelimiter",
           environment: env.NODE_ENV,
-          logLevel: env.VERCEL_ENV === "production" ? "warn" : "info",
+          logLevel: env.APP_ENV === "production" ? "warn" : "info",
           defaultFields: {
             durableObjectId: this.ctx.id.toString(),
+            version: this._env.VERSION,
           },
         })
 
@@ -153,29 +264,56 @@ export class DurableObjectUsagelimiter extends Server {
       singleton: false, // Don't use singleton for hibernating DOs
     })
 
+    const lakehousePipelineService = new LakehousePipelineService({
+      logger: this.logger,
+      pipelines: {
+        usage: env.PIPELINE_USAGE,
+        verification: env.PIPELINE_VERIFICATIONS,
+        metadata: env.PIPELINE_METADATA,
+        entitlement_snapshot: env.PIPELINE_ENTITLEMENTS,
+      },
+    })
+
     // initialize the storage provider
-    const storage = new SqliteDOStorageProvider({
+    this.storage = new SqliteDOStorageProvider({
       storage: this.ctx.storage,
       state: this.ctx,
       logger: this.logger,
       analytics: new Analytics({
-        emit: env.EMIT_ANALYTICS.toString() === "true",
+        emit: true,
         tinybirdToken: env.TINYBIRD_TOKEN,
         tinybirdUrl: env.TINYBIRD_URL,
         logger: this.logger,
       }),
+      lakehouseService: lakehousePipelineService,
     })
 
-    // initialize the storage provider
-    storage.initialize()
+    // initialize the storage provider - must block until complete
+    // If initialization fails (e.g., schema version changed), reset storage and retry
+    this.ctx.blockConcurrencyWhile(async () => {
+      const result = await this.storage.initialize()
+      if (result.err) {
+        this.logger.warn("Storage initialization failed, resetting storage", {
+          error: result.err.message,
+        })
+        // reset the storage and retry initialization - this is a last resort
+        await this.ctx.storage.deleteAll()
+        const retryResult = await this.storage.initialize()
+        if (retryResult.err) {
+          this.logger.error("Storage initialization failed after reset", {
+            error: retryResult.err.message,
+          })
+        }
+      }
+    })
 
     // initialize the entitlement service
     this.entitlementService = new EntitlementService({
       db: db,
-      storage: storage,
+      storage: this.storage,
       logger: this.logger,
       analytics: new Analytics({
-        emit: env.EMIT_ANALYTICS.toString() === "true",
+        emit: true,
         tinybirdToken: env.TINYBIRD_TOKEN,
         tinybirdUrl: env.TINYBIRD_URL,
         logger: this.logger,
@@ -185,9 +323,9 @@ export class DurableObjectUsagelimiter extends Server {
       metrics: this.metrics,
       config: {
         revalidateInterval:
-          env.NODE_ENV === "development"
+          env.APP_ENV === "development"
             ? 30000 // 30 seconds
-            : 300000, // 5 minutes
+            : 1000 * 60 * 60 * 24, // 24 hours
       },
     })
 
@@ -259,6 +397,16 @@ export class DurableObjectUsagelimiter extends Server {
     })
   }
 
+  public async resetUsage(params: {
+    customerId: string
+    projectId: string
+  }): Promise<Result<void, BaseError>> {
+    return await this.entitlementService.resetUsage({
+      customerId: params.customerId,
+      projectId: params.projectId,
+    })
+  }
+
   public async getActiveEntitlements(params: {
     customerId: string
     projectId: string
@@ -267,6 +415,12 @@ export class DurableObjectUsagelimiter extends Server {
       customerId: params.customerId,
       projectId: params.projectId,
     })
+  }
+
+  public async getBufferMetrics(data?: {
+    windowSeconds?: 300 | 3600 | 86400 | 604800
+  }): Promise<Result<BufferMetricsResponse, BaseError>> {
+    return await this.storage.getBufferStats(data?.windowSeconds)
   }
 
   // when connected through websocket we can broadcast events to the client
@@ -278,7 +432,7 @@ export class DurableObjectUsagelimiter extends Server {
     usage?: number
     limit?: number
     notifyUsage?: boolean
-    type: "can" | "reportUsage"
+    type: "verify" | "reportUsage"
     success: boolean
   }) {
     const now = Date.now()
@@ -297,8 +451,8 @@ export class DurableObjectUsagelimiter extends Server {
   public async verify(data: VerifyRequest): Promise<VerificationResult> {
     const wideEventLogger = createWideEventLogger({
       "service.name": "usagelimiter",
-      "service.version": env.VERSION,
-      "service.environment": env.NODE_ENV as
+      "service.version": this._env.VERSION,
+      "service.environment": this._env.NODE_ENV as
         | "production"
         | "staging"
         | "development"
@@ -312,6 +466,9 @@ export class DurableObjectUsagelimiter extends Server {
 
     return await wideEventLogger.runAsync(async () => {
       try {
+        // set the wide event helpers
+        this.entitlementService.setWideEventHelpers(wideEventHelpers)
+
         // set the request id for the metrics and logs
         this.logger.x(data.requestId)
         this.metrics.x(data.requestId)
@@ -324,12 +481,24 @@ export class DurableObjectUsagelimiter extends Server {
           region: this.metrics.getColo(),
         })
         wideEventLogger.add("usagelimiter.operation", "verify")
-        wideEventLogger.add("usagelimiter.input", data)
+        wideEventLogger.add("usagelimiter.input", summarizeUsageInput(data))
         // All logic handled internally!
-        const result = await this.entitlementService.verify(data, wideEventLogger)
-        wideEventLogger.add("usagelimiter.result", result)
+        const result = await this.entitlementService.verify(data)
+        wideEventLogger.add("usagelimiter.result", summarizeUsageResult(result))
         // Set alarm to flush buffers
-        await this.ensureAlarmIsSet(wideEventLogger, data.flushTime)
+        await this.ensureAlarmIsSet(wideEventLogger)
+
+        this.ctx.waitUntil(
+          this.broadcastEvents({
+            customerId: data.customerId,
+            featureSlug: data.featureSlug,
+            type: "verify",
+            success: result.allowed,
+            deniedReason: result.deniedReason as DenyReason | undefined,
+            usage: result.usage,
+            limit: result.limit,
+          })
+        )
 
         return result
       } catch (error) {
@@ -341,7 +510,7 @@ export class DurableObjectUsagelimiter extends Server {
           deniedReason: "ENTITLEMENT_ERROR",
         }
       } finally {
-        wideEventLogger.add("request.duration", performance.now() - data.performanceStart)
+        wideEventLogger.add("request.duration", Date.now() - data.performanceStart)
         this.ctx.waitUntil(
           (async () => {
             try {
@@ -367,8 +536,8 @@ export class DurableObjectUsagelimiter extends Server {
   public async reportUsage(data: ReportUsageRequest): Promise<ReportUsageResult> {
     const wideEventLogger = createWideEventLogger({
       "service.name": "usagelimiter",
-      "service.version": env.VERSION,
-      "service.environment": env.NODE_ENV as
+      "service.version": this._env.VERSION,
+      "service.environment": this._env.NODE_ENV as
         | "production"
         | "staging"
         | "development"
@@ -382,6 +551,9 @@ export class DurableObjectUsagelimiter extends Server {
 
     return await wideEventLogger.runAsync(async () => {
       try {
+        // set the wide event helpers
+        this.entitlementService.setWideEventHelpers(wideEventHelpers)
+
         // set the request id for the metrics and logs
         this.logger.x(data.requestId)
         this.metrics.x(data.requestId)
@@ -395,12 +567,24 @@ export class DurableObjectUsagelimiter extends Server {
           region: this.metrics.getColo(),
         })
         wideEventLogger.add("usagelimiter.operation", "reportUsage")
-        wideEventLogger.add("usagelimiter.input", data)
+        wideEventLogger.add("usagelimiter.input", summarizeUsageInput(data))
 
-        const result = await this.entitlementService.reportUsage(data, wideEventLogger)
-        wideEventLogger.add("usagelimiter.result", result)
+        const result = await this.entitlementService.reportUsage(data)
+        wideEventLogger.add("usagelimiter.result", summarizeUsageResult(result))
         // Set alarm to flush buffers
-        await this.ensureAlarmIsSet(wideEventLogger, data.flushTime)
+        await this.ensureAlarmIsSet(wideEventLogger)
+
+        this.ctx.waitUntil(
+          this.broadcastEvents({
+            customerId: data.customerId,
+            featureSlug: data.featureSlug,
+            type: "reportUsage",
+            success: result.allowed,
+            deniedReason: result.deniedReason as DenyReason | undefined,
+            usage: result.usage,
+            limit: result.limit,
+          })
+        )
 
         return result
       } catch (error) {
@@ -413,7 +597,7 @@ export class DurableObjectUsagelimiter extends Server {
         }
       } finally {
         data.performanceStart &&
-          wideEventLogger.add("request.duration", performance.now() - data.performanceStart)
+          wideEventLogger.add("request.duration", Date.now() - data.performanceStart)
 
         this.ctx.waitUntil(
           (async () => {
@@ -438,24 +622,141 @@ export class DurableObjectUsagelimiter extends Server {
   }
 
   // ensure the alarm is set to flush the usage records and verifications
-  private async ensureAlarmIsSet(
-    wideEventLogger: WideEventLogger,
-    flushTime?: number
-  ): Promise<void> {
+  private async ensureAlarmIsSet(wideEventLogger: WideEventLogger): Promise<void> {
     const alarm = await this.ctx.storage.getAlarm()
     const now = Date.now()
 
-    // min 5s, max 30m
-    const flushSec = Math.min(Math.max(flushTime ?? this.TTL_ANALYTICS / 1000, 5), 30 * 60)
-    const nextAlarm = now + flushSec * 1000
+    const fallbackFlushSec = this.normalizeFlushSeconds()
 
-    wideEventLogger.add("usagelimiter.next_alarm", nextAlarm)
+    // if alarm is in the past, set it to the future
+    if (alarm && alarm < now) {
+      this.ctx.storage.setAlarm(now + fallbackFlushSec * 1000)
+      wideEventLogger.add(
+        "usagelimiter.next_alarm",
+        new Date(now + fallbackFlushSec * 1000).toISOString()
+      )
+      return
+    }
 
-    if (!alarm) this.ctx.storage.setAlarm(nextAlarm)
-    else if (alarm < now) {
-      this.ctx.storage.deleteAlarm()
+    if (alarm && alarm <= now + fallbackFlushSec * 1000) {
+      wideEventLogger.add("usagelimiter.next_alarm", new Date(alarm).toISOString())
+      return
+    }
+
+    const pressure = await this.getFlushPressureSafe()
+    const adaptiveFlushSec = this.getAdaptiveFlushSeconds(pressure, fallbackFlushSec)
+    const nextAlarm = now + adaptiveFlushSec * 1000
+
+    if (pressure) {
+      this.emitFlushPressureSlo("schedule", pressure)
+    }
+
+    wideEventLogger.add("usagelimiter.next_alarm", new Date(nextAlarm).toISOString())
+    if (!alarm || nextAlarm < alarm) {
       this.ctx.storage.setAlarm(nextAlarm)
     }
+  }
+
+  private normalizeFlushSeconds(): number {
+    return Math.min(Math.max(this.TTL_ANALYTICS / 1000, this.FLUSH_SEC_MIN), this.FLUSH_SEC_MAX)
+  }
+
+  private getAdaptiveFlushSeconds(
+    pressure: FlushPressureStats | null,
+    fallbackFlushSec: number
+  ): number {
+    if (!pressure) {
+      return fallbackFlushSec
+    }
+
+    this.updateAdaptiveProfile(pressure)
+
+    const effectivePending = Math.max(
+      pressure.pendingTotalRecords,
+      Math.round(this.adaptiveProfile.emaPendingTotal)
+    )
+    const effectiveOldestAgeSeconds = Math.max(
+      pressure.oldestPendingAgeSeconds,
+      Math.round(this.adaptiveProfile.emaOldestAgeSeconds)
+    )
+
+    let adaptive = fallbackFlushSec
+
+    if (effectivePending >= 20000) {
+      adaptive = Math.min(adaptive, 5)
+    } else if (effectivePending >= 10000) {
+      adaptive = Math.min(adaptive, 10)
+    } else if (effectivePending >= 5000) {
+      adaptive = Math.min(adaptive, 15)
+    } else if (effectivePending >= 2000) {
+      adaptive = Math.min(adaptive, 30)
+    } else if (effectivePending >= 500) {
+      adaptive = Math.min(adaptive, 45)
+    }
+
+    if (effectiveOldestAgeSeconds >= 5 * 60) {
+      adaptive = Math.min(adaptive, 10)
+    }
+
+    return Math.min(Math.max(adaptive, this.FLUSH_SEC_MIN), this.FLUSH_SEC_MAX)
+  }
+
+  private updateAdaptiveProfile(pressure: FlushPressureStats): void {
+    if (this.adaptiveProfile.samples === 0) {
+      this.adaptiveProfile.emaPendingTotal = pressure.pendingTotalRecords
+      this.adaptiveProfile.emaOldestAgeSeconds = pressure.oldestPendingAgeSeconds
+      this.adaptiveProfile.samples = 1
+      return
+    }
+
+    const alpha = this.ADAPTIVE_PROFILE_ALPHA
+    this.adaptiveProfile.emaPendingTotal =
+      alpha * pressure.pendingTotalRecords + (1 - alpha) * this.adaptiveProfile.emaPendingTotal
+    this.adaptiveProfile.emaOldestAgeSeconds =
+      alpha * pressure.oldestPendingAgeSeconds +
+      (1 - alpha) * this.adaptiveProfile.emaOldestAgeSeconds
+    this.adaptiveProfile.samples += 1
+  }
+
+  private emitFlushPressureSlo(phase: "schedule" | "alarm", pressure: FlushPressureStats): void {
+    const fields = {
+      phase,
+      pendingTotalRecords: pressure.pendingTotalRecords,
+      pendingUsageRecords: pressure.pendingUsageRecords,
+      pendingVerificationRecords: pressure.pendingVerificationRecords,
+      oldestPendingAgeSeconds: pressure.oldestPendingAgeSeconds,
+      oldestPendingTimestamp: pressure.oldestPendingTimestamp,
+      emaPendingTotal: Math.round(this.adaptiveProfile.emaPendingTotal),
+      emaOldestAgeSeconds: Math.round(this.adaptiveProfile.emaOldestAgeSeconds),
+      profileSamples: this.adaptiveProfile.samples,
+    }
+
+    if (
+      pressure.pendingTotalRecords >= this.SLO_PENDING_ERROR ||
+      pressure.oldestPendingAgeSeconds >= this.SLO_OLDEST_AGE_ERROR_SEC
+    ) {
+      this.logger.error("Flush pressure SLO breached", fields)
+      return
+    }
+
+    if (
+      pressure.pendingTotalRecords >= this.SLO_PENDING_WARN ||
+      pressure.oldestPendingAgeSeconds >= this.SLO_OLDEST_AGE_WARN_SEC
+    ) {
+      this.logger.warn("Flush pressure SLO near breach", fields)
+      return
+    }
+
+    this.logger.info("Flush pressure SLO healthy", fields)
+  }
+
+  private async getFlushPressureSafe(): Promise<FlushPressureStats | null> {
+    const { err, val } = await this.storage.getFlushPressure()
+    if (err) {
+      this.logger.warn("Unable to read flush pressure", { error: err.message })
+      return null
+    }
+    return val
   }
 
   // websocket events handlers
@@ -490,14 +791,89 @@ export class DurableObjectUsagelimiter extends Server {
   }
 
   // websocket message handler
-  async onMessage(_conn: Connection, message: string) {
-    this.logger.debug(`onMessage ${message}`)
+  async onMessage(conn: Connection, message: string) {
+    try {
+      const parsed = JSON.parse(message) as {
+        type?: "snapshot_request"
+        windowSeconds?: 300 | 3600 | 86400 | 604800
+        customerId?: string
+        projectId?: string
+      }
+
+      if (parsed.type === "snapshot_request") {
+        const { err, val } = await this.getBufferMetrics({
+          windowSeconds: parsed.windowSeconds,
+        })
+
+        if (err) {
+          conn.send(
+            JSON.stringify({
+              type: "snapshot_error",
+              message: err.message,
+            })
+          )
+          return
+        }
+
+        let usageByFeature: Record<string, number> | undefined
+
+        if (parsed.customerId && parsed.projectId) {
+          const allStatesResult = await this.storage.getAll()
+
+          if (allStatesResult.err) {
+            this.logger.warn("Failed to resolve in-memory usage for snapshot", {
+              customerId: parsed.customerId,
+              projectId: parsed.projectId,
+              error: allStatesResult.err.message,
+            })
+          } else {
+            usageByFeature = buildUsageByFeature({
+              states: allStatesResult.val,
+              customerId: parsed.customerId,
+              projectId: parsed.projectId,
+            })
+          }
+        }
+
+        conn.send(
+          JSON.stringify({
+            type: "snapshot",
+            metrics: val,
+            usageByFeature,
+            source: "durable_object",
+          })
+        )
+      }
+    } catch {
+      this.logger.debug(`onMessage ${message}`)
+    }
   }
 
   // when the alarm is triggered
   async onAlarm(): Promise<void> {
+    this.logger.debug("Triggering alarm flush")
     // flush the usage records
-    await this.entitlementService.flush()
+    const flushResult = await this.storage.flush()
+
+    if (flushResult.err) {
+      this.logger.error("Alarm flush failed", { error: flushResult.err.message })
+    }
+
+    const pressure = await this.getFlushPressureSafe()
+
+    if (pressure && pressure.pendingTotalRecords > 0) {
+      const now = Date.now()
+      const adaptiveFlushSec = this.getAdaptiveFlushSeconds(pressure, this.TTL_ANALYTICS / 1000)
+      this.ctx.storage.setAlarm(now + adaptiveFlushSec * 1000)
+      this.emitFlushPressureSlo("alarm", pressure)
+
+      this.logger.info("Scheduled follow-up flush under pressure", {
+        pendingTotalRecords: pressure.pendingTotalRecords,
+        oldestPendingAgeSeconds: pressure.oldestPendingAgeSeconds,
+        nextFlushSeconds: adaptiveFlushSec,
+      })
+    }
+
     // flush the metrics and logs
     this.ctx.waitUntil(
       (async () => {

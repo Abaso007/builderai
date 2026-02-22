@@ -30,9 +30,7 @@ export const getByPlanVersionId = protectedProjectProcedure
       customerId,
       featureSlug,
       isMain: workspace.isMain,
-      metadata: {
-        action: "getByPlanVersionId",
-      },
+      action: "getByPlanVersionId",
     })
 
     if (!result.success) {

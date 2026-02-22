@@ -2,9 +2,9 @@ NODE features_usage_monthly_mv_node
 SQL >
     SELECT
         toStartOfMonth(date) AS date,
-        projectId,
-        customerId,
-        featureSlug,
+        project_id,
+        customer_id,
+        feature_slug,
         countMergeState(count) AS count,
         sumMergeState(sum) AS sum,
         maxMergeState(max) AS max,
@@ -13,9 +13,9 @@ SQL >
     FROM unprice_feature_usage_daily_mv
     GROUP BY
         date,
-        projectId,
-        customerId,
-        featureSlug
+        project_id,
+        customer_id,
+        feature_slug
 
 TYPE MATERIALIZED
 DATASOURCE unprice_feature_usage_monthly_mv

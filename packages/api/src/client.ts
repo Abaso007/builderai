@@ -1,5 +1,5 @@
 import { version } from "../package.json"
-import type { ErrorResponse } from "./errors"
+import type { ApiError, ErrorResponse } from "./errors"
 import type { paths } from "./openapi"
 import type { Telemetry } from "./telemetry"
 import { getTelemetry } from "./telemetry"
@@ -82,7 +82,7 @@ type Result<R> =
     }
   | {
       result?: never
-      error: ErrorResponse["error"]
+      error: ApiError
     }
 
 export class Unprice {
@@ -195,12 +195,13 @@ export class Unprice {
       return (await res.json()) as ErrorResponse
     }
 
+    const lastErr = err as Error | null
+    const message =
+      lastErr instanceof Error ? lastErr.message : lastErr != null ? String(lastErr) : "No response"
     return {
       error: {
-        // @ts-ignore
         code: "FETCH_ERROR",
-        // @ts-ignore I don't understand why `err` is `never`
-        message: err?.message ?? "No response",
+        message,
         docs: "https://developer.mozilla.org/en-US/docs/Web/API/fetch",
         requestId: "N/A",
       },
@@ -225,28 +226,30 @@ export class Unprice {
       },
 
       getEntitlements: async (
-        customerId: string
+        req: paths["/v1/customer/getEntitlements"]["post"]["requestBody"]["content"]["application/json"]
       ): Promise<
         Result<
-          paths["/v1/customer/{customerId}/getEntitlements"]["get"]["responses"]["200"]["content"]["application/json"]
+          paths["/v1/customer/getEntitlements"]["post"]["responses"]["200"]["content"]["application/json"]
         >
       > => {
         return await this.fetch({
-          path: ["v1", "customer", customerId, "getEntitlements"],
-          method: "GET",
+          path: ["v1", "customer", "getEntitlements"],
+          method: "POST",
+          body: req,
         })
       },
 
       getSubscription: async (
-        customerId: string
+        req: paths["/v1/customer/getSubscription"]["post"]["requestBody"]["content"]["application/json"]
       ): Promise<
         Result<
-          paths["/v1/customer/{customerId}/getSubscription"]["get"]["responses"]["200"]["content"]["application/json"]
+          paths["/v1/customer/getSubscription"]["post"]["responses"]["200"]["content"]["application/json"]
         >
       > => {
         return await this.fetch({
-          path: ["v1", "customer", customerId, "getSubscription"],
-          method: "GET",
+          path: ["v1", "customer", "getSubscription"],
+          method: "POST",
+          body: req,
         })
       },
 
@@ -263,28 +266,31 @@ export class Unprice {
         })
       },
 
-      can: async (
-        req: paths["/v1/customer/can"]["post"]["requestBody"]["content"]["application/json"]
+      verify: async (
+        req: paths["/v1/customer/verify"]["post"]["requestBody"]["content"]["application/json"]
       ): Promise<
-        Result<paths["/v1/customer/can"]["post"]["responses"]["200"]["content"]["application/json"]>
+        Result<
+          paths["/v1/customer/verify"]["post"]["responses"]["200"]["content"]["application/json"]
+        >
       > => {
         return await this.fetch({
-          path: ["v1", "customer", "can"],
+          path: ["v1", "customer", "verify"],
           method: "POST",
           body: req,
         })
       },
 
       getUsage: async (
-        customerId: string
+        req: paths["/v1/customer/getUsage"]["post"]["requestBody"]["content"]["application/json"]
       ): Promise<
         Result<
-          paths["/v1/customer/{customerId}/getUsage"]["get"]["responses"]["200"]["content"]["application/json"]
+          paths["/v1/customer/getUsage"]["post"]["responses"]["200"]["content"]["application/json"]
         >
       > => {
         return await this.fetch({
-          path: ["v1", "customer", customerId, "getUsage"],
-          method: "GET",
+          path: ["v1", "customer", "getUsage"],
+          method: "POST",
+          body: req,
         })
       },
 
@@ -375,6 +381,24 @@ export class Unprice {
     }
   }
 
+  public get lakehouse() {
+    return {
+      getFilePlan: async (
+        req: paths["/v1/lakehouse/file-plan"]["post"]["requestBody"]["content"]["application/json"]
+      ): Promise<
+        Result<
+          paths["/v1/lakehouse/file-plan"]["post"]["responses"]["200"]["content"]["application/json"]
+        >
+      > => {
+        return await this.fetch({
+          path: ["v1", "lakehouse", "file-plan"],
+          method: "POST",
+          body: req,
+        })
+      },
+    }
+  }
+
   public get plans() {
     return {
       listPlanVersions: async (
@@ -421,6 +445,20 @@ export class Unprice {
         })
       },
 
+      getRealtimeUsage: async (
+        req: paths["/v1/analytics/realtime"]["post"]["requestBody"]["content"]["application/json"]
+      ): Promise<
+        Result<
+          paths["/v1/analytics/realtime"]["post"]["responses"]["200"]["content"]["application/json"]
+        >
+      > => {
+        return await this.fetch({
+          path: ["v1", "analytics", "realtime"],
+          method: "POST",
+          body: req,
+        })
+      },
+
       getVerifications: async (
         req: paths["/v1/analytics/verifications"]["post"]["requestBody"]["content"]["application/json"]
       ): Promise<
@@ -430,6 +468,24 @@ export class Unprice {
       > => {
         return await this.fetch({
           path: ["v1", "analytics", "verifications"],
+          method: "POST",
+          body: req,
+        })
+      },
+
+      /**
+       * Issue a short-lived ticket for customer realtime websocket access.
+       * Requires a session token (e.g. Auth.js session) when used for dashboard realtime.
+       */
+      getRealtimeTicket: async (
+        req: paths["/v1/analytics/realtime/ticket"]["post"]["requestBody"]["content"]["application/json"]
+      ): Promise<
+        Result<
+          paths["/v1/analytics/realtime/ticket"]["post"]["responses"]["200"]["content"]["application/json"]
+        >
+      > => {
+        return await this.fetch({
+          path: ["v1", "analytics", "realtime", "ticket"],
           method: "POST",
           body: req,
         })

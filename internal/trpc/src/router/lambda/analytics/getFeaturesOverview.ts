@@ -12,33 +12,27 @@ export const getFeaturesOverview = protectedProjectProcedure
     })
   )
   .query(async (opts) => {
-    const { intervalDays } = opts.input
-    const projectId = opts.ctx.project.id
+    const { interval_days } = opts.input
+    const project_id = opts.ctx.project.id
     const timezone = opts.ctx.project.timezone
 
-    const cacheKey = `${projectId}:${timezone}:${intervalDays}`
-    const result = await opts.ctx.cache.getFeaturesOverview.swr(cacheKey, async () => {
-      const result = await opts.ctx.analytics
+    try {
+      const data = await opts.ctx.analytics
         .getFeaturesOverview({
-          projectId,
-          intervalDays,
+          project_id,
+          interval_days,
           timezone,
         })
         .then((res) => res.data)
 
-      return result
-    })
-
-    if (result.err) {
-      opts.ctx.logger.error(result.err.message, {
-        projectId,
-        intervalDays,
+      return { data: data ?? [] }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to fetch features overview"
+      opts.ctx.logger.error(message, {
+        project_id,
+        interval_days,
       })
 
-      return { data: [], error: result.err.message }
+      return { data: [], error: message }
     }
-
-    const data = result.val ?? []
-
-    return { data }
   })

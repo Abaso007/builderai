@@ -52,6 +52,26 @@ const stripeSignUpMetadataSchema = z.object({
   cancelUrl: z.string().url().describe("The cancel url"),
 })
 
+function isExternalIdConflictError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false
+  }
+
+  const dbError = error as {
+    code?: string
+    constraint?: string
+    message?: string
+  }
+
+  return (
+    dbError.code === "23505" &&
+    (dbError.constraint === "cp_external_id_idx" ||
+      dbError.message?.includes("cp_external_id_idx") ||
+      dbError.message?.includes("external_id") ||
+      false)
+  )
+}
+
 export type StripeSignUpRequest = z.infer<typeof route.request.params>
 
 export const registerStripeSignUpV1 = (app: App) =>
@@ -59,10 +79,9 @@ export const registerStripeSignUpV1 = (app: App) =>
     const { sessionId, projectId } = c.req.valid("param")
     const key = c.req.header("cf-connecting-ip") ?? c.req.header("x-forwarded-for") ?? projectId
     const { customer, db, subscription, analytics } = c.get("services")
-    const stats = c.get("stats")
 
     // rate limit the request
-    const result = await c.env.RL_FREE_600_60s.limit({ key })
+    const result = await c.env.RL_FREE_1000_60s.limit({ key })
 
     if (!result) {
       throw new UnpriceApiError({
@@ -137,6 +156,7 @@ export const registerStripeSignUpV1 = (app: App) =>
         id: customerSession.customer.id,
         projectId: customerSession.customer.projectId,
         stripeCustomerId: stripeSession.customerId,
+        externalId: customerSession.customer.externalId,
         name: customerSession.customer.name ?? "",
         email: customerSession.customer.email ?? "",
         defaultCurrency: customerSession.customer.currency,
@@ -145,20 +165,13 @@ export const registerStripeSignUpV1 = (app: App) =>
         metadata: {
           stripeSubscriptionId: stripeSession.subscriptionId ?? "",
           stripeDefaultPaymentMethodId: defaultPaymentMethodId ?? "",
-          externalId: customerSession.customer.externalId,
-          // stats
-          colo: stats.colo,
-          country: stats.country,
-          city: stats.city,
-          isEUCountry: stats.isEUCountry,
-          region: stats.region,
-          continent: stats.continent,
         },
       })
       .onConflictDoUpdate({
         target: [customers.id, customers.projectId],
         set: {
           stripeCustomerId: stripeSession.customerId,
+          externalId: customerSession.customer.externalId,
           name: customerSession.customer.name ?? "",
           email: customerSession.customer.email ?? "",
           defaultCurrency: customerSession.customer.currency,
@@ -167,19 +180,21 @@ export const registerStripeSignUpV1 = (app: App) =>
           metadata: {
             stripeSubscriptionId: stripeSession.subscriptionId ?? "",
             stripeDefaultPaymentMethodId: defaultPaymentMethodId ?? "",
-            externalId: customerSession.customer.externalId,
-            // analytics
-            colo: stats.colo,
-            country: stats.country,
-            city: stats.city,
-            isEUCountry: stats.isEUCountry,
-            region: stats.region,
-            continent: stats.continent,
           },
         },
       })
       .returning()
       .then((result) => result.at(0))
+      .catch((error) => {
+        if (isExternalIdConflictError(error)) {
+          throw new UnpriceApiError({
+            code: "CONFLICT",
+            message: "External customer id already exists for this project",
+          })
+        }
+
+        throw error
+      })
 
     if (!customerUnprice) {
       throw new UnpriceApiError({

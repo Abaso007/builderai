@@ -20,6 +20,7 @@ import {
   createWideEventHelpers,
   createWideEventLogger,
 } from "@unprice/logging"
+import { shouldEmitLogsToBackend, shouldEmitMetrics } from "@unprice/logging/env"
 import type { CacheNamespaces } from "@unprice/services/cache"
 import { CacheService, createRedis } from "@unprice/services/cache"
 import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/metrics"
@@ -113,7 +114,7 @@ export const createInnerTRPCContext = (
     analytics: new Analytics({
       tinybirdToken: env.TINYBIRD_TOKEN,
       tinybirdUrl: env.TINYBIRD_URL,
-      emit: env.EMIT_ANALYTICS,
+      emit: true,
       logger: opts.logger,
     }),
     // INFO: better wait for native support for RLS in Drizzle
@@ -162,46 +163,34 @@ export const createTRPCContext = async (opts: {
   const pathname = opts.req?.nextUrl.pathname ?? opts.opts?.pathname ?? "unknown"
   const method = opts.req?.method ?? opts.opts?.method ?? "unknown"
 
-  const logger = env.EMIT_METRICS_LOGS
+  const emitLogsToBackend = shouldEmitLogsToBackend(env)
+  const emitMetrics = shouldEmitMetrics(env)
+
+  const logger = emitLogsToBackend
     ? new AxiomLogger({
         apiKey: env.AXIOM_API_TOKEN,
         requestId,
         defaultFields: {
-          userId,
-          region,
-          country,
-          source,
-          ip: ip === "::1" ? "127.0.0.1" : ip,
-          pathname,
-          userAgent,
-          method,
+          path: pathname,
+          version: env.VERCEL_DEPLOYMENT_ID ?? "unknown",
         },
         dataset: env.AXIOM_DATASET,
         environment: env.NODE_ENV,
         service: "trpc",
-        logLevel: env.VERCEL_ENV === "production" ? "warn" : "info",
+        logLevel: env.APP_ENV === "production" ? "warn" : "info",
       })
     : new ConsoleLogger({
         requestId,
         environment: env.NODE_ENV,
-        logLevel: env.VERCEL_ENV === "production" ? "warn" : "info",
+        logLevel: env.APP_ENV === "production" ? "warn" : "info",
         service: "trpc",
         defaultFields: {
-          userId,
-          region,
-          country,
-          source,
-          ip: ip === "::1" ? "127.0.0.1" : ip,
-          pathname,
-          userAgent,
-          colo: region,
-          continent,
-          city,
-          method,
+          path: pathname,
+          version: env.VERCEL_DEPLOYMENT_ID ?? "unknown",
         },
       })
 
-  const metrics: Metrics = env.EMIT_METRICS_LOGS
+  const metrics: Metrics = emitMetrics
     ? new LogdrainMetrics({
         requestId,
         logger,
@@ -220,7 +209,7 @@ export const createTRPCContext = async (opts: {
       waitUntil,
     },
     metrics,
-    env.EMIT_METRICS_LOGS
+    emitMetrics
   )
 
   const upstashCacheStore =
@@ -250,7 +239,7 @@ export const createTRPCContext = async (opts: {
   const wideEventLogger = createWideEventLogger({
     "service.name": "trpc",
     "service.version": env.VERCEL_DEPLOYMENT_ID ?? "unknown",
-    "service.environment": env.VERCEL_ENV as
+    "service.environment": env.APP_ENV as
       | "production"
       | "staging"
       | "development"
@@ -274,8 +263,7 @@ export const createTRPCContext = async (opts: {
       host: opts.headers.get("host") ?? undefined,
       port: opts.headers.get("port") ?? undefined,
       protocol: opts.headers.get("protocol") ?? undefined,
-      headers: opts.headers.get("headers") ?? undefined,
-      query: opts.headers.get("query") ?? undefined,
+      query: opts.req?.nextUrl.search ? opts.req.nextUrl.search.replace(/^\?/, "") : undefined,
     },
     cloud: {
       platform: "vercel",

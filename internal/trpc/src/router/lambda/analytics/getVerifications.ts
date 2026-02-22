@@ -11,31 +11,25 @@ export const getVerifications = protectedProjectProcedure
     })
   )
   .query(async (opts) => {
-    const projectId = opts.ctx.project.id
+    const project_id = opts.ctx.project.id
     const input = opts.input
 
-    const cacheKey = `${projectId}:${input.intervalDays}`
-    const result = await opts.ctx.cache.getVerifications.swr(cacheKey, async () => {
-      const result = opts.ctx.analytics
+    try {
+      const verifications = await opts.ctx.analytics
         .getFeaturesVerifications({
-          projectId,
-          intervalDays: input.intervalDays,
+          project_id,
+          interval_days: input.interval_days,
         })
         .then((res) => res.data)
 
-      return result
-    })
-
-    if (result.err) {
-      opts.ctx.logger.error(result.err.message, {
-        projectId,
-        intervalDays: input.intervalDays,
+      return { verifications: verifications ?? [] }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to fetch verifications"
+      opts.ctx.logger.error(message, {
+        project_id,
+        interval_days: input.interval_days,
       })
 
-      return { verifications: [], error: result.err.message }
+      return { verifications: [], error: message }
     }
-
-    const verifications = result.val ?? []
-
-    return { verifications }
   })

@@ -27,7 +27,7 @@ export const listByWorkspace = protectedWorkspaceProcedure
     const workspaceProjects = await opts.ctx.db.query.workspaces.findFirst({
       with: {
         projects: {
-          orderBy: (pj, { desc }) => [desc(pj.createdAtM)],
+          orderBy: (pj, { asc }) => [asc(pj.createdAtM)],
         },
       },
       where: (ws, { eq }) => eq(ws.id, workspace.id),

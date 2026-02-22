@@ -52,7 +52,7 @@ export const registerCreatePaymentMethodV1 = (app: App) =>
     const { customer } = c.get("services")
 
     // validate the request
-    const key = await keyAuth(c)
+    await keyAuth(c)
 
     const { err: customerDataErr, val: customerData } = await customer.getCustomer(customerId)
 
@@ -70,8 +70,8 @@ export const registerCreatePaymentMethodV1 = (app: App) =>
     // get payment provider for the project
     const { err: paymentProviderErr, val: paymentProviderService } =
       await customer.getPaymentProvider({
-        customerId: customerId,
-        projectId: key.projectId,
+        customerId: customerData.id,
+        projectId: customerData.projectId,
         provider: paymentProvider,
       })
 
@@ -80,8 +80,8 @@ export const registerCreatePaymentMethodV1 = (app: App) =>
     }
 
     const { err, val } = await paymentProviderService.createSession({
-      customerId: customerId,
-      projectId: key.projectId,
+      customerId: customerData.id,
+      projectId: customerData.projectId,
       email: customerData.email,
       currency: customerData.defaultCurrency,
       successUrl: successUrl,

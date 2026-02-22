@@ -17,7 +17,7 @@ export const create = protectedProjectProcedure
     })
   )
   .mutation(async (opts) => {
-    const { slug, description, defaultPlan, enterprisePlan } = opts.input
+    const { slug, description, defaultPlan, enterprisePlan, title } = opts.input
     const project = opts.ctx.project
     const workspace = opts.ctx.project.workspace
     const customerId = workspace.unPriceCustomerId
@@ -31,9 +31,7 @@ export const create = protectedProjectProcedure
       customerId,
       featureSlug,
       isMain: workspace.isMain,
-      metadata: {
-        action: "create",
-      },
+      action: "create",
     })
 
     if (!result.success) {
@@ -85,8 +83,9 @@ export const create = protectedProjectProcedure
       .values({
         id: planId,
         slug,
+        title,
         projectId: project.id,
-        description,
+        description: description ?? "",
         active: true,
         defaultPlan: defaultPlan ?? false,
         enterprisePlan: enterprisePlan ?? false,
@@ -111,9 +110,7 @@ export const create = protectedProjectProcedure
           featureSlug,
           usage: 1,
           isMain: workspace.isMain,
-          metadata: {
-            action: "create",
-          },
+          action: "create",
         })
       )
     }

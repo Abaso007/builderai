@@ -3,7 +3,6 @@ import { reportUsageResultSchema } from "@unprice/db/validators"
 import { endTime, startTime } from "hono/timing"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
-
 import { z } from "zod"
 import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
@@ -22,34 +21,80 @@ export const route = createRoute({
   tags,
   request: {
     body: jsonContentRequired(
-      z.object({
-        customerId: z.string().openapi({
-          description: "The customer ID",
-          example: "cus_1H7KQFLr7RepUyQBKdnvY",
+      z
+        .object({
+          customerId: z
+            .string()
+            .openapi({
+              description: "The unprice customer ID",
+              example: "cus_1H7KQFLr7RepUyQBKdnvY",
+            })
+            .optional(),
+          externalId: z
+            .string()
+            .openapi({
+              description: "The external customer ID provided at sign up",
+              example: "user_123",
+            })
+            .optional(),
+          featureSlug: z.string().openapi({
+            description: "The feature slug",
+            example: "tokens",
+          }),
+          usage: z.number().openapi({
+            description: "The usage",
+            example: 30,
+          }),
+          idempotenceKey: z.string().uuid().openapi({
+            description: "The idempotence key",
+            example: "123e4567-e89b-12d3-a456-426614174000",
+          }),
+          action: z
+            .string()
+            .openapi({
+              description:
+                "The action being performed (e.g., 'create', 'update', 'delete', 'send-email', 'flush'). Normalized to lowercase with spaces as hyphens.",
+              example: "create",
+            })
+            .optional()
+            .transform((v) =>
+              v == null || v === "" ? undefined : v.trim().toLowerCase().replace(/\s+/g, "-")
+            ),
+          metadata: z
+            .object({
+              source: z.string().optional(),
+              workspaceId: z.string().optional(),
+              projectId: z.string().optional(),
+              tenantId: z.string().optional(),
+              userId: z.string().optional(),
+              resourceId: z.string().optional(),
+              resourceType: z.string().optional(),
+            })
+            .strict()
+            .openapi({
+              description:
+                "Structured metadata for this report usage (filtering and analytics). Only the listed keys are accepted.",
+              example: {
+                source: "api",
+                resourceId: "123",
+                resourceType: "user",
+                workspaceId: "123",
+                projectId: "123",
+                tenantId: "123",
+                userId: "123",
+              },
+            })
+            .optional(),
+        })
+        .superRefine((data, ctx) => {
+          if (!data.customerId && !data.externalId) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Either customerId or externalId is required",
+              path: ["customerId", "externalId"],
+            })
+          }
         }),
-        featureSlug: z.string().openapi({
-          description: "The feature slug",
-          example: "tokens",
-        }),
-        usage: z.number().openapi({
-          description: "The usage",
-          example: 30,
-        }),
-        idempotenceKey: z.string().uuid().openapi({
-          description: "The idempotence key",
-          example: "123e4567-e89b-12d3-a456-426614174000",
-        }),
-        metadata: z
-          .record(z.string(), z.string())
-          .openapi({
-            description: "The metadata",
-            example: {
-              action: "create",
-              country: "US",
-            },
-          })
-          .optional(),
-      }),
       "The usage to report"
     ),
   },
@@ -73,20 +118,42 @@ export type ReportUsageResponse = z.infer<
 
 export const registerReportUsageV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId, featureSlug, usage, idempotenceKey, metadata } = c.req.valid("json")
-    const { usagelimiter } = c.get("services")
+    const { customerId, externalId, featureSlug, usage, idempotenceKey, metadata, action } =
+      c.req.valid("json")
+    const { usagelimiter, customer } = c.get("services")
     const stats = c.get("stats")
     const requestId = c.get("requestId")
+    const requestStartedAt = c.get("requestStartedAt")
+    const performanceStart = c.get("performanceStart")
 
     // validate the request
     const key = await keyAuth(c)
 
-    const projectId = await resolveContextProjectId(c, key.projectId, customerId)
+    const projectId = customerId
+      ? await resolveContextProjectId(c, key.projectId, customerId)
+      : key.projectId
+
+    let resolvedCustomerId: string
+
+    if (customerId) {
+      resolvedCustomerId = customerId
+    } else {
+      const { err: resolveCustomerErr, val: customerContext } = await customer.resolveCustomerId({
+        projectId,
+        externalId,
+      })
+
+      if (resolveCustomerErr) {
+        throw resolveCustomerErr
+      }
+
+      resolvedCustomerId = customerContext.customerId
+    }
 
     // check if the customer is blocked
     // ONLY bounce if usage is positive (consuming) because negative usage is a correction
     if (usage >= 0) {
-      await bouncer(c, customerId, projectId)
+      await bouncer(c, resolvedCustomerId, projectId)
     }
 
     // start a new timer
@@ -94,36 +161,28 @@ export const registerReportUsageV1 = (app: App) =>
 
     // validate usage from db
     const { err, val: result } = await usagelimiter.reportUsage({
-      customerId,
+      customerId: resolvedCustomerId,
       featureSlug,
       usage,
-      // timestamp of the record
-      timestamp: Date.now(), // for now we report the usage at the time of the request
+      // timestamp of the record (stabilized at request start)
+      timestamp: requestStartedAt,
       idempotenceKey,
-      // short ttl for dev
-      flushTime: c.env.NODE_ENV === "development" ? 5 : undefined,
       projectId,
       requestId,
-      metadata: {
-        ...metadata,
-        ip: stats.ip,
-        country: stats.country,
-        region: stats.region,
-        colo: stats.colo,
-        city: stats.city,
-        ua: stats.ua,
-        continent: stats.continent,
-        source: stats.source,
-      },
+      performanceStart,
+      // first-class analytics fields
+      country: stats.country,
+      region: stats.colo,
+      action: action,
+      keyId: key.id,
+      metadata: metadata ?? null,
     })
 
     // end the timer
     endTime(c, "reportUsage")
 
     // send analytics event for the unprice customer
-    c.executionCtx.waitUntil(
-      reportUsageEvents(c, { action: "reportUsage", status: err ? "error" : "success" })
-    )
+    c.executionCtx.waitUntil(reportUsageEvents(c, {}, "report-usage"))
 
     if (err) {
       throw err

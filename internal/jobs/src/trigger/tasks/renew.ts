@@ -1,7 +1,5 @@
 import { task } from "@trigger.dev/sdk/v3"
-import { logger } from "@trigger.dev/sdk/v3"
 import { SubscriptionService } from "@unprice/services/subscriptions"
-import { unprice } from "src/unprice"
 import { createContext } from "./context"
 
 export const renewTask = task({
@@ -46,20 +44,6 @@ export const renewTask = task({
 
     if (renewResult.err) {
       throw renewResult.err
-    }
-
-    // reset entitlements after the subscription is renewed
-    const { error } = await unprice.customers.resetEntitlements({
-      customerId,
-      projectId,
-    })
-
-    if (error) {
-      logger.error(`error resetting entitlements: ${error.message}`, {
-        error: error,
-        customerId,
-        projectId,
-      })
     }
 
     return {

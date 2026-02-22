@@ -42,7 +42,7 @@ export const listByActiveProject = protectedProjectProcedure
           where: (version, { eq }) =>
             // get published versions by default, only get unpublished versions if the user wants it
             needsPublished ? eq(version.status, "published") : undefined,
-          orderBy: (version, { desc }) => [desc(version.createdAtM)],
+          orderBy: (version, { asc }) => [asc(version.version)],
           columns: {
             status: true,
             id: true,
@@ -61,6 +61,7 @@ export const listByActiveProject = protectedProjectProcedure
           // get active versions by default, only get inactive versions if the user wants it
           needsActive ? eq(plan.active, true) : undefined
         ),
+      orderBy: (plan, { asc }) => [asc(plan.createdAtM)],
     })
 
     return {

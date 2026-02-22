@@ -2,11 +2,11 @@ import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { EntitlementState } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import { type Logger, createWideEventHelpers } from "@unprice/logging"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
-import { createClock, createMockEntitlementState } from "../test-utils"
+import { createClock, createMockEntitlementState, createMockWideEventLogger } from "../test-utils"
 import { MemoryEntitlementStorageProvider } from "./memory-provider"
 import { EntitlementService } from "./service"
 
@@ -55,6 +55,7 @@ describe("EntitlementService - Reset Cycles", () => {
         expiresAt: jan1 + 30 * 24 * 60 * 60 * 1000, // 30 days
         limit: 100,
         priority: 10,
+        featurePlanVersionId: "fpv_idem_1",
       },
     ],
     effectiveAt: jan1,
@@ -69,6 +70,8 @@ describe("EntitlementService - Reset Cycles", () => {
       planType: "recurring",
     },
   })
+
+  const mockWideEventLogger = createMockWideEventLogger("entitlements-test", "0.0.1", "test")
 
   beforeEach(async () => {
     vi.clearAllMocks()
@@ -146,6 +149,7 @@ describe("EntitlementService - Reset Cycles", () => {
       waitUntil: vi.fn((promise) => promise),
       cache: mockCache,
       metrics: mockMetrics,
+      wideEventHelpers: createWideEventHelpers(mockWideEventLogger),
     })
   })
 
@@ -269,6 +273,7 @@ describe("EntitlementService - Reset Cycles", () => {
           limit: 10,
           effectiveAt: monthStart,
           expiresAt: monthEnd,
+          featurePlanVersionId: "fpv_idem_1",
         },
       ],
     })

@@ -47,9 +47,13 @@ const PlanVersionPublish = forwardRef<ElementRef<"button">, PlanVersionPublishPr
         }
 
         toast.promise(
-          publishVersion.mutateAsync({
-            id: planVersionId,
-          }),
+          publishVersion
+            .mutateAsync({
+              id: planVersionId,
+            })
+            .then(() => {
+              onConfirmAction?.()
+            }),
           {
             loading: "Publishing...",
             success: "Version published",
@@ -61,8 +65,8 @@ const PlanVersionPublish = forwardRef<ElementRef<"button">, PlanVersionPublishPr
     return (
       <ConfirmAction
         message="Once you publish this version, it will be available to your customers. You won't be able to edit it anymore. Are you sure you want to publish this version?"
+        title="Do you want to publish this version?"
         confirmAction={() => {
-          onConfirmAction?.()
           onPublishVersion()
         }}
       >
@@ -120,6 +124,7 @@ const PlanVersionDuplicate = forwardRef<ElementRef<"button">, PlanVersionDuplica
     return (
       <ConfirmAction
         message="Are you sure you want to duplicate this version?"
+        title="Do you want to duplicate this version?"
         confirmAction={() => {
           onConfirmAction?.()
           onDuplicateVersion()

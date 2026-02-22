@@ -27,10 +27,8 @@ export const deactivate = protectedProjectProcedure
       customerId: workspace.unPriceCustomerId,
       featureSlug: "plans",
       isMain: workspace.isMain,
-      metadata: {
-        action: "deactivate",
-        module: "planVersion",
-      },
+      action: "deactivate",
+      metadata: { module: "planVersion" },
     })
 
     if (!result.success) {

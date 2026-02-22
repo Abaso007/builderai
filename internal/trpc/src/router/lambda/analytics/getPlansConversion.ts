@@ -11,31 +11,25 @@ export const getPlansConversion = protectedProjectProcedure
     })
   )
   .query(async (opts) => {
-    const { intervalDays } = opts.input
-    const projectId = opts.ctx.project.id
+    const { interval_days } = opts.input
+    const project_id = opts.ctx.project.id
 
-    const cacheKey = `${projectId}:${intervalDays}`
-    const result = await opts.ctx.cache.getPlansConversion.swr(cacheKey, async () => {
-      const result = await opts.ctx.analytics
+    try {
+      const data = await opts.ctx.analytics
         .getPlansConversion({
-          projectId,
-          intervalDays,
+          project_id,
+          interval_days,
         })
         .then((res) => res.data)
 
-      return result
-    })
-
-    if (result.err) {
-      opts.ctx.logger.error(result.err.message, {
-        projectId,
-        intervalDays,
+      return { data: data ?? [] }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to fetch plans conversion"
+      opts.ctx.logger.error(message, {
+        project_id,
+        interval_days,
       })
 
-      return { data: [], error: result.err.message }
+      return { data: [], error: message }
     }
-
-    const data = result.val ?? []
-
-    return { data }
   })

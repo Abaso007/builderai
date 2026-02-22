@@ -186,7 +186,7 @@ export class UsageMeter {
     } else if (strategy === "last-call") {
       isAllowed = cost <= 0 || currentTokens > 0
     } else {
-      // strategy === "none" (strict)
+      // strategy === "none" (strict): allow when remaining >= cost (use exactly what's left)
       isAllowed = currentTokens >= cost
     }
 

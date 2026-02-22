@@ -11,8 +11,8 @@ import type {
   VerifyRequest,
 } from "@unprice/db/validators"
 import type { CurrentUsage } from "@unprice/db/validators"
-import { type BaseError, Err, type FetchError, Ok, type Result } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import { type BaseError, Err, FetchError, Ok, type Result } from "@unprice/error"
+import type { Logger, WideEventHelpers } from "@unprice/logging"
 import type { Cache, CacheNamespaces } from "@unprice/services/cache"
 import type { CustomerService } from "@unprice/services/customers"
 import type { UnPriceCustomerError } from "@unprice/services/customers"
@@ -23,7 +23,12 @@ import {
 import type { Metrics } from "@unprice/services/metrics"
 import type { DurableObjectProject } from "~/project/do"
 import type { DurableObjectUsagelimiter } from "./do"
-import type { GetEntitlementsRequest, GetUsageRequest, UsageLimiter } from "./interface"
+import type {
+  BufferMetricsResponse,
+  GetEntitlementsRequest,
+  GetUsageRequest,
+  UsageLimiter,
+} from "./interface"
 
 // you would understand entitlements service if you think about it as feature flag system
 // it's totally separated from billing system and you can give entitlements to customers
@@ -43,6 +48,7 @@ export class UsageLimiterService implements UsageLimiter {
   private readonly stats: Stats
   private readonly requestId: string
   private hashCache: Map<string, string>
+  private wideEventHelpers?: WideEventHelpers
 
   constructor(opts: {
     namespace: DurableObjectNamespace<DurableObjectUsagelimiter>
@@ -59,6 +65,7 @@ export class UsageLimiterService implements UsageLimiter {
     db: Database
     customer: CustomerService
     stats: Stats
+    wideEventHelpers?: WideEventHelpers
   }) {
     this.namespace = opts.namespace
     this.logger = opts.logger
@@ -72,6 +79,7 @@ export class UsageLimiterService implements UsageLimiter {
     this.stats = opts.stats
     this.requestId = opts.requestId
     this.hashCache = opts.hashCache
+    this.wideEventHelpers = opts.wideEventHelpers
 
     // we don't need storage for this so we don't need to call the DO
     // instead we use the entitlement service
@@ -83,14 +91,31 @@ export class UsageLimiterService implements UsageLimiter {
       waitUntil: this.waitUntil,
       cache: this.cache,
       metrics: this.metrics,
+      wideEventHelpers: this.wideEventHelpers,
+      config: {
+        revalidateInterval:
+          env.APP_ENV === "development"
+            ? 30000 // 30 seconds
+            : 1000 * 60 * 60 * 24, // 24 hours
+      },
     })
+  }
+
+  /**
+   * Sets the wide event helpers for request-scoped logging context.
+   * This should be called inside the wideEventLogger.runAsync() context.
+   * Propagates to nested services (entitlementService).
+   */
+  public setWideEventHelpers(wideEventHelpers: WideEventHelpers) {
+    this.wideEventHelpers = wideEventHelpers
+    this.entitlementService.setWideEventHelpers(wideEventHelpers)
   }
 
   // in memory cache with size and TTL limits
   // kid of hard to reach the limit as cloudflare can hit others isolates
   // but just in case we limit it to 1000 entries
   private updateCache(key: string, result: VerificationResult) {
-    if (env.VERCEL_ENV === "production" && !result.allowed) {
+    if (env.APP_ENV === "production" && !result.allowed) {
       // enforce max size - remove oldest entry if at limit
       if (this.hashCache.size >= 1000) {
         // remove first (oldest) entry
@@ -110,7 +135,7 @@ export class UsageLimiterService implements UsageLimiter {
     locationHint?: DurableObjectLocationHint
   ): DurableObjectStub<DurableObjectUsagelimiter> {
     // jurisdiction is only available in production
-    if (this.stats.isEUCountry && env.NODE_ENV === "production") {
+    if (this.stats.isEUCountry && env.APP_ENV === "production") {
       const euSubnamespace = this.namespace.jurisdiction("eu")
       const euStub = euSubnamespace.get(euSubnamespace.idFromName(name), {
         locationHint,
@@ -127,19 +152,85 @@ export class UsageLimiterService implements UsageLimiter {
   private getDurableObjectCustomerId(customerId: string, projectId: string): string {
     // later on we can shard this by customer and feature slug if needed
     // preview environments copy production data so we need to differentiate between them
-    return `${env.NODE_ENV}:${projectId}:${customerId}`
+    return `${env.APP_ENV}:${projectId}:${customerId}`
+  }
+
+  // Timeout for DO calls before falling back to cached state
+  private static readonly DO_TIMEOUT_MS = 5000
+
+  /**
+   * Wraps a promise with a timeout. If the promise doesn't resolve within
+   * the specified time, it rejects with a timeout error.
+   */
+  private withTimeout<T>(promise: Promise<T>, ms: number, operation: string): Promise<T> {
+    let timeoutId: ReturnType<typeof setTimeout>
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(`${operation} timed out after ${ms}ms`)), ms)
+    })
+
+    return Promise.race([promise, timeoutPromise]).finally(() => {
+      clearTimeout(timeoutId)
+    })
+  }
+
+  /**
+   * Builds a degraded verification response from cached entitlement state.
+   * Used when DO is unavailable but we have cached data to fall back to.
+   */
+  private buildDegradedVerifyResponse(
+    cachedEntitlement: {
+      limit?: number | null
+      featureType?: string
+      meter?: { usage?: string }
+    },
+    requestedUsage?: number,
+    reason?: string
+  ): VerificationResult {
+    const limit = cachedEntitlement.limit ?? undefined
+    const currentUsage = Number(cachedEntitlement.meter?.usage ?? 0)
+    const remaining = limit ? Math.max(0, limit - currentUsage) : undefined
+
+    // Use cached state to determine if request would be allowed
+    const wouldBeAllowed =
+      !limit || (requestedUsage ? currentUsage + requestedUsage <= limit : true)
+
+    return {
+      allowed: wouldBeAllowed,
+      degraded: true,
+      degradedReason: reason ?? "DO_UNAVAILABLE_USING_CACHED_STATE",
+      usage: currentUsage,
+      limit,
+      remaining,
+      featureType: cachedEntitlement.featureType as VerificationResult["featureType"],
+      message: wouldBeAllowed ? "Access granted (cached state)" : "Limit exceeded (cached state)",
+      deniedReason: wouldBeAllowed ? undefined : "LIMIT_EXCEEDED",
+    }
+  }
+
+  private shouldRunProbabilisticVerify(data: VerifyRequest): boolean {
+    const sampleRate = env.APP_ENV === "production" ? 0.05 : 1
+    if (sampleRate <= 0) return false
+
+    const seed = `${data.projectId}:${data.customerId}:${data.featureSlug}:${data.requestId}`
+    let hash = 0
+    for (let i = 0; i < seed.length; i += 1) {
+      hash = (hash * 31 + seed.charCodeAt(i)) >>> 0
+    }
+
+    const percentile = (hash % 10000) / 10000
+    return percentile < sampleRate
   }
 
   public async verify(
     data: VerifyRequest
   ): Promise<Result<VerificationResult, FetchError | UnPriceCustomerError>> {
-    const key = `verify:${env.NODE_ENV}:${data.projectId}:${data.customerId}:${data.featureSlug}:`
+    const key = `verify:${env.APP_ENV}:${data.projectId}:${data.customerId}:${data.featureSlug}:`
     const cached = this.hashCache.get(key)
 
     const parsedCached = cached ? (JSON.parse(cached) as VerificationResult) : undefined
 
     // if we hit the same isolate we can return the cached result, only for request that are denied.
-    if (parsedCached && parsedCached.allowed === false && env.VERCEL_ENV === "production") {
+    if (parsedCached && parsedCached.allowed === false && env.APP_ENV === "production") {
       return Ok({ ...parsedCached, cacheHit: true })
     }
 
@@ -147,16 +238,96 @@ export class UsageLimiterService implements UsageLimiter {
       this.getDurableObjectCustomerId(data.customerId, data.projectId)
     )
 
-    // TODO: implement this if the request is async, we can validate entitlement from cache
+    try {
+      // this is the most expensive call in terms of latency
+      // this will trigger a call to the DO and validate the entitlement given the current usage
+      // wrap with timeout to prevent hanging requests
+      const result = await this.withTimeout(
+        durableObject.verify(data),
+        UsageLimiterService.DO_TIMEOUT_MS,
+        "DO.verify"
+      )
 
-    // this is the most expensive call in terms of latency
-    // this will trigger a call to the DO and validate the entitlement given the current usage
-    const result = await durableObject.verify(data)
+      // in extreme cases we hit in memory cache for the same isolate, speeding up the next request
+      this.updateCache(key, result)
 
-    // in extreme cases we hit in memory cache for the same isolate, speeding up the next request
-    this.updateCache(key, result)
+      return Ok(result)
+    } catch (error) {
+      // DO unavailable or timed out - attempt graceful degradation
+      const errorMessage = error instanceof Error ? error.message : String(error)
 
-    return Ok(result)
+      this.logger.warn("DO unavailable for verify, attempting fallback", {
+        customerId: data.customerId,
+        projectId: data.projectId,
+        featureSlug: data.featureSlug,
+        error: errorMessage,
+        operation: "verify",
+        degraded: true,
+      })
+
+      // 1. Try local in-memory cache first (0ms, same isolate)
+      if (parsedCached) {
+        this.logger.info("Returning degraded response from local cache", {
+          customerId: data.customerId,
+          featureSlug: data.featureSlug,
+        })
+        return Ok({
+          ...parsedCached,
+          degraded: true,
+          degradedReason: "DO_UNAVAILABLE_USING_LOCAL_CACHE",
+          cacheHit: true,
+        })
+      }
+
+      // 2. Try distributed cache for entitlement state (only on failure path)
+      const entitlementCacheKey = `${data.projectId}:${data.customerId}:${data.featureSlug}`
+      const { val: cachedEntitlement } =
+        await this.cache.customerEntitlement.get(entitlementCacheKey)
+
+      if (cachedEntitlement) {
+        this.logger.info("Returning degraded response from distributed cache", {
+          customerId: data.customerId,
+          featureSlug: data.featureSlug,
+        })
+        return Ok(
+          this.buildDegradedVerifyResponse(
+            cachedEntitlement,
+            data.usage,
+            "DO_UNAVAILABLE_USING_DISTRIBUTED_CACHE"
+          )
+        )
+      }
+
+      if ((data.usage ?? 0) > 0 && this.shouldRunProbabilisticVerify(data)) {
+        this.logger.warn("Running probabilistic degraded verify", {
+          customerId: data.customerId,
+          featureSlug: data.featureSlug,
+          projectId: data.projectId,
+        })
+
+        const probabilistic = await this.entitlementService.verify(data)
+
+        return Ok({
+          ...probabilistic,
+          degraded: true,
+          degradedReason: "DO_UNAVAILABLE_PROBABILISTIC_VERIFY",
+        })
+      }
+
+      // 3. No cached state available - fail open with warning
+      // This is the safest option for service continuity
+      this.logger.warn("No cached state available, failing open", {
+        customerId: data.customerId,
+        featureSlug: data.featureSlug,
+      })
+
+      return Ok({
+        allowed: true,
+        degraded: true,
+        degradedReason: "DO_UNAVAILABLE_NO_CACHE",
+        message: "Service temporarily degraded - access granted with limited data",
+      })
+    }
   }
 
   public async reportUsage(
@@ -164,7 +335,7 @@ export class UsageLimiterService implements UsageLimiter {
   ): Promise<Result<ReportUsageResult, FetchError | UnPriceCustomerError>> {
     // in dev we use the idempotence key and timestamp to deduplicate reuse the same key for the same request
     const idempotentKey =
-      env.VERCEL_ENV === "production"
+      env.APP_ENV === "production"
         ? `${data.idempotenceKey}`
         : `${data.idempotenceKey}:${data.timestamp}`
 
@@ -180,19 +351,59 @@ export class UsageLimiterService implements UsageLimiter {
     const durableObject = this.getStub(
       this.getDurableObjectCustomerId(data.customerId, data.projectId)
     )
-    const result = await durableObject.reportUsage({
-      ...data,
-      idempotenceKey: idempotentKey,
-    })
 
-    this.waitUntil(
-      // cache the result for the next time
-      // update the cache with the new usage so we can check limit in the next request
-      // without calling the DO again
-      this.cache.idempotentRequestUsageByHash.set(cacheKey, result)
-    )
+    try {
+      // Wrap with timeout to prevent hanging requests
+      const result = await this.withTimeout(
+        durableObject.reportUsage({
+          ...data,
+          idempotenceKey: idempotentKey,
+        }),
+        UsageLimiterService.DO_TIMEOUT_MS,
+        "DO.reportUsage"
+      )
 
-    return Ok(result)
+      this.waitUntil(
+        // cache the result for the next time
+        // update the cache with the new usage so we can check limit in the next request
+        // without calling the DO again
+        this.cache.idempotentRequestUsageByHash.set(cacheKey, result)
+      )
+
+      return Ok(result)
+    } catch (error) {
+      // DO unavailable or timed out - fail closed for usage reporting
+      // This is critical for billing accuracy - we cannot lose usage data
+      const errorMessage = error instanceof Error ? error.message : String(error)
+
+      this.logger.error("DO unavailable for reportUsage, failing closed", {
+        customerId: data.customerId,
+        projectId: data.projectId,
+        featureSlug: data.featureSlug,
+        usage: data.usage,
+        idempotenceKey: idempotentKey,
+        error: errorMessage,
+        operation: "reportUsage",
+        degraded: true,
+      })
+
+      // Fail closed: return error so client can retry
+      // This ensures no usage data is lost for billing
+      return Err(
+        new FetchError({
+          message: `Usage reporting temporarily unavailable: ${errorMessage}. Please retry.`,
+          retry: true,
+          context: {
+            url: "durable-object://usagelimiter/reportUsage",
+            method: "RPC",
+            customerId: data.customerId,
+            projectId: data.projectId,
+            featureSlug: data.featureSlug,
+            reason: "DO_UNAVAILABLE",
+          },
+        })
+      )
+    }
   }
 
   public async resetEntitlements(params: {
@@ -204,10 +415,35 @@ export class UsageLimiterService implements UsageLimiter {
     )
 
     // reset the entitlements for the customer
-    await durableObject.resetEntitlements({
+    const result = await durableObject.resetEntitlements({
       customerId: params.customerId,
       projectId: params.projectId,
     })
+
+    // Propagate error from DO reset
+    if (result.err) {
+      return Err(result.err)
+    }
+
+    return Ok(undefined)
+  }
+
+  public async resetUsage(params: {
+    customerId: string
+    projectId: string
+  }): Promise<Result<void, BaseError>> {
+    const durableObject = this.getStub(
+      this.getDurableObjectCustomerId(params.customerId, params.projectId)
+    )
+
+    const result = await durableObject.resetUsage({
+      customerId: params.customerId,
+      projectId: params.projectId,
+    })
+
+    if (result.err) {
+      return Err(result.err)
+    }
 
     return Ok(undefined)
   }
@@ -258,5 +494,58 @@ export class UsageLimiterService implements UsageLimiter {
     const result = await durableObject.getCurrentUsage(data)
 
     return result
+  }
+
+  public async getBufferMetrics(data: {
+    customerId: string
+    projectId: string
+    windowSeconds?: 300 | 3600 | 86400 | 604800
+  }): Promise<Result<BufferMetricsResponse, FetchError | BaseError>> {
+    const durableObject = this.getStub(
+      this.getDurableObjectCustomerId(data.customerId, data.projectId)
+    )
+
+    try {
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(
+          () => reject(new Error("DO.getBufferMetrics timed out")),
+          UsageLimiterService.DO_TIMEOUT_MS
+        )
+      })
+
+      const result = await Promise.race([
+        durableObject.getBufferMetrics({ windowSeconds: data.windowSeconds }),
+        timeoutPromise,
+      ])
+
+      if (result.err) {
+        return Err(result.err)
+      }
+
+      return Ok(result.val)
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+
+      this.logger.error("DO unavailable for getBufferMetrics", {
+        customerId: data.customerId,
+        projectId: data.projectId,
+        error: errorMessage,
+        operation: "getBufferMetrics",
+      })
+
+      return Err(
+        new FetchError({
+          message: `Buffer metrics temporarily unavailable: ${errorMessage}`,
+          retry: true,
+          context: {
+            url: "durable-object://usagelimiter/getBufferMetrics",
+            method: "RPC",
+            customerId: data.customerId,
+            projectId: data.projectId,
+            reason: "DO_UNAVAILABLE",
+          },
+        })
+      )
+    }
   }
 }

@@ -17,7 +17,7 @@ export const update = protectedProjectProcedure
     })
   )
   .mutation(async (opts) => {
-    const { id, description, active, defaultPlan, enterprisePlan } = opts.input
+    const { id, description, active, title, defaultPlan, enterprisePlan } = opts.input
     const project = opts.ctx.project
     const workspace = opts.ctx.project.workspace
     const customerId = workspace.unPriceCustomerId
@@ -30,9 +30,7 @@ export const update = protectedProjectProcedure
       customerId,
       featureSlug,
       isMain: workspace.isMain,
-      metadata: {
-        action: "update",
-      },
+      action: "update",
     })
 
     if (!result.success) {
@@ -95,14 +93,10 @@ export const update = protectedProjectProcedure
       }
     }
 
-    // TODO: is it a good idea to let the user update the plan?
-    // maybe we should think what happen if the user update the plan and there are versions
-    // that are not compatible with the new plan. This is also a good reason to have a version as a snapshot
-    // in the subscription so the customer can keep using the old version no matter what happens with the plan
-
     const updatedPlan = await opts.ctx.db
       .update(schema.plans)
       .set({
+        title,
         description,
         active,
         defaultPlan: defaultPlan ?? false,

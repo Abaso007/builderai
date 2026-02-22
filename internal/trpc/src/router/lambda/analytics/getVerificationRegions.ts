@@ -3,7 +3,7 @@ import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
 export const getVerificationRegions = protectedProjectProcedure
-  .input(z.custom<Omit<Parameters<Analytics["getFeaturesVerificationRegions"]>[0], "projectId">>())
+  .input(z.custom<Omit<Parameters<Analytics["getFeaturesVerificationRegions"]>[0], "project_id">>())
   .output(
     z.object({
       verifications: z.custom<VerificationRegions>(),
@@ -11,36 +11,30 @@ export const getVerificationRegions = protectedProjectProcedure
     })
   )
   .query(async (opts) => {
-    const projectId = opts.ctx.project.id
+    const project_id = opts.ctx.project.id
     const timezone = opts.ctx.project.timezone
     const input = opts.input
 
-    const cacheKey = `${projectId}:${input.region}:${timezone}:${input.intervalDays}`
-
-    const result = await opts.ctx.cache.getVerificationRegions.swr(cacheKey, async () => {
-      const result = await opts.ctx.analytics
+    try {
+      const verifications = await opts.ctx.analytics
         .getFeaturesVerificationRegions({
-          projectId,
+          project_id,
           timezone,
           region: input.region,
-          intervalDays: input.intervalDays,
+          interval_days: input.interval_days,
         })
         .then((res) => res.data)
 
-      return result
-    })
-
-    if (result.err) {
-      opts.ctx.logger.error(result.err.message, {
-        projectId,
+      return { verifications: verifications ?? [] }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to fetch verification regions"
+      opts.ctx.logger.error(message, {
+        project_id,
         region: input.region,
-        intervalDays: input.intervalDays,
+        interval_days: input.interval_days,
       })
 
-      return { verifications: [], error: result.err.message }
+      return { verifications: [], error: message }
     }
-
-    const verifications = result.val ?? []
-
-    return { verifications }
   })

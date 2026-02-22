@@ -8,16 +8,12 @@ import { subscriptionItemsConfigSchema } from "./subscriptions/items"
 extendZodWithOpenApi(z)
 
 export const customerMetadataSchema = z.object({
-  externalId: z.string().optional(),
   stripeSubscriptionId: z.string().optional(),
   stripeDefaultPaymentMethodId: z.string().optional(),
   // analytics
-  continent: z.string().optional(),
   country: z.string().optional(),
   region: z.string().optional(),
-  colo: z.string().optional(),
   city: z.string().optional(),
-  isEUCountry: z.coerce.boolean().optional(),
 })
 
 export const customerSelectSchema = createSelectSchema(schema.customers, {
@@ -110,9 +106,12 @@ export const customerSignUpSchema = z
       example: "https://example.com/login",
     }),
     metadata: customerMetadataSchema.optional().openapi({
-      description: "The metadata of the customer",
+      description:
+        "The metadata of the customer, very important to pass geolocation data if you want to segment later on",
       example: {
-        externalId: "1234567890",
+        country: "US",
+        region: "CA",
+        city: "San Francisco",
       },
     }),
   })

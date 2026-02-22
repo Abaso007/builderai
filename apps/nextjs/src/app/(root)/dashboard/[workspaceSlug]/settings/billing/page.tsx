@@ -56,7 +56,7 @@ async function UsageCard({
   customerId,
   workspaceSlug,
 }: { customerId: string; workspaceSlug: string }) {
-  const { result: usageData, error } = await unprice.customers.getUsage(customerId)
+  const { result: usageData, error } = await unprice.customers.getUsage({ customerId })
 
   if (error) {
     return (

@@ -60,6 +60,8 @@ const nextConfig = {
     config.resolve.alias = {
       ...config.resolve.alias,
       // "#": path.resolve(__dirname, "../../internal/trpc/src/"),
+      "@duckdb/duckdb-wasm/dist/duckdb-node.cjs": "@duckdb/duckdb-wasm/dist/duckdb-browser.cjs",
+      "@duckdb/duckdb-wasm/dist/duckdb-node": "@duckdb/duckdb-wasm/dist/duckdb-browser.mjs",
     }
     return config
   },

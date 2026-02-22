@@ -9,7 +9,7 @@ import UpgradePlanError from "~/components/layout/error"
 import { entitlementFlag } from "~/lib/flags"
 import { intervalParams, pageParams } from "~/lib/searchParams"
 import { HydrateClient, api, batchPrefetch, trpc } from "~/trpc/server"
-import { ANALYTICS_STALE_TIME } from "~/trpc/shared"
+import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
 import { Browsers, BrowsersSkeleton } from "../_components/browsers"
 import { Countries, CountriesSkeleton } from "../_components/countries"
 import { PageVisits, PageVisitsSkeleton } from "../_components/page-visits"
@@ -38,31 +38,31 @@ export default async function DashboardPages(props: {
   batchPrefetch([
     trpc.analytics.getPagesOverview.queryOptions(
       {
-        intervalDays: interval.intervalDays,
-        pageId: page.pageId,
+        interval_days: interval.intervalDays,
+        page_id: page.pageId,
       },
       {
-        staleTime: ANALYTICS_STALE_TIME,
+        ...ANALYTICS_CONFIG_REALTIME,
         enabled: page.isSelected,
       }
     ),
     trpc.analytics.getCountryVisits.queryOptions(
       {
-        intervalDays: interval.intervalDays,
+        interval_days: interval.intervalDays,
         page_id: page.pageId,
       },
       {
-        staleTime: ANALYTICS_STALE_TIME,
+        ...ANALYTICS_CONFIG_REALTIME,
         enabled: page.isSelected,
       }
     ),
     trpc.analytics.getBrowserVisits.queryOptions(
       {
-        intervalDays: interval.intervalDays,
+        interval_days: interval.intervalDays,
         page_id: page.pageId,
       },
       {
-        staleTime: ANALYTICS_STALE_TIME,
+        ...ANALYTICS_CONFIG_REALTIME,
         enabled: page.isSelected,
       }
     ),

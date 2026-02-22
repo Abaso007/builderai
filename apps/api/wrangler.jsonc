@@ -12,25 +12,61 @@
     "prod": {
       "observability": {
         "enabled": true,
-        "head_sampling_rate": 1.0 // 100% of requests
+        "head_sampling_rate": 0.1 // 10% of requests
       },
       "route": {
         "pattern": "api.unprice.dev",
         "custom_domain": true
       },
+      "r2_buckets": [
+        {
+          "binding": "LAKEHOUSE",
+          "bucket_name": "unprice-lakehouse-prod"
+        }
+      ],
+      "vars": {
+        "LAKEHOUSE_FILE_PLAN_BASE_URL": "https://lakehouse.unprice.dev"
+      },
       "unsafe": {
         "bindings": [
           {
-            "name": "RL_FREE_600_60s",
+            "name": "RL_FREE_1000_60s",
             "type": "ratelimit",
             "namespace_id": "1001",
             "simple": {
-              "limit": 600,
+              "limit": 1000, // for other important endpoint keep it lower
+              "period": 60
+            }
+          },
+          {
+            "name": "RL_FREE_6000_60s",
+            "type": "ratelimit",
+            "namespace_id": "1002",
+            "simple": {
+              "limit": 6000, // 100 requests per second
               "period": 60
             }
           }
         ]
       },
+      "pipelines": [
+        {
+          "pipeline": "46b501b75391484e84cd3a3b363af0db",
+          "binding": "PIPELINE_VERIFICATIONS"
+        },
+        {
+          "pipeline": "b83ecba6d5d8427a815c4f328d2d4a6a",
+          "binding": "PIPELINE_USAGE"
+        },
+        {
+          "pipeline": "fccba46a55274b9a9208402fc5ab4f6f",
+          "binding": "PIPELINE_METADATA"
+        },
+        {
+          "pipeline": "1eb2c54f16ea4d15becc07a0a85e10d0",
+          "binding": "PIPELINE_ENTITLEMENTS"
+        }
+      ],
       "durable_objects": {
         "bindings": [
           {
@@ -63,22 +99,62 @@
         "pattern": "preview-api.unprice.dev",
         "custom_domain": true
       },
+      "r2_buckets": [
+        {
+          "binding": "LAKEHOUSE",
+          "bucket_name": "unprice-lakehouse-dev"
+        }
+      ],
+      "vars": {
+        "LAKEHOUSE_FILE_PLAN_BASE_URL": "https://lakehouse.unprice.dev"
+      },
       "unsafe": {
         // # Limit: the number of tokens allowed within a given period in a single
         // # Cloudflare location
         // # Period: the duration of the period, in seconds. Must be either 10 or 60
         "bindings": [
           {
-            "name": "RL_FREE_600_60s",
+            "name": "RL_FREE_1000_60s",
             "type": "ratelimit",
             "namespace_id": "1001",
             "simple": {
-              "limit": 600,
+              "limit": 1000,
+              "period": 60
+            }
+          },
+          {
+            "name": "RL_FREE_6000_60s",
+            "type": "ratelimit",
+            "namespace_id": "1002",
+            "simple": {
+              "limit": 6000, // 100 requests per second
               "period": 60
             }
           }
         ]
       },
+      "pipelines": [
+        {
+          "pipeline": "75cfca9093854dd88f4d46e2088f235b",
+          "binding": "PIPELINE_VERIFICATIONS",
+          "remote": true
+        },
+        {
+          "pipeline": "a636dd5b2ca3485aab7de834efccf099",
+          "binding": "PIPELINE_USAGE",
+          "remote": true
+        },
+        {
+          "pipeline": "c0c1af506adb4e0c9394dde8e0c66241",
+          "binding": "PIPELINE_METADATA",
+          "remote": true
+        },
+        {
+          "pipeline": "ac1eb44429dc40f9992d38e5daff6c6c",
+          "binding": "PIPELINE_ENTITLEMENTS",
+          "remote": true
+        }
+      ],
       "durable_objects": {
         "bindings": [
           {
@@ -103,9 +179,15 @@
       ]
     },
     "dev": {
-      "route": {
-        "pattern": "localhost:8787",
-        "custom_domain": false
+      "r2_buckets": [
+        {
+          "binding": "LAKEHOUSE",
+          "bucket_name": "unprice-lakehouse-dev",
+          "remote": true
+        }
+      ],
+      "vars": {
+        "LAKEHOUSE_FILE_PLAN_BASE_URL": "https://lakehouse.unprice.dev"
       },
       "unsafe": {
         // # Limit: the number of tokens allowed within a given period in a single
@@ -113,11 +195,20 @@
         // # Period: the duration of the period, in seconds. Must be either 10 or 60
         "bindings": [
           {
-            "name": "RL_FREE_600_60s",
+            "name": "RL_FREE_1000_60s",
             "type": "ratelimit",
             "namespace_id": "1001",
             "simple": {
-              "limit": 600,
+              "limit": 1000,
+              "period": 60
+            }
+          },
+          {
+            "name": "RL_FREE_6000_60s",
+            "type": "ratelimit",
+            "namespace_id": "1002",
+            "simple": {
+              "limit": 6000, // 100 requests per second
               "period": 60
             }
           }
@@ -135,6 +226,28 @@
           }
         ]
       },
+      "pipelines": [
+        {
+          "pipeline": "75cfca9093854dd88f4d46e2088f235b",
+          "binding": "PIPELINE_VERIFICATIONS",
+          "remote": true
+        },
+        {
+          "pipeline": "a636dd5b2ca3485aab7de834efccf099",
+          "binding": "PIPELINE_USAGE",
+          "remote": true
+        },
+        {
+          "pipeline": "c0c1af506adb4e0c9394dde8e0c66241",
+          "binding": "PIPELINE_METADATA",
+          "remote": true
+        },
+        {
+          "pipeline": "ac1eb44429dc40f9992d38e5daff6c6c",
+          "binding": "PIPELINE_ENTITLEMENTS",
+          "remote": true
+        }
+      ],
       "migrations": [
         {
           "tag": "v1",
@@ -163,14 +276,12 @@
    * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
    */
   // "placement": { "mode": "smart" },
-
   /**
    * Bindings
    * Bindings allow your Worker to interact with resources on the Cloudflare Developer Platform, including
    * databases, object storage, AI inference, real-time communication and more.
    * https://developers.cloudflare.com/workers/runtime-apis/bindings/
    */
-
   /**
    * Environment Variables
    * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
@@ -180,13 +291,11 @@
    * Note: Use secrets to store sensitive data.
    * https://developers.cloudflare.com/workers/configuration/secrets/
    */
-
   /**
    * Static Assets
    * https://developers.cloudflare.com/workers/static-assets/binding/
    */
   // "assets": { "directory": "./public/", "binding": "ASSETS" },
-
   /**
    * Service Bindings (communicate between multiple Workers)
    * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings

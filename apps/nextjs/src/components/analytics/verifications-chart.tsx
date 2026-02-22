@@ -16,7 +16,7 @@ import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { useIntervalFilter } from "~/hooks/use-filter"
 import { useQueryInvalidation } from "~/hooks/use-query-invalidation"
 import { useTRPC } from "~/trpc/client"
-import { ANALYTICS_STALE_TIME } from "~/trpc/shared"
+import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
 
 const chartConfig = {
   verifications: {
@@ -68,10 +68,10 @@ export function VerificationsChart() {
   } = useSuspenseQuery(
     trpc.analytics.getVerifications.queryOptions(
       {
-        intervalDays: intervalFilter.intervalDays,
+        interval_days: intervalFilter.intervalDays,
       },
       {
-        staleTime: ANALYTICS_STALE_TIME,
+        ...ANALYTICS_CONFIG_REALTIME,
       }
     )
   )
@@ -85,7 +85,7 @@ export function VerificationsChart() {
       ["analytics", "getVerifications"],
       {
         input: {
-          intervalDays: param,
+          interval_days: param,
         },
         type: "query",
       },
@@ -97,7 +97,7 @@ export function VerificationsChart() {
   }
 
   const chartData = verifications.verifications.map((v) => ({
-    feature: v.featureSlug,
+    feature: v.feature_slug,
     verifications: v.count,
     p50_latency: v.p50_latency,
     p95_latency: v.p95_latency,

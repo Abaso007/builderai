@@ -27,6 +27,7 @@ export const listByActiveProject = protectedProjectProcedure
           fromDate ? gte(page.createdAtM, fromDate) : undefined,
           toDate ? lte(page.createdAtM, toDate) : undefined
         ),
+      orderBy: (page, { desc }) => [desc(page.createdAtM)],
     })
 
     return {

@@ -33,6 +33,7 @@ export const create = protectedProjectProcedure
       resetConfig,
       type,
       aggregationMethod,
+      unitOfMeasure,
     } = opts.input
     const project = opts.ctx.project
 
@@ -47,9 +48,7 @@ export const create = protectedProjectProcedure
       customerId,
       featureSlug,
       isMain: workspace.isMain,
-      metadata: {
-        action: "create",
-      },
+      action: "create",
     })
 
     if (!result.success) {
@@ -97,6 +96,12 @@ export const create = protectedProjectProcedure
     const billingConfigCreate =
       featureType === "usage" ? billingConfig : planVersionData.billingConfig
 
+    // if the aggregation method is lifetime/accumulated or the billing config name is the same as the reset config name we don't need to store the reset config
+    const resetConfigCreate =
+      aggregationMethod?.endsWith("_all") || billingConfigCreate.name === resetConfig?.name
+        ? null
+        : resetConfig
+
     const planVersionFeatureCreated = await opts.ctx.db
       .insert(schema.planVersionFeatures)
       .values({
@@ -104,6 +109,7 @@ export const create = protectedProjectProcedure
         featureId: featureData.id,
         projectId: project.id,
         planVersionId: planVersionData.id,
+        unitOfMeasure: unitOfMeasure ?? featureData.unitOfMeasure ?? "units",
         // for now we use the same billing config as the plan version
         billingConfig: {
           ...billingConfigCreate,
@@ -115,7 +121,9 @@ export const create = protectedProjectProcedure
         order: order ?? "1024",
         defaultQuantity: defaultQuantity === 0 ? null : defaultQuantity,
         limit: limit === 0 ? null : limit,
-        resetConfig,
+        // by default reset config is the same as the billing config
+        // when null the system will reset given the aggregation method
+        resetConfig: resetConfigCreate,
         type,
         // flat features don't have a meter so we don't need to store the aggregation method
         aggregationMethod: featureType !== "usage" ? "none" : aggregationMethod,
@@ -157,9 +165,7 @@ export const create = protectedProjectProcedure
           featureSlug,
           usage: 1,
           isMain: workspace.isMain,
-          metadata: {
-            action: "create",
-          },
+          action: "create",
         })
       )
     }

@@ -32,10 +32,8 @@ export const duplicate = protectedProjectProcedure
       customerId: workspace.unPriceCustomerId,
       featureSlug: "plans",
       isMain: workspace.isMain,
-      metadata: {
-        action: "duplicate",
-        module: "planVersion",
-      },
+      action: "duplicate",
+      metadata: { module: "planVersion" },
     })
 
     if (!result.success) {
@@ -176,10 +174,8 @@ export const duplicate = protectedProjectProcedure
           featureSlug: "plans",
           usage: 1,
           isMain: workspace.isMain,
-          metadata: {
-            action: "duplicate",
-            module: "planVersion",
-          },
+          action: "duplicate",
+          metadata: { module: "planVersion" },
         })
       )
     }

@@ -1,10 +1,13 @@
 import { createRoute } from "@hono/zod-openapi"
+import { endTime, startTime } from "hono/timing"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 
 import { customerSignUpSchema, signUpResponseSchema } from "@unprice/db/validators"
+import { UnPriceCustomerError } from "@unprice/services/customers"
 import type { z } from "zod"
 import { keyAuth } from "~/auth/key"
+import { UnpriceApiError } from "~/errors/http"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 
@@ -57,41 +60,45 @@ export const registerSignUpV1 = (app: App) =>
       sessionId,
     } = c.req.valid("json")
     const { customer } = c.get("services")
-    const stats = c.get("stats")
 
     // validate the request
     const key = await keyAuth(c)
 
+    startTime(c, "customerSignUp")
+
     // get payment methods from service
-    const result = await customer.signUp({
-      input: {
-        name,
-        timezone,
-        defaultCurrency,
-        email,
-        planVersionId,
-        planSlug,
-        successUrl,
-        cancelUrl,
-        config,
-        externalId,
-        billingInterval,
-        sessionId,
-        metadata: {
-          ...metadata,
-          // analytics
-          colo: stats.colo,
-          country: stats.country,
-          city: stats.city,
-          isEUCountry: stats.isEUCountry,
-          region: stats.region,
-          continent: stats.continent,
+    const result = await customer
+      .signUp({
+        input: {
+          name,
+          timezone,
+          defaultCurrency,
+          email,
+          planVersionId,
+          planSlug,
+          successUrl,
+          cancelUrl,
+          config,
+          externalId,
+          billingInterval,
+          sessionId,
+          metadata: metadata,
         },
-      },
-      projectId: key.projectId,
-    })
+        projectId: key.projectId,
+      })
+      .finally(() => endTime(c, "customerSignUp"))
 
     if (result.err) {
+      if (
+        result.err instanceof UnPriceCustomerError &&
+        result.err.code === "CUSTOMER_EXTERNAL_ID_CONFLICT"
+      ) {
+        throw new UnpriceApiError({
+          code: "CONFLICT",
+          message: result.err.message,
+        })
+      }
+
       throw result.err
     }
 

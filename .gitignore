@@ -93,3 +93,8 @@ tsconfig.tsbuildinfo
 .vitest
 
 mailpit/
+.opencode/
+internal/lakehouse/lakenv/*
+**/__pycache__/**
+**/.venv/**
+.sisyphus

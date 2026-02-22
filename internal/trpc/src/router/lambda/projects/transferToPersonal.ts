@@ -32,9 +32,7 @@ export const transferToPersonal = protectedWorkspaceProcedure
       customerId,
       featureSlug,
       isMain: workspace.isMain,
-      metadata: {
-        action: "transferToPersonal",
-      },
+      action: "transferToPersonal",
     })
 
     if (!result.success) {

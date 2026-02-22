@@ -650,11 +650,11 @@
         }
       }
     },
-    "/v1/customer/can": {
+    "/v1/customer/verify": {
       "post": {
-        "operationId": "customers.can",
-        "summary": "can feature",
-        "description": "Check if a customer can use a feature",
+        "operationId": "customers.verify",
+        "summary": "verify feature",
+        "description": "Verify if a customer can use a feature",
         "tags": ["customer"],
         "requestBody": {
           "description": "Body of the request",
@@ -698,7 +698,7 @@
         },
         "responses": {
           "200": {
-            "description": "The result of the can check",
+            "description": "The result of the verify check",
             "content": {
               "application/json": {
                 "schema": {

@@ -12,7 +12,7 @@ export const create = protectedProjectProcedure
   .input(featureInsertBaseSchema)
   .output(z.object({ feature: featureSelectBaseSchema }))
   .mutation(async (opts) => {
-    const { description, slug, title, unit } = opts.input
+    const { description, slug, title, unitOfMeasure } = opts.input
     const project = opts.ctx.project
 
     // check if the customer has access to the feature
@@ -20,9 +20,7 @@ export const create = protectedProjectProcedure
       customerId: project.workspace.unPriceCustomerId,
       featureSlug: FEATURE_SLUGS.PLANS.SLUG,
       isMain: project.workspace.isMain,
-      metadata: {
-        action: "create",
-      },
+      action: "create",
     })
 
     if (!result.success) {
@@ -41,7 +39,7 @@ export const create = protectedProjectProcedure
         title,
         projectId: project.id,
         description,
-        unit,
+        unitOfMeasure,
       })
       .returning()
       .then((data) => data[0])
@@ -61,18 +59,9 @@ export const create = protectedProjectProcedure
             featureSlug: "plans",
             usage: 1,
             isMain: project.workspace.isMain,
-            metadata: {
-              action: "create",
-              module: "feature",
-            },
+            action: "create",
+            metadata: { module: "feature" },
           }),
-        opts.ctx.analytics.ingestFeatures({
-          id: featureId,
-          project_id: project.id,
-          slug,
-          code: featureData.code,
-          timestamp: new Date().toISOString(),
-        }),
       ])
     )
 

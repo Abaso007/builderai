@@ -32,6 +32,7 @@ describe("GrantsManager", () => {
         slug: featureSlug,
       },
       featureType: "usage" as const,
+      unitOfMeasure: "units",
       aggregationMethod: "sum" as const,
       config: {
         usageMode: "sum",

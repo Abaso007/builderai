@@ -34,6 +34,7 @@ export const update = protectedProjectProcedure
       billingConfig,
       resetConfig,
       type,
+      unitOfMeasure,
     } = opts.input
 
     // we purposely don't allow to update the currency and the payment provider
@@ -52,9 +53,7 @@ export const update = protectedProjectProcedure
       customerId,
       featureSlug,
       isMain: workspace.isMain,
-      metadata: {
-        action: "update",
-      },
+      action: "update",
     })
 
     if (!result.success) {
@@ -87,6 +86,24 @@ export const update = protectedProjectProcedure
     const billingConfigUpdate =
       featureType === "usage" ? billingConfig : planVersionData.billingConfig
 
+    let unitOfMeasureUpdate = unitOfMeasure
+
+    if (unitOfMeasureUpdate === undefined && featureId) {
+      const featureData = await opts.ctx.db.query.features.findFirst({
+        where: (feature, { eq, and }) =>
+          and(eq(feature.id, featureId), eq(feature.projectId, project.id)),
+      })
+
+      if (!featureData?.id) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "feature not found",
+        })
+      }
+
+      unitOfMeasureUpdate = featureData.unitOfMeasure ?? "units"
+    }
+
     const planVersionFeatureUpdated = await opts.ctx.db
       .update(schema.planVersionFeatures)
       .set({
@@ -96,6 +113,7 @@ export const update = protectedProjectProcedure
         ...(config && { config }),
         ...(metadata && { metadata: { ...planVersionData.metadata, ...metadata } }),
         ...(order && { order }),
+        ...(unitOfMeasureUpdate !== undefined && { unitOfMeasure: unitOfMeasureUpdate }),
         ...(defaultQuantity !== undefined && {
           defaultQuantity: defaultQuantity === 0 ? null : defaultQuantity,
         }),

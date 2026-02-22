@@ -16,10 +16,8 @@ export const exist = protectedProjectProcedure
       customerId: project.workspace.unPriceCustomerId,
       featureSlug: FEATURE_SLUGS.PLANS.SLUG,
       isMain: project.workspace.isMain,
-      metadata: {
-        action: "exist",
-        module: "feature",
-      },
+      action: "exist",
+      metadata: { module: "feature" },
     })
 
     if (!result.success) {

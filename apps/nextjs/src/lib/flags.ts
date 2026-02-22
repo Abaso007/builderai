@@ -29,7 +29,9 @@ const identify = dedupe(async (): Promise<UserIdentity> => {
     }
   }
 
-  const { result } = await unprice.customers.getEntitlements(currentWorkspace.unPriceCustomerId)
+  const { result } = await unprice.customers.getEntitlements({
+    customerId: currentWorkspace.unPriceCustomerId,
+  })
 
   if (!result) {
     return {

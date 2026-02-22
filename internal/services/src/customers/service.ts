@@ -13,9 +13,9 @@ import type {
   SubscriptionCache,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import type { Logger, WideEventHelpers } from "@unprice/logging"
 import { env } from "../../env"
-import type { CacheNamespaces, CustomerCache } from "../cache"
+import type { CacheNamespaces, CustomerCache, CustomersProjectCache } from "../cache"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
 import { PaymentProviderService } from "../payment-provider/service"
@@ -33,6 +33,26 @@ type SignUpContext = {
   cancelUrl: string
 }
 
+function isExternalIdConflictError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false
+  }
+
+  const dbError = error as {
+    code?: string
+    constraint?: string
+    message?: string
+  }
+
+  return (
+    dbError.code === "23505" &&
+    (dbError.constraint === "cp_external_id_idx" ||
+      dbError.message?.includes("cp_external_id_idx") ||
+      dbError.message?.includes("external_id") ||
+      false)
+  )
+}
+
 export class CustomerService {
   private readonly db: Database
   private readonly logger: Logger
@@ -41,6 +61,7 @@ export class CustomerService {
   private readonly metrics: Metrics
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
+  private wideEventHelpers?: WideEventHelpers
 
   constructor({
     db,
@@ -49,6 +70,7 @@ export class CustomerService {
     waitUntil,
     cache,
     metrics,
+    wideEventHelpers,
   }: {
     db: Database
     logger: Logger
@@ -57,6 +79,7 @@ export class CustomerService {
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
     metrics: Metrics
+    wideEventHelpers?: WideEventHelpers
   }) {
     this.db = db
     this.logger = logger
@@ -64,6 +87,15 @@ export class CustomerService {
     this.waitUntil = waitUntil
     this.cache = cache
     this.metrics = metrics
+    this.wideEventHelpers = wideEventHelpers
+  }
+
+  /**
+   * Sets the wide event helpers for request-scoped logging context.
+   * This should be called inside the wideEventLogger.runAsync() context.
+   */
+  public setWideEventHelpers(wideEventHelpers?: WideEventHelpers) {
+    this.wideEventHelpers = wideEventHelpers
   }
 
   /**
@@ -141,6 +173,95 @@ export class CustomerService {
    * @param customerId - Customer id
    * @returns Customer data
    */
+  private async getCustomersProjectData(projectId: string): Promise<CustomersProjectCache[]> {
+    const customers = await this.db.query.customers.findMany({
+      columns: {
+        id: true,
+        name: true,
+        email: true,
+        projectId: true,
+        isMain: true,
+      },
+      where: (customer, { eq }) => eq(customer.projectId, projectId),
+    })
+
+    if (!customers) {
+      return []
+    }
+
+    return customers
+  }
+
+  /**
+   * Gets the customer data from the database
+   * @param customerId - Customer id
+   * @param opts - Options
+   * @returns Customer data
+   */
+  public async getCustomersProject(
+    projectId: string,
+    opts?: {
+      skipCache: boolean
+    }
+  ): Promise<Result<CustomersProjectCache[], FetchError | UnPriceCustomerError>> {
+    if (opts?.skipCache) {
+      this.logger.debug("skipping cache for getCustomersProject", {
+        projectId,
+      })
+    }
+
+    const { val, err } = opts?.skipCache
+      ? await wrapResult(
+          this.getCustomersProjectData(projectId),
+          (err) =>
+            new FetchError({
+              message: `unable to query for getCustomersProjectData, ${err.message}`,
+              retry: false,
+            })
+        )
+      : await retry(
+          3,
+          async () =>
+            this.cache.customersProject.swr(projectId, () =>
+              this.getCustomersProjectData(projectId)
+            ),
+          (attempt, err) => {
+            this.logger.warn(
+              "Failed to fetch getCustomersProjectData data from cache, retrying...",
+              {
+                projectId: projectId,
+                attempt,
+                error: err.message,
+              }
+            )
+          }
+        )
+
+    if (err) {
+      this.logger.error("error getting getCustomersProjectData", {
+        error: err.message,
+      })
+
+      return Err(
+        new FetchError({
+          message: `unable to query db for getCustomersProjectData, ${err.message}`,
+          retry: false,
+        })
+      )
+    }
+
+    if (!val) {
+      return Ok([])
+    }
+
+    return Ok(val)
+  }
+
+  /**
+   * Gets the customer data from the database
+   * @param customerId - Customer id
+   * @returns Customer data
+   */
   private async getCustomerData(customerId: string): Promise<CustomerCache | null> {
     const customer = await this.db.query.customers.findFirst({
       with: {
@@ -151,6 +272,29 @@ export class CustomerService {
         },
       },
       where: (customer, { eq }) => eq(customer.id, customerId),
+    })
+
+    if (!customer) {
+      return null
+    }
+
+    return customer
+  }
+
+  private async getCustomerByExternalIdData(
+    projectId: string,
+    externalId: string
+  ): Promise<CustomerCache | null> {
+    const customer = await this.db.query.customers.findFirst({
+      with: {
+        project: {
+          with: {
+            workspace: true,
+          },
+        },
+      },
+      where: (customer, { and, eq }) =>
+        and(eq(customer.projectId, projectId), eq(customer.externalId, externalId)),
     })
 
     if (!customer) {
@@ -216,7 +360,133 @@ export class CustomerService {
       return Ok(null)
     }
 
+    if (val.externalId) {
+      const cacheKey = `${val.projectId}:${val.externalId}`
+      this.waitUntil(this.cache.customerByExternalId.set(cacheKey, val))
+    }
+
     return Ok(val)
+  }
+
+  public async getCustomerByExternalId(
+    projectId: string,
+    externalId: string,
+    opts?: {
+      skipCache: boolean
+    }
+  ): Promise<Result<CustomerCache | null, FetchError | UnPriceCustomerError>> {
+    const cacheKey = `${projectId}:${externalId}`
+
+    if (opts?.skipCache) {
+      this.logger.debug("skipping cache for getCustomerByExternalId", {
+        projectId,
+        externalId,
+      })
+    }
+
+    const { val, err } = opts?.skipCache
+      ? await wrapResult(
+          this.getCustomerByExternalIdData(projectId, externalId),
+          (err) =>
+            new FetchError({
+              message: `unable to query for getCustomerByExternalIdData, ${err.message}`,
+              retry: false,
+            })
+        )
+      : await retry(
+          3,
+          async () =>
+            this.cache.customerByExternalId.swr(cacheKey, () =>
+              this.getCustomerByExternalIdData(projectId, externalId)
+            ),
+          (attempt, err) => {
+            this.logger.warn(
+              "Failed to fetch getCustomerByExternalIdData data from cache, retrying...",
+              {
+                projectId,
+                externalId,
+                attempt,
+                error: err.message,
+              }
+            )
+          }
+        )
+
+    if (err) {
+      this.logger.error("error getting getCustomerByExternalIdData", {
+        error: err.message,
+      })
+
+      return Err(
+        new FetchError({
+          message: `unable to query db for getCustomerByExternalIdData, ${err.message}`,
+          retry: false,
+        })
+      )
+    }
+
+    if (!val) {
+      return Ok(null)
+    }
+
+    this.waitUntil(this.cache.customer.set(val.id, val))
+
+    return Ok(val)
+  }
+
+  public async resolveCustomerId(opts: {
+    projectId: string
+    customerId?: string
+    externalId?: string
+  }): Promise<
+    Result<{ customerId: string; projectId: string }, FetchError | UnPriceCustomerError>
+  > {
+    const { projectId, customerId, externalId } = opts
+
+    if (customerId) {
+      const { err, val } = await this.getCustomer(customerId)
+
+      if (err) {
+        return Err(err)
+      }
+
+      if (!val || val.projectId !== projectId) {
+        return Err(
+          new UnPriceCustomerError({
+            code: "CUSTOMER_NOT_FOUND",
+            message: "Customer not found",
+          })
+        )
+      }
+
+      return Ok({ customerId: val.id, projectId: val.projectId })
+    }
+
+    if (!externalId) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "CUSTOMER_NOT_FOUND",
+          message: "Either customerId or externalId is required",
+        })
+      )
+    }
+
+    const { err, val } = await this.getCustomerByExternalId(projectId, externalId)
+
+    if (err) {
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "CUSTOMER_NOT_FOUND",
+          message: "Customer not found",
+        })
+      )
+    }
+
+    return Ok({ customerId: val.id, projectId: val.projectId })
   }
 
   /**
@@ -466,6 +736,12 @@ export class CustomerService {
       })
 
     if (!config) {
+      this.logger.error("error getting payment provider config", {
+        customerId,
+        projectId,
+        provider,
+      })
+
       return Err(
         new UnPriceCustomerError({
           code: "PAYMENT_PROVIDER_CONFIG_NOT_FOUND",
@@ -481,14 +757,32 @@ export class CustomerService {
       ciphertext: config.key,
     })
 
+    const providerCustomerId = this.getProviderCustomerId(customerData, provider)
+
     const paymentProviderService = new PaymentProviderService({
-      providerCustomerId: customerData?.stripeCustomerId ?? undefined,
+      providerCustomerId: providerCustomerId,
       logger: this.logger,
       paymentProvider: provider,
       token: decryptedKey,
+      wideEventHelpers: this.wideEventHelpers,
     })
 
     return Ok(paymentProviderService)
+  }
+
+  private getProviderCustomerId(
+    customerData: Customer | undefined,
+    provider: PaymentProvider
+  ): string | undefined {
+    if (provider === "stripe") {
+      return customerData?.stripeCustomerId ?? undefined
+    }
+
+    if (provider === "sandbox") {
+      return customerData?.id ?? undefined
+    }
+
+    return customerData?.stripeCustomerId ?? undefined
   }
 
   /**
@@ -652,6 +946,17 @@ export class CustomerService {
       skipCache?: boolean // skip cache to force revalidation
     }
   }): Promise<Result<CustomerPaymentMethod[], FetchError | UnPriceCustomerError>> {
+    const cacheKey = `${projectId}:${customerId}:${provider}`
+
+    if (opts?.skipCache) {
+      this.logger.debug("skipping cache for getPaymentMethods", {
+        customerId,
+        projectId,
+        provider,
+        cacheKey,
+      })
+    }
+
     // first try to get the payment methods from cache, if not found try to get it from DO,
     const { val, err } = opts?.skipCache
       ? await wrapResult(
@@ -676,7 +981,7 @@ export class CustomerService {
       : await retry(
           3,
           async () =>
-            this.cache.customerPaymentMethods.swr(`${customerId}:${provider}`, () =>
+            this.cache.customerPaymentMethods.swr(cacheKey, () =>
               this.getPaymentMethodsData({
                 customerId,
                 provider,
@@ -736,10 +1041,33 @@ export class CustomerService {
     })
 
     if (planResolution.err) {
+      this.wideEventHelpers?.addError(planResolution.err)
       return Err(planResolution.err)
     }
 
     const { planVersion, pageId } = planResolution.val
+
+    if (input.externalId) {
+      const { err: existingCustomerErr, val: existingCustomer } =
+        await this.getCustomerByExternalId(projectId, input.externalId, {
+          skipCache: true,
+        })
+
+      if (existingCustomerErr) {
+        this.wideEventHelpers?.addError(existingCustomerErr)
+        return Err(existingCustomerErr)
+      }
+
+      if (existingCustomer) {
+        return Err(
+          new UnPriceCustomerError({
+            code: "CUSTOMER_EXTERNAL_ID_CONFLICT",
+            message: "External customer id already exists for this project",
+          })
+        )
+      }
+    }
+
     const customerId = newId("customer")
     const successUrl = input.successUrl.replace("{CUSTOMER_ID}", customerId)
 
@@ -754,8 +1082,23 @@ export class CustomerService {
       cancelUrl: input.cancelUrl,
     }
 
+    this.wideEventHelpers?.addCustomer({
+      operation: "sign_up",
+      name: input.name,
+      email: input.email,
+      plan_version_id: planVersion.id,
+      plan_slug: planVersion.plan.slug,
+      success_url: successUrl,
+      cancel_url: input.cancelUrl,
+      session_id: input.sessionId,
+      currency: input.defaultCurrency,
+    })
+
+    // let's skip the payment required flow if the payment provider is sandbox
+    const isSandbox = planVersion.paymentProvider === "sandbox"
+
     // Step 3: Branch Logic
-    if (planVersion.paymentMethodRequired) {
+    if (planVersion.paymentMethodRequired && !isSandbox) {
       return this.handlePaymentRequiredFlow(context)
     }
 
@@ -781,6 +1124,9 @@ export class CustomerService {
     let pageId: string | null = null
 
     if (sessionId) {
+      this.wideEventHelpers?.add("customers.session_id", sessionId)
+      this.wideEventHelpers?.add("customers.currency", defaultCurrency)
+
       // if session id is provided, we need to get the plan version from the session
       // get the session from analytics
       const data = await this.analytics.getPlanClickBySessionId({
@@ -941,6 +1287,10 @@ export class CustomerService {
       )
     }
 
+    this.wideEventHelpers?.add("customers.plan_version_id", planVersion.id)
+    this.wideEventHelpers?.add("customers.plan_slug", planVersion.plan.slug)
+    this.wideEventHelpers?.add("customers.currency", planVersion.currency)
+
     if (planVersion.status !== "published") {
       return Err(
         new UnPriceCustomerError({
@@ -976,12 +1326,12 @@ export class CustomerService {
     }
 
     // validate the currency if provided
+    // TODO: why this is needed?
     if (currency !== planVersion.currency) {
       return Err(
         new UnPriceCustomerError({
           code: "CURRENCY_MISMATCH",
-          message:
-            "Currency mismatch, the project default currency does not match the plan version currency",
+          message: `Currency mismatch, the project default currency does not match the plan version currency: ${currency} !== ${planVersion.currency}`,
         })
       )
     }
@@ -1038,6 +1388,7 @@ export class CustomerService {
       logger: this.logger,
       paymentProvider: paymentProvider,
       token: decryptedKey,
+      wideEventHelpers: this.wideEventHelpers,
     })
 
     // create a session with the data of the customer, the plan version and the success and cancel urls
@@ -1146,9 +1497,11 @@ export class CustomerService {
     >
   > {
     const { input, projectId, planVersion, customerId, pageId, successUrl, cancelUrl } = context
-    const { email, name, config, timezone, metadata } = input
+    const { email, name, config, timezone, metadata, externalId } = input
 
     const currency = input.defaultCurrency ?? planVersion.project.defaultCurrency
+
+    const customerMetadata = externalId ? { ...metadata, externalId } : metadata
 
     try {
       await this.db.transaction(async (trx) => {
@@ -1162,7 +1515,8 @@ export class CustomerService {
             defaultCurrency: currency,
             timezone: timezone ?? planVersion.project.timezone,
             active: true,
-            metadata: metadata,
+            externalId: externalId,
+            metadata: customerMetadata,
           })
           .returning()
           .then((data) => data[0])
@@ -1183,6 +1537,7 @@ export class CustomerService {
           cache: this.cache,
           metrics: this.metrics,
           db: this.db,
+          wideEventHelpers: this.wideEventHelpers,
         })
 
         const { err, val: newSubscription } = await subscriptionService.createSubscription({
@@ -1196,6 +1551,7 @@ export class CustomerService {
         })
 
         if (err) {
+          this.wideEventHelpers?.addError(err)
           this.logger.error("Error creating subscription", {
             error: err.message,
           })
@@ -1204,11 +1560,13 @@ export class CustomerService {
           throw err
         }
 
+        const phaseTimestamp = Date.now()
+
         // create the phase
-        const { err: createPhaseErr } = await subscriptionService.createPhase({
+        const { err: createPhaseErr, val: newPhase } = await subscriptionService.createPhase({
           input: {
             planVersionId: planVersion.id,
-            startAt: Date.now(),
+            startAt: phaseTimestamp,
             config: config,
             paymentMethodRequired: planVersion.paymentMethodRequired,
             customerId: newCustomer.id,
@@ -1216,10 +1574,11 @@ export class CustomerService {
           },
           projectId: projectId,
           db: trx,
-          now: Date.now(),
+          now: phaseTimestamp,
         })
 
         if (createPhaseErr) {
+          this.wideEventHelpers?.addError(createPhaseErr)
           trx.rollback()
 
           return Err(
@@ -1229,6 +1588,11 @@ export class CustomerService {
             })
           )
         }
+
+        // add customer and subscription to the wide event helpers
+        this.wideEventHelpers?.add("customers.customer_id", customerId)
+        this.wideEventHelpers?.add("customers.subscription_id", newSubscription?.id ?? "")
+        this.wideEventHelpers?.add("customers.subscription_phase_id", newPhase?.id ?? "")
 
         return { newCustomer, newSubscription }
       })
@@ -1256,6 +1620,15 @@ export class CustomerService {
         customerId: customerId,
       })
     } catch (error) {
+      if (isExternalIdConflictError(error)) {
+        return Err(
+          new UnPriceCustomerError({
+            code: "CUSTOMER_EXTERNAL_ID_CONFLICT",
+            message: "External customer id already exists for this project",
+          })
+        )
+      }
+
       const err = error as Error
 
       return Ok({

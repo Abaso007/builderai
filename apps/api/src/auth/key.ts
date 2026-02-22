@@ -1,3 +1,4 @@
+import type { ApiKeyExtended } from "@unprice/db/validators"
 import { SchemaError } from "@unprice/error"
 import type { Context } from "hono"
 import { endTime, startTime } from "hono/timing"
@@ -23,26 +24,31 @@ export async function keyAuth(c: Context<HonoEnv>) {
   // start timer
   startTime(c, "verifyApiKey")
 
+  const shouldAvoidRateLimit = c.env.APP_ENV === "development"
+
   // quick off in parallel (reducing p95 latency)
   const [rateLimited, verifyRes] = await Promise.all([
-    apikey.rateLimit({
-      key: authorization,
-      workspaceId: c.get("workspaceId") as string,
-      source: "cloudflare",
-      limiter: c.env.RL_FREE_600_60s,
-    }),
+    !shouldAvoidRateLimit
+      ? apikey.rateLimit({
+          key: authorization,
+          workspaceId: c.get("workspaceId") as string,
+          source: "cloudflare",
+          limiter: c.env.RL_FREE_6000_60s,
+        })
+      : Promise.resolve(false),
     apikey.verifyApiKey({ key: authorization }),
   ])
 
   // end timer
   endTime(c, "verifyApiKey")
 
-  if (!rateLimited) {
+  const { val: key, err } = verifyRes
+
+  // skip for internal and main projects
+  if (rateLimited && !key?.project.isInternal && !key?.project.isMain) {
     wideEventHelpers.addRateLimited(true)
     throw new UnpriceApiError({ code: "RATE_LIMITED", message: "apikey rate limit exceeded" })
   }
-
-  const { val: key, err } = verifyRes
 
   if (err) {
     switch (true) {
@@ -83,9 +89,42 @@ export async function keyAuth(c: Context<HonoEnv>) {
 }
 
 /**
- * Resolves the project ID for a customer.
- * If the customer is the project itself (acting as a customer of the Main Project),
- * it resolves the ID of the project that owns the customer (the Main Project).
+ * Resolves which project ID to use when the request targets a customer.
+ *
+ * Most calls use the API key's project as context, so the project is already known. This
+ * function handles the special case where the **customer being queried is Unprice's own
+ * workspace** (the workspace that holds the Main Project). In that "self-reflection" case,
+ * the customer record is owned by the Main Project, so we must return the Main Project's ID
+ * instead of the default (caller's) project ID.
+ *
+ * @example Visual: normal vs self-reflection
+ *
+ *   NORMAL (third-party customer):
+ *   ┌─────────────┐     customerId = "acme-customer"
+ *   │ API Key     │     (different from this workspace's customer)
+ *   │ Project A   │──────────────────────────────────────► return defaultProjectId (A)
+ *   └─────────────┘
+ *
+ *   SELF-REFLECTION (Unprice querying its own usage):
+ *   ┌─────────────────────────────────────────────────────────────────────────┐
+ *   │ Unprice Workspace (has unPriceCustomerId = "unprice-self")             │
+ *   │                                                                         │
+ *   │   API Key ◄─── same workspace ───► customerId = "unprice-self"          │
+ *   │     │                                        │                          │
+ *   │     │ defaultProjectId                       │ customer record          │
+ *   │     │ (could be any project                  │ is owned by              │
+ *   │     │  in this workspace)                    ▼                          │
+ *   │     │                              ┌──────────────────┐                 │
+ *   │     └─────────────────────────────►│ Main Project     │◄── return this  │
+ *   │                                    │ (owns customer)  │    project ID   │
+ *   │                                    └──────────────────┘                 │
+ *   └─────────────────────────────────────────────────────────────────────────┘
+ *
+ * Resolution order for self-reflection (customerId === workspace's unPriceCustomerId):
+ * 1. Use MAIN_PROJECT_ID from env when set (avoids DB round-trip).
+ * 2. Otherwise load the customer from DB and use its projectId.
+ *
+ * For any other customerId, returns defaultProjectId (the project from the request context).
  */
 export async function resolveContextProjectId(
   c: Context<HonoEnv>,
@@ -97,16 +136,16 @@ export async function resolveContextProjectId(
 
   const unPriceCustomerId = c.get("unPriceCustomerId")
 
-  // If the request is for the customer ID linked to this workspace (self-reflection)
+  // Self-reflection: request is for the customer linked to this workspace (Unprice querying itself).
   if (unPriceCustomerId && customerId === unPriceCustomerId) {
-    // If we have the main project ID configured, use it directly (Zero Latency)
+    // Fast path: use env to avoid DB lookup.
     if (c.env.MAIN_PROJECT_ID) {
       endTime(c, "resolveContextProjectId")
       wideEventHelpers.addBusiness({ project_id: c.env.MAIN_PROJECT_ID })
       return c.env.MAIN_PROJECT_ID
     }
 
-    // Fallback: DB lookup if env var is missing (just in case)
+    // Fallback: resolve Main Project via customer record when env is not set.
     const { customer } = c.get("services")
     const { val } = await customer.getCustomer(customerId)
 
@@ -117,8 +156,34 @@ export async function resolveContextProjectId(
     }
   }
 
+  // Normal case: third-party customer; use the project from the request context.
   wideEventHelpers.addBusiness({ project_id: defaultProjectId })
   endTime(c, "resolveContextProjectId")
 
   return defaultProjectId
+}
+
+export function validateIsAllowedToAccessProject({
+  isMain,
+  key,
+  requestedProjectId,
+}: {
+  isMain: boolean
+  key: ApiKeyExtended
+  requestedProjectId: string
+}) {
+  const projectID = isMain
+    ? requestedProjectId
+      ? requestedProjectId
+      : key.projectId
+    : key.projectId
+
+  if (!isMain && projectID !== key.projectId) {
+    throw new UnpriceApiError({
+      code: "FORBIDDEN",
+      message: "You are not allowed to access this app analytics.",
+    })
+  }
+
+  return projectID
 }

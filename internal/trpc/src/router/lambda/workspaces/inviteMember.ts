@@ -36,9 +36,7 @@ export const inviteMember = protectedWorkspaceProcedure
       customerId: workspace.unPriceCustomerId,
       featureSlug,
       isMain: workspace.isMain,
-      metadata: {
-        action: "inviteMember",
-      },
+      action: "inviteMember",
     })
 
     if (!result.success) {

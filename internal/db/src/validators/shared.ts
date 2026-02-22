@@ -35,7 +35,11 @@ export const typeFeatureSchema = z.enum(FEATURE_TYPES)
 export const billingPeriodStatusSchema = z.enum(BILLING_PERIOD_STATUS)
 export const billingPeriodTypeSchema = z.enum(BILLING_PERIOD_TYPE)
 export const usageModeSchema = z.enum(USAGE_MODES)
-export const aggregationMethodSchema = z.enum(AGGREGATION_METHODS)
+export const aggregationMethodSchema = z
+  .enum(AGGREGATION_METHODS)
+  .describe(
+    "How to aggregate usage events. 'sum' (total values), 'count' (count events), 'max' (highest value), 'last_during_period' (last value during the current cycle period), 'sum_all' (total values ever), 'count_all' (count events ever), 'max_all' (highest value ever)"
+  )
 export const tierModeSchema = z.enum(TIER_MODES)
 export const featureConfigType = z.enum(FEATURE_CONFIG_TYPES)
 export const unitSchema = z.coerce.number().int().min(1)
@@ -95,6 +99,7 @@ export const deniedReasonSchema = z.enum([
   "PHASE_NOT_CREATED",
   "FEATURE_NOT_FOUND_IN_SUBSCRIPTION",
   "CUSTOMER_NOT_FOUND",
+  "CUSTOMER_EXTERNAL_ID_CONFLICT",
   "CUSTOMER_ENTITLEMENTS_NOT_FOUND",
   "FEATURE_TYPE_NOT_SUPPORTED",
   "PROJECT_DISABLED",

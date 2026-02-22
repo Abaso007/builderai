@@ -15,14 +15,7 @@ import type { Currency, PlanVersionFeatureInsert } from "@unprice/db/validators"
 
 import { currencySymbol } from "@unprice/db/utils"
 import { Button } from "@unprice/ui/button"
-import {
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@unprice/ui/form"
+import { FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
 import { Input } from "@unprice/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 import { Tooltip, TooltipArrow, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
@@ -45,12 +38,17 @@ export function QuantityFormField({
         name="defaultQuantity"
         render={({ field }) => (
           <FormItem className="">
-            <FormLabel>Default Quantity</FormLabel>
-            <FormDescription>
-              Default quantity of the feature when the subscription is created.
-            </FormDescription>
-            <div className="font-normal text-xs leading-snug">
-              If the quantity is not provided, it must be set at the time of the subscription.
+            <div className="flex items-center gap-1">
+              <FormLabel>Default Quantity</FormLabel>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="size-3.5 text-muted-foreground" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-[250px]">
+                  Initial quantity assigned when a subscription starts. Leave empty to require
+                  quantity selection during checkout.
+                </TooltipContent>
+              </Tooltip>
             </div>
 
             <div className="flex flex-col items-center space-y-1">
@@ -88,13 +86,17 @@ export function LimitFormField({
         name="limit"
         render={({ field }) => (
           <FormItem className="">
-            <FormLabel>Limit</FormLabel>
-            <FormDescription>
-              Set a limit for the feature when the subscription is created.
-            </FormDescription>
-            <div className="font-normal text-xs leading-snug">
-              If you set a limit, the feature will be disabled when the limit is reached. Otherwise
-              the feature will be unlimited.
+            <div className="flex items-center gap-1">
+              <FormLabel>Usage Limit</FormLabel>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="size-3.5 text-muted-foreground" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-[250px]">
+                  Maximum allowed usage. When reached, access is blocked or overage charges apply.
+                  Leave empty for unlimited usage.
+                </TooltipContent>
+              </Tooltip>
             </div>
 
             <div className="flex flex-col items-center space-y-1">
@@ -132,12 +134,16 @@ export function PriceFormField({
         name="config.price.displayAmount"
         render={({ field }) => (
           <FormItem className="">
-            <FormLabel>Price</FormLabel>
-            <FormDescription>
-              Price of the feature in the selected currency of the plan.
-            </FormDescription>
-            <div className="font-normal text-xs leading-snug">
-              Prices can be set as decimal values. For example, $1.99.
+            <div className="flex items-center gap-1">
+              <FormLabel>Price</FormLabel>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="size-3.5 text-muted-foreground" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-[250px]">
+                  The cost in the plan's currency. Supports decimals (e.g., $1.99).
+                </TooltipContent>
+              </Tooltip>
             </div>
 
             <div className="flex flex-col items-center space-y-1">
@@ -224,8 +230,18 @@ export function ResetConfigFeatureFormField({
         name={"resetConfig.name"}
         render={({ field }) => (
           <FormItem className="flex w-full flex-col">
-            <FormLabel>Reset Config</FormLabel>
-            <FormDescription>How often the feature usage will be reset.</FormDescription>
+            <div className="flex items-center gap-1">
+              <FormLabel>Usage Reset</FormLabel>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="size-3.5 text-muted-foreground" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-[250px]">
+                  When usage counters reset to zero (e.g., monthly, weekly). This controls when
+                  customers get fresh allowances.
+                </TooltipContent>
+              </Tooltip>
+            </div>
             <Select
               onValueChange={(value) => {
                 const config = RESET_CONFIG[value]
@@ -290,11 +306,18 @@ export function BillingConfigFeatureFormField({
         name={"billingConfig.name"}
         render={({ field }) => (
           <FormItem className="flex w-full flex-col">
-            <FormLabel>Billing Interval</FormLabel>
-            <FormDescription>
-              How often the feature will be billed. Can be different from the billing interval of
-              the plan.
-            </FormDescription>
+            <div className="flex items-center gap-1">
+              <FormLabel>Feature Billing</FormLabel>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="size-3.5 text-muted-foreground" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-[250px]">
+                  How often this specific feature is charged. Can differ from the main plan billing
+                  cycle.
+                </TooltipContent>
+              </Tooltip>
+            </div>
             <Select
               onValueChange={(value) => {
                 const config = BILLING_CONFIG[value]
@@ -343,10 +366,18 @@ export function OverageStrategyFormField({
         name="metadata.overageStrategy"
         render={({ field }) => (
           <FormItem className="flex flex-col">
-            <FormLabel>Overage Strategy</FormLabel>
-            <FormDescription>
-              How to handle usage that exceeds the limit. This is ignored if the limit is not set.
-            </FormDescription>
+            <div className="flex items-center gap-1">
+              <FormLabel>Overage Handling</FormLabel>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="size-3.5 text-muted-foreground" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-[250px]">
+                  What happens when usage exceeds the limit: block access, allow with extra charges,
+                  or continue free. Only applies if a limit is set.
+                </TooltipContent>
+              </Tooltip>
+            </div>
             <Select onValueChange={field.onChange} value={field.value ?? ""} disabled={isDisabled}>
               <FormControl className="truncate">
                 <SelectTrigger disabled={isDisabled}>
@@ -383,11 +414,36 @@ export function AggregationMethodFormField({
         name="aggregationMethod"
         render={({ field }) => (
           <FormItem className="flex flex-col">
-            <FormLabel>Aggregation Method</FormLabel>
-            <FormDescription>Charge for metered usage by</FormDescription>
-            <div className="font-normal text-xs leading-snug">
-              Usage based features meters usage over a period of time. Select the aggregation method
-              for the feature.
+            <div className="flex items-center gap-1">
+              <FormLabel>Aggregation Method</FormLabel>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="size-3.5 text-muted-foreground" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-[320px]">
+                  <div className="space-y-2">
+                    <p className="font-medium">How usage is calculated for billing:</p>
+                    <ul className="space-y-1 text-xs">
+                      <li>
+                        <strong>Sum:</strong> Total of all reported values
+                      </li>
+                      <li>
+                        <strong>Count:</strong> Number of usage events
+                      </li>
+                      <li>
+                        <strong>Max:</strong> Highest value in the period
+                      </li>
+                      <li>
+                        <strong>Last:</strong> Most recent reported value
+                      </li>
+                    </ul>
+                    <p className="border-t pt-2 text-xs">
+                      <strong>Period-based:</strong> Resets with each billing cycle.{" "}
+                      <strong>Accumulated:</strong> Tracks lifetime usage across all periods.
+                    </p>
+                  </div>
+                </TooltipContent>
+              </Tooltip>
             </div>
             <Select onValueChange={field.onChange} value={field.value ?? ""} disabled={isDisabled}>
               <FormControl className="truncate">
@@ -430,15 +486,20 @@ export function TierFormField({
 
   return (
     <div className="flex w-full flex-col">
-      <div className="mb-4 flex flex-col">
+      <div className="mb-4 flex items-center gap-2">
         <Typography variant="h4" className="my-auto block">
           Tier Configuration
         </Typography>
-        <div className="font-normal text-xs leading-snug">
-          {form.getValues("featureType") === "usage"
-            ? "Configure the tiers for the feature, the price will be calculated with the reported usage"
-            : "Configure the tiers for the feature, the price will be calculated when the subscription is created."}
-        </div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <HelpCircle className="size-3.5 text-muted-foreground" />
+          </TooltipTrigger>
+          <TooltipContent side="right" className="max-w-[280px]">
+            {form.getValues("featureType") === "usage"
+              ? "Set up pricing tiers based on usage volume. Customers pay different rates as their usage increases."
+              : "Set up pricing tiers based on quantity selected. Different quantities unlock different price points."}
+          </TooltipContent>
+        </Tooltip>
       </div>
 
       {fields.length > 0 ? (
@@ -467,10 +528,10 @@ export function TierFormField({
                           </div>
 
                           <TooltipContent
-                            className="w-32 bg-background-bg font-normal text-xs"
+                            className="w-40 bg-background-bg font-normal text-xs"
                             align="center"
                           >
-                            First unit for the tier range. For the first tier, this should be 0.
+                            Starting unit for this tier. The first tier always starts at 1.
                             <TooltipArrow className="fill-background-bg" />
                           </TooltipContent>
                         </Tooltip>
@@ -507,8 +568,8 @@ export function TierFormField({
                             className="w-48 bg-background-bg font-normal text-xs"
                             align="center"
                           >
-                            If the usage is less than the tier up to value, then the flat price is
-                            charged. For infinite usage, use 9999999.
+                            Ending unit for this tier. Use ∞ (infinity) for the final tier to cover
+                            all remaining usage.
                             <TooltipArrow className="fill-background-bg" />
                           </TooltipContent>
                         </Tooltip>
@@ -542,7 +603,7 @@ export function TierFormField({
                       <FormLabel className={cn(index !== 0 && "sr-only")}>
                         <Tooltip>
                           <div className="flex items-center justify-center gap-2 font-normal text-xs">
-                            Flat price
+                            Flat Fee
                             <span>
                               <TooltipTrigger asChild>
                                 <HelpCircle className="h-4 w-4 font-light" />
@@ -551,10 +612,10 @@ export function TierFormField({
                           </div>
 
                           <TooltipContent
-                            className="w-32 bg-background-bg font-normal text-xs"
+                            className="w-40 bg-background-bg font-normal text-xs"
                             align="center"
                           >
-                            Flat price of the tier, it will be sum to usage price.
+                            Fixed charge added when this tier is reached, on top of per-unit costs.
                             <TooltipArrow className="fill-background-bg" />
                           </TooltipContent>
                         </Tooltip>
@@ -598,7 +659,7 @@ export function TierFormField({
                       <FormLabel className={cn(index !== 0 && "sr-only")}>
                         <Tooltip>
                           <div className="flex items-center justify-center gap-2 font-normal text-xs">
-                            Unit price
+                            Unit Price
                             <span>
                               <TooltipTrigger asChild>
                                 <HelpCircle className="h-4 w-4 font-light" />
@@ -607,10 +668,10 @@ export function TierFormField({
                           </div>
 
                           <TooltipContent
-                            className="w-32 bg-background-bg font-normal text-xs"
+                            className="w-40 bg-background-bg font-normal text-xs"
                             align="center"
                           >
-                            Price per unit
+                            Cost per unit within this tier. Multiplied by quantity used.
                             <TooltipArrow className="fill-background-bg" />
                           </TooltipContent>
                         </Tooltip>

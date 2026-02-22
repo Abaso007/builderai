@@ -20,7 +20,7 @@ import { SuperLink } from "~/components/super-link"
 import { useIntervalFilter, usePageFilter } from "~/hooks/use-filter"
 import { useQueryInvalidation } from "~/hooks/use-query-invalidation"
 import { useTRPC } from "~/trpc/client"
-import { ANALYTICS_STALE_TIME } from "~/trpc/shared"
+import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
 
 const chartConfig = {
   desktop_visits: {
@@ -40,9 +40,11 @@ const chartConfig = {
 export function PageVisitsSkeleton({
   isLoading,
   error,
+  isSelected,
 }: {
   isLoading: boolean
   error?: string
+  isSelected?: boolean
 }) {
   const params = useParams()
   const [intervalFilter] = useIntervalFilter()
@@ -50,6 +52,7 @@ export function PageVisitsSkeleton({
   const workspaceSlug = params.workspaceSlug as string
   const projectSlug = params.projectSlug as string
   const basePath = `/${workspaceSlug}/${projectSlug}`
+  const isPageSelected = isSelected ?? pageFilter.isSelected
 
   return (
     <Card className="py-0">
@@ -84,18 +87,18 @@ export function PageVisitsSkeleton({
           <EmptyPlaceholder.Title>
             {error
               ? "Ups, something went wrong"
-              : !pageFilter.isSelected
+              : !isPageSelected
                 ? "No page selected"
                 : "No data available for this page"}
           </EmptyPlaceholder.Title>
           <EmptyPlaceholder.Description>
             {error
               ? error
-              : !pageFilter.isSelected
+              : !isPageSelected
                 ? "Please select a page to see page views."
                 : `There is no data available for the ${intervalFilter.label}.`}
           </EmptyPlaceholder.Description>
-          {!pageFilter.isSelected && (
+          {!isPageSelected && (
             <EmptyPlaceholder.Action>
               <SuperLink href={`${basePath}/pages`} className="mt-2 w-full">
                 <Button size={"sm"}>Create a page</Button>
@@ -108,10 +111,12 @@ export function PageVisitsSkeleton({
   )
 }
 
-export function PageVisits() {
+export function PageVisits({ pageId }: { pageId?: string } = {}) {
   const trpc = useTRPC()
   const [pageFilter] = usePageFilter()
   const [intervalFilter] = useIntervalFilter()
+  const resolvedPageId = pageId ?? pageFilter.pageId
+  const isSelected = pageId ? true : pageFilter.isSelected
 
   const {
     data: pageVisits,
@@ -121,12 +126,12 @@ export function PageVisits() {
   } = useSuspenseQuery(
     trpc.analytics.getPagesOverview.queryOptions(
       {
-        intervalDays: intervalFilter.intervalDays,
-        pageId: pageFilter.pageId,
+        interval_days: intervalFilter.intervalDays,
+        page_id: resolvedPageId,
       },
       {
-        enabled: pageFilter.isSelected,
-        staleTime: ANALYTICS_STALE_TIME,
+        enabled: isSelected,
+        ...ANALYTICS_CONFIG_REALTIME,
       }
     )
   )
@@ -140,8 +145,8 @@ export function PageVisits() {
       ["analytics", "getPagesOverview"],
       {
         input: {
-          intervalDays: param,
-          pageId: pageFilter.pageId,
+          interval_days: param,
+          page_id: resolvedPageId,
         },
         type: "query",
       },
@@ -158,11 +163,17 @@ export function PageVisits() {
       mobile_visits: chartData.reduce((acc, curr) => acc + curr.mobile_visits, 0),
       other_visits: chartData.reduce((acc, curr) => acc + curr.other_visits, 0),
     }),
-    [intervalFilter.intervalDays, pageFilter.pageId, chartData.length]
+    [intervalFilter.intervalDays, resolvedPageId, chartData.length]
   )
 
   if (isLoadingPageVisits || !chartData || chartData.length === 0) {
-    return <PageVisitsSkeleton isLoading={isLoadingPageVisits} error={pageVisits.error} />
+    return (
+      <PageVisitsSkeleton
+        isLoading={isLoadingPageVisits}
+        error={pageVisits.error}
+        isSelected={isSelected}
+      />
+    )
   }
 
   return (

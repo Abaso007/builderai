@@ -3,9 +3,9 @@ DESCRIPTION >
 
 SCHEMA >
     `date` DateTime,
-    `projectId` String,
-    `customerId` String,
-    `featureSlug` LowCardinality(String),
+    `project_id` String,
+    `customer_id` String,
+    `feature_slug` LowCardinality(String),
     `max` AggregateFunction(max, Decimal64(4)),
     `count` AggregateFunction(count),
     `sum` AggregateFunction(sum, Decimal64(4)),
@@ -14,5 +14,5 @@ SCHEMA >
 
 ENGINE AggregatingMergeTree
 ENGINE_PARTITION_KEY toYYYYMM(date)
-ENGINE_SORTING_KEY (projectId, customerId, featureSlug, date)
+ENGINE_SORTING_KEY (project_id, customer_id, feature_slug, date)
 ENGINE_TTL date + INTERVAL 2 YEAR

@@ -25,11 +25,9 @@ export const roll = protectedProjectProcedure
 
     const result = await featureGuard({
       customerId: project.workspace.unPriceCustomerId,
-      featureSlug,
+      featureSlug: featureSlug,
       isMain: project.workspace.isMain,
-      metadata: {
-        action: "roll",
-      },
+      action: "roll",
     })
 
     if (!result.success) {

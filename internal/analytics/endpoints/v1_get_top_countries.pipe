@@ -21,8 +21,8 @@ SQL >
         {% if defined(page_id) %}
             AND page_id = {{ String(page_id, description="Page ID", required=False) }}
         {% end %}
-        {% if defined(intervalDays) %}
-            AND date >= toStartOfDay(today() - {{ Int32(intervalDays) }})
+        {% if defined(interval_days) %}
+            AND date >= toStartOfDay(today() - {{ Int32(interval_days) }})
         {% else %}
             AND date >= toStartOfDay(today() - 7)
         {% end %}

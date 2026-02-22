@@ -45,6 +45,16 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
     }
   }
 
+  async insertReportUsageDeniedEvent(_record: {
+    project_id: string
+    customer_id: string
+    feature_slug: string
+    timestamp: number
+    denied_reason: string
+  }): Promise<Result<void, UnPriceEntitlementStorageError>> {
+    return Ok(undefined)
+  }
+
   private isInitialized(): Result<void, UnPriceEntitlementStorageError> {
     if (!this.initialized) {
       return Err(new UnPriceEntitlementStorageError({ message: "Not initialized" }))
@@ -175,7 +185,7 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
   ): Promise<Result<boolean, UnPriceEntitlementStorageError>> {
     try {
       this.isInitialized()
-      const exists = this.usageRecords.some((r) => r.idempotenceKey === idempotenceKey)
+      const exists = this.usageRecords.some((r) => r.idempotence_key === idempotenceKey)
       return Ok(exists)
     } catch (error) {
       return Err(
@@ -294,7 +304,7 @@ export class MemoryEntitlementStorageProvider implements UnPriceEntitlementStora
         },
         verification: {
           count: this.verifications.length,
-          lastId: this.verifications[this.verifications.length - 1]?.requestId ?? null,
+          lastId: this.verifications[this.verifications.length - 1]?.request_id ?? null,
         },
       }
 

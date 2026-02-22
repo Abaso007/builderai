@@ -155,6 +155,7 @@ export function SubscriptionPhaseForm({
           isDisabled={editMode}
           planVersions={planVersions?.planVersions ?? []}
           isLoading={isLoading}
+          withFeatureDetails
         />
 
         <div className="mt-8 flex justify-end space-x-4">

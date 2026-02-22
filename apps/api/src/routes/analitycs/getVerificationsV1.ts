@@ -27,12 +27,12 @@ export const route = createRoute({
   request: {
     body: jsonContentRequired(
       z.object({
-        customerId: z.string().optional().openapi({
+        customer_id: z.string().optional().openapi({
           description:
             "The customer ID if you want to get the verifications for a specific customer",
           example: "cus_1H7KQFLr7RepUyQBKdnvY",
         }),
-        projectId: z.string().openapi({
+        project_id: z.string().openapi({
           description:
             "The project ID (optional, if not provided, the project ID will be the one of the key)",
           example: "project_1H7KQFLr7RepUyQBKdnvY",
@@ -66,7 +66,7 @@ export type GetAnalyticsVerificationsResponse = z.infer<
 
 export const registerGetAnalyticsVerificationsV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId, range, projectId } = c.req.valid("json")
+    const { customer_id: customerId, range, project_id: projectId } = c.req.valid("json")
     const { analytics, cache } = c.get("services")
 
     // validate the request
@@ -93,9 +93,9 @@ export const registerGetAnalyticsVerificationsV1 = (app: App) =>
     const { err, val: data } = await cache.getVerifications.swr(cacheKey, async () => {
       const result = analytics
         .getFeaturesVerifications({
-          projectId,
-          intervalDays,
-          customerId,
+          project_id: projectID,
+          interval_days: intervalDays,
+          customer_id: customerId,
         })
         .then((res) => res.data)
 
@@ -111,9 +111,7 @@ export const registerGetAnalyticsVerificationsV1 = (app: App) =>
     endTime(c, "getVerifications")
 
     // send analytics event for the unprice customer
-    c.executionCtx.waitUntil(
-      reportUsageEvents(c, { action: "getVerifications", status: err ? "error" : "success" })
-    )
+    c.executionCtx.waitUntil(reportUsageEvents(c, {}, "get-verifications"))
 
     return c.json(
       {

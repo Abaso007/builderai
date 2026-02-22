@@ -42,9 +42,7 @@ export const deleteProject = protectedProjectProcedure
       customerId,
       featureSlug,
       isMain: workspace.isMain,
-      metadata: {
-        action: "delete",
-      },
+      action: "delete",
     })
 
     if (!result.success) {
@@ -75,9 +73,7 @@ export const deleteProject = protectedProjectProcedure
           featureSlug,
           usage: -1,
           isMain: workspace.isMain,
-          metadata: {
-            action: "remove",
-          },
+          action: "remove",
         })
       )
     }

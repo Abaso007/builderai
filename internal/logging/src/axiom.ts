@@ -1,7 +1,7 @@
 import { Axiom } from "@axiomhq/js"
-import { AxiomJSTransport, Logger as LoggerAxiom } from "@axiomhq/logging"
+import { AxiomJSTransport, EVENT, Logger as LoggerAxiom } from "@axiomhq/logging"
 import { Log, type LogSchema } from "@unprice/logs"
-import type { Fields, Logger } from "./interface"
+import type { Fields, LogType, Logger } from "./interface"
 
 export class AxiomLogger implements Logger {
   private requestId: string
@@ -25,6 +25,8 @@ export class AxiomLogger implements Logger {
       ...opts?.defaultFields,
       service: opts.service,
       environment: opts.environment,
+      "service.name": opts.service,
+      "service.environment": opts.environment,
     }
     this.environment = opts.environment
     this.service = opts.service
@@ -48,6 +50,49 @@ export class AxiomLogger implements Logger {
     })
   }
 
+  private withMetadata(fields?: Fields, defaultLogType: LogType = "normal"): Fields {
+    const enriched: Fields = {
+      ...this.defaultFields,
+      ...fields,
+    }
+
+    if (!enriched["service.name"]) {
+      enriched["service.name"] = this.service
+    }
+    if (!enriched["service.environment"]) {
+      enriched["service.environment"] = this.environment
+    }
+    if (!enriched.service) {
+      enriched.service = this.service
+    }
+    if (!enriched.environment) {
+      enriched.environment = this.environment
+    }
+    if (!enriched["log.type"]) {
+      enriched["log.type"] = defaultLogType
+    }
+
+    return enriched
+  }
+
+  private toTransportArgs(
+    fields?: Fields,
+    defaultLogType: LogType = "normal"
+  ): Record<string | symbol, unknown> {
+    const metadata = this.withMetadata(fields, defaultLogType)
+
+    const root: Record<string, unknown> = {
+      "service.name": metadata["service.name"],
+      "service.environment": metadata["service.environment"],
+      "log.type": metadata["log.type"],
+    }
+
+    return {
+      ...metadata,
+      [EVENT]: root,
+    }
+  }
+
   private marshal(
     level: "debug" | "info" | "warn" | "error" | "fatal",
     message: string,
@@ -59,7 +104,7 @@ export class AxiomLogger implements Logger {
       time: Date.now(),
       level,
       message,
-      context: { ...this.defaultFields, ...fields },
+      context: this.withMetadata(fields),
       environment: this.environment,
       service: this.service,
     }).toString()
@@ -67,47 +112,29 @@ export class AxiomLogger implements Logger {
 
   public emit(level: "debug" | "info" | "warn" | "error", message: string, fields?: Fields): void {
     if (this.logLevel === "off") return
-    this.client[level](message, {
-      ...this.defaultFields,
-      ...fields,
-    })
+    this.client[level](message, this.toTransportArgs(fields))
   }
 
   public debug(message: string, fields?: Fields): void {
     if (this.logLevel !== "debug") return
-    this.client.debug(this.marshal("debug", message, fields), {
-      ...this.defaultFields,
-      ...fields,
-    })
+    this.client.debug(this.marshal("debug", message, fields), this.toTransportArgs(fields))
   }
 
   public info(message: string, fields?: Fields): void {
     if (!["debug", "info"].includes(this.logLevel)) return
-    this.client.info(this.marshal("info", message, fields), {
-      ...this.defaultFields,
-      ...fields,
-    })
+    this.client.info(this.marshal("info", message, fields), this.toTransportArgs(fields))
   }
   public warn(message: string, fields?: Fields): void {
     if (!["debug", "info", "warn"].includes(this.logLevel)) return
-    this.client.warn(this.marshal("warn", message, fields), {
-      ...this.defaultFields,
-      ...fields,
-    })
+    this.client.warn(this.marshal("warn", message, fields), this.toTransportArgs(fields))
   }
   public error(message: string, fields?: Fields): void {
     if (this.logLevel === "off") return
-    this.client.error(this.marshal("error", message, fields), {
-      ...this.defaultFields,
-      ...fields,
-    })
+    this.client.error(this.marshal("error", message, fields), this.toTransportArgs(fields))
   }
   public fatal(message: string, fields?: Fields): void {
     if (this.logLevel === "off") return
-    this.client.error(this.marshal("fatal", message, fields), {
-      ...this.defaultFields,
-      ...fields,
-    })
+    this.client.error(this.marshal("fatal", message, fields), this.toTransportArgs(fields))
   }
 
   public async flush(): Promise<void> {

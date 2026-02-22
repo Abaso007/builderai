@@ -3,7 +3,8 @@
 import { useRouter } from "next/navigation"
 import { useEffect } from "react"
 
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { DOCS_DOMAIN } from "@unprice/config"
 import {
   FEATURE_TYPES,
   FEATURE_TYPES_MAPS,
@@ -19,21 +20,16 @@ import type {
 } from "@unprice/db/validators"
 import { planVersionFeatureInsertBaseSchema } from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@unprice/ui/form"
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
+import { HelpCircle } from "@unprice/ui/icons"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 import { Separator } from "@unprice/ui/separator"
 import { Switch } from "@unprice/ui/switch"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { cn } from "@unprice/ui/utils"
 import { SubmitButton } from "~/components/submit-button"
-import { useActiveFeature, usePlanFeaturesList } from "~/hooks/use-features"
+import { SuperLink } from "~/components/super-link"
+import { useActiveFeature, useIsOnboarding, usePlanFeaturesList } from "~/hooks/use-features"
 import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
@@ -56,8 +52,10 @@ export function FeatureConfigForm({
 }) {
   const router = useRouter()
   const [_planFeatureList, setPlanFeatureList] = usePlanFeaturesList()
+  const [isOnboarding] = useIsOnboarding()
   const [activeFeature] = useActiveFeature()
   const trpc = useTRPC()
+  const queryClient = useQueryClient()
 
   const editMode = !!defaultValues.id
   const isPublished = planVersion?.status === "published"
@@ -137,6 +135,13 @@ export function FeatureConfigForm({
         toastAction("saved")
         setDialogOpen?.(false)
         router.refresh()
+
+        // invalidate only if not onboarding
+        if (!isOnboarding) {
+          void queryClient.invalidateQueries({
+            queryKey: trpc.planVersions.getById.queryKey(),
+          })
+        }
       },
       onError: (error) => {
         console.error(error)
@@ -181,11 +186,24 @@ export function FeatureConfigForm({
           name="metadata.hidden"
           render={({ field }) => (
             <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
-              <div className="space-y-0.5">
-                <FormLabel className="font-semibold text-sm">Hide this feature from UI</FormLabel>
-                <FormDescription className="font-normal text-sm">
-                  When enabled, this feature will not be visible in pricing pages.
-                </FormDescription>
+              <div className="flex items-center gap-2">
+                <FormLabel className="font-semibold text-sm">Hide from Pricing Page</FormLabel>
+                <SuperLink
+                  href={`${DOCS_DOMAIN}/features/plans`}
+                  target="_blank"
+                  className="text-muted-foreground text-xs underline-offset-4 hover:underline"
+                >
+                  Learn more
+                </SuperLink>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <HelpCircle className="size-3.5 text-muted-foreground" />
+                  </TooltipTrigger>
+                  <TooltipContent side="right" className="max-w-[250px]">
+                    When enabled, customers won't see this feature on public pricing pages. Useful
+                    for internal or backend features.
+                  </TooltipContent>
+                </Tooltip>
               </div>
               <FormControl>
                 <Switch
@@ -246,12 +264,17 @@ export function FeatureConfigForm({
         <div className="flex flex-col gap-2">
           <div className="items-center rounded-md border-1">
             <div className="space-y-2">
-              <div className="rounded-md bg-background-bg p-2 text-center font-semibold shadow-sm">
+              <div className="flex items-center justify-center gap-2 rounded-md bg-background-bg p-2 font-semibold shadow-sm">
                 Pricing Model
-              </div>
-              <div className="line-clamp-3 space-y-2 break-all text-justify font-normal text-xs leading-snug">
-                All units price based on final tier reached. Needs a record for Stripe to track
-                customer service usage.
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <HelpCircle className="size-3.5 text-muted-foreground" />
+                  </TooltipTrigger>
+                  <TooltipContent side="right" className="max-w-[280px]">
+                    Choose how this feature is priced: flat fee, usage-based, tiered pricing, or
+                    package bundles.
+                  </TooltipContent>
+                </Tooltip>
               </div>
               <div className="flex flex-col gap-1">
                 <FormField
@@ -389,7 +412,7 @@ export function FeatureConfigForm({
           <UsageFormFields
             form={form}
             currency={planVersion.currency}
-            units={activeFeature?.feature?.unit ?? "units"}
+            units={activeFeature?.unitOfMeasure ?? "units"}
             isDisabled={isPublished}
           />
         )}
@@ -398,7 +421,7 @@ export function FeatureConfigForm({
           <TierFormFields
             form={form}
             currency={planVersion.currency}
-            units={activeFeature?.feature?.unit ?? "units"}
+            units={activeFeature?.unitOfMeasure ?? "units"}
             isDisabled={isPublished}
           />
         )}
