@@ -29,6 +29,11 @@ export function normalizeFileUrl(url: string): string {
 }
 
 export function computeCatalogFingerprint(plan: LakehouseFilePlan): string {
+  const scopedProjects = [
+    ...new Set((plan.projectIds ?? []).map((id) => id.trim()).filter(Boolean)),
+  ]
+    .sort((a, b) => a.localeCompare(b))
+    .join(",")
   const tableFiles = (Object.keys(TABLE_CONFIG) as TableSource[])
     .map((src) => {
       const files = [...(plan.tableFiles[src] ?? [])].map(normalizeFileUrl).sort()
@@ -45,7 +50,9 @@ export function computeCatalogFingerprint(plan: LakehouseFilePlan): string {
       ].join("|")
     : "no-credentials"
 
-  return [plan.targetEnv, plan.interval, credentialFingerprint, tableFiles].join("|")
+  return [plan.targetEnv, plan.interval, scopedProjects, credentialFingerprint, tableFiles].join(
+    "|"
+  )
 }
 
 export function computeExpirationMs(rawExpiration: unknown, ttlSeconds: unknown): number | null {

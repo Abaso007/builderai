@@ -101,6 +101,8 @@ function LakehouseDashboardInner() {
   // ── Store ─────────────────────────────────────────────────────────────────
   const getConnector = useRoomStore((s) => s.db.getConnector)
   const refreshTableSchemas = useRoomStore((s) => s.db.refreshTableSchemas)
+  const addOrUpdateSqlQueryDataSource = useRoomStore((s) => s.room.addOrUpdateSqlQueryDataSource)
+  const removeDataSource = useRoomStore((s) => s.room.removeDataSource)
   const setFilePlan = useRoomStore((s) => s.setFilePlan)
   const tables = useRoomStore((s) => s.db.tables)
 
@@ -131,6 +133,8 @@ function LakehouseDashboardInner() {
     onRefetch: () => void credentialsQuery.refetch(),
     getConnector,
     refreshTableSchemas,
+    addOrUpdateSqlQueryDataSource,
+    removeDataSource,
     setFilePlan,
     onTablesLoaded: handleTablesLoaded,
   })

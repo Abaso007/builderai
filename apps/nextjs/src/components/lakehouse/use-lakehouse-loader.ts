@@ -1,10 +1,5 @@
 import type { DataTable } from "@sqlrooms/duckdb"
 import { useCallback, useRef, useState } from "react"
-import {
-  getExistingTableNames,
-  persistSnapshotCacheState,
-  readSnapshotCacheState,
-} from "./lakehouse-cache-ops"
 import { TABLE_CONFIG, type TableSource } from "./lakehouse-constants"
 import {
   computeCatalogFingerprint,
@@ -21,6 +16,8 @@ interface Options {
   onRefetch: () => void
   getConnector: () => PromiseLike<Connector>
   refreshTableSchemas: () => PromiseLike<DataTable[]>
+  addOrUpdateSqlQueryDataSource: (tableName: string, query: string) => PromiseLike<void>
+  removeDataSource: (tableName: string) => PromiseLike<void>
   setFilePlan: (plan: LakehouseFilePlan | null) => void
   onTablesLoaded: (tables: string[], initialQuery: string) => void
 }
@@ -40,11 +37,23 @@ const isCredentialError = (err: unknown) =>
     err instanceof Error ? err.message : String(err)
   )
 
+function getScopedProjectIds(filePlan: LakehouseFilePlan): string[] {
+  const projectIds = [
+    ...new Set((filePlan.projectIds ?? []).map((id) => id.trim()).filter(Boolean)),
+  ]
+  if (projectIds.length === 0) {
+    throw new Error("Lakehouse file plan did not include any project IDs")
+  }
+  return projectIds.sort((a, b) => a.localeCompare(b))
+}
+
 export function useLakehouseLoader({
   credentialsData,
   onRefetch,
   getConnector,
   refreshTableSchemas,
+  addOrUpdateSqlQueryDataSource,
+  removeDataSource,
   setFilePlan,
   onTablesLoaded,
 }: Options): LakehouseLoaderState {
@@ -57,6 +66,7 @@ export function useLakehouseLoader({
   const catalogFingerprintRef = useRef<string | null>(null)
   const credentialRefreshRetryRef = useRef(false)
   const loadingStepRef = useRef("")
+  const isLoadingRef = useRef(false)
 
   const updateStep = useCallback((step: string) => {
     loadingStepRef.current = step
@@ -65,7 +75,9 @@ export function useLakehouseLoader({
 
   const loadDataIntoDb = useCallback(async () => {
     if (!credentialsData?.result || credentialsData.error) return
+    if (isLoadingRef.current) return
 
+    isLoadingRef.current = true
     setIsLoadingData(true)
     setLoadError(null)
     updateStep("Connecting to local analytics engine")
@@ -89,29 +101,15 @@ export function useLakehouseLoader({
       if (!filePlan.credentials) {
         throw new Error("Missing temporary credentials for non-empty file plan")
       }
+      const scopedProjectIds = getScopedProjectIds(filePlan)
+      const scopedProjectWhere = `project_id IN (${scopedProjectIds
+        .map((id) => `'${escapeSqlString(id)}'`)
+        .join(", ")})`
 
       // ── Fast exit: fingerprint unchanged ────────────────────────────────
       if (catalogFingerprintRef.current === catalogFingerprint) return
 
       const connector = await withTimeout(getConnector(), 20_000, "initializing local DuckDB")
-
-      // ── DuckDB-persisted cache hit ───────────────────────────────────────
-      const cached = await readSnapshotCacheState(connector)
-      if (cached?.catalogFingerprint === catalogFingerprint) {
-        const existing = await getExistingTableNames(connector)
-        const validTables = cached.tables.filter((t) => existing.has(t))
-        if (validTables.length > 0) {
-          updateStep("Refreshing table schemas")
-          await withTimeout(refreshTableSchemas(), 20_000, "refreshing table schemas")
-          catalogFingerprintRef.current = catalogFingerprint
-          credentialRefreshRetryRef.current = false
-          setLoadedTables(validTables)
-          setLoadedFileCount(Math.max(cached.loadedFileCount, validTables.length))
-          onTablesLoaded(validTables, selectInitialQuery(validTables))
-          updateStep("Snapshot synced")
-          return
-        }
-      }
 
       // ── Full load ────────────────────────────────────────────────────────
       const endpointHost = (() => {
@@ -152,28 +150,34 @@ export function useLakehouseLoader({
         return `read_parquet([${paths}], union_by_name = true)`
       }
 
+      const sourceQuery = (source: TableSource, files: string[]) => {
+        const sourceSql = readParquet(files)
+        const baseSelect =
+          source === "verification"
+            ? `SELECT * REPLACE (CAST(denied_reason AS VARCHAR) AS denied_reason) FROM ${sourceSql}`
+            : `SELECT * FROM ${sourceSql}`
+        return `${baseSelect} WHERE ${scopedProjectWhere}`
+      }
+
       const loadSource = async (source: TableSource): Promise<number> => {
         const { tableName, label } = TABLE_CONFIG[source]
         const files = filePlan.tableFiles[source] ?? []
 
         if (files.length === 0) {
+          updateStep(`Clearing ${label}`)
+          await withTimeout(removeDataSource(tableName), 20_000, `clearing ${label}`)
           await withTimeout(
             connector.query(`DROP TABLE IF EXISTS ${tableName}`),
             20_000,
-            `clearing ${label}`
+            `dropping stale ${label} table`
           )
           return 0
         }
 
         updateStep(`Importing ${label} (${files.length} ${files.length === 1 ? "file" : "files"})`)
 
-        const select =
-          source === "verification"
-            ? `SELECT * REPLACE (CAST(denied_reason AS VARCHAR) AS denied_reason) FROM ${readParquet(files)}`
-            : `SELECT * FROM ${readParquet(files)}`
-
         await withTimeout(
-          connector.query(`CREATE OR REPLACE TABLE ${tableName} AS ${select}`),
+          addOrUpdateSqlQueryDataSource(tableName, sourceQuery(source, files)),
           240_000,
           `importing ${label}`
         )
@@ -199,7 +203,6 @@ export function useLakehouseLoader({
       setLoadedTables(tablesLoaded)
       setLoadedFileCount(totalFiles)
       onTablesLoaded(tablesLoaded, selectInitialQuery(tablesLoaded))
-      await persistSnapshotCacheState(connector, catalogFingerprint, tablesLoaded, totalFiles)
       updateStep("Snapshot synced")
     } catch (err) {
       console.error("[useLakehouseLoader]", err)
@@ -214,6 +217,7 @@ export function useLakehouseLoader({
       const message = err instanceof Error ? err.message : "Failed to load data"
       setLoadError(`${prefix}${message}`)
     } finally {
+      isLoadingRef.current = false
       setIsLoadingData(false)
       setLoadingStep("")
     }
@@ -223,6 +227,8 @@ export function useLakehouseLoader({
     onRefetch,
     getConnector,
     refreshTableSchemas,
+    addOrUpdateSqlQueryDataSource,
+    removeDataSource,
     setFilePlan,
     onTablesLoaded,
     updateStep,

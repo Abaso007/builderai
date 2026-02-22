@@ -10,7 +10,6 @@ export const TABLE_CONFIG = {
 
 export type TableSource = keyof typeof TABLE_CONFIG
 
-export const CACHE_STATE_TABLE = "__lakehouse_cache_state"
 export const CREDENTIAL_REFRESH_BUFFER = 60_000
 export const EXPECTED_LAG_MINUTES = "1-5 min"
 
