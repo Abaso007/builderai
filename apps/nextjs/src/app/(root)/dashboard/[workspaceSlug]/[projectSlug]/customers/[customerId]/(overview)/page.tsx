@@ -46,8 +46,7 @@ function buildRealtimeCycleUsageRows(usageData?: CustomerUsageResult | null) {
 
       if (feature.type === "tiered") {
         const tieredMax = feature.tieredDisplay.tiers.find((t) => t.isActive)?.max
-        const limit =
-          typeof tieredMax === "number" && tieredMax > 0 ? tieredMax : null
+        const limit = typeof tieredMax === "number" && tieredMax > 0 ? tieredMax : null
         rows.push({
           featureSlug: feature.id,
           currentUsage: feature.tieredDisplay.currentUsage,

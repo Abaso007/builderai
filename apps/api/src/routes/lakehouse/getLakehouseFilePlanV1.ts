@@ -46,16 +46,19 @@ const workerResponseSchema = z.object({
   table_files: z.record(z.array(z.string())).default({}),
   urls: z.union([z.array(z.string()), z.record(z.array(z.string()))]),
   errors: z.array(z.object({ table: z.string(), error: z.string() })).default([]),
-  credentials: z.object({
-    bucket: z.string(),
-    r2_endpoint: z.string(),
-    access_key_id: z.string(),
-    secret_access_key: z.string(),
-    session_token: z.string(),
-    expiration: z.union([z.string(), z.number()]),
-    ttl_seconds: z.number().int(),
-    prefixes: z.array(z.string()),
-  }),
+  credentials: z
+    .object({
+      bucket: z.string(),
+      r2_endpoint: z.string(),
+      access_key_id: z.string(),
+      secret_access_key: z.string(),
+      session_token: z.string(),
+      expiration: z.union([z.string(), z.number()]),
+      ttl_seconds: z.number().int(),
+      prefixes: z.array(z.string()),
+    })
+    .nullable()
+    .optional(),
 })
 
 const requestSchema = z.object({
@@ -79,16 +82,18 @@ const responseSchema = z.object({
   tableFiles: z.record(z.array(z.string())),
   urls: z.array(z.string()),
   errors: z.array(z.object({ table: z.string(), error: z.string() })),
-  credentials: z.object({
-    bucket: z.string(),
-    r2Endpoint: z.string(),
-    accessKeyId: z.string(),
-    secretAccessKey: z.string(),
-    sessionToken: z.string(),
-    expiration: z.union([z.string(), z.number()]),
-    ttlSeconds: z.number().int(),
-    prefixes: z.array(z.string()),
-  }),
+  credentials: z
+    .object({
+      bucket: z.string(),
+      r2Endpoint: z.string(),
+      accessKeyId: z.string(),
+      secretAccessKey: z.string(),
+      sessionToken: z.string(),
+      expiration: z.union([z.string(), z.number()]),
+      ttlSeconds: z.number().int(),
+      prefixes: z.array(z.string()),
+    })
+    .nullable(),
 })
 
 export const route = createRoute({
@@ -349,16 +354,18 @@ export const registerGetLakehouseFilePlanV1 = (app: App) =>
         tableFiles,
         urls,
         errors: workerResponse.errors,
-        credentials: {
-          bucket: workerResponse.credentials.bucket,
-          r2Endpoint: workerResponse.credentials.r2_endpoint,
-          accessKeyId: workerResponse.credentials.access_key_id,
-          secretAccessKey: workerResponse.credentials.secret_access_key,
-          sessionToken: workerResponse.credentials.session_token,
-          expiration: workerResponse.credentials.expiration,
-          ttlSeconds: workerResponse.credentials.ttl_seconds,
-          prefixes: workerResponse.credentials.prefixes,
-        },
+        credentials: workerResponse.credentials
+          ? {
+              bucket: workerResponse.credentials.bucket,
+              r2Endpoint: workerResponse.credentials.r2_endpoint,
+              accessKeyId: workerResponse.credentials.access_key_id,
+              secretAccessKey: workerResponse.credentials.secret_access_key,
+              sessionToken: workerResponse.credentials.session_token,
+              expiration: workerResponse.credentials.expiration,
+              ttlSeconds: workerResponse.credentials.ttl_seconds,
+              prefixes: workerResponse.credentials.prefixes,
+            }
+          : null,
       },
       HttpStatusCodes.OK
     )

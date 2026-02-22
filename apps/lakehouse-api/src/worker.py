@@ -320,13 +320,20 @@ def _build_lakehouse_files_response(
     all_prefixes = _dedupe(all_prefixes)
 
     if not urls:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "message": "No matching files were found for the requested filters",
-                "errors": errors,
+        return {
+            "project_ids": payload.project_ids,
+            "customer_ids": payload.customer_ids,
+            "interval": payload.interval,
+            "interval_days": interval_days,
+            "window": {
+                "start": _utc_iso(start_dt),
+                "end": _utc_iso(end_dt),
             },
-        )
+            "credentials": None,
+            "table_files": table_files,
+            "urls": [],
+            "errors": errors,
+        }
 
     previous_urls = _normalize_urls(previous_response.get("urls") if previous_response else None)
     current_urls = _normalize_urls(urls)
@@ -334,7 +341,7 @@ def _build_lakehouse_files_response(
     urls_changed = previous_urls != current_urls
     should_issue_credentials = urls_changed or _credentials_expired(previous_credentials)
 
-    credentials_payload: dict[str, Any]
+    credentials_payload: dict[str, Any] | None
     if should_issue_credentials:
         try:
             credentials = _issue_temp_credentials(

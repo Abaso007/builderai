@@ -32,7 +32,10 @@ export const getLakehouseFilePlan = protectedProjectProcedure
     })
 
     if (result.error) {
-      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: result.error.message })
+      throw new TRPCError({
+        code: result.error.code === "FETCH_ERROR" ? "INTERNAL_SERVER_ERROR" : result.error.code,
+        message: result.error.message,
+      })
     }
 
     return result

@@ -27,6 +27,7 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
   return createEnv({
     shared: {
       NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+      APP_ENV: z.enum(["development", "preview", "production"]).default("development"),
     },
     server: {
       AUTH_SECRET: z.string(),

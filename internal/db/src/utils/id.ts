@@ -6,7 +6,6 @@ const b58 = baseX(ALPHABET)
 // this simulates uuid v7 and generated ids sortable by timestamp and url safe base58 encoded
 export const prefixes = {
   workspace: "ws",
-  ingestion: "ing",
   request: "req",
   project: "proj",
   user: "usr",

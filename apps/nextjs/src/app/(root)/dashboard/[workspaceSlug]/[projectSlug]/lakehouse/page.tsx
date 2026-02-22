@@ -1,5 +1,5 @@
 import { IntervalFilter } from "~/components/analytics/interval-filter"
-import { LakehouseDashboardSqlrooms } from "~/components/lakehouse/lakehouse-dashboard-sqlrooms"
+import { LakehouseDashboardSqlrooms } from "~/components/lakehouse/lakehouse-dashboard"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 

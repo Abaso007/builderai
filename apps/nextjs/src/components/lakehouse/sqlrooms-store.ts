@@ -5,31 +5,9 @@ import {
   createRoomStore,
 } from "@sqlrooms/room-shell"
 import { type SqlEditorSliceState, createSqlEditorSlice } from "@sqlrooms/sql-editor"
+import type { RouterOutputs } from "#routes"
 
-export type LakehouseFilePlan = {
-  projectIds: string[]
-  customerIds: string[]
-  interval: "1d" | "7d" | "30d" | "90d"
-  intervalDays: number
-  targetEnv: "non_prod" | "prod"
-  window: {
-    start: string
-    end: string
-  }
-  tableFiles: Record<string, string[]>
-  urls: string[]
-  errors: Array<{ table: string; error: string }>
-  credentials: {
-    bucket: string
-    r2Endpoint: string
-    accessKeyId: string
-    secretAccessKey: string
-    sessionToken: string
-    expiration: string | number
-    ttlSeconds: number
-    prefixes: string[]
-  }
-}
+export type LakehouseFilePlan = RouterOutputs["analytics"]["getLakehouseFilePlan"]["result"]
 
 export type LakehouseDataSliceState = {
   filePlan: LakehouseFilePlan | null
