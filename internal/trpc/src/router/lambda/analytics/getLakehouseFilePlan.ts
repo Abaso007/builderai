@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server"
 import { z } from "zod"
+import { env } from "#env"
 import { protectedProjectProcedure } from "#trpc"
 import { unprice } from "#utils/unprice"
 
@@ -18,7 +19,6 @@ export const getLakehouseFilePlan = protectedProjectProcedure
       interval: frontendIntervalSchema.optional(),
       customerId: z.string().optional(),
       tables: z.array(filePlanTableSchema).optional(),
-      targetEnv: z.enum(["non_prod", "prod"]).default("non_prod").optional(),
     })
   )
   .query(async ({ input, ctx }) => {
@@ -28,7 +28,7 @@ export const getLakehouseFilePlan = protectedProjectProcedure
       customerId: input.customerId,
       tables: input.tables,
       interval: toFilePlanInterval(input.interval),
-      targetEnv: input.targetEnv ?? "non_prod",
+      targetEnv: env.APP_ENV === "production" ? "prod" : "non_prod",
     })
 
     if (result.error) {
