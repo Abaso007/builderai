@@ -485,13 +485,13 @@ export function FeaturesStats() {
           )}
         />
         <CardHeader className="pb-2">
-          <CardTitle>Overview Intelligence</CardTitle>
+          <CardTitle>Overview Activity</CardTitle>
           <CardDescription>
             Unified view of usage reported, verifications, and latency for the{" "}
             {intervalFilter.label}.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4 pt-4 pb-6">
+        <CardContent className="space-y-8 p-6">
           <div className="grid gap-3 md:grid-cols-3">
             <Card className="border-muted/60">
               <CardContent className="px-4 py-3">
@@ -703,7 +703,7 @@ export function FeaturesStats() {
                 </EmptyPlaceholder.Description>
               </EmptyPlaceholder>
             ) : (
-              <div className="overflow-hidden rounded-md border border-border/60">
+              <div className="m-3 overflow-hidden rounded-md border border-border/60 border-dashed">
                 <ScrollArea
                   className="h-[360px] w-full px-3 py-3 sm:h-[460px] sm:px-4 lg:h-[560px] [&_[data-radix-scroll-area-scrollbar]]:hidden [&_[data-radix-scroll-area-viewport]]:overflow-x-hidden"
                   hideScrollBar

@@ -27,7 +27,6 @@ import {
   AlertCircle,
   ArrowDownToLine,
   Database,
-  History,
   Loader2,
   Play,
   RefreshCw,
@@ -68,12 +67,12 @@ const verificationTrendChartConfig = {
 
 const CREDENTIAL_REFRESH_BUFFER_MS = 60_000
 const EXPECTED_LAG_MINUTES = "5-10 min"
+const CACHE_STATE_TABLE = "__lakehouse_cache_state"
 const QUICK_QUERY_KEYS: PredefinedLakehouseQueryKey[] = [
   "allUsage",
   "usageByFeature",
   "verificationByFeature",
   "verificationWithMetadata",
-  "verificationRaw",
   "metadataRaw",
   "usageByTagKey",
 ]
@@ -195,14 +194,36 @@ function LakehouseDashboardInner() {
 
       const filePlan = credentialsResult.result as LakehouseFilePlan
       setFilePlan(filePlan)
+
+      const normalizeFileUrlForFingerprint = (fileUrl: string) => {
+        try {
+          const parsed = new URL(fileUrl)
+          return `${parsed.host}${parsed.pathname}`
+        } catch {
+          return fileUrl.split("?")[0] ?? fileUrl
+        }
+      }
+
+      const tableFileFingerprint = (Object.keys(TABLE_CONFIG) as TableSource[])
+        .map((source) => {
+          const normalizedFiles = [...(filePlan.tableFiles[source] ?? [])]
+            .map(normalizeFileUrlForFingerprint)
+            .sort()
+          return `${source}:${normalizedFiles.join(",")}`
+        })
+        .join("|")
+
       const expireToken = filePlan.credentials.expiration ?? ""
+      const credentialFingerprint = [
+        filePlan.credentials.accessKeyId,
+        filePlan.credentials.sessionToken,
+        String(expireToken),
+      ].join("|")
       const catalogFingerprint = [
         filePlan.targetEnv,
         filePlan.interval,
-        filePlan.credentials.r2Endpoint,
-        filePlan.credentials.accessKeyId,
-        String(expireToken),
-        String(filePlan.urls.length),
+        credentialFingerprint,
+        tableFileFingerprint,
       ].join("|")
 
       if (
@@ -218,6 +239,155 @@ function LakehouseDashboardInner() {
       const connector = await withTimeout(getConnector(), 20_000, "initializing local DuckDB")
 
       const escapeSqlString = (value: string) => value.replaceAll("'", "''")
+      const rowArrayFromResult = (result: unknown): Array<Record<string, unknown>> => {
+        return (result as { toArray?: () => Array<Record<string, unknown>> })?.toArray?.() ?? []
+      }
+
+      const applySnapshotSelection = (tablesLoaded: string[]) => {
+        if (tablesLoaded.includes("usage")) {
+          const initialQuery = tablesLoaded.includes("metadata")
+            ? PREDEFINED_LAKEHOUSE_QUERIES.allUsage.query
+            : PREDEFINED_LAKEHOUSE_QUERIES.usageByFeature.query
+          setSqlQuery(initialQuery)
+          return
+        }
+
+        if (tablesLoaded.includes("verifications")) {
+          setSqlQuery(PREDEFINED_LAKEHOUSE_QUERIES.verificationByFeature.query)
+          return
+        }
+
+        if (tablesLoaded.includes("metadata")) {
+          setSqlQuery(PREDEFINED_LAKEHOUSE_QUERIES.metadataRaw.query)
+          return
+        }
+
+        if (tablesLoaded.includes("entitlement_snapshots")) {
+          setSqlQuery(PREDEFINED_LAKEHOUSE_QUERIES.entitlementSnapshotsRaw.query)
+          return
+        }
+
+        setSqlQuery("")
+      }
+
+      const applySnapshotState = (tablesLoaded: string[], totalFiles: number) => {
+        loadedCatalogFingerprintRef.current = catalogFingerprint
+        credentialRefreshRetryRef.current = false
+        setLoadedFileCount(totalFiles)
+        setLoadedTables(tablesLoaded)
+        applySnapshotSelection(tablesLoaded)
+      }
+
+      const ensureCacheStateTable = async () => {
+        await withTimeout(
+          connector.query(`CREATE TABLE IF NOT EXISTS ${CACHE_STATE_TABLE} (
+  state_key VARCHAR PRIMARY KEY,
+  catalog_fingerprint VARCHAR,
+  tables_json VARCHAR,
+  loaded_file_count BIGINT,
+  updated_at TIMESTAMP
+)`),
+          20_000,
+          "preparing snapshot cache state"
+        )
+      }
+
+      const readSnapshotCacheState = async () => {
+        await ensureCacheStateTable()
+        const result = await withTimeout(
+          connector.query(`SELECT
+  catalog_fingerprint,
+  tables_json,
+  loaded_file_count
+FROM ${CACHE_STATE_TABLE}
+WHERE state_key = 'latest'
+LIMIT 1`),
+          20_000,
+          "reading snapshot cache state"
+        )
+        const row = rowArrayFromResult(result)[0]
+        if (!row || typeof row.catalog_fingerprint !== "string") {
+          return null
+        }
+
+        const parsedTables = (() => {
+          if (typeof row.tables_json !== "string") return []
+          try {
+            const parsed = JSON.parse(row.tables_json)
+            return Array.isArray(parsed)
+              ? parsed.filter((value): value is string => typeof value === "string")
+              : []
+          } catch {
+            return []
+          }
+        })()
+
+        return {
+          catalogFingerprint: row.catalog_fingerprint,
+          tables: parsedTables,
+          loadedFileCount: Number(row.loaded_file_count ?? 0),
+        }
+      }
+
+      const getExistingTableNames = async () => {
+        const result = await withTimeout(
+          connector.query(`SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = current_schema()`),
+          20_000,
+          "checking cached tables"
+        )
+
+        return new Set(
+          rowArrayFromResult(result)
+            .map((row) => String(row.table_name ?? ""))
+            .filter(Boolean)
+        )
+      }
+
+      const persistSnapshotCacheState = async (tablesLoaded: string[], totalFiles: number) => {
+        await ensureCacheStateTable()
+        await withTimeout(
+          connector.query(`DELETE FROM ${CACHE_STATE_TABLE} WHERE state_key = 'latest'`),
+          20_000,
+          "resetting snapshot cache state"
+        )
+        await withTimeout(
+          connector.query(`INSERT INTO ${CACHE_STATE_TABLE} (
+  state_key,
+  catalog_fingerprint,
+  tables_json,
+  loaded_file_count,
+  updated_at
+) VALUES (
+  'latest',
+  '${escapeSqlString(catalogFingerprint)}',
+  '${escapeSqlString(JSON.stringify(tablesLoaded))}',
+  ${totalFiles},
+  current_timestamp
+)`),
+          20_000,
+          "saving snapshot cache state"
+        )
+      }
+
+      const cachedState = await readSnapshotCacheState()
+      if (cachedState?.catalogFingerprint === catalogFingerprint) {
+        const existingTableNames = await getExistingTableNames()
+        const cachedTables = cachedState.tables.filter((table) => existingTableNames.has(table))
+        if (cachedTables.length > 0) {
+          updateLoadingStep("Using cached lakehouse snapshot")
+          updateLoadingStep("Refreshing table schemas")
+          await withTimeout(refreshTableSchemas(), 20_000, "refreshing table schemas")
+          applySnapshotState(
+            cachedTables,
+            Math.max(cachedState.loadedFileCount, cachedTables.length)
+          )
+          updateLoadingStep("Snapshot synced")
+          return
+        }
+      }
+
       const endpointHost = (() => {
         try {
           return new URL(filePlan.credentials.r2Endpoint).host
@@ -238,13 +408,6 @@ function LakehouseDashboardInner() {
       }
 
       await withTimeout(connector.query("LOAD httpfs"), 20_000, "loading DuckDB httpfs extension")
-
-      for (const source of Object.keys(TABLE_CONFIG) as TableSource[]) {
-        const config = TABLE_CONFIG[source]
-        try {
-          await connector.query(`DROP TABLE IF EXISTS ${config.tableName}`)
-        } catch {}
-      }
 
       updateLoadingStep("Applying temporary lakehouse credentials")
       await withTimeout(
@@ -269,7 +432,13 @@ function LakehouseDashboardInner() {
       const loadTableFromSource = async (source: TableSource) => {
         const config = TABLE_CONFIG[source]
         const tableFiles = filePlan.tableFiles[source] ?? []
+
         if (tableFiles.length === 0) {
+          await withTimeout(
+            connector.query(`DROP TABLE IF EXISTS ${config.tableName}`),
+            20_000,
+            `clearing ${config.label.toLowerCase()}`
+          )
           return 0
         }
 
@@ -284,7 +453,7 @@ FROM ${parquetSource}`
             : `SELECT * FROM ${parquetSource}`
 
         await withTimeout(
-          connector.query(`CREATE TABLE ${config.tableName} AS ${sourceSelect}`),
+          connector.query(`CREATE OR REPLACE TABLE ${config.tableName} AS ${sourceSelect}`),
           240_000,
           `importing ${config.label.toLowerCase()}`
         )
@@ -294,27 +463,25 @@ FROM ${parquetSource}`
       const tablesLoaded: string[] = []
       let totalFiles = 0
 
-      const usageFiles = await loadTableFromSource("usage").catch(() => 0)
+      const usageFiles = await loadTableFromSource("usage")
       if (usageFiles > 0) {
         tablesLoaded.push("usage")
         totalFiles += usageFiles
       }
 
-      const verificationFiles = await loadTableFromSource("verification").catch(() => 0)
+      const verificationFiles = await loadTableFromSource("verification")
       if (verificationFiles > 0) {
         tablesLoaded.push("verifications")
         totalFiles += verificationFiles
       }
 
-      const metadataFiles = await loadTableFromSource("metadata").catch(() => 0)
+      const metadataFiles = await loadTableFromSource("metadata")
       if (metadataFiles > 0) {
         tablesLoaded.push("metadata")
         totalFiles += metadataFiles
       }
 
-      const entitlementSnapshotFiles = await loadTableFromSource("entitlement_snapshot").catch(
-        () => 0
-      )
+      const entitlementSnapshotFiles = await loadTableFromSource("entitlement_snapshot")
       if (entitlementSnapshotFiles > 0) {
         tablesLoaded.push("entitlement_snapshots")
         totalFiles += entitlementSnapshotFiles
@@ -322,27 +489,9 @@ FROM ${parquetSource}`
 
       updateLoadingStep("Refreshing table schemas")
       await withTimeout(refreshTableSchemas(), 20_000, "refreshing table schemas")
-      loadedCatalogFingerprintRef.current = catalogFingerprint
-      credentialRefreshRetryRef.current = false
-      setLoadedFileCount(totalFiles)
-      setLoadedTables(tablesLoaded)
+      applySnapshotState(tablesLoaded, totalFiles)
+      await persistSnapshotCacheState(tablesLoaded, totalFiles)
       updateLoadingStep("Snapshot synced")
-
-      // Pre-select a relevant query based on available tables
-      if (tablesLoaded.includes("usage")) {
-        const initialQuery = tablesLoaded.includes("metadata")
-          ? PREDEFINED_LAKEHOUSE_QUERIES.allUsage.query
-          : PREDEFINED_LAKEHOUSE_QUERIES.usageByFeature.query
-        setSqlQuery(initialQuery)
-      } else if (tablesLoaded.includes("verifications")) {
-        setSqlQuery(PREDEFINED_LAKEHOUSE_QUERIES.verificationByFeature.query)
-      } else if (tablesLoaded.includes("metadata")) {
-        setSqlQuery(PREDEFINED_LAKEHOUSE_QUERIES.metadataRaw.query)
-      } else if (tablesLoaded.includes("entitlement_snapshots")) {
-        setSqlQuery(PREDEFINED_LAKEHOUSE_QUERIES.entitlementSnapshotsRaw.query)
-      } else {
-        setSqlQuery("")
-      }
     } catch (err) {
       console.error("[LakehouseDashboardSqlrooms] Load error:", err)
 
@@ -877,11 +1026,8 @@ ORDER BY minute`
         className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
       >
         <div className="flex flex-col gap-2">
-          <h3 className="font-semibold text-lg tracking-tight">Lakehouse Snapshot</h3>
-          <p className="text-muted-foreground text-sm">
-            Historical analytics synced from the data lake. Expected lag: {EXPECTED_LAG_MINUTES}.
-          </p>
           <div className="flex flex-wrap items-center gap-2">
+            <h3 className="font-semibold text-lg tracking-tight">Lakehouse Snapshot</h3>
             <div className="flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs shadow-sm">
               <span className="relative flex h-2 w-2">
                 {snapshotStatus.pulse && (
@@ -905,6 +1051,10 @@ ORDER BY minute`
               Last sync {lastSyncedLabel}
             </Badge>
           </div>
+
+          <p className="text-muted-foreground text-sm">
+            Historical analytics synced from the data lake. Expected lag: {EXPECTED_LAG_MINUTES}.
+          </p>
         </div>
         <Button
           variant="outline"
@@ -1246,11 +1396,6 @@ ORDER BY minute`
                     <ArrowDownToLine className="mr-2 h-4 w-4" />
                     Download CSV
                   </Button>
-
-                  <Badge variant="outline" className="font-normal text-xs">
-                    <History className="mr-1 h-3 w-3" />
-                    Snapshot lag {EXPECTED_LAG_MINUTES}
-                  </Badge>
 
                   {manualQueryError && (
                     <p className="text-destructive text-sm">Query error: {manualQueryError}</p>

@@ -227,7 +227,7 @@ ORDER BY avg_latency DESC`,
   GROUP BY 1, 2, 3
 ),
 joined AS (
-  SELECT u.id, m.payload
+  SELECT u.id, TRY_CAST(m.payload AS JSON) AS payload_json
   FROM usage u
   LEFT JOIN metadata_dedup m
     ON CAST(u.meta_id AS VARCHAR) = m.meta_id
@@ -236,12 +236,14 @@ joined AS (
   WHERE u.deleted = 0 AND m.payload IS NOT NULL
 ),
 tags AS (
-  SELECT unnest(json_keys(payload)) AS tag
+  SELECT unnest(json_keys(payload_json)) AS tag
   FROM joined
+  WHERE payload_json IS NOT NULL
 )
 SELECT tag, COUNT(*) AS events
 FROM tags
-WHERE tag NOT IN ('cost', 'rate', 'rate_amount', 'rate_currency', 'rate_unit_size', 'usage', 'remaining')
+WHERE tag IS NOT NULL
+  AND tag NOT IN ('cost', 'rate', 'rate_amount', 'rate_currency', 'rate_unit_size', 'usage', 'remaining')
 GROUP BY tag
 ORDER BY events DESC`,
   },

@@ -38,6 +38,7 @@ export type LakehouseDataSliceState = {
 
 const duckDbConnector = createWasmDuckDbConnector({
   allowUnsignedExtensions: true,
+  path: ":memory:",
 })
 
 /**

@@ -71,7 +71,7 @@ export default async function DashboardOverview(props: {
         <IntervalFilter className="ml-auto" />
       </div>
       <HydrateClient>
-        <div className="min-h-[170px]">
+        <div className="min-h-[150px]">
           <Suspense fallback={<OverviewStatsSkeleton isLoading={true} />}>
             <OverviewStats />
           </Suspense>

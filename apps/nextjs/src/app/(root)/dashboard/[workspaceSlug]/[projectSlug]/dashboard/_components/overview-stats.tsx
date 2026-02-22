@@ -23,7 +23,7 @@ export const OverviewStatsSkeleton = ({ isLoading }: { isLoading?: boolean }) =>
   ]
 
   return (
-    <div className="min-h-[170px]">
+    <div className="min-h-[150px]">
       <StatsSkeleton stats={skeletonStats} isLoading={isLoading} />
     </div>
   )
@@ -59,7 +59,7 @@ const OverviewStats = () => {
   })
 
   return (
-    <div className="relative min-h-[170px]">
+    <div className="relative min-h-[150px]">
       <div
         className={cn(
           "pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/55 to-transparent transition-opacity duration-300",

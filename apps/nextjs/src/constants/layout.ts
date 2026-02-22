@@ -6,24 +6,34 @@ export const navItems = [
     href: `${BASE_URL}/manifesto`,
     title: "Manifesto",
     isMarketing: true,
+    isDashboard: false,
   },
   {
     href: "https://unprice.userjot.com/",
     title: "Feedback",
     target: "_blank",
     isMarketing: false,
+    isDashboard: true,
   },
   {
     href: `${DOCS_DOMAIN}`,
     title: "Docs",
     isMarketing: true,
+    isDashboard: true,
   },
   {
     href: `${PRICING_DOMAIN}/`,
     title: "Pricing",
     isMarketing: true,
+    isDashboard: false,
   },
-] satisfies { href: string; title: string; target?: string; isMarketing?: boolean }[]
+] satisfies {
+  href: string
+  title: string
+  target?: string
+  isMarketing?: boolean
+  isDashboard?: boolean
+}[]
 
 export const siteConfig: SiteConfig = {
   name: "unprice",
