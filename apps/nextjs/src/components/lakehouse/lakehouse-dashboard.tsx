@@ -1,17 +1,20 @@
 "use client"
 
-import { DataTableArrowPaginated } from "@sqlrooms/data-table"
+import { DataTablePaginated } from "@sqlrooms/data-table"
 import { useSql } from "@sqlrooms/duckdb"
 import { RoomShell } from "@sqlrooms/room-shell"
 import { useQuery } from "@tanstack/react-query"
+import { type PaginationState, createColumnHelper } from "@tanstack/react-table"
 import { PREDEFINED_LAKEHOUSE_QUERIES, type PredefinedLakehouseQueryKey } from "@unprice/lakehouse"
 import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@unprice/ui/chart"
+import { Popover, PopoverContent, PopoverTrigger } from "@unprice/ui/popover"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { cn } from "@unprice/ui/utils"
+import type { Table as ArrowTable } from "apache-arrow"
 import { motion } from "framer-motion"
 import {
   Activity,
@@ -80,6 +83,170 @@ function getRequiredTables(query: string): RequiredTable[] {
   if (/\bmetadata\b/.test(q)) required.push("metadata")
   if (/\bentitlement_snapshots\b/.test(q)) required.push("entitlement_snapshots")
   return required
+}
+
+const columnHelper = createColumnHelper<Record<string, unknown>>()
+const PREVIEW_CHAR_LIMIT = 140
+const JSON_RESULT_COLUMNS = new Set(["metadata_payload", "payload"])
+
+function safeJsonStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+function tryParseJson(value: string): unknown | null {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
+}
+
+function parsePayloadValue(value: unknown): { full: string; parsedJson: boolean } {
+  if (value === null || value === undefined) {
+    return { full: "NULL", parsedJson: false }
+  }
+
+  if (typeof value === "object") {
+    return { full: safeJsonStringify(value), parsedJson: true }
+  }
+
+  if (typeof value !== "string") {
+    return { full: String(value), parsedJson: false }
+  }
+
+  const firstParse = tryParseJson(value.trim())
+  if (firstParse === null) {
+    return { full: value, parsedJson: false }
+  }
+
+  if (typeof firstParse === "string") {
+    const secondParse = tryParseJson(firstParse.trim())
+    if (secondParse !== null && typeof secondParse === "object") {
+      return { full: safeJsonStringify(secondParse), parsedJson: true }
+    }
+    return { full: firstParse, parsedJson: false }
+  }
+
+  if (typeof firstParse === "object") {
+    return { full: safeJsonStringify(firstParse), parsedJson: true }
+  }
+
+  return { full: String(firstParse), parsedJson: false }
+}
+
+function compactPreview(value: string, limit = PREVIEW_CHAR_LIMIT): string {
+  const compact = value.replace(/\s+/g, " ").trim()
+  if (compact.length <= limit) return compact
+  return `${compact.slice(0, limit)}...`
+}
+
+function PayloadCell({
+  columnName,
+  value,
+}: {
+  columnName: string
+  value: unknown
+}) {
+  const { full, parsedJson } = useMemo(() => parsePayloadValue(value), [value])
+  const preview = useMemo(() => compactPreview(full), [full])
+  const shouldExpand = full.length > PREVIEW_CHAR_LIMIT || full.includes("\n")
+
+  if (!shouldExpand) {
+    return <span className="font-mono text-xs">{full}</span>
+  }
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="max-w-[460px] cursor-pointer truncate text-left font-mono text-primary text-xs hover:underline"
+        >
+          {preview || "(empty)"}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[min(85vw,760px)] max-w-none p-3">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <p className="text-muted-foreground text-xs">
+            {columnName}
+            {parsedJson ? " (parsed JSON)" : ""}
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void navigator.clipboard.writeText(full)}
+          >
+            Copy
+          </Button>
+        </div>
+        <div className="max-h-[360px] overflow-auto rounded border bg-muted/20 p-2">
+          <pre className="whitespace-pre-wrap break-all font-mono text-xs leading-5">{full}</pre>
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function ArrowQueryResultsTable({
+  table,
+  pageSize = 50,
+}: {
+  table: ArrowTable
+  pageSize?: number
+}) {
+  const [pagination, setPagination] = useState<PaginationState | undefined>(
+    table.numRows > pageSize ? { pageIndex: 0, pageSize } : undefined
+  )
+
+  useEffect(() => {
+    setPagination(table.numRows > pageSize ? { pageIndex: 0, pageSize } : undefined)
+  }, [table, pageSize])
+
+  const pagedTable = useMemo(() => {
+    if (!pagination) return table
+    const start = pagination.pageIndex * pagination.pageSize
+    return table.slice(start, start + pagination.pageSize)
+  }, [table, pagination])
+
+  const tableData = useMemo(() => ({ length: pagedTable.numRows }), [pagedTable])
+
+  const columns = useMemo(
+    () =>
+      pagedTable.schema.fields.map((field) =>
+        columnHelper.accessor((_row, rowIndex) => pagedTable.getChild(field.name)?.get(rowIndex), {
+          header: field.name,
+          cell: (info) => {
+            const value = info.getValue()
+            if (JSON_RESULT_COLUMNS.has(field.name)) {
+              return <PayloadCell columnName={field.name} value={value} />
+            }
+            if (value === null || value === undefined) return "NULL"
+            return String(value)
+          },
+          meta: {
+            type: String(field.type),
+            isNumeric: false,
+          },
+        })
+      ),
+    [pagedTable]
+  )
+
+  return (
+    <DataTablePaginated
+      data={tableData}
+      columns={columns}
+      numRows={table.numRows}
+      pagination={pagination}
+      onPaginationChange={setPagination}
+      fontSize="text-xs"
+      className="h-full min-w-full"
+    />
+  )
 }
 
 // ─── Inner dashboard (needs store context from RoomShell) ─────────────────────
@@ -771,12 +938,8 @@ function LakehouseDashboardInner() {
                   <Skeleton className="h-10 w-full" />
                 </div>
               ) : queryResult?.arrowTable ? (
-                <div className="max-h-[500px] w-full overflow-auto">
-                  <DataTableArrowPaginated
-                    table={queryResult.arrowTable}
-                    pageSize={50}
-                    className="min-w-full"
-                  />
+                <div className="h-[500px] w-full">
+                  <ArrowQueryResultsTable table={queryResult.arrowTable} pageSize={50} />
                 </div>
               ) : (
                 <p className="p-6 text-muted-foreground text-sm">Execute a query to see results</p>
