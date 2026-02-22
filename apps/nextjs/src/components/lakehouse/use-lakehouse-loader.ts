@@ -129,6 +129,7 @@ export function useLakehouseLoader({
         console.warn("[useLakehouseLoader] INSTALL httpfs skipped:", e)
       }
       await withTimeout(connector.query("LOAD httpfs"), 20_000, "loading httpfs")
+      await withTimeout(connector.query("SET enable_object_cache = true;"), 20_000, "setting cache")
 
       updateStep("Applying temporary lakehouse credentials")
       const { accessKeyId, secretAccessKey, sessionToken } = filePlan.credentials
