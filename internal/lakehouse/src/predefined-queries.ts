@@ -25,6 +25,40 @@ const entitlementSnapshotsRawQuery = buildInlineLakehouseQuery({
   limit: 200,
 })
 
+const verificationRawQuery = buildInlineLakehouseQuery({
+  from: { table: "verifications" },
+  select: [
+    { column: "id" },
+    { column: "customer_id" },
+    { column: "feature_slug" },
+    { column: "allowed" },
+    { column: "denied_reason" },
+    { column: "latency" },
+    { column: "timestamp" },
+  ],
+  orderBy: [{ column: { column: "timestamp" }, direction: "desc" }],
+  limit: 500,
+})
+
+const verificationWithMetadataQuery = `WITH metadata_dedup AS (
+  SELECT
+    CAST(id AS VARCHAR) AS meta_id,
+    project_id,
+    customer_id,
+    MIN(payload) AS payload
+  FROM metadata
+  GROUP BY 1, 2, 3
+)
+SELECT
+  v.*,
+  CAST(m.payload AS VARCHAR) AS metadata_payload
+FROM verifications v
+LEFT JOIN metadata_dedup m
+  ON CAST(v.meta_id AS VARCHAR) = m.meta_id
+  AND v.project_id = m.project_id
+  AND v.customer_id = m.customer_id
+LIMIT 500`
+
 const usageWithEntitlementContextQuery = buildInlineLakehouseQuery({
   from: { table: "usage", alias: "u" },
   select: [
@@ -74,7 +108,7 @@ const usageWithEntitlementContextQuery = buildInlineLakehouseQuery({
 
 export const PREDEFINED_LAKEHOUSE_QUERIES = {
   allUsage: {
-    label: "Usage (raw + tags)",
+    label: "Usage (raw + metadata)",
     description: "All usage events with metadata tags",
     query: `WITH metadata_dedup AS (
   SELECT
@@ -87,7 +121,7 @@ export const PREDEFINED_LAKEHOUSE_QUERIES = {
 )
 SELECT
   u.*,
-  m.payload as metadata_tags
+  CAST(m.payload AS VARCHAR) AS metadata_payload
 FROM usage u
 LEFT JOIN metadata_dedup m
   ON CAST(u.meta_id AS VARCHAR) = m.meta_id
@@ -215,6 +249,16 @@ ORDER BY events DESC`,
     label: "Metadata (raw)",
     description: "Raw metadata records with tags",
     query: metadataRawQuery,
+  },
+  verificationRaw: {
+    label: "Verification (raw)",
+    description: "Raw verification events",
+    query: verificationRawQuery,
+  },
+  verificationWithMetadata: {
+    label: "Verification + Metadata",
+    description: "Verification events joined with metadata payload",
+    query: verificationWithMetadataQuery,
   },
   entitlementSnapshotsRaw: {
     label: "Entitlement Snapshots (raw)",

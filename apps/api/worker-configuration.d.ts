@@ -7,7 +7,7 @@ declare namespace Cloudflare {
 	}
 	interface ProdEnv {
 		LAKEHOUSE: R2Bucket;
-		LAKEHOUSE_FILE_PLAN_BASE_URL: "https://unprice-lakehouse-api.fly.dev";
+		LAKEHOUSE_FILE_PLAN_BASE_URL: "https://lakehouse.unprice.dev";
 		TINYBIRD_TOKEN: string;
 		TINYBIRD_URL: string;
 		CLOUDFLARE_ZONE_ID: string;
@@ -41,7 +41,7 @@ declare namespace Cloudflare {
 	}
 	interface PreviewEnv {
 		LAKEHOUSE: R2Bucket;
-		LAKEHOUSE_FILE_PLAN_BASE_URL: "https://unprice-lakehouse-api.fly.dev";
+		LAKEHOUSE_FILE_PLAN_BASE_URL: "https://lakehouse.unprice.dev";
 		TINYBIRD_TOKEN: string;
 		TINYBIRD_URL: string;
 		CLOUDFLARE_ZONE_ID: string;
@@ -75,7 +75,7 @@ declare namespace Cloudflare {
 	}
 	interface DevEnv {
 		LAKEHOUSE: R2Bucket;
-		LAKEHOUSE_FILE_PLAN_BASE_URL: "https://unprice-lakehouse-api.fly.dev";
+		LAKEHOUSE_FILE_PLAN_BASE_URL: "https://lakehouse.unprice.dev";
 		TINYBIRD_TOKEN: string;
 		TINYBIRD_URL: string;
 		CLOUDFLARE_ZONE_ID: string;
@@ -131,7 +131,7 @@ declare namespace Cloudflare {
 		UNPRICE_API_KEY: string;
 		UNPRICE_API_URL: string;
 		LAKEHOUSE?: R2Bucket;
-		LAKEHOUSE_FILE_PLAN_BASE_URL?: "https://unprice-lakehouse-api.fly.dev";
+		LAKEHOUSE_FILE_PLAN_BASE_URL: "https://lakehouse.unprice.dev";
 		usagelimit?: DurableObjectNamespace<import("./src/index").DurableObjectUsagelimiter>;
 		projectdo?: DurableObjectNamespace<import("./src/index").DurableObjectProject>;
 		RL_FREE_1000_60s?: RateLimit;

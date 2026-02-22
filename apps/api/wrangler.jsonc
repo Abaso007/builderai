@@ -25,7 +25,7 @@
         }
       ],
       "vars": {
-        "LAKEHOUSE_FILE_PLAN_BASE_URL": "https://unprice-lakehouse-api.fly.dev"
+        "LAKEHOUSE_FILE_PLAN_BASE_URL": "https://lakehouse.unprice.dev"
       },
       "unsafe": {
         "bindings": [
@@ -106,7 +106,7 @@
         }
       ],
       "vars": {
-        "LAKEHOUSE_FILE_PLAN_BASE_URL": "https://unprice-lakehouse-api.fly.dev"
+        "LAKEHOUSE_FILE_PLAN_BASE_URL": "https://lakehouse.unprice.dev"
       },
       "unsafe": {
         // # Limit: the number of tokens allowed within a given period in a single
@@ -187,7 +187,7 @@
         }
       ],
       "vars": {
-        "LAKEHOUSE_FILE_PLAN_BASE_URL": "https://unprice-lakehouse-api.fly.dev"
+        "LAKEHOUSE_FILE_PLAN_BASE_URL": "https://lakehouse.unprice.dev"
       },
       "unsafe": {
         // # Limit: the number of tokens allowed within a given period in a single
