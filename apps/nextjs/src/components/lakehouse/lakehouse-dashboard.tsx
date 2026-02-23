@@ -6,13 +6,13 @@ import { RoomShell } from "@sqlrooms/room-shell"
 import { useQuery } from "@tanstack/react-query"
 import { type PaginationState, createColumnHelper } from "@tanstack/react-table"
 import { PREDEFINED_LAKEHOUSE_QUERIES, type PredefinedLakehouseQueryKey } from "@unprice/lakehouse"
-import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@unprice/ui/chart"
 import { Popover, PopoverContent, PopoverTrigger } from "@unprice/ui/popover"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 import { Skeleton } from "@unprice/ui/skeleton"
+import { Typography } from "@unprice/ui/typography"
 import { cn } from "@unprice/ui/utils"
 import type { Table as ArrowTable } from "apache-arrow"
 import { motion } from "framer-motion"
@@ -33,13 +33,15 @@ import { NumberTicker } from "~/components/analytics/number-ticker"
 import { useIntervalFilter } from "~/hooks/use-filter"
 import { useMounted } from "~/hooks/use-mounted"
 import { useTRPC } from "~/trpc/client"
+import { IntervalFilter } from "../analytics/interval-filter"
 import {
+  type LakehouseTrendBucket,
   QUICK_QUERY_KEYS,
   SECTION_MOTION,
   SNAPSHOT_STATUS,
+  type SnapshotStatusConfig,
   USAGE_TREND_CHART_CONFIG,
   VERIFICATION_TREND_CHART_CONFIG,
-  type LakehouseTrendBucket,
 } from "./lakehouse-constants"
 import { downloadArrowTableAsCsv } from "./lakehouse-utils"
 import { roomStore, useRoomStore } from "./sqlrooms-store"
@@ -252,6 +254,37 @@ function ArrowQueryResultsTable({
       fontSize="text-xs"
       className="h-full min-w-full"
     />
+  )
+}
+
+function HeaderDashboard({ snapshotStatus }: { snapshotStatus: SnapshotStatusConfig }) {
+  return (
+    <div className="flex w-full flex-col gap-2">
+      <div className="flex w-full flex-wrap items-center gap-2">
+        <Typography variant="h3">Analytics Console</Typography>
+        <div className="flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs shadow-sm">
+          <span className="relative flex h-2 w-2">
+            {snapshotStatus.pulse && (
+              <span
+                className={cn(
+                  "absolute inline-flex h-full w-full animate-ping rounded-full",
+                  snapshotStatus.pulseTone
+                )}
+              />
+            )}
+            <span
+              className={cn("relative inline-flex h-2 w-2 rounded-full", snapshotStatus.dotTone)}
+            />
+          </span>
+          <span className={cn("font-medium", snapshotStatus.tone)}>{snapshotStatus.label}</span>
+        </div>
+        <IntervalFilter className="ml-auto" />
+      </div>
+      <Typography variant="normal" className="hidden text-background-solidHover md:flex">
+        Explore your data with SQL. Historical analytics synced from the data lake. Sync can take a
+        few minutes to reflect current usage.
+      </Typography>
+    </div>
   )
 }
 
@@ -500,14 +533,6 @@ function LakehouseDashboardInner() {
     return SNAPSHOT_STATUS.ready
   }, [error, isLoading, tableReady])
 
-  const lastSyncedLabel = useMemo(
-    () =>
-      credentialsQuery.dataUpdatedAt
-        ? new Date(credentialsQuery.dataUpdatedAt).toLocaleString()
-        : "—",
-    [credentialsQuery.dataUpdatedAt]
-  )
-
   // ── Download CSV ──────────────────────────────────────────────────────────
   const downloadTable = useCallback(() => {
     if (queryResult?.arrowTable) downloadArrowTableAsCsv(queryResult.arrowTable)
@@ -524,35 +549,7 @@ function LakehouseDashboardInner() {
         {...SECTION_MOTION}
         className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
       >
-        <div className="flex flex-col gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="font-semibold text-lg tracking-tight">Lakehouse Snapshot</h3>
-
-            <div className="flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs shadow-sm">
-              <span className="relative flex h-2 w-2">
-                {snapshotStatus.pulse && (
-                  <span
-                    className={cn(
-                      "absolute inline-flex h-full w-full animate-ping rounded-full",
-                      snapshotStatus.pulseTone
-                    )}
-                  />
-                )}
-                <span
-                  className={cn(
-                    "relative inline-flex h-2 w-2 rounded-full",
-                    snapshotStatus.dotTone
-                  )}
-                />
-              </span>
-              <span className={cn("font-medium", snapshotStatus.tone)}>{snapshotStatus.label}</span>
-            </div>
-
-            <Badge variant="ghost" className="font-mono text-[10px] text-background-solidHover">
-              Last sync {lastSyncedLabel}
-            </Badge>
-          </div>
-        </div>
+        <HeaderDashboard snapshotStatus={snapshotStatus} />
       </motion.div>
 
       {/* ── Error banner ─────────────────────────────────────────────────── */}
@@ -571,7 +568,9 @@ function LakehouseDashboardInner() {
           <CardContent className="flex items-center gap-3 py-8">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             <div>
-              <p className="font-medium">Syncing lakehouse snapshot...</p>
+              <p className="font-medium">
+                Syncing lakehouse snapshot, this can take some minutes...
+              </p>
               <p className="text-muted-foreground text-sm">
                 {credentialsQuery.isLoading
                   ? "Fetching file plan from the lakehouse service."
@@ -768,7 +767,9 @@ function LakehouseDashboardInner() {
               <Card className="border-muted/60">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base">Verification Outcomes</CardTitle>
-                  <CardDescription>Allowed versus denied checks by selected time bucket</CardDescription>
+                  <CardDescription>
+                    Allowed versus denied checks by selected time bucket
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="h-56">
                   {hasVerification ? (
@@ -968,12 +969,7 @@ export function LakehouseDashboardSqlrooms() {
   if (!mounted) {
     return (
       <div className="w-full min-w-0 space-y-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="font-semibold text-2xl tracking-tight">Lakehouse SQL Explorer</h2>
-            <p className="text-muted-foreground text-sm">Loading...</p>
-          </div>
-        </div>
+        <HeaderDashboard snapshotStatus={SNAPSHOT_STATUS.loading} />
         <Card className="w-full">
           <CardContent className="flex items-center gap-3 py-8">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />

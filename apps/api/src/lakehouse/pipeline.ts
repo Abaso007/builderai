@@ -402,7 +402,7 @@ export class LakehousePipelineService implements LakehouseService {
         return cursorValue > params.cursorState.lastR2VerificationId
       })
 
-      this.logger.info("Lakehouse flush input filtering complete", {
+      this.logger.debug("Lakehouse flush input filtering complete", {
         cursor_lastR2UsageId: params.cursorState.lastR2UsageId,
         cursor_lastR2VerificationId: params.cursorState.lastR2VerificationId,
         input_usage_records: params.usageRecords.length,
@@ -435,7 +435,7 @@ export class LakehousePipelineService implements LakehouseService {
         ),
       }
 
-      this.logger.info("Lakehouse source batches prepared", {
+      this.logger.debug("Lakehouse source batches prepared", {
         usage_count: sourceBatches.usage.length,
         verification_count: sourceBatches.verification.length,
         metadata_count: sourceBatches.metadata.length,
@@ -548,20 +548,8 @@ export class LakehousePipelineService implements LakehouseService {
 
     const chunks = chunkRecords(records, this.batchSize)
 
-    this.logger.info("Sending lakehouse records in chunks", {
-      source,
-      total: records.length,
-      chunks: chunks.length,
-    })
-
     const sender = this.sourceSenders[source]
     for (const chunk of chunks) {
-      this.logger.info("Sending lakehouse chunk", {
-        source,
-        chunk_size: chunk.length,
-        chunk_preview: chunk.length > 0 ? JSON.stringify(chunk[0]) : undefined,
-      })
-
       try {
         // Log the actual data being sent for debugging
         this.logger.debug("About to send chunk to pipeline", {
