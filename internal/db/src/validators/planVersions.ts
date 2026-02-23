@@ -57,7 +57,7 @@ export const insertBillingConfigSchema = billingConfigSchema
 
     // onetime plans default to day of creation
     if (data.planType === "onetime") {
-      data.billingAnchor = 0
+      data.billingAnchor = "dayOfCreation"
     }
 
     return true
