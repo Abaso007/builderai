@@ -73,18 +73,6 @@ const USAGE_SCHEMA_VERSION = getLakehouseSourceCurrentVersion("usage")
 const VERIFICATION_SCHEMA_VERSION = getLakehouseSourceCurrentVersion("verification")
 const METADATA_SCHEMA_VERSION = getLakehouseSourceCurrentVersion("metadata")
 
-function chunkRecords<T>(records: T[], chunkSize: number): T[][] {
-  if (records.length === 0) {
-    return []
-  }
-
-  const chunks: T[][] = []
-  for (let i = 0; i < records.length; i += chunkSize) {
-    chunks.push(records.slice(i, i + chunkSize))
-  }
-  return chunks
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
 }
@@ -363,16 +351,16 @@ class LakehousePipelineSender {
 
 export class LakehousePipelineService implements LakehouseService {
   private readonly sourceSenders: Record<IndexedSource, LakehousePipelineSender>
-  private readonly batchSize: number
   private readonly logger: Logger
+  private readonly sendRetryMaxAttempts = 3
+  private readonly sendRetryBaseDelayMs = 250
+  private readonly sendRetryMaxDelayMs = 2_000
 
   constructor(params: {
     logger: Logger
     pipelines: LakehousePipelines
-    batchSize?: number
   }) {
     this.logger = params.logger
-    this.batchSize = Math.max(1, params.batchSize ?? 500)
 
     this.sourceSenders = {
       usage: new LakehousePipelineSender(params.pipelines.usage),
@@ -444,7 +432,7 @@ export class LakehousePipelineService implements LakehouseService {
 
       await Promise.all(
         (Object.keys(sourceBatches) as IndexedSource[]).map((source) =>
-          this.sendInChunks(source, sourceBatches[source])
+          this.sendSourceRecords(source, sourceBatches[source])
         )
       )
 
@@ -541,42 +529,66 @@ export class LakehousePipelineService implements LakehouseService {
     return accepted
   }
 
-  private async sendInChunks(source: IndexedSource, records: unknown[]): Promise<void> {
+  private async sendSourceRecords(source: IndexedSource, records: unknown[]): Promise<void> {
     if (records.length === 0) {
       return
     }
 
-    const chunks = chunkRecords(records, this.batchSize)
-
     const sender = this.sourceSenders[source]
-    for (const chunk of chunks) {
+    for (let attempt = 1; attempt <= this.sendRetryMaxAttempts; attempt++) {
       try {
-        // Log the actual data being sent for debugging
-        this.logger.debug("About to send chunk to pipeline", {
+        this.logger.debug("Sending lakehouse source records", {
           source,
-          chunk_size: chunk.length,
-          first_record_sample: chunk.length > 0 ? JSON.stringify(chunk[0]) : undefined,
-          binding_type: typeof sender,
+          records_count: records.length,
+          attempt,
+          max_attempts: this.sendRetryMaxAttempts,
         })
 
-        await sender.send(chunk)
+        await sender.send(records)
 
-        this.logger.info("Lakehouse chunk sent successfully", {
+        this.logger.info("Lakehouse source sent successfully", {
           source,
-          chunk_size: chunk.length,
+          records_count: records.length,
+          attempts_used: attempt,
         })
+        return
       } catch (error) {
-        this.logger.error("Failed to send lakehouse chunk", {
+        const isLastAttempt = attempt === this.sendRetryMaxAttempts
+
+        if (isLastAttempt) {
+          this.logger.error("Failed to send lakehouse source after retries", {
+            source,
+            records_count: records.length,
+            attempts: attempt,
+            error: error instanceof Error ? error.message : "unknown",
+            error_stack: error instanceof Error ? error.stack : undefined,
+            error_name: error instanceof Error ? error.name : undefined,
+            error_cause: error instanceof Error && error.cause ? String(error.cause) : undefined,
+          })
+          throw error
+        }
+
+        const retryDelayMs = this.getRetryDelayMs(attempt)
+        this.logger.warn("Retrying lakehouse source send", {
           source,
-          chunk_size: chunk.length,
+          records_count: records.length,
+          attempts: attempt,
+          next_attempt: attempt + 1,
+          retry_delay_ms: retryDelayMs,
           error: error instanceof Error ? error.message : "unknown",
-          error_stack: error instanceof Error ? error.stack : undefined,
-          error_name: error instanceof Error ? error.name : undefined,
-          error_cause: error instanceof Error && error.cause ? String(error.cause) : undefined,
-          first_record_sample: chunk.length > 0 ? JSON.stringify(chunk[0]) : undefined,
         })
-        throw error
+        await this.sleep(retryDelayMs)
       }
     }
+  }
+
+  private getRetryDelayMs(attempt: number): number {
+    const exponentialDelay = this.sendRetryBaseDelayMs * 2 ** (attempt - 1)
+    const jitterMs = Math.floor(Math.random() * 100)
+    return Math.min(exponentialDelay + jitterMs, this.sendRetryMaxDelayMs)
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms))
   }
 }

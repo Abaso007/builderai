@@ -951,15 +951,6 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     entitlementSnapshots: LakehouseEntitlementSnapshotEvent[]
   ): Promise<{ success: boolean; cursorState: LakehouseCursorState }> {
     try {
-      this.logger.info("Flushing lakehouse payload", {
-        usage_records: prepared.usageRecords.length,
-        verification_records: prepared.verificationRecords.length,
-        metadata_records: prepared.metadataRecords.length,
-        entitlement_snapshot_records: entitlementSnapshots.length,
-        cursor_lastR2UsageId: prepared.cursorState.lastR2UsageId,
-        cursor_lastR2VerificationId: prepared.cursorState.lastR2VerificationId,
-      })
-
       if (
         prepared.usageRecords.length === 0 &&
         prepared.verificationRecords.length === 0 &&
@@ -968,6 +959,15 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       ) {
         return { success: true, cursorState: prepared.cursorState }
       }
+
+      this.logger.info("Flushing lakehouse payload", {
+        usage_records: prepared.usageRecords.length,
+        verification_records: prepared.verificationRecords.length,
+        metadata_records: prepared.metadataRecords.length,
+        entitlement_snapshot_records: entitlementSnapshots.length,
+        cursor_lastR2UsageId: prepared.cursorState.lastR2UsageId,
+        cursor_lastR2VerificationId: prepared.cursorState.lastR2VerificationId,
+      })
 
       const lakehouseResult = await this.lakehouseService.flushRaw({
         cursorState: prepared.cursorState,

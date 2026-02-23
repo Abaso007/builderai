@@ -82,12 +82,12 @@ const usageChartConfig = {
 const verificationChartConfig = {
   verificationAllowedCount: { label: "Verify allowed", color: "var(--chart-4)" },
   verificationDeniedPolicyCount: {
-    label: "Verify denied (policy)",
+    label: "denied",
     color: "var(--chart-1)",
   },
   usageReportedCount: { label: "Usage reports", color: "var(--chart-2)" },
   usageLimitExceededCount: {
-    label: "Verify denied (limit exceeded)",
+    label: "limit exceeded",
     color: "var(--chart-5)",
   },
 } satisfies ChartConfig

@@ -29,6 +29,12 @@ export class ConsoleLogger implements Logger {
   private withMetadata(fields?: Fields, defaultLogType: LogType = "normal"): Fields {
     // skip in development mode
     if (this.environment === "development") {
+      // trim in dev to be able to debug
+      delete fields?.["log.type"]
+      delete fields?.["service.name"]
+      delete fields?.["service.version"]
+      delete fields?.["service.environment"]
+
       return {
         ...this.defaultFields,
         ...fields,

@@ -857,14 +857,19 @@ export class DurableObjectUsagelimiter extends Server {
     let nextFlushSec = heartbeatFlushSec
 
     try {
-      // flush the usage records
-      const flushResult = await this.storage.flush()
+      let pressure = await this.getFlushPressureSafe()
+      const shouldFlush = pressure === null || pressure.pendingTotalRecords > 0
 
-      if (flushResult.err) {
-        this.logger.error("Alarm flush failed", { error: flushResult.err.message })
+      if (!shouldFlush) {
+        this.logger.debug("Skipping alarm flush because buffer is empty")
+      } else {
+        const flushResult = await this.storage.flush()
+        if (flushResult.err) {
+          this.logger.error("Alarm flush failed", { error: flushResult.err.message })
+        }
+        pressure = await this.getFlushPressureSafe()
       }
 
-      const pressure = await this.getFlushPressureSafe()
       if (pressure) {
         nextFlushSec = this.getAdaptiveFlushSeconds(pressure, heartbeatFlushSec)
       }
