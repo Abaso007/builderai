@@ -27,6 +27,7 @@ import {
   ShieldCheck,
 } from "lucide-react"
 import dynamic from "next/dynamic"
+import { useParams } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Area, Bar, BarChart, CartesianGrid, ComposedChart, Line, XAxis, YAxis } from "recharts"
 import { NumberTicker } from "~/components/analytics/number-ticker"
@@ -254,6 +255,9 @@ function ArrowQueryResultsTable({
 function LakehouseDashboardInner() {
   const trpc = useTRPC()
   const [interval] = useIntervalFilter()
+  const params = useParams()
+  const workspaceSlug = params.workspaceSlug as string
+  const projectSlug = params.projectSlug as string
 
   // ── SQL editor state ──────────────────────────────────────────────────────
   const [sqlQuery, setSqlQuery] = useState("")
@@ -276,7 +280,11 @@ function LakehouseDashboardInner() {
   // ── Credentials ───────────────────────────────────────────────────────────
   const credentialsQuery = useQuery(
     trpc.analytics.getLakehouseFilePlan.queryOptions(
-      { interval: interval.name },
+      {
+        interval: interval.name,
+        workspaceSlug,
+        projectSlug,
+      },
       { staleTime: 1000 * 60 * 5 }
     )
   )
@@ -318,14 +326,14 @@ function LakehouseDashboardInner() {
     if (credentialsQuery.data && !credentialsQuery.isLoading) void loadDataIntoDb()
   }, [credentialsQuery.data, credentialsQuery.isLoading, loadDataIntoDb])
 
-  // ── Reset everything when the interval filter changes ─────────────────────
+  // ── Reset everything when the interval filter or route scope changes ──────
   useEffect(() => {
     resetLoader()
     setSqlQuery("")
     setExecutedQuery(null)
     setManualQueryError(null)
     setFilePlan(null)
-  }, [interval, resetLoader, setFilePlan])
+  }, [interval, workspaceSlug, projectSlug, resetLoader, setFilePlan])
 
   // ── Derived booleans ──────────────────────────────────────────────────────
   const hasUsage = loadedTables.includes("usage")

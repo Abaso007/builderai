@@ -3,7 +3,13 @@ import { LakehouseDashboardSqlrooms } from "~/components/lakehouse/lakehouse-das
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 
-export default async function LakehousePage() {
+export default async function LakehousePage({
+  params,
+}: {
+  params: { workspaceSlug: string; projectSlug: string }
+}) {
+  const routeScopeKey = `${params.workspaceSlug}:${params.projectSlug}`
+
   return (
     <DashboardShell
       header={
@@ -14,7 +20,7 @@ export default async function LakehousePage() {
         />
       }
     >
-      <LakehouseDashboardSqlrooms />
+      <LakehouseDashboardSqlrooms key={routeScopeKey} />
     </DashboardShell>
   )
 }

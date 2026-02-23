@@ -19,6 +19,8 @@ export const getLakehouseFilePlan = protectedProjectProcedure
       interval: frontendIntervalSchema.optional(),
       customerId: z.string().optional(),
       tables: z.array(filePlanTableSchema).optional(),
+      workspaceSlug: z.string().optional(),
+      projectSlug: z.string().optional(),
     })
   )
   .query(async ({ input, ctx }) => {
