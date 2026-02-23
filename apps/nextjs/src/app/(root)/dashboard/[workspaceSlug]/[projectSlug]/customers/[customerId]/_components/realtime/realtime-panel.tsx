@@ -940,7 +940,7 @@ export function RealtimePanel(props: {
                       ? "Flat feature"
                       : hasLimit
                         ? `${formatNumber(usageValue)} used of ${formatNumber(limitValue)}`
-                        : "No limit"
+                        : `${formatNumber(usageValue)} used of ${formatNumber(Number.POSITIVE_INFINITY)}`
 
                     const usageBarColor = isFlatFeature
                       ? "hsl(var(--muted-foreground) / 0.35)"

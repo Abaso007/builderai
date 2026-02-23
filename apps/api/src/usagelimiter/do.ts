@@ -141,7 +141,6 @@ export class DurableObjectUsagelimiter extends Server {
   private storage: SqliteDOStorageProvider
   // metrics service
   private metrics: Metrics
-  private TTL_ANALYTICS = 1000 * 60 // 1 minute
   // last broadcast message time
   private LAST_BROADCAST_MSG = Date.now()
   // debounce delay for the broadcast events
@@ -150,6 +149,7 @@ export class DurableObjectUsagelimiter extends Server {
   private SAMPLE_RATE = 0.1
   private readonly FLUSH_SEC_MIN = 5
   private readonly FLUSH_SEC_MAX = 30 * 60
+  private readonly HEARTBEAT_FLUSH_SEC = 60
   private readonly ADAPTIVE_PROFILE_ALPHA = 0.2
   private readonly SLO_PENDING_WARN = 5000
   private readonly SLO_PENDING_ERROR = 20000
@@ -172,12 +172,10 @@ export class DurableObjectUsagelimiter extends Server {
     this._env = env
 
     if (env.APP_ENV === "development") {
-      this.TTL_ANALYTICS = 1000 * 60 // 60 seconds
       this.SAMPLE_RATE = 1
     }
 
     if (env.APP_ENV === "preview") {
-      this.TTL_ANALYTICS = 1000 * 60 * 5 // 5 minutes
       this.SAMPLE_RATE = 0.1
     }
 
@@ -623,42 +621,44 @@ export class DurableObjectUsagelimiter extends Server {
 
   // ensure the alarm is set to flush the usage records and verifications
   private async ensureAlarmIsSet(wideEventLogger: WideEventLogger): Promise<void> {
-    const alarm = await this.ctx.storage.getAlarm()
     const now = Date.now()
+    const currentAlarm = await this.ctx.storage.getAlarm()
+    const heartbeatWindowMs = this.getHeartbeatFlushSeconds() * 1000
 
-    const fallbackFlushSec = this.normalizeFlushSeconds()
-
-    // if alarm is in the past, set it to the future
-    if (alarm && alarm < now) {
-      this.ctx.storage.setAlarm(now + fallbackFlushSec * 1000)
-      wideEventLogger.add(
-        "usagelimiter.next_alarm",
-        new Date(now + fallbackFlushSec * 1000).toISOString()
-      )
+    // Keep healthy alarms untouched so request paths stay lightweight.
+    if (currentAlarm !== null && currentAlarm >= now && currentAlarm <= now + heartbeatWindowMs) {
+      wideEventLogger.add("usagelimiter.next_alarm", new Date(currentAlarm).toISOString())
       return
     }
 
-    if (alarm && alarm <= now + fallbackFlushSec * 1000) {
-      wideEventLogger.add("usagelimiter.next_alarm", new Date(alarm).toISOString())
-      return
-    }
-
-    const pressure = await this.getFlushPressureSafe()
-    const adaptiveFlushSec = this.getAdaptiveFlushSeconds(pressure, fallbackFlushSec)
-    const nextAlarm = now + adaptiveFlushSec * 1000
-
-    if (pressure) {
-      this.emitFlushPressureSlo("schedule", pressure)
-    }
-
+    // The request path only repairs heartbeat scheduling; pressure-based fast retries happen in onAlarm().
+    const nextAlarm = await this.scheduleAlarmWithHeartbeat(this.getHeartbeatFlushSeconds())
     wideEventLogger.add("usagelimiter.next_alarm", new Date(nextAlarm).toISOString())
-    if (!alarm || nextAlarm < alarm) {
-      this.ctx.storage.setAlarm(nextAlarm)
-    }
   }
 
-  private normalizeFlushSeconds(): number {
-    return Math.min(Math.max(this.TTL_ANALYTICS / 1000, this.FLUSH_SEC_MIN), this.FLUSH_SEC_MAX)
+  private getHeartbeatFlushSeconds(): number {
+    return Math.min(Math.max(this.HEARTBEAT_FLUSH_SEC, this.FLUSH_SEC_MIN), this.FLUSH_SEC_MAX)
+  }
+
+  private async scheduleAlarmWithHeartbeat(targetFlushSec: number): Promise<number> {
+    const now = Date.now()
+    const heartbeatFlushSec = this.getHeartbeatFlushSeconds()
+    const boundedTargetSec = Math.min(
+      Math.max(targetFlushSec, this.FLUSH_SEC_MIN),
+      heartbeatFlushSec
+    )
+    const targetAlarm = now + boundedTargetSec * 1000
+    const currentAlarm = await this.ctx.storage.getAlarm()
+
+    const shouldUpdateAlarm =
+      currentAlarm === null || currentAlarm < now || currentAlarm > targetAlarm
+
+    if (shouldUpdateAlarm) {
+      await this.ctx.storage.setAlarm(targetAlarm)
+      return targetAlarm
+    }
+
+    return currentAlarm
   }
 
   private getAdaptiveFlushSeconds(
@@ -852,26 +852,48 @@ export class DurableObjectUsagelimiter extends Server {
   // when the alarm is triggered
   async onAlarm(): Promise<void> {
     this.logger.debug("Triggering alarm flush")
-    // flush the usage records
-    const flushResult = await this.storage.flush()
 
-    if (flushResult.err) {
-      this.logger.error("Alarm flush failed", { error: flushResult.err.message })
-    }
+    const heartbeatFlushSec = this.getHeartbeatFlushSeconds()
+    let nextFlushSec = heartbeatFlushSec
 
-    const pressure = await this.getFlushPressureSafe()
+    try {
+      // flush the usage records
+      const flushResult = await this.storage.flush()
 
-    if (pressure && pressure.pendingTotalRecords > 0) {
-      const now = Date.now()
-      const adaptiveFlushSec = this.getAdaptiveFlushSeconds(pressure, this.TTL_ANALYTICS / 1000)
-      this.ctx.storage.setAlarm(now + adaptiveFlushSec * 1000)
-      this.emitFlushPressureSlo("alarm", pressure)
+      if (flushResult.err) {
+        this.logger.error("Alarm flush failed", { error: flushResult.err.message })
+      }
 
-      this.logger.info("Scheduled follow-up flush under pressure", {
-        pendingTotalRecords: pressure.pendingTotalRecords,
-        oldestPendingAgeSeconds: pressure.oldestPendingAgeSeconds,
-        nextFlushSeconds: adaptiveFlushSec,
+      const pressure = await this.getFlushPressureSafe()
+      if (pressure) {
+        nextFlushSec = this.getAdaptiveFlushSeconds(pressure, heartbeatFlushSec)
+      }
+
+      if (pressure && pressure.pendingTotalRecords > 0) {
+        this.emitFlushPressureSlo("alarm", pressure)
+
+        this.logger.info("Scheduled follow-up flush under pressure", {
+          pendingTotalRecords: pressure.pendingTotalRecords,
+          oldestPendingAgeSeconds: pressure.oldestPendingAgeSeconds,
+          nextFlushSeconds: nextFlushSec,
+        })
+      }
+    } catch (error) {
+      this.logger.error("Unexpected alarm handler failure", {
+        error: error instanceof Error ? error.message : "unknown error",
       })
+    } finally {
+      try {
+        const nextAlarm = await this.scheduleAlarmWithHeartbeat(nextFlushSec)
+        this.logger.debug("Scheduled alarm heartbeat", {
+          nextAlarm: new Date(nextAlarm).toISOString(),
+          nextFlushSeconds: nextFlushSec,
+        })
+      } catch (error) {
+        this.logger.error("Failed to schedule alarm heartbeat", {
+          error: error instanceof Error ? error.message : "unknown error",
+        })
+      }
     }
 
     // flush the metrics and logs

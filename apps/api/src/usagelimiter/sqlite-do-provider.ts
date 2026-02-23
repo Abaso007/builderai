@@ -977,7 +977,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         entitlementSnapshots,
       })
 
-      this.logger.info("Lakehouse payload flush result", {
+      this.logger.info("Lakehouse payload flush successfully", {
         success: lakehouseResult.success,
         usage_records_sent: prepared.usageRecords.length,
         verification_records_sent: prepared.verificationRecords.length,
