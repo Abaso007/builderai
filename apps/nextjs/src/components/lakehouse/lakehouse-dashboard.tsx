@@ -280,6 +280,10 @@ function LakehouseDashboardInner() {
       { staleTime: 1000 * 60 * 5 }
     )
   )
+  const refetchCredentials = useCallback(
+    () => void credentialsQuery.refetch(),
+    [credentialsQuery.refetch]
+  )
 
   // ── Loader ────────────────────────────────────────────────────────────────
   const handleTablesLoaded = useCallback((_newTables: string[], initialQuery: string) => {
@@ -297,7 +301,7 @@ function LakehouseDashboardInner() {
     resetLoader,
   } = useLakehouseLoader({
     credentialsData: credentialsQuery.data,
-    onRefetch: () => void credentialsQuery.refetch(),
+    onRefetch: refetchCredentials,
     getConnector,
     refreshTableSchemas,
     addOrUpdateSqlQueryDataSource,
@@ -307,10 +311,7 @@ function LakehouseDashboardInner() {
   })
 
   // ── Auto-refresh credentials before they expire ───────────────────────────
-  useCredentialRefresh(
-    credentialsQuery.data?.result?.credentials ?? null,
-    () => void credentialsQuery.refetch()
-  )
+  useCredentialRefresh(credentialsQuery.data?.result?.credentials ?? null, refetchCredentials)
 
   // ── Trigger load when credentials arrive ─────────────────────────────────
   useEffect(() => {
@@ -409,7 +410,7 @@ function LakehouseDashboardInner() {
     pendingScrollRef.current = false
   }, [])
 
-  const handleRefresh = useCallback(() => void credentialsQuery.refetch(), [credentialsQuery])
+  const handleRefresh = refetchCredentials
 
   const getLatestSchemas = useCallback(() => ({ tableSchemas: tables }), [tables])
 
