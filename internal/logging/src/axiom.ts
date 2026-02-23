@@ -45,8 +45,6 @@ export class AxiomLogger implements Logger {
           dataset: opts.dataset,
         }),
       ],
-    }).with({
-      ...this.defaultFields,
     })
   }
 
@@ -75,20 +73,39 @@ export class AxiomLogger implements Logger {
     return enriched
   }
 
+  private pickTransportMetadata(metadata: Fields): Fields {
+    const safe: Fields = {}
+    // Keep transport fields intentionally narrow so we do not auto-expand Axiom dataset columns.
+    // Full context is still present in the marshaled JSON message.
+
+    if (metadata["service.name"] !== undefined) {
+      safe["service.name"] = metadata["service.name"]
+    }
+    if (metadata["service.environment"] !== undefined) {
+      safe["service.environment"] = metadata["service.environment"]
+    }
+    if (metadata["log.type"] !== undefined) {
+      safe["log.type"] = metadata["log.type"]
+    }
+
+    return safe
+  }
+
   private toTransportArgs(
     fields?: Fields,
     defaultLogType: LogType = "normal"
   ): Record<string | symbol, unknown> {
     const metadata = this.withMetadata(fields, defaultLogType)
+    const safeMetadata = this.pickTransportMetadata(metadata)
 
     const root: Record<string, unknown> = {
-      "service.name": metadata["service.name"],
-      "service.environment": metadata["service.environment"],
-      "log.type": metadata["log.type"],
+      "service.name": safeMetadata["service.name"],
+      "service.environment": safeMetadata["service.environment"],
+      "log.type": safeMetadata["log.type"],
     }
 
     return {
-      ...metadata,
+      ...safeMetadata,
       [EVENT]: root,
     }
   }
