@@ -23,8 +23,8 @@ export default function VersionOverview({
       <Card variant="ghost">
         <div className="flex flex-col">
           <div className="flex h-[70px] shrink-0 items-center justify-between space-x-1 px-0 py-2">
-            <div className="flex items-center space-x-2">
-              <Typography variant="h3" className="truncate">
+            <div className="flex min-w-0 items-center space-x-2">
+              <Typography variant="h3" className="max-w-full truncate">
                 {planVersion.plan.slug}
               </Typography>
 
