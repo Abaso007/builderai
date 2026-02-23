@@ -59,6 +59,16 @@ export const grantSchemaExtended = grantSchema.extend({
     .optional(),
 })
 
+const metadataValueSchema = z.union([z.string(), z.number(), z.boolean()])
+export const metadataSchema = z
+  .record(metadataValueSchema) // Force flat key-value pairs (no deep nesting!)
+  .refine((obj) => Object.keys(obj).length <= 50, {
+    message: "Maximum of 50 properties allowed per event",
+  })
+  .refine((obj) => JSON.stringify(obj).length <= 5000, {
+    message: "Properties payload too large (max 5KB)",
+  })
+
 export const reportUsageSchema = z.object({
   customerId: z.string(),
   featureSlug: z.string(),

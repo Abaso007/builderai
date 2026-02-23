@@ -109,7 +109,11 @@ export function FeatureConfigForm({
       resetAnchor: planVersion?.billingConfig.billingAnchor,
     },
     type: defaultValues.type ?? "feature",
-    metadata: defaultValues?.metadata,
+    metadata: defaultValues?.metadata ?? {
+      hidden: false,
+      realtime: false,
+      overageStrategy: "none",
+    },
   }
 
   const form = useZodForm({

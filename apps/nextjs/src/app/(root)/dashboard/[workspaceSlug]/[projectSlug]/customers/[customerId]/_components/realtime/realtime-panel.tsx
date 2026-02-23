@@ -921,12 +921,16 @@ export function RealtimePanel(props: {
                       ? 100
                       : hasLimit
                         ? (usageValue / usageReference) * 100
-                        : 50
+                        : usageValue > 0
+                          ? 90
+                          : 0
                     const usageProgressPercent = isFlatFeature
                       ? 100
                       : hasLimit
                         ? Math.min(100, Math.max(rawUsagePercent, 0))
-                        : 50
+                        : usageValue > 0
+                          ? 90
+                          : 0
                     const overagePercent =
                       !isFlatFeature && hasLimit && allowsOverage
                         ? Math.min(100, Math.max(rawUsagePercent - 100, 0))

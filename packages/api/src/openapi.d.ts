@@ -843,26 +843,8 @@ export interface operations {
            * @example create
            */
           action?: string
-          /**
-           * @description Structured metadata for this report usage (filtering and analytics). Only the listed keys are accepted.
-           * @example {
-           *       "source": "api",
-           *       "resourceId": "123",
-           *       "resourceType": "user",
-           *       "workspaceId": "123",
-           *       "projectId": "123",
-           *       "tenantId": "123",
-           *       "userId": "123"
-           *     }
-           */
           metadata?: {
-            source?: string
-            workspaceId?: string
-            projectId?: string
-            tenantId?: string
-            userId?: string
-            resourceId?: string
-            resourceType?: string
+            [key: string]: (string | number | boolean) | undefined
           }
         }
       }
@@ -1221,26 +1203,8 @@ export interface operations {
            * @example read
            */
           action?: string
-          /**
-           * @description Structured metadata for this verification (filtering and analytics). Only the listed keys are accepted.
-           * @example {
-           *       "source": "api",
-           *       "resourceId": "123",
-           *       "resourceType": "user",
-           *       "workspaceId": "123",
-           *       "projectId": "123",
-           *       "tenantId": "123",
-           *       "userId": "123"
-           *     }
-           */
           metadata?: {
-            source?: string
-            workspaceId?: string
-            projectId?: string
-            tenantId?: string
-            userId?: string
-            resourceId?: string
-            resourceType?: string
+            [key: string]: (string | number | boolean) | undefined
           }
           /**
            * @description The usage to check feature access for, if not provided, it will be 0
@@ -4595,10 +4559,16 @@ export interface operations {
           projectId?: string
           customerId?: string
           tables?: ("usage" | "verification" | "metadata" | "entitlement_snapshot")[]
-          /** @default 30d */
-          interval?: "1d" | "7d" | "30d" | "90d"
-          /** @default non_prod */
-          targetEnv?: "non_prod" | "prod"
+          /**
+           * @default 30d
+           * @enum {string}
+           */
+          interval: "1d" | "7d" | "30d" | "90d"
+          /**
+           * @default non_prod
+           * @enum {string}
+           */
+          targetEnv: "non_prod" | "prod"
         }
       }
     }
@@ -4612,8 +4582,10 @@ export interface operations {
           "application/json": {
             projectIds: string[]
             customerIds: string[]
+            /** @enum {string} */
             interval: "1d" | "7d" | "30d" | "90d"
             intervalDays: number
+            /** @enum {string} */
             targetEnv: "non_prod" | "prod"
             window: {
               start: string
@@ -4636,7 +4608,7 @@ export interface operations {
               expiration: string | number
               ttlSeconds: number
               prefixes: string[]
-            }
+            } | null
           }
         }
       }

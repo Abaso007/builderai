@@ -1,5 +1,5 @@
 import { createRoute } from "@hono/zod-openapi"
-import { reportUsageResultSchema } from "@unprice/db/validators"
+import { metadataSchema, reportUsageResultSchema } from "@unprice/db/validators"
 import { endTime, startTime } from "hono/timing"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
@@ -60,31 +60,7 @@ export const route = createRoute({
             .transform((v) =>
               v == null || v === "" ? undefined : v.trim().toLowerCase().replace(/\s+/g, "-")
             ),
-          metadata: z
-            .object({
-              source: z.string().optional(),
-              workspaceId: z.string().optional(),
-              projectId: z.string().optional(),
-              tenantId: z.string().optional(),
-              userId: z.string().optional(),
-              resourceId: z.string().optional(),
-              resourceType: z.string().optional(),
-            })
-            .strict()
-            .openapi({
-              description:
-                "Structured metadata for this report usage (filtering and analytics). Only the listed keys are accepted.",
-              example: {
-                source: "api",
-                resourceId: "123",
-                resourceType: "user",
-                workspaceId: "123",
-                projectId: "123",
-                tenantId: "123",
-                userId: "123",
-              },
-            })
-            .optional(),
+          metadata: metadataSchema.optional(),
         })
         .superRefine((data, ctx) => {
           if (!data.customerId && !data.externalId) {

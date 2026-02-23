@@ -15,7 +15,7 @@ export default async function LakehousePage({
       header={
         <HeaderTab
           title="Analytics Console"
-          description="Explore your data with SQL"
+          description="Explore your data with SQL. Historical analytics synced from the data lake."
           action={<IntervalFilter className="ml-auto" />}
         />
       }

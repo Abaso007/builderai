@@ -10,6 +10,7 @@
   "compatibility_flags": ["nodejs_compat", "nodejs_compat_populate_process_env"],
   "env": {
     "prod": {
+      "workers_dev": false,
       "observability": {
         "enabled": true,
         "head_sampling_rate": 0.1 // 10% of requests
@@ -91,6 +92,7 @@
       ]
     },
     "preview": {
+      "workers_dev": false,
       "observability": {
         "enabled": true,
         "head_sampling_rate": 1.0 // 100% of requests
@@ -179,6 +181,7 @@
       ]
     },
     "dev": {
+      "workers_dev": true,
       "r2_buckets": [
         {
           "binding": "LAKEHOUSE",

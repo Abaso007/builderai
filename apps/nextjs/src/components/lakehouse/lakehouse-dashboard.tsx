@@ -23,7 +23,6 @@ import {
   Database,
   Loader2,
   Play,
-  RefreshCw,
   ShieldCheck,
 } from "lucide-react"
 import dynamic from "next/dynamic"
@@ -35,12 +34,12 @@ import { useIntervalFilter } from "~/hooks/use-filter"
 import { useMounted } from "~/hooks/use-mounted"
 import { useTRPC } from "~/trpc/client"
 import {
-  EXPECTED_LAG_MINUTES,
   QUICK_QUERY_KEYS,
   SECTION_MOTION,
   SNAPSHOT_STATUS,
   USAGE_TREND_CHART_CONFIG,
   VERIFICATION_TREND_CHART_CONFIG,
+  type LakehouseTrendBucket,
 } from "./lakehouse-constants"
 import { downloadArrowTableAsCsv } from "./lakehouse-utils"
 import { roomStore, useRoomStore } from "./sqlrooms-store"
@@ -69,9 +68,15 @@ const numberFmt = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
 })
 
-function formatMinuteTick(value: string, sameDay: boolean): string {
+function formatTrendTick(value: string, bucket: LakehouseTrendBucket, sameDay: boolean): string {
   if (!value) return value
-  return sameDay ? value.slice(11, 16) : value.slice(5, 16)
+  if (bucket === "hour") {
+    return sameDay ? value.slice(11, 16) : value.slice(5, 16)
+  }
+  if (bucket === "day") {
+    return value.slice(5)
+  }
+  return value
 }
 
 type RequiredTable = "usage" | "verifications" | "metadata" | "entitlement_snapshots"
@@ -165,7 +170,7 @@ function PayloadCell({
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="max-w-[460px] cursor-pointer truncate text-left font-mono text-primary text-xs hover:underline"
+          className="max-w-[460px] cursor-pointer truncate text-left font-mono text-xs hover:underline"
         >
           {preview || "(empty)"}
         </button>
@@ -354,9 +359,15 @@ function LakehouseDashboardInner() {
     verificationTrendData,
     metadataCoveragePct,
     verificationPassRate,
-    usageMinuteSameDay,
-    verificationMinuteSameDay,
-  } = useLakehouseAnalytics({ hasUsage, hasVerification, hasMetadata })
+    trendBucket,
+    usageSameDay,
+    verificationSameDay,
+  } = useLakehouseAnalytics({
+    hasUsage,
+    hasVerification,
+    hasMetadata,
+    intervalName: interval.name,
+  })
 
   // Derived display values
   const usageEvents = Number(usageSummaryRow?.events ?? 0)
@@ -537,25 +548,11 @@ function LakehouseDashboardInner() {
               <span className={cn("font-medium", snapshotStatus.tone)}>{snapshotStatus.label}</span>
             </div>
 
-            <Badge variant="outline" className="font-mono text-[11px]">
+            <Badge variant="ghost" className="font-mono text-[10px] text-background-solidHover">
               Last sync {lastSyncedLabel}
             </Badge>
           </div>
-
-          <p className="text-muted-foreground text-sm">
-            Historical analytics synced from the data lake. Expected lag: {EXPECTED_LAG_MINUTES}.
-          </p>
         </div>
-
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={handleRefresh}
-          disabled={isLoading}
-          title="Refresh snapshot"
-        >
-          <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
-        </Button>
       </motion.div>
 
       {/* ── Error banner ─────────────────────────────────────────────────── */}
@@ -596,7 +593,7 @@ function LakehouseDashboardInner() {
           </CardHeader>
           <CardContent className="space-y-3 text-muted-foreground text-sm">
             <p>When events arrive, KPIs and trend charts will populate automatically.</p>
-            <Button variant="outline" size="sm" onClick={handleRefresh}>
+            <Button variant="default" size="sm" onClick={handleRefresh}>
               Retry load
             </Button>
           </CardContent>
@@ -730,9 +727,9 @@ function LakehouseDashboardInner() {
                           stroke="hsl(var(--muted-foreground) / 0.2)"
                         />
                         <XAxis
-                          dataKey="minute"
+                          dataKey="bucket"
                           tick={{ fontSize: 11 }}
-                          tickFormatter={(v) => formatMinuteTick(v, usageMinuteSameDay)}
+                          tickFormatter={(v) => formatTrendTick(v, trendBucket, usageSameDay)}
                         />
                         <YAxis tick={{ fontSize: 11 }} />
                         <ChartTooltip
@@ -771,7 +768,7 @@ function LakehouseDashboardInner() {
               <Card className="border-muted/60">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base">Verification Outcomes</CardTitle>
-                  <CardDescription>Allowed versus denied checks by snapshot minute</CardDescription>
+                  <CardDescription>Allowed versus denied checks by selected time bucket</CardDescription>
                 </CardHeader>
                 <CardContent className="h-56">
                   {hasVerification ? (
@@ -785,9 +782,11 @@ function LakehouseDashboardInner() {
                           stroke="hsl(var(--muted-foreground) / 0.2)"
                         />
                         <XAxis
-                          dataKey="minute"
+                          dataKey="bucket"
                           tick={{ fontSize: 11 }}
-                          tickFormatter={(v) => formatMinuteTick(v, verificationMinuteSameDay)}
+                          tickFormatter={(v) =>
+                            formatTrendTick(v, trendBucket, verificationSameDay)
+                          }
                         />
                         <YAxis tick={{ fontSize: 11 }} />
                         <ChartTooltip
@@ -928,8 +927,8 @@ function LakehouseDashboardInner() {
                   </CardDescription>
                 </div>
                 <Button
-                  variant="outline"
                   size="sm"
+                  variant={"default"}
                   onClick={downloadTable}
                   disabled={!queryResult?.arrowTable}
                 >

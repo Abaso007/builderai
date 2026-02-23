@@ -3,6 +3,7 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 import { cn } from "@unprice/ui/utils"
 import { Calendar } from "lucide-react"
+import { useTransition } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useRealtimeIntervalFilter } from "~/hooks/use-filter"
 import { realtimeIntervalValues } from "~/lib/searchParams"
@@ -15,6 +16,9 @@ const options = [
 ] as const
 
 export function RealtimeIntervalFilter({ className }: { className?: string }) {
+  // this filters are updating dashboards so better wrap them into a transiontion to
+  // avoid blocking the select closing
+  const [isPending, startTransition] = useTransition()
   const [windowSeconds, setWindowSeconds] = useRealtimeIntervalFilter()
 
   const hotkeys = options.map((option) => option.hotkey)
@@ -31,14 +35,19 @@ export function RealtimeIntervalFilter({ className }: { className?: string }) {
     }
   })
 
+  const handleSelect = (value: string) => {
+    // The dropdown closes immediately, while the heavy state updates in the background
+    startTransition(() => {
+      setWindowSeconds({ realtimeInterval: value })
+    })
+  }
+
   return (
-    <Select
-      value={String(windowSeconds)}
-      onValueChange={(value) => {
-        setWindowSeconds({ realtimeInterval: value })
-      }}
-    >
-      <SelectTrigger className={cn("w-44 items-start [&_[data-description]]:hidden", className)}>
+    <Select value={String(windowSeconds)} onValueChange={handleSelect}>
+      <SelectTrigger
+        className={cn("w-44 items-start [&_[data-description]]:hidden", className)}
+        disabled={isPending}
+      >
         <div className="flex items-center gap-2 font-medium text-xs">
           <Calendar className="size-4" />
           <SelectValue placeholder="Select time window" />

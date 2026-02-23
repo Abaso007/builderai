@@ -116,7 +116,29 @@ export const METADATA_COVERAGE_QUERY = `
    AND u.customer_id = m.customer_id
   WHERE u.deleted = 0`
 
-export const USAGE_TREND_QUERY = `
+export type LakehouseTrendInterval = "24h" | "7d" | "30d" | "90d"
+export type LakehouseTrendBucket = "hour" | "day" | "month"
+
+export function getLakehouseTrendBucket(interval: LakehouseTrendInterval): LakehouseTrendBucket {
+  if (interval === "24h") return "hour"
+  if (interval === "90d") return "month"
+  return "day"
+}
+
+function getTrendBucketSql(bucket: LakehouseTrendBucket): string {
+  switch (bucket) {
+    case "hour":
+      return "strftime(CAST(date_trunc('hour', ts) AS TIMESTAMP), '%Y-%m-%d %H:00')"
+    case "day":
+      return "strftime(CAST(date_trunc('day', ts) AS TIMESTAMP), '%Y-%m-%d')"
+    case "month":
+      return "strftime(CAST(date_trunc('month', ts) AS TIMESTAMP), '%Y-%m')"
+  }
+}
+
+export function getUsageTrendQuery(interval: LakehouseTrendInterval): string {
+  const bucketSql = getTrendBucketSql(getLakehouseTrendBucket(interval))
+  return `
   WITH base AS (
     SELECT TRY_CAST("timestamp" AS DOUBLE) AS ts_num,
            TRY_CAST("timestamp" AS TIMESTAMP) AS ts_native, usage
@@ -130,12 +152,15 @@ export const USAGE_TREND_QUERY = `
       ELSE epoch_ms(CAST(ts_num * 1000.0 AS BIGINT))
     END AS ts, usage FROM base
   )
-  SELECT strftime(CAST(date_trunc('minute', ts) AS TIMESTAMP), '%Y-%m-%d %H:%M') AS minute,
+  SELECT ${bucketSql} AS bucket,
          COUNT(*) AS events, SUM(usage) AS total_usage
   FROM normalized WHERE ts IS NOT NULL
-  GROUP BY minute ORDER BY minute`
+  GROUP BY bucket ORDER BY bucket`
+}
 
-export const VERIFICATION_TREND_QUERY = `
+export function getVerificationTrendQuery(interval: LakehouseTrendInterval): string {
+  const bucketSql = getTrendBucketSql(getLakehouseTrendBucket(interval))
+  return `
   WITH base AS (
     SELECT TRY_CAST("timestamp" AS DOUBLE) AS ts_num,
            TRY_CAST("timestamp" AS TIMESTAMP) AS ts_native, allowed
@@ -149,8 +174,9 @@ export const VERIFICATION_TREND_QUERY = `
       ELSE epoch_ms(CAST(ts_num * 1000.0 AS BIGINT))
     END AS ts, allowed FROM base
   )
-  SELECT strftime(CAST(date_trunc('minute', ts) AS TIMESTAMP), '%Y-%m-%d %H:%M') AS minute,
+  SELECT ${bucketSql} AS bucket,
          SUM(CASE WHEN allowed = 1 THEN 1 ELSE 0 END) AS allowed,
          SUM(CASE WHEN allowed = 0 THEN 1 ELSE 0 END) AS denied
   FROM normalized WHERE ts IS NOT NULL
-  GROUP BY minute ORDER BY minute`
+  GROUP BY bucket ORDER BY bucket`
+}

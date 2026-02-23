@@ -4,12 +4,16 @@ import { INTERVAL_KEYS, type Interval, prepareInterval } from "@unprice/analytic
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 import { cn } from "@unprice/ui/utils"
 import { Calendar } from "lucide-react"
+import { useTransition } from "react"
 import { useHotkeys } from "react-hotkeys-hook"
 import { useIntervalFilter } from "~/hooks/use-filter"
 import { capitalize } from "~/lib/capitalize"
 
 export function IntervalFilter({ className }: { className?: string }) {
   const [intervalFilter, setIntervalFilter] = useIntervalFilter()
+  // this filters are updating dashboards so better wrap them into a transiontion to
+  // avoid blocking the select closing
+  const [isPending, startTransition] = useTransition()
 
   const hotkeys = INTERVAL_KEYS.map((i) => prepareInterval(i).hotkey)
 
@@ -26,14 +30,19 @@ export function IntervalFilter({ className }: { className?: string }) {
     }
   })
 
+  const handleSelect = (value: string) => {
+    // The dropdown closes immediately, while the heavy state updates in the background
+    startTransition(() => {
+      setIntervalFilter({ intervalFilter: value as Interval })
+    })
+  }
+
   return (
-    <Select
-      onValueChange={(value) => {
-        setIntervalFilter({ intervalFilter: value as Interval })
-      }}
-      value={intervalFilter.name}
-    >
-      <SelectTrigger className={cn("w-44 items-start [&_[data-description]]:hidden", className)}>
+    <Select onValueChange={handleSelect} value={intervalFilter.name}>
+      <SelectTrigger
+        className={cn("w-44 items-start [&_[data-description]]:hidden", className)}
+        disabled={isPending}
+      >
         <div className="flex items-center gap-2 font-medium text-xs">
           <Calendar className="size-4" />
           <SelectValue placeholder="Select date range" />

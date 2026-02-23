@@ -16,10 +16,9 @@ const BASE_URL = __ENV.BASE_URL || "http://localhost:8787"
 const API_TOKEN = __ENV.UNPRICE_TOKEN || ""
 const BILLING_INTERVAL = __ENV.BILLING_INTERVAL || "month"
 const CURRENCY = __ENV.CURRENCY || "EUR"
-const PLAN_SLUG = __ENV.PLAN_SLUG || "FOUNDATION"
+const PLAN_SLUG = __ENV.PLAN_SLUG || "FREE"
 const SUCCESS_URL = __ENV.SUCCESS_URL || "https://example.com/success"
 const CANCEL_URL = __ENV.CANCEL_URL || "https://example.com/cancel"
-const CUSTOMER_TIMEZONE = __ENV.CUSTOMER_TIMEZONE || "UTC"
 const USAGE_EVENTS_PER_CUSTOMER = Number(__ENV.USAGE_EVENTS_PER_CUSTOMER || 1)
 const VERIFY_EVENTS_PER_CUSTOMER = Number(__ENV.VERIFY_EVENTS_PER_CUSTOMER || 1)
 const PROVISIONING_TIMEOUT_MS = Number(__ENV.PROVISIONING_TIMEOUT_MS || 60000)
@@ -56,7 +55,7 @@ function post(path, payload, tags = {}) {
   })
 }
 
-function get(path, tags = {}) {
+function _get(path, tags = {}) {
   return http.get(`${BASE_URL}${path}`, {
     headers: authHeaders(),
     tags,
@@ -107,14 +106,14 @@ function createSdkClient() {
         const response = post("/v1/customer/signUp", req, { name: "customer-signup" })
         return unwrapResponse(response)
       },
-      getEntitlements(customerId) {
-        const response = get(`/v1/customer/${customerId}/getEntitlements`, {
+      getEntitlements(req) {
+        const response = post("/v1/customer/getEntitlements", req, {
           name: "customer-get-entitlements",
         })
         return unwrapResponse(response)
       },
-      getSubscription(customerId) {
-        const response = get(`/v1/customer/${customerId}/getSubscription`, {
+      getSubscription(req) {
+        const response = post("/v1/customer/getSubscription", req, {
           name: "customer-get-subscription",
         })
         return unwrapResponse(response)
@@ -176,7 +175,7 @@ function rotateFeatureSlugs(featureSlugs) {
   return ordered
 }
 
-function resolvePlanSlug(sdk) {
+function _resolvePlanSlug(sdk) {
   if (PLAN_SLUG) {
     return PLAN_SLUG
   }
@@ -226,8 +225,11 @@ function resolvePlanSlug(sdk) {
 function resolveEntitlementFeatureSlugs(sdk, customerId) {
   const deadlineAt = Date.now() + PROVISIONING_TIMEOUT_MS
 
+  // let's give some time to update its state
+  sleep(3)
+
   while (Date.now() < deadlineAt) {
-    const subscriptionResult = sdk.customers.getSubscription(customerId)
+    const subscriptionResult = sdk.customers.getSubscription({ customerId })
 
     if (subscriptionResult.__response.status === 429) {
       sleep(PROVISIONING_POLL_MS / 1000)
@@ -245,7 +247,7 @@ function resolveEntitlementFeatureSlugs(sdk, customerId) {
     }
 
     const hasActivePhase = Boolean(subscriptionResult.result?.activePhase)
-    const entitlementsResult = sdk.customers.getEntitlements(customerId)
+    const entitlementsResult = sdk.customers.getEntitlements({ customerId })
 
     if (entitlementsResult.__response.status === 429) {
       sleep(PROVISIONING_POLL_MS / 1000)
@@ -281,7 +283,7 @@ function resolveEntitlementFeatureSlugs(sdk, customerId) {
 }
 
 function provisionCustomerForVu(sdk) {
-  const resolvedPlanSlug = resolvePlanSlug(sdk)
+  // const resolvedPlanSlug = resolvePlanSlug(sdk)
 
   for (let attempt = 0; attempt < SIGNUP_RETRY_MAX; attempt += 1) {
     const suffix = `${Date.now()}-${__VU}-${attempt}`
@@ -290,8 +292,7 @@ function provisionCustomerForVu(sdk) {
       email: `k6+${suffix}@example.com`,
       successUrl: SUCCESS_URL,
       cancelUrl: CANCEL_URL,
-      timezone: CUSTOMER_TIMEZONE,
-      planSlug: resolvedPlanSlug,
+      planSlug: PLAN_SLUG,
     }
 
     const signUpResult = sdk.customers.signUp(signUpPayload)

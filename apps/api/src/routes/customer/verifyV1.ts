@@ -1,5 +1,5 @@
 import { createRoute } from "@hono/zod-openapi"
-import { verificationResultSchema } from "@unprice/db/validators"
+import { metadataSchema, verificationResultSchema } from "@unprice/db/validators"
 import { endTime } from "hono/timing"
 import { startTime } from "hono/timing"
 import * as HttpStatusCodes from "stoker/http-status-codes"
@@ -52,31 +52,7 @@ export const route = createRoute({
             .transform((v) =>
               v == null || v === "" ? undefined : v.trim().toLowerCase().replace(/\s+/g, "-")
             ),
-          metadata: z
-            .object({
-              source: z.string().optional(),
-              workspaceId: z.string().optional(),
-              projectId: z.string().optional(),
-              tenantId: z.string().optional(),
-              userId: z.string().optional(),
-              resourceId: z.string().optional(),
-              resourceType: z.string().optional(),
-            })
-            .strict()
-            .openapi({
-              description:
-                "Structured metadata for this verification (filtering and analytics). Only the listed keys are accepted.",
-              example: {
-                source: "api",
-                resourceId: "123",
-                resourceType: "user",
-                workspaceId: "123",
-                projectId: "123",
-                tenantId: "123",
-                userId: "123",
-              },
-            })
-            .optional(),
+          metadata: metadataSchema.optional(),
           // TODO: turn this into a verify + consume request - better delete it and create a new endpoint to avoid confusion
           usage: z
             .number()

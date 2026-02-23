@@ -1,17 +1,21 @@
 import { useSql } from "@sqlrooms/duckdb"
 import { useCallback, useMemo } from "react"
 import {
+  type LakehouseTrendBucket,
+  type LakehouseTrendInterval,
   METADATA_COVERAGE_QUERY,
   USAGE_SUMMARY_QUERY,
-  USAGE_TREND_QUERY,
   VERIFICATION_SUMMARY_QUERY,
-  VERIFICATION_TREND_QUERY,
+  getLakehouseTrendBucket,
+  getUsageTrendQuery,
+  getVerificationTrendQuery,
 } from "./lakehouse-constants"
 
 interface Options {
   hasUsage: boolean
   hasVerification: boolean
   hasMetadata: boolean
+  intervalName: LakehouseTrendInterval
 }
 
 const toNumber = (v: unknown): number => {
@@ -24,7 +28,17 @@ const toNumber = (v: unknown): number => {
 // biome-ignore lint/suspicious/noExplicitAny: <explanation>
 const tableToRows = (table?: { toArray?: () => any[] } | null) => table?.toArray?.() ?? []
 
-export function useLakehouseAnalytics({ hasUsage, hasVerification, hasMetadata }: Options) {
+export function useLakehouseAnalytics({
+  hasUsage,
+  hasVerification,
+  hasMetadata,
+  intervalName,
+}: Options) {
+  const trendBucket: LakehouseTrendBucket = useMemo(
+    () => getLakehouseTrendBucket(intervalName),
+    [intervalName]
+  )
+
   const usageSummary = useSql({ query: USAGE_SUMMARY_QUERY, enabled: hasUsage })
   const verificationSummary = useSql({
     query: VERIFICATION_SUMMARY_QUERY,
@@ -34,8 +48,14 @@ export function useLakehouseAnalytics({ hasUsage, hasVerification, hasMetadata }
     query: METADATA_COVERAGE_QUERY,
     enabled: hasUsage && hasMetadata,
   })
-  const usageTrend = useSql({ query: USAGE_TREND_QUERY, enabled: hasUsage })
-  const verificationTrend = useSql({ query: VERIFICATION_TREND_QUERY, enabled: hasVerification })
+  const usageTrend = useSql({
+    query: getUsageTrendQuery(intervalName),
+    enabled: hasUsage,
+  })
+  const verificationTrend = useSql({
+    query: getVerificationTrendQuery(intervalName),
+    enabled: hasVerification,
+  })
 
   const usageSummaryRow = useMemo(
     () => tableToRows(usageSummary.data?.arrowTable)[0],
@@ -84,9 +104,9 @@ export function useLakehouseAnalytics({ hasUsage, hasVerification, hasMetadata }
     return total ? (allowed / total) * 100 : 0
   }, [verificationSummaryRow, hasVerification])
 
-  const isSameDay = useCallback((data: Array<{ minute?: string }>) => {
+  const isSameDay = useCallback((data: Array<{ bucket?: string }>) => {
     if (data.length < 2) return false
-    return data[0]?.minute?.slice(0, 10) === data[data.length - 1]?.minute?.slice(0, 10)
+    return data[0]?.bucket?.slice(0, 10) === data[data.length - 1]?.bucket?.slice(0, 10)
   }, [])
 
   return {
@@ -97,7 +117,8 @@ export function useLakehouseAnalytics({ hasUsage, hasVerification, hasMetadata }
     verificationTrendData,
     metadataCoveragePct,
     verificationPassRate,
-    usageMinuteSameDay: isSameDay(usageTrendData),
-    verificationMinuteSameDay: isSameDay(verificationTrendData),
+    trendBucket,
+    usageSameDay: isSameDay(usageTrendData),
+    verificationSameDay: isSameDay(verificationTrendData),
   }
 }
