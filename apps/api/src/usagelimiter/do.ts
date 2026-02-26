@@ -127,6 +127,55 @@ const buildUsageByFeature = (params: {
   return usageByFeature
 }
 
+const METADATA_MAX_KEYS = 50
+const METADATA_MAX_SIZE_BYTES = 5_000
+
+function normalizeWsAction(action: unknown): string | undefined {
+  if (typeof action !== "string") return undefined
+  const normalized = action.trim().toLowerCase().replace(/\s+/g, "-")
+  return normalized.length > 0 ? normalized : undefined
+}
+
+function normalizeWsMetadata(metadata: unknown): Record<string, string | number | boolean> | null {
+  if (metadata == null) {
+    return null
+  }
+
+  if (typeof metadata !== "object" || Array.isArray(metadata)) {
+    throw new Error("Invalid metadata payload")
+  }
+
+  const entries = Object.entries(metadata).filter(([, value]) => value !== undefined)
+  if (entries.length > METADATA_MAX_KEYS) {
+    throw new Error(`Metadata exceeds ${METADATA_MAX_KEYS} properties`)
+  }
+
+  const normalized: Record<string, string | number | boolean> = {}
+
+  for (const [key, value] of entries) {
+    if (typeof value === "string" || typeof value === "boolean") {
+      normalized[key] = value
+      continue
+    }
+
+    if (typeof value === "number") {
+      if (!Number.isFinite(value)) {
+        throw new Error("Metadata number values must be finite")
+      }
+      normalized[key] = value
+      continue
+    }
+
+    throw new Error("Metadata values must be string, number, or boolean")
+  }
+
+  if (JSON.stringify(normalized).length > METADATA_MAX_SIZE_BYTES) {
+    throw new Error(`Metadata payload too large (max ${METADATA_MAX_SIZE_BYTES} bytes)`)
+  }
+
+  return normalized
+}
+
 // This durable object takes care of handling the usage of every feature per customer.
 // It is used to validate the usage of a feature and to report the usage to tinybird.
 // think of it as a queue that will be flushed to the db periodically
@@ -759,14 +808,44 @@ export class DurableObjectUsagelimiter extends Server {
     return val
   }
 
+  private resolveRoomScope(): {
+    projectId: string
+    customerId: string
+  } | null {
+    const roomName = this.name
+    if (!roomName) {
+      return null
+    }
+
+    const roomParts = roomName.split(":")
+    if (roomParts.length < 3) {
+      return null
+    }
+
+    const projectId = roomParts[roomParts.length - 2]
+    const customerId = roomParts[roomParts.length - 1]
+
+    if (!projectId || !customerId) {
+      return null
+    }
+
+    return {
+      projectId,
+      customerId,
+    }
+  }
+
   // websocket events handlers
   onStart(): void | Promise<void> {
     this.logger.debug("onStart initializing do")
   }
 
   // when a websocket connection is established
-  onConnect(): void | Promise<void> {
-    this.logger.debug("onConnect")
+  onConnect(connection: Connection): void | Promise<void> {
+    this.logger.debug("onConnect", {
+      connectionId: connection.id,
+      room: this.name,
+    })
   }
 
   // when a websocket connection is closed
@@ -794,10 +873,15 @@ export class DurableObjectUsagelimiter extends Server {
   async onMessage(conn: Connection, message: string) {
     try {
       const parsed = JSON.parse(message) as {
-        type?: "snapshot_request"
+        type?: "snapshot_request" | "verify_request"
         windowSeconds?: 300 | 3600 | 86400 | 604800
         customerId?: string
         projectId?: string
+        requestId?: string
+        featureSlug?: string
+        usage?: number
+        action?: string
+        metadata?: Record<string, unknown>
       }
 
       if (parsed.type === "snapshot_request") {
@@ -841,6 +925,113 @@ export class DurableObjectUsagelimiter extends Server {
             metrics: val,
             usageByFeature,
             source: "durable_object",
+          })
+        )
+        return
+      }
+
+      if (parsed.type === "verify_request") {
+        const scope = this.resolveRoomScope()
+        const requestId =
+          typeof parsed.requestId === "string" && parsed.requestId.trim().length > 0
+            ? parsed.requestId
+            : crypto.randomUUID()
+
+        if (!scope) {
+          conn.send(
+            JSON.stringify({
+              type: "verify_error",
+              requestId,
+              message: "Invalid realtime room scope",
+            })
+          )
+          return
+        }
+
+        if (parsed.customerId && parsed.customerId !== scope.customerId) {
+          conn.send(
+            JSON.stringify({
+              type: "verify_error",
+              requestId,
+              message: "Customer scope mismatch",
+            })
+          )
+          return
+        }
+
+        if (parsed.projectId && parsed.projectId !== scope.projectId) {
+          conn.send(
+            JSON.stringify({
+              type: "verify_error",
+              requestId,
+              message: "Project scope mismatch",
+            })
+          )
+          return
+        }
+
+        const featureSlug =
+          typeof parsed.featureSlug === "string" ? parsed.featureSlug.trim() : undefined
+
+        if (!featureSlug) {
+          conn.send(
+            JSON.stringify({
+              type: "verify_error",
+              requestId,
+              message: "featureSlug is required",
+            })
+          )
+          return
+        }
+
+        if (
+          typeof parsed.usage !== "undefined" &&
+          (typeof parsed.usage !== "number" || !Number.isFinite(parsed.usage))
+        ) {
+          conn.send(
+            JSON.stringify({
+              type: "verify_error",
+              requestId,
+              message: "usage must be a finite number",
+            })
+          )
+          return
+        }
+
+        let metadata: Record<string, string | number | boolean> | null
+        try {
+          metadata = normalizeWsMetadata(parsed.metadata)
+        } catch (error) {
+          conn.send(
+            JSON.stringify({
+              type: "verify_error",
+              requestId,
+              message: error instanceof Error ? error.message : "Invalid metadata payload",
+            })
+          )
+          return
+        }
+
+        const performanceStart = Date.now()
+        const verifyRequest: VerifyRequest = {
+          customerId: scope.customerId,
+          projectId: scope.projectId,
+          featureSlug,
+          usage: parsed.usage,
+          action: normalizeWsAction(parsed.action),
+          metadata,
+          requestId,
+          timestamp: performanceStart,
+          performanceStart,
+        }
+
+        const result = await this.verify(verifyRequest)
+
+        conn.send(
+          JSON.stringify({
+            type: "verify_result",
+            requestId,
+            result,
           })
         )
       }
