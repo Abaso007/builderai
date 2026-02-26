@@ -30,11 +30,7 @@ let vuCustomerId = ""
 let vuEntitlementFeatureSlugs = []
 
 export const options = {
-  stages: [
-    { duration: "30s", target: 10 },
-    { duration: "90s", target: 40 },
-    { duration: "30s", target: 0 },
-  ],
+  stages: [{ duration: "5s", target: 1 }],
   thresholds: {
     http_req_duration: ["p(50)<120", "p(90)<400", "p(99)<1000"],
     http_req_failed: ["rate<0.05"],

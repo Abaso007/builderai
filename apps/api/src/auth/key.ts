@@ -27,11 +27,11 @@ export async function keyAuth(c: Context<HonoEnv>) {
   const shouldAvoidRateLimit = c.env.APP_ENV === "development"
 
   // quick off in parallel (reducing p95 latency)
-  const [rateLimited, verifyRes] = await Promise.all([
+  const [isRateLimited, verifyRes] = await Promise.all([
     !shouldAvoidRateLimit
       ? apikey.rateLimit({
           key: authorization,
-          workspaceId: c.get("workspaceId") as string,
+          workspaceId: (c.get("workspaceId") as string | undefined) ?? "unknown",
           source: "cloudflare",
           limiter: c.env.RL_FREE_6000_60s,
         })
@@ -45,7 +45,7 @@ export async function keyAuth(c: Context<HonoEnv>) {
   const { val: key, err } = verifyRes
 
   // skip for internal and main projects
-  if (rateLimited && !key?.project.isInternal && !key?.project.isMain) {
+  if (isRateLimited && !key?.project.isInternal && !key?.project.isMain) {
     wideEventHelpers.addRateLimited(true)
     throw new UnpriceApiError({ code: "RATE_LIMITED", message: "apikey rate limit exceeded" })
   }

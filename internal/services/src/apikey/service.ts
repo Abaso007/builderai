@@ -356,7 +356,7 @@ export class ApiKeysService {
   public async rateLimit(req: {
     limiter: ApiKeyLimiter
     key: string
-    workspaceId: string
+    workspaceId?: string
     source: string
   }) {
     // hash the key
@@ -364,26 +364,25 @@ export class ApiKeysService {
     const start = performance.now()
     const result = await req.limiter.limit({ key: keyHash })
     const end = performance.now()
-    const workspaceId = req.workspaceId
+    const workspaceId = req.workspaceId ?? "unknown"
 
-    if (result.success) {
-      // emit metrics
-      this.waitUntil(
-        Promise.all([
-          this.metrics.emit({
-            metric: "metric.ratelimit",
-            workspaceId,
-            identifier: keyHash,
-            latency: end - start,
-            mode: req.source,
-            success: result.success,
-            error: !result.success,
-            source: req.source,
-          }),
-        ])
+    // emit metrics (both allowed and limited)
+    this.waitUntil(
+      Promise.resolve(
+        this.metrics.emit({
+          metric: "metric.ratelimit",
+          workspaceId,
+          identifier: keyHash,
+          latency: end - start,
+          mode: req.source,
+          success: result.success,
+          error: !result.success,
+          source: req.source,
+        })
       )
-    }
+    )
 
-    return result.success
+    // Cloudflare RateLimit bindings return { success: true } when the request is allowed.
+    return !result.success
   }
 }
