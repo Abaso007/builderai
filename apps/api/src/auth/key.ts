@@ -43,9 +43,10 @@ export async function keyAuth(c: Context<HonoEnv>) {
   endTime(c, "verifyApiKey")
 
   const { val: key, err } = verifyRes
+  const shouldSkipRateLimit = key?.project.isInternal || key?.project.isMain
 
   // skip for internal and main projects
-  if (isRateLimited && !key?.project.isInternal && !key?.project.isMain) {
+  if (isRateLimited && !shouldSkipRateLimit) {
     wideEventHelpers.addRateLimited(true)
     throw new UnpriceApiError({ code: "RATE_LIMITED", message: "apikey rate limit exceeded" })
   }
