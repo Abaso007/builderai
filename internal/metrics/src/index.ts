@@ -72,6 +72,7 @@ export const metricSchema = z.discriminatedUnion("metric", [
     colo: z.string().optional(),
     country: z.string().optional(),
     continent: z.string().optional(),
+    path: z.string().optional(),
   }),
   z.object({
     metric: z.literal("metric.http.request"),

@@ -1,5 +1,5 @@
 import type { Fields, Logger } from "@unprice/logging"
-import { Log, type LogSchema } from "@unprice/logs"
+import type { LogSchema } from "@unprice/logs"
 import type { Metric } from "@unprice/metrics"
 import type { Metrics } from "./interface"
 
@@ -37,7 +37,7 @@ export class LogdrainMetrics implements Metrics {
   }
 
   public emit(metric: Metric): void {
-    const log = new Log({
+    const payload = {
       requestId: this.requestId,
       type: "metric",
       time: Date.now(),
@@ -45,16 +45,13 @@ export class LogdrainMetrics implements Metrics {
       environment: this.environment,
       service: this.service,
       colo: this.colo,
-      durableObjectId: this.durableObjectId,
-    })
-
-    // colo is important to keep track of the location
-    this.logger.emit("info", log.toString(), {
-      colo: this.colo,
       country: this.country,
       continent: this.continent,
+      durableObjectId: this.durableObjectId,
       "log.type": "metric",
-    } as Fields)
+    } as Fields
+
+    this.logger.emit("info", metric.metric, payload)
   }
 
   public setColo(colo: string): void {

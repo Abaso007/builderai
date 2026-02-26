@@ -28,14 +28,15 @@ export async function keyAuth(c: Context<HonoEnv>) {
 
   // quick off in parallel (reducing p95 latency)
   const [isRateLimited, verifyRes] = await Promise.all([
-    !shouldAvoidRateLimit
-      ? apikey.rateLimit({
+    shouldAvoidRateLimit
+      ? Promise.resolve(false) // skip
+      : apikey.rateLimit({
+          path: c.req.path,
           key: authorization,
           workspaceId: (c.get("workspaceId") as string | undefined) ?? "unknown",
           source: "cloudflare",
           limiter: c.env.RL_FREE_6000_60s,
-        })
-      : Promise.resolve(false),
+        }),
     apikey.verifyApiKey({ key: authorization }),
   ])
 
@@ -43,13 +44,6 @@ export async function keyAuth(c: Context<HonoEnv>) {
   endTime(c, "verifyApiKey")
 
   const { val: key, err } = verifyRes
-  const shouldSkipRateLimit = key?.project.isInternal || key?.project.isMain
-
-  // skip for internal and main projects
-  if (isRateLimited && !shouldSkipRateLimit) {
-    wideEventHelpers.addRateLimited(true)
-    throw new UnpriceApiError({ code: "RATE_LIMITED", message: "apikey rate limit exceeded" })
-  }
 
   if (err) {
     switch (true) {
@@ -72,6 +66,9 @@ export async function keyAuth(c: Context<HonoEnv>) {
     })
   }
 
+  // don't rate limit important workspaces
+  const shouldSkipRateLimit = key.project.isInternal || key.project.isMain
+
   c.set("isMain", key.project.isMain ?? false)
   c.set("isInternal", key.project.isInternal ?? false)
   c.set("workspaceId", key.project.workspaceId)
@@ -85,6 +82,12 @@ export async function keyAuth(c: Context<HonoEnv>) {
     is_internal: key.project.isInternal ?? false,
     unprice_customer_id: key.project.workspace.unPriceCustomerId,
   })
+
+  // skip for internal and main projects
+  if (isRateLimited && !shouldSkipRateLimit) {
+    wideEventHelpers.addRateLimited(true)
+    throw new UnpriceApiError({ code: "RATE_LIMITED", message: "apikey rate limit exceeded" })
+  }
 
   return key
 }

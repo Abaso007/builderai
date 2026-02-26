@@ -73,40 +73,41 @@ export class AxiomLogger implements Logger {
     return enriched
   }
 
-  private pickTransportMetadata(metadata: Fields): Fields {
-    const safe: Fields = {}
-    // Keep transport fields intentionally narrow so we do not auto-expand Axiom dataset columns.
-    // Full context is still present in the marshaled JSON message.
-
-    if (metadata["service.name"] !== undefined) {
-      safe["service.name"] = metadata["service.name"]
-    }
-    if (metadata["service.environment"] !== undefined) {
-      safe["service.environment"] = metadata["service.environment"]
-    }
-    if (metadata["log.type"] !== undefined) {
-      safe["log.type"] = metadata["log.type"]
-    }
-
-    return safe
-  }
-
-  private toTransportArgs(
+  /**
+   * Emit only canonical metadata fields for plain text log lines so we keep
+   * Axiom columns stable for ad-hoc logs.
+   */
+  private toMetadataTransportArgs(
     fields?: Fields,
     defaultLogType: LogType = "normal"
   ): Record<string | symbol, unknown> {
     const metadata = this.withMetadata(fields, defaultLogType)
-    const safeMetadata = this.pickTransportMetadata(metadata)
+    const event: Fields = {}
 
-    const root: Record<string, unknown> = {
-      "service.name": safeMetadata["service.name"],
-      "service.environment": safeMetadata["service.environment"],
-      "log.type": safeMetadata["log.type"],
+    if (metadata["service.name"] !== undefined) {
+      event["service.name"] = metadata["service.name"]
+    }
+    if (metadata["service.environment"] !== undefined) {
+      event["service.environment"] = metadata["service.environment"]
+    }
+    if (metadata["log.type"] !== undefined) {
+      event["log.type"] = metadata["log.type"]
     }
 
     return {
-      ...safeMetadata,
-      [EVENT]: root,
+      [EVENT]: event,
+    }
+  }
+
+  /**
+   * Emit full structured payload for wide events and metrics.
+   */
+  private toStructuredTransportArgs(
+    fields?: Fields,
+    defaultLogType: LogType = "normal"
+  ): Record<string | symbol, unknown> {
+    return {
+      [EVENT]: this.withMetadata(fields, defaultLogType),
     }
   }
 
@@ -129,29 +130,29 @@ export class AxiomLogger implements Logger {
 
   public emit(level: "debug" | "info" | "warn" | "error", message: string, fields?: Fields): void {
     if (this.logLevel === "off") return
-    this.client[level](message, this.toTransportArgs(fields))
+    this.client[level](message, this.toStructuredTransportArgs(fields))
   }
 
   public debug(message: string, fields?: Fields): void {
     if (this.logLevel !== "debug") return
-    this.client.debug(this.marshal("debug", message, fields), this.toTransportArgs(fields))
+    this.client.debug(this.marshal("debug", message, fields), this.toMetadataTransportArgs(fields))
   }
 
   public info(message: string, fields?: Fields): void {
     if (!["debug", "info"].includes(this.logLevel)) return
-    this.client.info(this.marshal("info", message, fields), this.toTransportArgs(fields))
+    this.client.info(this.marshal("info", message, fields), this.toMetadataTransportArgs(fields))
   }
   public warn(message: string, fields?: Fields): void {
     if (!["debug", "info", "warn"].includes(this.logLevel)) return
-    this.client.warn(this.marshal("warn", message, fields), this.toTransportArgs(fields))
+    this.client.warn(this.marshal("warn", message, fields), this.toMetadataTransportArgs(fields))
   }
   public error(message: string, fields?: Fields): void {
     if (this.logLevel === "off") return
-    this.client.error(this.marshal("error", message, fields), this.toTransportArgs(fields))
+    this.client.error(this.marshal("error", message, fields), this.toMetadataTransportArgs(fields))
   }
   public fatal(message: string, fields?: Fields): void {
     if (this.logLevel === "off") return
-    this.client.error(this.marshal("fatal", message, fields), this.toTransportArgs(fields))
+    this.client.error(this.marshal("fatal", message, fields), this.toMetadataTransportArgs(fields))
   }
 
   public async flush(): Promise<void> {

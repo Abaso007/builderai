@@ -353,15 +353,29 @@ export class ApiKeysService {
     return Ok(newApiKeyExtended)
   }
 
+  /**
+   * Applies rate limiting for a given API key and records metrics.
+   *
+   * @param req.limiter - Implementation of the rate limiter used to enforce limits.
+   * @param req.key - Raw API key string used to identify the caller (hashed internally).
+   * @param req.workspaceId - Optional workspace identifier for metric attribution.
+   * @param req.source - Logical source of the request (e.g. "public-api").
+   * @param req.path - Optional request path for more granular metric tagging.
+   *
+   * @returns A boolean indicating whether the request has been rate limited.
+   * `true` means the request is limited (not allowed); `false` means it is allowed.
+   */
   public async rateLimit(req: {
     limiter: ApiKeyLimiter
     key: string
     workspaceId?: string
     source: string
+    path?: string
   }) {
     // hash the key
     const keyHash = await this.hash(req.key)
     const start = performance.now()
+    // emits true if it's allowed
     const result = await req.limiter.limit({ key: keyHash })
     const end = performance.now()
     const workspaceId = req.workspaceId ?? "unknown"
@@ -375,6 +389,7 @@ export class ApiKeysService {
           identifier: keyHash,
           latency: end - start,
           mode: req.source,
+          path: req.path,
           success: result.success,
           error: !result.success,
           source: req.source,
