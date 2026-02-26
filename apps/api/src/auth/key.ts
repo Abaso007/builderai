@@ -1,9 +1,13 @@
 import type { ApiKeyExtended } from "@unprice/db/validators"
 import { SchemaError } from "@unprice/error"
+import { UnPriceApiKeyError } from "@unprice/services/apikey"
 import type { Context } from "hono"
 import { endTime, startTime } from "hono/timing"
 import { UnpriceApiError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
+
+// verify is sensitive to latency
+const API_KEY_RATE_LIMIT_BYPASS_PATHS = new Set(["/v1/customer/verify"])
 
 /**
  * keyAuth takes the bearer token from the request and verifies the key
@@ -12,33 +16,25 @@ import type { HonoEnv } from "~/hono/env"
  * automatically by hono
  */
 export async function keyAuth(c: Context<HonoEnv>) {
-  const authorization = c.req.header("authorization")?.replace("Bearer ", "")
+  const authHeader = c.req.header("authorization")?.trim()
+  const authorization = authHeader?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim()
   const wideEventHelpers = c.get("wideEventHelpers")
 
   if (!authorization) {
     throw new UnpriceApiError({ code: "UNAUTHORIZED", message: "key required" })
   }
 
-  const { apikey } = c.get("services")
+  const { apikey, logger } = c.get("services")
 
   // start timer
   startTime(c, "verifyApiKey")
 
   const shouldAvoidRateLimit = c.env.APP_ENV === "development"
+  const requestPath =
+    c.req.path.endsWith("/") && c.req.path.length > 1 ? c.req.path.slice(0, -1) : c.req.path
+  const shouldBypassRateLimitPath = API_KEY_RATE_LIMIT_BYPASS_PATHS.has(requestPath)
 
-  // quick off in parallel (reducing p95 latency)
-  const [isRateLimited, verifyRes] = await Promise.all([
-    shouldAvoidRateLimit
-      ? Promise.resolve(false) // skip
-      : apikey.rateLimit({
-          path: c.req.path,
-          key: authorization,
-          workspaceId: (c.get("workspaceId") as string | undefined) ?? "unknown",
-          source: "cloudflare",
-          limiter: c.env.RL_FREE_6000_60s,
-        }),
-    apikey.verifyApiKey({ key: authorization }),
-  ])
+  const verifyRes = await apikey.verifyApiKey({ key: authorization })
 
   // end timer
   endTime(c, "verifyApiKey")
@@ -52,6 +48,40 @@ export async function keyAuth(c: Context<HonoEnv>) {
           code: "BAD_REQUEST",
           message: err.message,
         })
+      case err instanceof UnPriceApiKeyError:
+        switch (err.code) {
+          case "NOT_FOUND":
+            throw new UnpriceApiError({
+              code: "UNAUTHORIZED",
+              message: "key not found",
+            })
+          case "REVOKED":
+            throw new UnpriceApiError({
+              code: "UNAUTHORIZED",
+              message: "key revoked",
+            })
+          case "EXPIRED":
+            throw new UnpriceApiError({
+              code: "EXPIRED",
+              message: "key expired",
+            })
+          case "PROJECT_DISABLED":
+          case "WORKSPACE_DISABLED":
+            throw new UnpriceApiError({
+              code: "DISABLED",
+              message: err.message,
+            })
+          case "RATE_LIMIT_EXCEEDED":
+            throw new UnpriceApiError({
+              code: "RATE_LIMITED",
+              message: err.message,
+            })
+          default:
+            throw new UnpriceApiError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: err.message,
+            })
+        }
     }
     throw new UnpriceApiError({
       code: "INTERNAL_SERVER_ERROR",
@@ -83,8 +113,31 @@ export async function keyAuth(c: Context<HonoEnv>) {
     unprice_customer_id: key.project.workspace.unPriceCustomerId,
   })
 
+  // Evaluate rate-limit after key verification so we can tag metrics with real workspace context.
+  // If limiter infra fails, auth should continue (fail-open) and we capture the error in observability.
+  let isRateLimited = false
+  if (!shouldAvoidRateLimit && !shouldSkipRateLimit && !shouldBypassRateLimitPath) {
+    try {
+      isRateLimited = await apikey.rateLimit({
+        path: requestPath,
+        key: authorization,
+        workspaceId: key.project.workspaceId,
+        source: "cloudflare",
+        limiter: c.env.RL_FREE_6000_60s,
+      })
+    } catch (rateLimitError) {
+      wideEventHelpers.addError(rateLimitError)
+      logger.error("apikey rate limit check failed", {
+        path: requestPath,
+        workspaceId: key.project.workspaceId,
+        error:
+          rateLimitError instanceof Error ? rateLimitError.message : String(rateLimitError ?? ""),
+      })
+    }
+  }
+
   // skip for internal and main projects
-  if (isRateLimited && !shouldSkipRateLimit) {
+  if (isRateLimited) {
     wideEventHelpers.addRateLimited(true)
     throw new UnpriceApiError({ code: "RATE_LIMITED", message: "apikey rate limit exceeded" })
   }

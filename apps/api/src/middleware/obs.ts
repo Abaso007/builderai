@@ -5,6 +5,7 @@ export function obs(): MiddlewareHandler<HonoEnv> {
   return async (c, next) => {
     const { metrics, logger } = c.get("services")
     const start = c.get("performanceStart")
+    const requestId = c.get("requestId")
     const isolateLifetime = Date.now() - c.get("isolateCreatedAt")
 
     // Get the wide event logger from context (request-scoped)
@@ -19,6 +20,7 @@ export function obs(): MiddlewareHandler<HonoEnv> {
     } finally {
       const status = c.res.status
       const duration = Date.now() - start
+      c.res.headers.set("Unprice-Request-Id", requestId)
       c.res.headers.append("Unprice-Latency", `service=${duration}ms`)
       c.res.headers.append("Unprice-Version", c.env.VERSION)
 

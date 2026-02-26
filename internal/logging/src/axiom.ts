@@ -33,6 +33,7 @@ export class AxiomLogger implements Logger {
     this.logLevel = opts.logLevel ?? "info"
 
     this.client = new LoggerAxiom({
+      overrideDefaultFormatters: true,
       transports: [
         // new ConsoleTransport({
         //   prettyPrint: true,

@@ -54,11 +54,11 @@ export function init(): MiddlewareHandler<HonoEnv> {
       isolateCreatedAt = Date.now()
     }
 
-    const requestId =
-      c.req.header("unprice-request-id") ||
-      c.req.header("x-request-id") ||
-      c.req.header("x-vercel-id") ||
-      newId("request")
+    const inboundUnpriceRequestId = c.req.header("unprice-request-id")?.trim()
+    const inboundXRequestId = c.req.header("x-request-id")?.trim()
+    const inboundVercelRequestId = c.req.header("x-vercel-id")?.trim()
+    const upstreamRequestId = inboundUnpriceRequestId || inboundXRequestId || inboundVercelRequestId
+    const requestId = newId("request")
 
     const requestStartedAt = Date.now()
     const performanceStart = Date.now()
@@ -276,6 +276,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       wideEventLogger.addMany({
         request: {
           id: requestId,
+          parent_id: upstreamRequestId,
           timestamp: new Date().toISOString(),
           method: c.req.method as "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS",
           path: c.req.path,
