@@ -97,6 +97,42 @@ export function init(): MiddlewareHandler<HonoEnv> {
           },
         })
 
+    const WAIT_UNTIL_TIMEOUT_MS = 8_000
+    const registerWaitUntil = c.executionCtx.waitUntil.bind(c.executionCtx)
+    const boundedWaitUntil = (promise: Promise<unknown>, task: string) => {
+      registerWaitUntil(
+        (async () => {
+          let timeoutId: ReturnType<typeof setTimeout> | null = null
+          const timeoutPromise = new Promise<"timeout">((resolve) => {
+            timeoutId = setTimeout(() => resolve("timeout"), WAIT_UNTIL_TIMEOUT_MS)
+          })
+
+          try {
+            const outcome = await Promise.race([
+              promise.then(() => "done" as const),
+              timeoutPromise,
+            ])
+
+            if (outcome === "timeout") {
+              logger.warn("waitUntil task timed out", {
+                task,
+                timeoutMs: WAIT_UNTIL_TIMEOUT_MS,
+              })
+            }
+          } catch (error) {
+            logger.warn("waitUntil task failed", {
+              task,
+              error: error instanceof Error ? error.message : String(error ?? "unknown"),
+            })
+          } finally {
+            if (timeoutId) {
+              clearTimeout(timeoutId)
+            }
+          }
+        })()
+      )
+    }
+
     const wideEventLogger = createWideEventLogger({
       "service.name": "api",
       "service.version": c.env.VERSION,
@@ -127,7 +163,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
     const cacheService = new CacheService(
       {
         // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-        waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
+        waitUntil: (promise: Promise<any>) => boundedWaitUntil(promise, "cache-service"),
       },
       metrics,
       emitMetrics
@@ -180,7 +216,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       logger,
       analytics,
       // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
+      waitUntil: (promise: Promise<any>) => boundedWaitUntil(promise, "customer-service"),
       cache,
       metrics,
       db,
@@ -192,7 +228,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       cache,
       db,
       // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
+      waitUntil: (promise: Promise<any>) => boundedWaitUntil(promise, "subscription-service"),
       metrics,
     })
 
@@ -207,7 +243,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
           cache,
           db,
           // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-          waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
+          waitUntil: (promise: Promise<any>) => boundedWaitUntil(promise, "usagelimiter-service"),
           customer,
           stats: c.get("stats"),
           hashCache,
@@ -220,7 +256,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       logger,
       metrics,
       // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
+      waitUntil: (promise: Promise<any>) => boundedWaitUntil(promise, "project-service"),
       db,
       requestId,
     })
@@ -232,7 +268,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       metrics,
       db,
       // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
+      waitUntil: (promise: Promise<any>) => boundedWaitUntil(promise, "apikey-service"),
       hashCache,
     })
 

@@ -1206,7 +1206,8 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
             : normalizedWindowSeconds <= WINDOW_1_DAY
               ? HOUR_BUCKET_SECONDS
               : DAY_BUCKET_SECONDS
-      const windowStart = Date.now() - normalizedWindowSeconds * 1000
+      const now = Date.now()
+      const windowStart = now - normalizedWindowSeconds * 1000
 
       const usageSeries = await this.db
         .select({
@@ -1216,7 +1217,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         })
         .from(schema.usageAggregates)
         .where(
-          sql`${schema.usageAggregates.bucket_size_seconds} = ${selectedBucketSizeSeconds} AND ${schema.usageAggregates.bucket_start} >= ${windowStart}`
+          sql`${schema.usageAggregates.bucket_size_seconds} = ${selectedBucketSizeSeconds} AND ${schema.usageAggregates.bucket_start} >= ${windowStart} AND ${schema.usageAggregates.bucket_start} <= ${now}`
         )
         .groupBy(schema.usageAggregates.bucket_start)
         .orderBy(schema.usageAggregates.bucket_start)
@@ -1230,7 +1231,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         })
         .from(schema.verificationAggregates)
         .where(
-          sql`${schema.verificationAggregates.bucket_size_seconds} = ${selectedBucketSizeSeconds} AND ${schema.verificationAggregates.bucket_start} >= ${windowStart}`
+          sql`${schema.verificationAggregates.bucket_size_seconds} = ${selectedBucketSizeSeconds} AND ${schema.verificationAggregates.bucket_start} >= ${windowStart} AND ${schema.verificationAggregates.bucket_start} <= ${now}`
         )
         .groupBy(schema.verificationAggregates.bucket_start)
         .orderBy(schema.verificationAggregates.bucket_start)
@@ -1242,7 +1243,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         })
         .from(schema.reportUsageAggregates)
         .where(
-          sql`${schema.reportUsageAggregates.bucket_size_seconds} = ${selectedBucketSizeSeconds} AND ${schema.reportUsageAggregates.bucket_start} >= ${windowStart}`
+          sql`${schema.reportUsageAggregates.bucket_size_seconds} = ${selectedBucketSizeSeconds} AND ${schema.reportUsageAggregates.bucket_start} >= ${windowStart} AND ${schema.reportUsageAggregates.bucket_start} <= ${now}`
         )
         .groupBy(schema.reportUsageAggregates.bucket_start)
         .orderBy(schema.reportUsageAggregates.bucket_start)
@@ -1255,7 +1256,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         })
         .from(schema.usageAggregates)
         .where(
-          sql`${schema.usageAggregates.bucket_size_seconds} = ${selectedBucketSizeSeconds} AND ${schema.usageAggregates.bucket_start} >= ${windowStart}`
+          sql`${schema.usageAggregates.bucket_size_seconds} = ${selectedBucketSizeSeconds} AND ${schema.usageAggregates.bucket_start} >= ${windowStart} AND ${schema.usageAggregates.bucket_start} <= ${now}`
         )
         .groupBy(schema.usageAggregates.feature_slug)
 
@@ -1268,7 +1269,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         })
         .from(schema.verificationAggregates)
         .where(
-          sql`${schema.verificationAggregates.bucket_size_seconds} = ${selectedBucketSizeSeconds} AND ${schema.verificationAggregates.bucket_start} >= ${windowStart}`
+          sql`${schema.verificationAggregates.bucket_size_seconds} = ${selectedBucketSizeSeconds} AND ${schema.verificationAggregates.bucket_start} >= ${windowStart} AND ${schema.verificationAggregates.bucket_start} <= ${now}`
         )
         .groupBy(schema.verificationAggregates.feature_slug)
 
@@ -1411,7 +1412,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     const now = Date.now()
 
     for (const bucketSizeSeconds of AGGREGATE_BUCKETS) {
-      const bucketStart = this.getBucketStart(data.timestamp, bucketSizeSeconds)
+      const bucketStart = this.getBucketStart(data.timestamp, bucketSizeSeconds, now)
 
       await this.db
         .insert(schema.usageAggregates)
@@ -1447,7 +1448,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     const now = Date.now()
 
     for (const bucketSizeSeconds of AGGREGATE_BUCKETS) {
-      const bucketStart = this.getBucketStart(data.timestamp, bucketSizeSeconds)
+      const bucketStart = this.getBucketStart(data.timestamp, bucketSizeSeconds, now)
 
       await this.db
         .insert(schema.reportUsageAggregates)
@@ -1484,7 +1485,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     const deniedDelta = data.allowed === 1 ? 0 : 1
 
     for (const bucketSizeSeconds of AGGREGATE_BUCKETS) {
-      const bucketStart = this.getBucketStart(data.timestamp, bucketSizeSeconds)
+      const bucketStart = this.getBucketStart(data.timestamp, bucketSizeSeconds, now)
 
       await this.db
         .insert(schema.verificationAggregates)
@@ -1513,9 +1514,11 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     }
   }
 
-  private getBucketStart(timestamp: number, bucketSizeSeconds: number): number {
+  private getBucketStart(timestamp: number, bucketSizeSeconds: number, nowMs = Date.now()): number {
+    const safeTimestamp = Number.isFinite(timestamp) ? timestamp : nowMs
+    const normalizedTimestamp = Math.min(safeTimestamp, nowMs)
     const bucketSizeMs = bucketSizeSeconds * 1000
-    return Math.floor(timestamp / bucketSizeMs) * bucketSizeMs
+    return Math.floor(normalizedTimestamp / bucketSizeMs) * bucketSizeMs
   }
 
   private async pruneAggregateBuckets(nowMs: number): Promise<void> {

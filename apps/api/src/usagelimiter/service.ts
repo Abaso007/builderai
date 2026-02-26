@@ -231,6 +231,7 @@ export class UsageLimiterService implements UsageLimiter {
 
     // if we hit the same isolate we can return the cached result, only for request that are denied.
     if (parsedCached && parsedCached.allowed === false && env.APP_ENV === "production") {
+      parsedCached.latency = 0
       return Ok({ ...parsedCached, cacheHit: true })
     }
 

@@ -508,7 +508,7 @@ export class DurableObjectUsagelimiter extends Server {
           deniedReason: "ENTITLEMENT_ERROR",
         }
       } finally {
-        wideEventLogger.add("request.duration", Date.now() - data.performanceStart)
+        wideEventLogger.add("request.duration", Math.max(0, Date.now() - data.performanceStart))
         this.ctx.waitUntil(
           (async () => {
             try {
@@ -595,7 +595,7 @@ export class DurableObjectUsagelimiter extends Server {
         }
       } finally {
         data.performanceStart &&
-          wideEventLogger.add("request.duration", Date.now() - data.performanceStart)
+          wideEventLogger.add("request.duration", Math.max(0, Date.now() - data.performanceStart))
 
         this.ctx.waitUntil(
           (async () => {
@@ -844,8 +844,10 @@ export class DurableObjectUsagelimiter extends Server {
           })
         )
       }
-    } catch {
-      this.logger.debug(`onMessage ${message}`)
+    } catch (e) {
+      this.logger.error(`onMessage ${message}`, {
+        error: JSON.stringify(e),
+      })
     }
   }
 

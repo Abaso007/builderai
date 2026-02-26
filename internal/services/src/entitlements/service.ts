@@ -131,6 +131,14 @@ export class EntitlementService {
     return Math.round(value * 100) / 100
   }
 
+  private calculateLatencyMs(performanceStart: number): number {
+    if (!Number.isFinite(performanceStart)) {
+      return 0
+    }
+
+    return Math.max(0, Date.now() - performanceStart)
+  }
+
   private getUsageMeter(validatedState: EntitlementState): UsageMeter {
     return new UsageMeter(
       {
@@ -179,7 +187,7 @@ export class EntitlementService {
         state_found: false,
       })
 
-      const latency = Date.now() - params.performanceStart
+      const latency = this.calculateLatencyMs(params.performanceStart)
       this.waitUntil(
         this.storage.insertVerification({
           customer_id: params.customerId,
@@ -219,7 +227,7 @@ export class EntitlementService {
     })
 
     if (err) {
-      const latency = Date.now() - params.performanceStart
+      const latency = this.calculateLatencyMs(params.performanceStart)
       return {
         allowed: false,
         message: err.message,
@@ -231,7 +239,7 @@ export class EntitlementService {
 
     const usageMeter = this.getUsageMeter(validatedState)
     const verifyResult = usageMeter.verify(params.timestamp, params.usage)
-    const latency = Date.now() - params.performanceStart
+    const latency = this.calculateLatencyMs(params.performanceStart)
 
     this.waitUntil(
       this.storage.insertVerification({

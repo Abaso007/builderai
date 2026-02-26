@@ -13,7 +13,7 @@
       "workers_dev": false,
       "observability": {
         "enabled": true,
-        "head_sampling_rate": 0.1 // 10% of requests
+        "head_sampling_rate": 1 // TODO: change to 10% of requests with more traffic
       },
       "route": {
         "pattern": "api.unprice.dev",
