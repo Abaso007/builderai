@@ -2,15 +2,7 @@
 
 import type { paths } from "@unprice/api/src/openapi"
 import { usePartySocket } from "partysocket/react"
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import type { PropsWithChildren, ReactNode } from "react"
 import { useUnpriceClient } from "./context"
 
@@ -239,13 +231,13 @@ export function UnpriceEntitlementsRealtimeProvider({
   const hasAutoRefreshFailedRef = useRef(false)
   const activeRealtimeTokenRef = useRef<string | null>(activeRealtimeToken)
   const isRealtimeTokenExpiredRef = useRef(isRealtimeTokenExpired)
-  const roomName = useMemo(() => `${runtimeEnv}:${projectId}:${customerId}`, [
-    runtimeEnv,
-    projectId,
-    customerId,
-  ])
+  const roomName = useMemo(
+    () => `${runtimeEnv}:${projectId}:${customerId}`,
+    [runtimeEnv, projectId, customerId]
+  )
   const socketHost = useMemo(() => toWebSocketBaseUrl(apiBaseUrl), [apiBaseUrl])
-  const realtimeSocketEnabled = Boolean(activeRealtimeToken) && !isRealtimeTokenExpired && !disableWebsocket
+  const realtimeSocketEnabled =
+    Boolean(activeRealtimeToken) && !isRealtimeTokenExpired && !disableWebsocket
 
   useEffect(() => {
     activeRealtimeTokenRef.current = activeRealtimeToken
@@ -827,12 +819,7 @@ export function UnpriceEntitlementsRealtimeProvider({
       force: true,
       socket: socket as unknown as SocketSender,
     })
-  }, [
-    realtimeSocketEnabled,
-    rejectPendingVerifyRequests,
-    requestSnapshot,
-    socket,
-  ])
+  }, [realtimeSocketEnabled, rejectPendingVerifyRequests, requestSnapshot, socket])
 
   const entitlementSlugs = useMemo(() => {
     return new Set(entitlements.map((entitlement) => entitlement.featureSlug))
