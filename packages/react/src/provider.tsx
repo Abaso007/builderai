@@ -1,14 +1,15 @@
 "use client"
 
-import type { Unprice, UnpriceOptions } from "@unprice/api"
 import type { PropsWithChildren } from "react"
-import { UnpriceClientProvider, useUnpriceClient } from "./context"
 import {
   type EntitlementValidationEvent,
   type RealtimeTokenPayload,
   type RealtimeWindowSeconds,
+  type SubscriptionStatus,
   UnpriceEntitlementsRealtimeProvider,
 } from "./realtime"
+
+export type RealtimeTicketReason = "init" | "pre_expiry" | "expired" | "reconnect" | "manual"
 
 export type UnpriceRealtimeConfig = {
   customerId: string
@@ -16,68 +17,34 @@ export type UnpriceRealtimeConfig = {
   runtimeEnv?: string
   apiBaseUrl?: string
   snapshotWindowSeconds?: RealtimeWindowSeconds
-  token?: string | null
-  tokenExpiresAt?: number | null
-  refreshToken?: (params: {
+  initialTicket?: RealtimeTokenPayload | null
+  getRealtimeTicket: (params: {
     customerId: string
     projectId: string
+    reason: RealtimeTicketReason
+    currentExpiresAt: number | null
   }) => Promise<RealtimeTokenPayload>
   onTokenRefresh?: (payload: RealtimeTokenPayload) => void
-  allowClientSideTicketFetch?: boolean
+  refreshLeadSeconds?: number
+  snapshotStaleThresholdMs?: number
+  snapshotRetryIntervalMs?: number
   disableWebsocket?: boolean
   eventBufferSize?: number
   onValidationEvent?: (event: EntitlementValidationEvent) => void
+  onConnectionStateChange?: (value: {
+    status: "idle" | "connecting" | "open" | "closed" | "error"
+    attempts: number
+    lastError: string | null
+  }) => void
 }
 
 export type UnpriceProviderProps = PropsWithChildren<{
-  /**
-   * Provide a pre-configured client if you need custom instantiation.
-   */
-  client?: Unprice
-  /**
-   * Pass raw client options when you need more than just a token.
-   */
-  options?: UnpriceOptions
-  /**
-   * Fast path for common setup.
-   */
-  token?: string
-  /**
-   * Optional realtime setup for entitlements + feature checks.
-   */
-  realtime?: UnpriceRealtimeConfig
+  realtime: UnpriceRealtimeConfig
 }>
 
-function resolveClientOptions(params: {
-  options?: UnpriceOptions
-  token?: string
-}): UnpriceOptions | undefined {
-  if (params.options) {
-    if (params.token) {
-      return {
-        ...params.options,
-        token: params.token,
-      }
-    }
-    return params.options
-  }
+export type { SubscriptionStatus }
 
-  if (!params.token) {
-    return undefined
-  }
-
-  return { token: params.token } as UnpriceOptions
-}
-
-function renderRealtimeLayer(params: {
-  children: PropsWithChildren["children"]
-  realtime?: UnpriceRealtimeConfig
-}) {
-  if (!params.realtime) {
-    return params.children
-  }
-
-  const realtime = params.realtime
+export function UnpriceProvider({ children, realtime }: UnpriceProviderProps) {
   return (
     <UnpriceEntitlementsRealtimeProvider
       customerId={realtime.customerId}
@@ -85,43 +52,19 @@ function renderRealtimeLayer(params: {
       runtimeEnv={realtime.runtimeEnv}
       apiBaseUrl={realtime.apiBaseUrl}
       snapshotWindowSeconds={realtime.snapshotWindowSeconds}
-      realtimeToken={realtime.token}
-      realtimeTokenExpiresAt={realtime.tokenExpiresAt}
-      refreshRealtimeToken={realtime.refreshToken}
+      initialRealtimeToken={realtime.initialTicket?.ticket ?? null}
+      initialRealtimeTokenExpiresAt={realtime.initialTicket?.expiresAt ?? null}
+      getRealtimeTicket={realtime.getRealtimeTicket}
       onRealtimeTokenRefresh={realtime.onTokenRefresh}
-      allowClientSideTicketFetch={realtime.allowClientSideTicketFetch}
+      refreshLeadSeconds={realtime.refreshLeadSeconds}
+      snapshotStaleThresholdMs={realtime.snapshotStaleThresholdMs}
+      snapshotRetryIntervalMs={realtime.snapshotRetryIntervalMs}
       disableWebsocket={realtime.disableWebsocket}
       eventBufferSize={realtime.eventBufferSize}
       onValidationEvent={realtime.onValidationEvent}
+      onConnectionStateChange={realtime.onConnectionStateChange}
     >
-      {params.children}
+      {children}
     </UnpriceEntitlementsRealtimeProvider>
   )
-}
-
-export function UnpriceProvider({
-  children,
-  client,
-  options,
-  token,
-  realtime,
-}: UnpriceProviderProps) {
-  const resolvedOptions = resolveClientOptions({ options, token })
-
-  if (!client && !resolvedOptions?.token) {
-    throw new Error("UnpriceProvider requires `client`, `token`, or `options.token`.")
-  }
-
-  return (
-    <UnpriceClientProvider client={client} options={resolvedOptions}>
-      {renderRealtimeLayer({
-        children,
-        realtime,
-      })}
-    </UnpriceClientProvider>
-  )
-}
-
-export function useUnprice() {
-  return useUnpriceClient().client
 }

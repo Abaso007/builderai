@@ -1,5 +1,11 @@
 "use client"
 
+import {
+  type EntitlementRealtimeEvent,
+  UnpriceProvider,
+  useUnpriceEntitlementsRealtime,
+  useUnpriceUsage,
+} from "@unprice/react"
 import { useMutation } from "@tanstack/react-query"
 import { API_DOMAIN } from "@unprice/config"
 import { Badge } from "@unprice/ui/badge"
@@ -16,8 +22,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { cn } from "@unprice/ui/utils"
 import { AnimatePresence, motion } from "framer-motion"
 import { Activity, BarChart2, CircleHelp, Clock, Shield, ShieldCheck, Zap } from "lucide-react"
-import { usePartySocket } from "partysocket/react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { NumberTicker } from "~/components/analytics/number-ticker"
 import { RealtimeIntervalFilter } from "~/components/analytics/realtime-interval-filter"
@@ -67,14 +72,6 @@ type RealtimeEvent = {
   deniedReason?: string
 }
 
-type CycleFeatureUsageRow = {
-  featureSlug: string
-  currentUsage: number
-  limit: number | null
-  limitType: "hard" | "soft" | "none"
-  featureType: "flat" | "tiered" | "usage" | "package"
-}
-
 const usageChartConfig = {
   totalUsage: { label: "Usage", color: "var(--chart-4)" },
 } satisfies ChartConfig
@@ -92,7 +89,9 @@ const verificationChartConfig = {
   },
 } satisfies ChartConfig
 
-const SNAPSHOT_REQUEST_THROTTLE_MS = 1500
+const SNAPSHOT_STALE_THRESHOLD_MS = 20_000
+
+type RealtimeWindowSeconds = 300 | 3600 | 86400 | 604800
 
 function normalizeEpochSeconds(value: number | null): number | null {
   if (typeof value !== "number") {
@@ -152,246 +151,130 @@ function formatBucketTimestamp(timestamp: number, bucketSizeSeconds: number): st
   })
 }
 
-export function RealtimePanel(props: {
+type RealtimePanelProps = {
   customerId: string
   projectId: string
   realtimeTicket: string | null
   realtimeTicketExpiresAt: number | null
   runtimeEnv: string
-  currentPlanSlug?: string | null
-  currentCycleStartAt?: number | null
-  currentCycleEndAt?: number | null
-  cycleTimezone?: string | null
-  entitlementSlugs?: string[]
-  cycleFeatureUsageRows?: CycleFeatureUsageRow[]
-  currentPhaseBillingPeriod: string
-}) {
-  const {
-    customerId,
-    projectId,
-    realtimeTicket,
-    realtimeTicketExpiresAt,
-    runtimeEnv,
-    currentPlanSlug,
-    currentCycleStartAt,
-    currentCycleEndAt,
-    cycleTimezone,
-    entitlementSlugs = [],
-    cycleFeatureUsageRows = [],
-    currentPhaseBillingPeriod,
-  } = props
+}
+
+function normalizeRealtimeWindowSeconds(windowSeconds: number): RealtimeWindowSeconds {
+  if (windowSeconds === 300 || windowSeconds === 3600 || windowSeconds === 86400) {
+    return windowSeconds
+  }
+
+  return 604800
+}
+
+export function RealtimePanel(props: RealtimePanelProps) {
+  const { customerId, projectId, realtimeTicket, realtimeTicketExpiresAt, runtimeEnv } = props
   const trpc = useTRPC()
   const [windowSeconds] = useRealtimeIntervalFilter()
-  const [metrics, setMetrics] = useState<Metrics | null>(null)
-  const [events, setEvents] = useState<RealtimeEvent[]>([])
-  const [liveCycleUsageBySlug, setLiveCycleUsageBySlug] = useState<Record<string, number>>({})
-  const [browserTimezone, setBrowserTimezone] = useState<string | null>(null)
-  const [activeRealtimeTicket, setActiveRealtimeTicket] = useState<string | null>(realtimeTicket)
-  const [activeRealtimeTicketExpiresAt, setActiveRealtimeTicketExpiresAt] = useState<number | null>(
-    normalizeEpochSeconds(realtimeTicketExpiresAt)
+  const realtimeWindowSeconds = useMemo(
+    () => normalizeRealtimeWindowSeconds(windowSeconds),
+    [windowSeconds]
   )
-  const [isRefreshingTicket, setIsRefreshingTicket] = useState(false)
-  const [ticketRefreshError, setTicketRefreshError] = useState<string | null>(null)
-  const [isTicketExpired, setIsTicketExpired] = useState<boolean>(() => {
-    if (!activeRealtimeTicket || !activeRealtimeTicketExpiresAt) {
-      return true
-    }
-
-    return activeRealtimeTicketExpiresAt <= Math.floor(Date.now() / 1000)
-  })
-  const lastSnapshotRequestedAtRef = useRef(0)
-
   const refreshRealtimeTicketMutation = useMutation(
     trpc.analytics.getRealtimeTicket.mutationOptions()
   )
 
-  const refreshRealtimeTicket = useCallback(async () => {
-    setIsRefreshingTicket(true)
-    setTicketRefreshError(null)
-
-    try {
-      const ticketResponse = await refreshRealtimeTicketMutation.mutateAsync({ customerId })
-      const nextExpiresAt = normalizeEpochSeconds(ticketResponse.expiresAt)
-
-      setActiveRealtimeTicket(ticketResponse.ticket)
-      setActiveRealtimeTicketExpiresAt(nextExpiresAt)
-      setIsTicketExpired(!nextExpiresAt || nextExpiresAt <= Math.floor(Date.now() / 1000))
-      setMetrics(null)
-      setEvents([])
-      setLiveCycleUsageBySlug({})
-    } catch (error) {
-      setTicketRefreshError(
-        error instanceof Error ? error.message : "Failed to refresh realtime ticket"
-      )
-    } finally {
-      setIsRefreshingTicket(false)
+  const initialTicket = useMemo(() => {
+    if (!realtimeTicket) {
+      return null
     }
-  }, [customerId, refreshRealtimeTicketMutation])
 
-  const requestSnapshot = useCallback(
-    (
-      targetSocket: Pick<WebSocket, "send"> | null | undefined,
-      options: {
-        force?: boolean
-      } = {}
-    ) => {
-      if (!targetSocket) {
-        return
-      }
-
-      if (!activeRealtimeTicket || isTicketExpired) {
-        return
-      }
-
-      const now = Date.now()
-      if (
-        !options.force &&
-        now - lastSnapshotRequestedAtRef.current < SNAPSHOT_REQUEST_THROTTLE_MS
-      ) {
-        return
-      }
-
-      lastSnapshotRequestedAtRef.current = now
-      targetSocket.send(
-        JSON.stringify({
-          type: "snapshot_request",
-          windowSeconds,
-          customerId,
-          projectId,
-        })
-      )
-    },
-    [windowSeconds, customerId, projectId, activeRealtimeTicket, isTicketExpired]
-  )
-
-  useEffect(() => {
-    setActiveRealtimeTicket(realtimeTicket)
-    setActiveRealtimeTicketExpiresAt(normalizeEpochSeconds(realtimeTicketExpiresAt))
-    setTicketRefreshError(null)
+    const normalizedExpiresAt = normalizeEpochSeconds(realtimeTicketExpiresAt)
+    return {
+      ticket: realtimeTicket,
+      expiresAt: normalizedExpiresAt ?? Math.floor(Date.now() / 1000) + 60,
+    }
   }, [realtimeTicket, realtimeTicketExpiresAt])
 
-  useEffect(() => {
-    if (!activeRealtimeTicket || !activeRealtimeTicketExpiresAt) {
-      setIsTicketExpired(true)
-      return
-    }
+  const getRealtimeTicket = useCallback(
+    async (params: {
+      customerId: string
+      projectId: string
+      reason: "init" | "pre_expiry" | "expired" | "reconnect" | "manual"
+      currentExpiresAt: number | null
+    }) => {
+      const ticketResponse = await refreshRealtimeTicketMutation.mutateAsync({
+        customerId: params.customerId,
+      })
+      const normalizedExpiresAt = normalizeEpochSeconds(ticketResponse.expiresAt)
 
-    const now = Math.floor(Date.now() / 1000)
-    if (activeRealtimeTicketExpiresAt <= now) {
-      setIsTicketExpired(true)
-      return
-    }
+      return {
+        ticket: ticketResponse.ticket,
+        expiresAt: normalizedExpiresAt ?? Math.floor(Date.now() / 1000) + 60,
+      }
+    },
+    [refreshRealtimeTicketMutation]
+  )
 
-    setIsTicketExpired(false)
+  return (
+    <UnpriceProvider
+      realtime={{
+        customerId,
+        projectId,
+        runtimeEnv,
+        apiBaseUrl: API_DOMAIN,
+        snapshotWindowSeconds: realtimeWindowSeconds,
+        initialTicket,
+        getRealtimeTicket,
+      }}
+    >
+      <RealtimePanelContent {...props} windowSeconds={realtimeWindowSeconds} />
+    </UnpriceProvider>
+  )
+}
 
-    const timeoutMs = activeRealtimeTicketExpiresAt * 1000 - Date.now()
-    const timeoutId = window.setTimeout(() => {
-      setIsTicketExpired(true)
-    }, timeoutMs)
-
-    return () => {
-      window.clearTimeout(timeoutId)
-    }
-  }, [activeRealtimeTicket, activeRealtimeTicketExpiresAt])
+function RealtimePanelContent(
+  props: RealtimePanelProps & {
+    windowSeconds: RealtimeWindowSeconds
+  }
+) {
+  const { windowSeconds } = props
+  const {
+    metrics: realtimeMetrics,
+    events: realtimeEvents,
+    subscription,
+    lastSnapshotAt,
+    socketStatus,
+    error: realtimeError,
+    isRefreshingToken: isRefreshingTicket,
+    refreshRealtimeToken,
+    refreshSnapshot,
+  } = useUnpriceEntitlementsRealtime()
+  const metrics = realtimeMetrics as Metrics | null
+  const events = useMemo<RealtimeEvent[]>(() => {
+    return realtimeEvents.map((event: EntitlementRealtimeEvent) => ({
+      at: event.at,
+      featureSlug: event.featureSlug,
+      type: event.type,
+      success: event.success,
+      usage: event.usage,
+      limit: event.limit,
+      latencyMs: event.latencyMs,
+      deniedReason: event.deniedReason,
+    }))
+  }, [realtimeEvents])
+  const [browserTimezone, setBrowserTimezone] = useState<string | null>(null)
+  const [snapshotClockMs, setSnapshotClockMs] = useState(() => Date.now())
 
   useEffect(() => {
     const resolvedTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
     setBrowserTimezone(resolvedTimeZone || null)
   }, [])
 
-  const roomName = `${runtimeEnv}:${projectId}:${customerId}`
-
-  const socket = usePartySocket({
-    enabled: Boolean(activeRealtimeTicket) && !isTicketExpired,
-    host: API_DOMAIN.replace("https://", "wss://").replace("http://", "ws://"),
-    room: roomName,
-    prefix: "broadcast",
-    party: "usagelimit",
-    query: {
-      ticket: activeRealtimeTicket ?? "",
-    },
-    onOpen: (event) => {
-      if (isTicketExpired) {
-        return
-      }
-      requestSnapshot(event.currentTarget as WebSocket | null, { force: true })
-    },
-    onMessage: (event) => {
-      try {
-        const payload = JSON.parse(event.data) as
-          | {
-              type: "snapshot"
-              metrics: Metrics
-              usageByFeature?: Record<string, number>
-            }
-          | {
-              type: "snapshot_error"
-              message?: string
-            }
-          | {
-              type?: "verify" | "reportUsage"
-              customerId: string
-              featureSlug: string
-              success: boolean
-              usage?: number
-              limit?: number
-              latencyMs?: number
-              deniedReason?: string
-            }
-
-        if (payload && "type" in payload && payload.type === "snapshot" && "metrics" in payload) {
-          setMetrics(payload.metrics)
-          if (payload.usageByFeature) {
-            setLiveCycleUsageBySlug(payload.usageByFeature)
-          }
-          return
-        }
-
-        if (payload && "type" in payload && payload.type === "snapshot_error") {
-          if (payload.message?.toLowerCase().includes("expired")) {
-            setIsTicketExpired(true)
-          }
-          return
-        }
-
-        if (!payload || payload.customerId !== customerId) {
-          return
-        }
-
-        const eventType = payload.type
-        if (eventType !== "verify" && eventType !== "reportUsage") {
-          return
-        }
-
-        setEvents((prev) => [
-          {
-            at: Date.now(),
-            featureSlug: payload.featureSlug,
-            type: eventType,
-            success: payload.success,
-            usage: payload.usage,
-            limit: payload.limit,
-            latencyMs: payload.latencyMs,
-            deniedReason: payload.deniedReason,
-          },
-          ...prev.slice(0, 29),
-        ])
-
-        requestSnapshot(event.currentTarget as WebSocket | null)
-      } catch {
-        return
-      }
-    },
-    onClose: (event) => {
-      if (event.reason.toLowerCase().includes("expired")) {
-        setIsTicketExpired(true)
-      }
-    },
-  })
-
   useEffect(() => {
-    requestSnapshot(socket as unknown as Pick<WebSocket, "send"> | null, { force: true })
-  }, [socket, requestSnapshot])
+    const intervalId = setInterval(() => {
+      setSnapshotClockMs(Date.now())
+    }, 5_000)
+
+    return () => {
+      clearInterval(intervalId)
+    }
+  }, [])
 
   const desiredBucketSizeSeconds = useMemo(
     () => resolveBucketSizeSeconds(windowSeconds),
@@ -515,32 +398,16 @@ export function RealtimePanel(props: {
     return Math.min(100, Math.max(0, (metrics.allowedCount / metrics.verificationCount) * 100))
   }, [metrics?.verificationCount, metrics?.allowedCount])
 
-  const cycleFeatureUsageBySlug = useMemo(() => {
-    return new Map(cycleFeatureUsageRows.map((feature) => [feature.featureSlug, feature]))
-  }, [cycleFeatureUsageRows])
-
-  const entitlementRows = useMemo(() => {
-    const uniqueSlugs = Array.from(
-      new Set(entitlementSlugs.filter((featureSlug) => featureSlug.trim().length > 0))
-    )
-
-    return uniqueSlugs.map((featureSlug) => {
-      const cycleFeatureUsage = cycleFeatureUsageBySlug.get(featureSlug)
-      const liveCycleUsage = liveCycleUsageBySlug[featureSlug]
-
-      return {
-        featureSlug,
-        cycleUsage: liveCycleUsage ?? cycleFeatureUsage?.currentUsage ?? null,
-        cycleLimitType: cycleFeatureUsage?.limitType,
-        cycleFeatureType: cycleFeatureUsage?.featureType,
-        limit: cycleFeatureUsage?.limit ?? null,
-      }
-    })
-  }, [entitlementSlugs, cycleFeatureUsageBySlug, liveCycleUsageBySlug])
+  const { rows: entitlementRows } = useUnpriceUsage()
+  const currentPlanSlug = subscription?.planSlug ?? null
+  const currentCycleStartAt = subscription?.cycleStartAt ?? null
+  const currentCycleEndAt = subscription?.cycleEndAt ?? null
+  const cycleTimezone = subscription?.timezone ?? null
+  const currentPhaseBillingPeriod = subscription?.billingInterval ?? null
 
   const maxVisibleEntitlementUsage = useMemo(() => {
     return entitlementRows.reduce((maxUsage, entitlement) => {
-      return Math.max(maxUsage, entitlement.cycleUsage ?? 0)
+      return Math.max(maxUsage, entitlement.usage ?? 0)
     }, 0)
   }, [entitlementRows])
 
@@ -592,6 +459,23 @@ export function RealtimePanel(props: {
   }, [currentCycleStartAt, currentCycleEndAt, browserTimezone])
 
   const bucketLabel = formatBucketLabel(chartBucketSizeSeconds)
+  const isRealtimeLive = socketStatus === "open"
+  const isRealtimeConnecting = socketStatus === "connecting"
+  const shouldShowRefreshNotice =
+    socketStatus === "closed" || socketStatus === "error" || Boolean(realtimeError)
+  const isSnapshotStale =
+    socketStatus === "open" &&
+    (typeof lastSnapshotAt !== "number" ||
+      snapshotClockMs - lastSnapshotAt > SNAPSHOT_STALE_THRESHOLD_MS)
+  const realtimeStatusLabel = isRealtimeLive
+    ? isSnapshotStale
+      ? "Live (stale)"
+      : "Live"
+    : isRealtimeConnecting
+      ? "Connecting"
+      : realtimeError
+        ? "Refresh required"
+        : "Unavailable"
 
   return (
     <div className="space-y-6">
@@ -602,27 +486,21 @@ export function RealtimePanel(props: {
             <div className="inline-block">
               <div className="flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs shadow-sm">
                 <span className="relative flex h-2 w-2">
-                  {activeRealtimeTicket && !isTicketExpired && (
+                  {isRealtimeLive && (
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
                   )}
                   <span
                     className={cn(
                       "relative inline-flex h-2 w-2 rounded-full",
-                      !activeRealtimeTicket
-                        ? "bg-muted-foreground/50"
-                        : isTicketExpired
+                      isRealtimeLive
+                        ? "bg-emerald-500"
+                        : isRealtimeConnecting
                           ? "bg-amber-500"
-                          : "bg-emerald-500"
+                          : "bg-muted-foreground/50"
                     )}
                   />
                 </span>
-                <span className="font-medium text-muted-foreground">
-                  {!activeRealtimeTicket
-                    ? "Unavailable"
-                    : isTicketExpired
-                      ? "Refresh required"
-                      : "Live"}
-                </span>
+                <span className="font-medium text-muted-foreground">{realtimeStatusLabel}</span>
               </div>
             </div>
           </h3>
@@ -635,16 +513,16 @@ export function RealtimePanel(props: {
         </div>
       </div>
 
-      {activeRealtimeTicket && isTicketExpired && (
+      {shouldShowRefreshNotice && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/20">
           <p className="text-amber-800 text-sm dark:text-amber-200">
-            Realtime token expired.{" "}
+            Realtime connection needs refresh.{" "}
             <Button
               type="button"
               variant="link"
               size="sm"
               className="h-auto p-0 text-amber-800 underline-offset-2 hover:text-amber-900 dark:text-amber-200 dark:hover:text-amber-100"
-              onClick={refreshRealtimeTicket}
+              onClick={() => void refreshRealtimeToken()}
               disabled={isRefreshingTicket}
             >
               {isRefreshingTicket ? "Refreshing..." : "Refresh to reconnect"}
@@ -653,7 +531,24 @@ export function RealtimePanel(props: {
         </div>
       )}
 
-      {ticketRefreshError && <p className="text-destructive text-sm">{ticketRefreshError}</p>}
+      {isSnapshotStale && !shouldShowRefreshNotice && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/20">
+          <p className="text-amber-800 text-sm dark:text-amber-200">
+            Realtime socket is connected but snapshot data is stale.{" "}
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="h-auto p-0 text-amber-800 underline-offset-2 hover:text-amber-900 dark:text-amber-200 dark:hover:text-amber-100"
+              onClick={() => refreshSnapshot()}
+            >
+              Retry snapshot now
+            </Button>
+          </p>
+        </div>
+      )}
+
+      {realtimeError && <p className="text-destructive text-sm">{realtimeError.message}</p>}
 
       <div className="grid gap-4 lg:grid-cols-[1.25fr_2fr]">
         <Card className="border-muted/60 bg-gradient-to-br from-background to-muted/30">
@@ -896,18 +791,15 @@ export function RealtimePanel(props: {
               ) : (
                 <div className="space-y-4">
                   {entitlementRows.map((entitlement, index) => {
-                    const featureType = entitlement.cycleFeatureType ?? "usage"
+                    const featureType = entitlement.featureType
                     const isFlatFeature = featureType === "flat"
                     const limitValue =
                       typeof entitlement.limit === "number" && entitlement.limit > 0
                         ? entitlement.limit
                         : null
                     const hasLimit = limitValue !== null
-                    const usageValue = entitlement.cycleUsage ?? 0
-                    const overageStrategy = "none"
-                    const effectiveLimitType =
-                      entitlement.cycleLimitType ??
-                      (hasLimit ? (overageStrategy === "none" ? "hard" : "soft") : "none")
+                    const usageValue = entitlement.usage ?? 0
+                    const effectiveLimitType = entitlement.limitType
                     const allowsOverage = effectiveLimitType !== "hard"
 
                     let usageReference = 1

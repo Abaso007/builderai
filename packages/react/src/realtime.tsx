@@ -4,27 +4,71 @@ import type { paths } from "@unprice/api/src/openapi"
 import { usePartySocket } from "partysocket/react"
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import type { PropsWithChildren, ReactNode } from "react"
-import { useUnpriceClient } from "./context"
 
 const SNAPSHOT_REQUEST_THROTTLE_MS = 1_500
 const TOKEN_REFRESH_LEAD_SECONDS = 30
 const DEFAULT_EVENT_BUFFER_SIZE = 50
 const DEFAULT_API_BASE_URL = "https://api.unprice.dev"
 const VERIFY_REQUEST_TIMEOUT_MS = 7_000
+const MAX_TOKEN_REFRESH_RETRY_DELAY_MS = 30_000
+const DEFAULT_SNAPSHOT_STALE_THRESHOLD_MS = 20_000
+const DEFAULT_SNAPSHOT_RETRY_INTERVAL_MS = 10_000
 
 export type RealtimeWindowSeconds = 300 | 3600 | 86400 | 604800
 type RealtimeMetrics =
   paths["/v1/analytics/realtime"]["post"]["responses"]["200"]["content"]["application/json"]["metrics"]
-type CustomerEntitlement =
-  paths["/v1/customer/getEntitlements"]["post"]["responses"]["200"]["content"]["application/json"][number]
 export type VerifyEntitlementInput =
   paths["/v1/customer/verify"]["post"]["requestBody"]["content"]["application/json"]
 export type VerifyEntitlementResult =
   paths["/v1/customer/verify"]["post"]["responses"]["200"]["content"]["application/json"]
 
+export type SubscriptionStatus = "active" | "trialing" | "canceled" | "expired" | "past_due"
+
+export type RealtimeEntitlement = {
+  id: string
+  featureSlug: string
+  effectiveAt: number
+  expiresAt: number | null
+}
+
+export type RealtimeFeatureState = {
+  featureSlug: string
+  featureType: "flat" | "tiered" | "usage" | "package"
+  usage: number | null
+  limit: number | null
+  limitType: "hard" | "soft" | "none" | null
+  effectiveAt: number | null
+  expiresAt: number | null
+}
+
+export type RealtimeSubscriptionState = {
+  status: SubscriptionStatus | null
+  planSlug: string | null
+  billingInterval: string | null
+  phaseStartAt: number | null
+  phaseEndAt: number | null
+  cycleStartAt: number | null
+  cycleEndAt: number | null
+  timezone: string | null
+}
+
+export type RealtimeSnapshotState = {
+  customerId: string
+  projectId: string
+  subscriptionStatus: SubscriptionStatus | null
+  subscription?: RealtimeSubscriptionState | null
+  entitlements: RealtimeEntitlement[]
+  features: RealtimeFeatureState[]
+  usageByFeature: Record<string, number>
+  metrics: RealtimeMetrics
+  asOf: number
+  stateVersion: string
+}
+
 type SocketStatus = "idle" | "connecting" | "open" | "closed" | "error"
 type RealtimeEventType = "verify" | "reportUsage"
 type EventSource = "socket" | "hook"
+type RealtimeTicketReason = "init" | "pre_expiry" | "expired" | "reconnect" | "manual"
 
 type SocketSender = {
   send: (message: string) => void
@@ -39,7 +83,7 @@ type PendingVerifyRequest = {
 
 export type RealtimeTokenPayload = {
   ticket: string
-  expiresAt: number | null
+  expiresAt: number
 }
 
 export type EntitlementRealtimeEvent = {
@@ -71,43 +115,56 @@ export type UnpriceEntitlementsRealtimeProviderProps = PropsWithChildren<{
   runtimeEnv?: string
   apiBaseUrl?: string
   snapshotWindowSeconds?: RealtimeWindowSeconds
-  realtimeToken?: string | null
-  realtimeTokenExpiresAt?: number | null
-  refreshRealtimeToken?: (params: {
+  initialRealtimeToken?: string | null
+  initialRealtimeTokenExpiresAt?: number | null
+  getRealtimeTicket: (params: {
     customerId: string
     projectId: string
+    reason: RealtimeTicketReason
+    currentExpiresAt: number | null
   }) => Promise<RealtimeTokenPayload>
   onRealtimeTokenRefresh?: (payload: RealtimeTokenPayload) => void
-  allowClientSideTicketFetch?: boolean
+  refreshLeadSeconds?: number
+  snapshotStaleThresholdMs?: number
+  snapshotRetryIntervalMs?: number
   disableWebsocket?: boolean
   eventBufferSize?: number
   onValidationEvent?: (event: EntitlementValidationEvent) => void
+  onConnectionStateChange?: (value: {
+    status: SocketStatus
+    attempts: number
+    lastError: string | null
+  }) => void
 }>
 
 type EntitlementsRealtimeContextValue = {
   customerId: string
   projectId: string
-  entitlements: CustomerEntitlement[]
+  subscriptionStatus: SubscriptionStatus | null
+  subscription: RealtimeSubscriptionState | null
+  entitlements: RealtimeEntitlement[]
   entitlementSlugs: Set<string>
-  entitlementByFeatureSlug: Map<string, CustomerEntitlement>
+  entitlementByFeatureSlug: Map<string, RealtimeEntitlement>
+  features: RealtimeFeatureState[]
   usageByFeature: Record<string, number>
   metrics: RealtimeMetrics | null
+  lastSnapshotAt: number | null
+  stateVersion: string | null
   events: EntitlementRealtimeEvent[]
   validationsByFeature: Record<string, EntitlementValidationEvent>
   lastValidationEvent: EntitlementValidationEvent | null
   socketStatus: SocketStatus
   isConnected: boolean
   isRefreshingToken: boolean
-  isRefreshingEntitlements: boolean
   error: Error | null
-  refreshEntitlements: () => Promise<void>
   refreshRealtimeToken: () => Promise<void>
+  refreshSnapshot: () => void
   validateEntitlement: (input: VerifyEntitlementInput) => Promise<VerifyEntitlementResult>
 }
 
 export type UseEntitlementResult = {
   featureSlug: string
-  entitlement: CustomerEntitlement | null
+  entitlement: RealtimeEntitlement | null
   isEntitled: boolean
   isAllowed: boolean
   shouldRenderPaywall: boolean
@@ -116,6 +173,38 @@ export type UseEntitlementResult = {
   validate: (
     input?: Omit<VerifyEntitlementInput, "featureSlug">
   ) => Promise<VerifyEntitlementResult>
+}
+
+export type UnpriceUsageSeedRow = {
+  featureSlug: string
+  usage?: number | null
+  limit?: number | null
+  limitType?: "hard" | "soft" | "none" | null
+  featureType?: RealtimeFeatureState["featureType"] | null
+}
+
+export type UnpriceUsageRow = {
+  featureSlug: string
+  usage: number | null
+  limit: number | null
+  limitType: "hard" | "soft" | "none"
+  featureType: RealtimeFeatureState["featureType"]
+  hasLimit: boolean
+  isFlatFeature: boolean
+  allowsOverage: boolean
+}
+
+export type UseUnpriceUsageOptions = {
+  featureSlugs?: string[]
+  seedRows?: UnpriceUsageSeedRow[]
+}
+
+export type UseUnpriceUsageResult = {
+  rows: UnpriceUsageRow[]
+  byFeatureSlug: Map<string, UnpriceUsageRow>
+  totalUsage: number
+  meteredFeatureCount: number
+  featuresAtOrOverLimit: number
 }
 
 const EntitlementsRealtimeContext = createContext<EntitlementsRealtimeContextValue | undefined>(
@@ -128,6 +217,18 @@ function normalizeEpochSeconds(value: number | null | undefined): number | null 
   }
 
   return value > 1_000_000_000_000 ? Math.floor(value / 1000) : Math.floor(value)
+}
+
+function normalizeEpochMilliseconds(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || Number.isNaN(value) || !Number.isFinite(value)) {
+    return null
+  }
+
+  if (value > 1_000_000_000_000) {
+    return Math.floor(value)
+  }
+
+  return Math.floor(value * 1000)
 }
 
 function toWebSocketBaseUrl(input: string): string {
@@ -178,6 +279,176 @@ function readBoolean(record: Record<string, unknown>, key: string): boolean | un
   return typeof value === "boolean" ? value : undefined
 }
 
+function readObject(record: Record<string, unknown>, key: string): Record<string, unknown> | null {
+  const value = record[key]
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+  return value as Record<string, unknown>
+}
+
+function readArray(record: Record<string, unknown>, key: string): unknown[] {
+  const value = record[key]
+  return Array.isArray(value) ? value : []
+}
+
+function parseSubscriptionStatus(value: unknown): SubscriptionStatus | null {
+  if (
+    value === "active" ||
+    value === "trialing" ||
+    value === "canceled" ||
+    value === "expired" ||
+    value === "past_due"
+  ) {
+    return value
+  }
+  return null
+}
+
+function parseRealtimeEntitlement(value: unknown): RealtimeEntitlement | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+
+  const input = value as Record<string, unknown>
+  const id = readString(input, "id")
+  const featureSlug = readString(input, "featureSlug")
+  const effectiveAt = readNumber(input, "effectiveAt")
+  const expiresAtRaw = input.expiresAt
+
+  if (!id || !featureSlug || typeof effectiveAt !== "number") {
+    return null
+  }
+
+  const expiresAt =
+    typeof expiresAtRaw === "number" && Number.isFinite(expiresAtRaw) ? expiresAtRaw : null
+
+  return {
+    id,
+    featureSlug,
+    effectiveAt,
+    expiresAt,
+  }
+}
+
+function parseRealtimeFeature(value: unknown): RealtimeFeatureState | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+
+  const input = value as Record<string, unknown>
+  const featureSlug = readString(input, "featureSlug")
+  const featureType = readString(input, "featureType")
+
+  if (!featureSlug) {
+    return null
+  }
+
+  if (
+    featureType !== "flat" &&
+    featureType !== "tiered" &&
+    featureType !== "usage" &&
+    featureType !== "package"
+  ) {
+    return null
+  }
+
+  const usage = readNumber(input, "usage")
+  const limit = readNumber(input, "limit")
+  const effectiveAt = readNumber(input, "effectiveAt")
+  const expiresAt = readNumber(input, "expiresAt")
+  const limitTypeRaw = readString(input, "limitType")
+  const limitType =
+    limitTypeRaw === "hard" || limitTypeRaw === "soft" || limitTypeRaw === "none"
+      ? limitTypeRaw
+      : null
+
+  return {
+    featureSlug,
+    featureType,
+    usage: typeof usage === "number" && Number.isFinite(usage) ? usage : null,
+    limit: typeof limit === "number" && Number.isFinite(limit) ? limit : null,
+    limitType,
+    effectiveAt:
+      typeof effectiveAt === "number" && Number.isFinite(effectiveAt) ? effectiveAt : null,
+    expiresAt: typeof expiresAt === "number" && Number.isFinite(expiresAt) ? expiresAt : null,
+  }
+}
+
+function parseRealtimeSubscription(value: unknown): RealtimeSubscriptionState | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+
+  const input = value as Record<string, unknown>
+  const planSlugRaw = input.planSlug
+  const billingIntervalRaw = input.billingInterval
+  const timezoneRaw = input.timezone
+
+  return {
+    status: parseSubscriptionStatus(input.status),
+    planSlug: typeof planSlugRaw === "string" && planSlugRaw.trim().length > 0 ? planSlugRaw : null,
+    billingInterval:
+      typeof billingIntervalRaw === "string" && billingIntervalRaw.trim().length > 0
+        ? billingIntervalRaw
+        : null,
+    phaseStartAt: normalizeEpochMilliseconds(readNumber(input, "phaseStartAt")),
+    phaseEndAt: normalizeEpochMilliseconds(readNumber(input, "phaseEndAt")),
+    cycleStartAt: normalizeEpochMilliseconds(readNumber(input, "cycleStartAt")),
+    cycleEndAt: normalizeEpochMilliseconds(readNumber(input, "cycleEndAt")),
+    timezone: typeof timezoneRaw === "string" && timezoneRaw.trim().length > 0 ? timezoneRaw : null,
+  }
+}
+
+function parseUsageByFeature(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {}
+  }
+
+  const output: Record<string, number> = {}
+
+  for (const [featureSlug, usage] of Object.entries(value)) {
+    if (typeof usage === "number" && Number.isFinite(usage)) {
+      output[featureSlug] = usage
+    }
+  }
+
+  return output
+}
+
+function normalizeUsageValue(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null
+  }
+  return value
+}
+
+function normalizeLimitValue(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return null
+  }
+  return value
+}
+
+function normalizeLimitType(
+  value: "hard" | "soft" | "none" | null | undefined,
+  hasLimit: boolean
+): "hard" | "soft" | "none" {
+  if (value === "hard" || value === "soft" || value === "none") {
+    return value
+  }
+  return hasLimit ? "hard" : "none"
+}
+
+function normalizeFeatureType(
+  value: RealtimeFeatureState["featureType"] | null | undefined
+): RealtimeFeatureState["featureType"] {
+  if (value === "flat" || value === "tiered" || value === "usage" || value === "package") {
+    return value
+  }
+  return "usage"
+}
+
 export function UnpriceEntitlementsRealtimeProvider({
   children,
   customerId,
@@ -185,36 +456,44 @@ export function UnpriceEntitlementsRealtimeProvider({
   runtimeEnv = "sdk",
   apiBaseUrl = DEFAULT_API_BASE_URL,
   snapshotWindowSeconds = 3600,
-  realtimeToken = null,
-  realtimeTokenExpiresAt = null,
-  refreshRealtimeToken,
+  initialRealtimeToken = null,
+  initialRealtimeTokenExpiresAt = null,
+  getRealtimeTicket,
   onRealtimeTokenRefresh,
-  allowClientSideTicketFetch = false,
+  refreshLeadSeconds = TOKEN_REFRESH_LEAD_SECONDS,
+  snapshotStaleThresholdMs = DEFAULT_SNAPSHOT_STALE_THRESHOLD_MS,
+  snapshotRetryIntervalMs = DEFAULT_SNAPSHOT_RETRY_INTERVAL_MS,
   disableWebsocket = false,
   eventBufferSize = DEFAULT_EVENT_BUFFER_SIZE,
   onValidationEvent,
+  onConnectionStateChange,
 }: UnpriceEntitlementsRealtimeProviderProps) {
-  const { client } = useUnpriceClient()
   const maxEvents = Math.max(1, Math.floor(eventBufferSize))
 
-  const [activeRealtimeToken, setActiveRealtimeToken] = useState<string | null>(realtimeToken)
+  const [activeRealtimeToken, setActiveRealtimeToken] = useState<string | null>(
+    initialRealtimeToken
+  )
   const [activeRealtimeTokenExpiresAt, setActiveRealtimeTokenExpiresAt] = useState<number | null>(
-    normalizeEpochSeconds(realtimeTokenExpiresAt)
+    normalizeEpochSeconds(initialRealtimeTokenExpiresAt)
   )
   const [isRealtimeTokenExpired, setIsRealtimeTokenExpired] = useState<boolean>(() => {
-    const normalizedExpiresAt = normalizeEpochSeconds(realtimeTokenExpiresAt)
-    if (!realtimeToken || !normalizedExpiresAt) {
+    const normalizedExpiresAt = normalizeEpochSeconds(initialRealtimeTokenExpiresAt)
+    if (!initialRealtimeToken || !normalizedExpiresAt) {
       return true
     }
     return normalizedExpiresAt <= Math.floor(Date.now() / 1000)
   })
   const [socketStatus, setSocketStatus] = useState<SocketStatus>("idle")
   const [isRefreshingToken, setIsRefreshingToken] = useState(false)
-  const [isRefreshingEntitlements, setIsRefreshingEntitlements] = useState(false)
   const [error, setError] = useState<Error | null>(null)
+  const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus | null>(null)
+  const [subscription, setSubscription] = useState<RealtimeSubscriptionState | null>(null)
   const [metrics, setMetrics] = useState<RealtimeMetrics | null>(null)
-  const [entitlements, setEntitlements] = useState<CustomerEntitlement[]>([])
+  const [entitlements, setEntitlements] = useState<RealtimeEntitlement[]>([])
+  const [features, setFeatures] = useState<RealtimeFeatureState[]>([])
   const [usageByFeature, setUsageByFeature] = useState<Record<string, number>>({})
+  const [lastSnapshotAt, setLastSnapshotAt] = useState<number | null>(null)
+  const [stateVersion, setStateVersion] = useState<string | null>(null)
   const [events, setEvents] = useState<EntitlementRealtimeEvent[]>([])
   const [validationsByFeature, setValidationsByFeature] = useState<
     Record<string, EntitlementValidationEvent>
@@ -229,6 +508,10 @@ export function UnpriceEntitlementsRealtimeProvider({
   const pendingVerifyRequestsRef = useRef<Map<string, PendingVerifyRequest>>(new Map())
   const lastSnapshotRequestedAtRef = useRef(0)
   const hasAutoRefreshFailedRef = useRef(false)
+  const refreshRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const refreshRetryAttemptRef = useRef(0)
+  const lastRefreshReasonRef = useRef<RealtimeTicketReason>("init")
+  const lastRefreshErrorRef = useRef<string | null>(null)
   const activeRealtimeTokenRef = useRef<string | null>(activeRealtimeToken)
   const isRealtimeTokenExpiredRef = useRef(isRealtimeTokenExpired)
   const roomName = useMemo(
@@ -248,14 +531,28 @@ export function UnpriceEntitlementsRealtimeProvider({
   }, [isRealtimeTokenExpired])
 
   useEffect(() => {
-    setActiveRealtimeToken(realtimeToken)
-    setActiveRealtimeTokenExpiresAt(normalizeEpochSeconds(realtimeTokenExpiresAt))
+    setActiveRealtimeToken(initialRealtimeToken)
+    setActiveRealtimeTokenExpiresAt(normalizeEpochSeconds(initialRealtimeTokenExpiresAt))
     hasAutoRefreshFailedRef.current = false
-  }, [realtimeToken, realtimeTokenExpiresAt])
+  }, [initialRealtimeToken, initialRealtimeTokenExpiresAt])
 
   useEffect(() => {
     hasAutoRefreshFailedRef.current = false
+    refreshRetryAttemptRef.current = 0
+    lastRefreshErrorRef.current = null
+    if (refreshRetryTimerRef.current) {
+      clearTimeout(refreshRetryTimerRef.current)
+      refreshRetryTimerRef.current = null
+    }
   }, [customerId, projectId])
+
+  useEffect(() => {
+    onConnectionStateChange?.({
+      status: socketStatus,
+      attempts: refreshRetryAttemptRef.current,
+      lastError: lastRefreshErrorRef.current,
+    })
+  }, [onConnectionStateChange, socketStatus])
 
   const rejectPendingVerifyRequests = useCallback((message: string) => {
     if (pendingVerifyRequestsRef.current.size === 0) {
@@ -271,6 +568,8 @@ export function UnpriceEntitlementsRealtimeProvider({
   }, [])
 
   useEffect(() => {
+    setSubscription(null)
+    setSubscriptionStatus(null)
     setMetrics(null)
     setUsageByFeature({})
     setEvents([])
@@ -283,6 +582,10 @@ export function UnpriceEntitlementsRealtimeProvider({
     isUnmountedRef.current = false
     return () => {
       isUnmountedRef.current = true
+      if (refreshRetryTimerRef.current) {
+        clearTimeout(refreshRetryTimerRef.current)
+        refreshRetryTimerRef.current = null
+      }
       rejectPendingVerifyRequests("Realtime provider unmounted")
     }
   }, [rejectPendingVerifyRequests])
@@ -337,100 +640,102 @@ export function UnpriceEntitlementsRealtimeProvider({
     [customerId, projectId, snapshotWindowSeconds]
   )
 
-  const refreshRealtimeTokenInternal = useCallback(async () => {
-    if (refreshPromiseRef.current) {
-      return refreshPromiseRef.current
+  const scheduleTokenRefreshRetry = useCallback(() => {
+    if (refreshRetryTimerRef.current) {
+      return
     }
 
-    const task = (async () => {
-      setIsRefreshingToken(true)
-      try {
-        let nextTokenPayload: RealtimeTokenPayload
+    refreshRetryAttemptRef.current += 1
+    const exponentialBackoffMs = Math.min(
+      MAX_TOKEN_REFRESH_RETRY_DELAY_MS,
+      1000 * 2 ** Math.min(refreshRetryAttemptRef.current, 5)
+    )
+    const jitterMs = Math.floor(Math.random() * 750)
+    const delayMs = exponentialBackoffMs + jitterMs
 
-        if (refreshRealtimeToken) {
-          nextTokenPayload = await refreshRealtimeToken({ customerId, projectId })
-        } else if (allowClientSideTicketFetch) {
-          const response = await client.analytics.getRealtimeTicket({ customerId, projectId })
-          if (response.error || !response.result) {
-            throw new Error(response.error?.message ?? "Failed to refresh realtime token")
-          }
+    refreshRetryTimerRef.current = setTimeout(() => {
+      refreshRetryTimerRef.current = null
+      hasAutoRefreshFailedRef.current = false
+      setIsRealtimeTokenExpired(true)
+    }, delayMs)
+  }, [])
 
-          nextTokenPayload = {
-            ticket: response.result.ticket,
-            expiresAt: response.result.expiresAt,
-          }
-        } else {
-          throw new Error(
-            "No realtime token refresh strategy configured. Pass refreshRealtimeToken or enable allowClientSideTicketFetch."
-          )
-        }
-
-        const nextExpiresAt = normalizeEpochSeconds(nextTokenPayload.expiresAt)
-        if (isUnmountedRef.current) {
-          return
-        }
-
-        hasAutoRefreshFailedRef.current = false
-        setActiveRealtimeToken(nextTokenPayload.ticket)
-        setActiveRealtimeTokenExpiresAt(nextExpiresAt)
-        setIsRealtimeTokenExpired(!nextExpiresAt || nextExpiresAt <= Math.floor(Date.now() / 1000))
-        setError(null)
-        onRealtimeTokenRefresh?.({
-          ticket: nextTokenPayload.ticket,
-          expiresAt: nextExpiresAt,
-        })
-      } catch (refreshError) {
-        hasAutoRefreshFailedRef.current = true
-        if (isUnmountedRef.current) {
-          return
-        }
-        setError(toError(refreshError, "Failed to refresh realtime token"))
-      } finally {
-        if (!isUnmountedRef.current) {
-          setIsRefreshingToken(false)
-        }
+  const refreshRealtimeTokenInternal = useCallback(
+    async (reason: RealtimeTicketReason = "manual") => {
+      if (refreshPromiseRef.current) {
+        return refreshPromiseRef.current
       }
-    })()
 
-    refreshPromiseRef.current = task.finally(() => {
-      refreshPromiseRef.current = null
-    })
-    return refreshPromiseRef.current
-  }, [
-    allowClientSideTicketFetch,
-    client,
-    customerId,
-    onRealtimeTokenRefresh,
-    projectId,
-    refreshRealtimeToken,
-  ])
+      const task = (async () => {
+        setIsRefreshingToken(true)
+        try {
+          lastRefreshReasonRef.current = reason
 
-  const refreshEntitlements = useCallback(async () => {
-    setIsRefreshingEntitlements(true)
-    try {
-      const response = await client.customers.getEntitlements({
-        customerId,
-        projectId,
+          const nextTokenPayload = await getRealtimeTicket({
+            customerId,
+            projectId,
+            reason,
+            currentExpiresAt: activeRealtimeTokenExpiresAt,
+          })
+
+          if (!nextTokenPayload.ticket || nextTokenPayload.ticket.trim().length === 0) {
+            throw new Error("Realtime ticket is missing")
+          }
+
+          const nextExpiresAt = normalizeEpochSeconds(nextTokenPayload.expiresAt)
+          if (isUnmountedRef.current) {
+            return
+          }
+
+          if (!nextExpiresAt) {
+            throw new Error("Realtime ticket expiration is missing")
+          }
+
+          hasAutoRefreshFailedRef.current = false
+          refreshRetryAttemptRef.current = 0
+          lastRefreshErrorRef.current = null
+          if (refreshRetryTimerRef.current) {
+            clearTimeout(refreshRetryTimerRef.current)
+            refreshRetryTimerRef.current = null
+          }
+          setActiveRealtimeToken(nextTokenPayload.ticket)
+          setActiveRealtimeTokenExpiresAt(nextExpiresAt)
+          setIsRealtimeTokenExpired(nextExpiresAt <= Math.floor(Date.now() / 1000))
+          setError(null)
+          onRealtimeTokenRefresh?.({
+            ticket: nextTokenPayload.ticket,
+            expiresAt: nextExpiresAt,
+          })
+        } catch (refreshError) {
+          hasAutoRefreshFailedRef.current = true
+          if (isUnmountedRef.current) {
+            return
+          }
+          const normalizedError = toError(refreshError, "Failed to refresh realtime token")
+          lastRefreshErrorRef.current = normalizedError.message
+          setError(normalizedError)
+          scheduleTokenRefreshRetry()
+        } finally {
+          if (!isUnmountedRef.current) {
+            setIsRefreshingToken(false)
+          }
+        }
+      })()
+
+      refreshPromiseRef.current = task.finally(() => {
+        refreshPromiseRef.current = null
       })
-
-      if (response.error) {
-        throw new Error(response.error.message)
-      }
-
-      if (!isUnmountedRef.current) {
-        setEntitlements(response.result ?? [])
-        setError(null)
-      }
-    } catch (entitlementError) {
-      if (!isUnmountedRef.current) {
-        setError(toError(entitlementError, "Failed to load customer entitlements"))
-      }
-    } finally {
-      if (!isUnmountedRef.current) {
-        setIsRefreshingEntitlements(false)
-      }
-    }
-  }, [client, customerId, projectId])
+      return refreshPromiseRef.current
+    },
+    [
+      customerId,
+      getRealtimeTicket,
+      onRealtimeTokenRefresh,
+      projectId,
+      scheduleTokenRefreshRetry,
+      activeRealtimeTokenExpiresAt,
+    ]
+  )
 
   const handleVerifyResult = useCallback(
     (params: {
@@ -490,20 +795,71 @@ export function UnpriceEntitlementsRealtimeProvider({
       const payload = parsed as Record<string, unknown>
       const type = readString(payload, "type")
 
+      if (
+        type === "snapshot" ||
+        type === "snapshot_error" ||
+        type === "verify_result" ||
+        type === "verify_error" ||
+        type === "verify" ||
+        type === "reportUsage"
+      ) {
+        setSocketStatus((current) => (current === "open" ? current : "open"))
+      }
+
       if (type === "snapshot") {
-        const nextMetrics = payload.metrics
-        if (nextMetrics && typeof nextMetrics === "object") {
-          setMetrics(nextMetrics as RealtimeMetrics)
+        const state = readObject(payload, "state")
+        let nextMetrics: RealtimeMetrics | null = null
+        let nextUsageByFeature: Record<string, number> = {}
+
+        if (state) {
+          const snapshotCustomerId = readString(state, "customerId")
+          const snapshotProjectId = readString(state, "projectId")
+          if (snapshotCustomerId && snapshotCustomerId !== customerId) {
+            return
+          }
+          if (snapshotProjectId && snapshotProjectId !== projectId) {
+            return
+          }
+
+          const stateMetrics = state.metrics
+          if (stateMetrics && typeof stateMetrics === "object") {
+            nextMetrics = stateMetrics as RealtimeMetrics
+          }
+
+          const parsedEntitlements = readArray(state, "entitlements")
+            .map((item) => parseRealtimeEntitlement(item))
+            .filter((item): item is RealtimeEntitlement => item !== null)
+          const parsedFeatures = readArray(state, "features")
+            .map((item) => parseRealtimeFeature(item))
+            .filter((item): item is RealtimeFeatureState => item !== null)
+          const parsedSubscription = parseRealtimeSubscription(state.subscription)
+
+          nextUsageByFeature = parseUsageByFeature(state.usageByFeature)
+
+          setSubscription(parsedSubscription)
+          setSubscriptionStatus(parsedSubscription?.status ?? parseSubscriptionStatus(state.subscriptionStatus))
+          setEntitlements(parsedEntitlements)
+          setFeatures(parsedFeatures)
+          setStateVersion(readString(state, "stateVersion") ?? null)
+          setLastSnapshotAt(readNumber(state, "asOf") ?? Date.now())
         }
 
-        const usagePayload = payload.usageByFeature
-        if (usagePayload && typeof usagePayload === "object") {
-          const nextUsageByFeature: Record<string, number> = {}
-          for (const [featureSlug, value] of Object.entries(usagePayload)) {
-            if (typeof value === "number") {
-              nextUsageByFeature[featureSlug] = value
-            }
+        if (!nextMetrics) {
+          const legacyMetrics = payload.metrics
+          if (legacyMetrics && typeof legacyMetrics === "object") {
+            nextMetrics = legacyMetrics as RealtimeMetrics
           }
+        }
+
+        if (nextMetrics) {
+          setMetrics(nextMetrics)
+        }
+
+        if (Object.keys(nextUsageByFeature).length === 0) {
+          nextUsageByFeature = parseUsageByFeature(payload.usageByFeature)
+        }
+
+        if (Object.keys(nextUsageByFeature).length > 0) {
           setUsageByFeature((previous) => ({
             ...previous,
             ...nextUsageByFeature,
@@ -513,8 +869,13 @@ export function UnpriceEntitlementsRealtimeProvider({
       }
 
       if (type === "snapshot_error") {
+        const code = readString(payload, "code")?.toLowerCase()
         const message = readString(payload, "message")
-        if (message?.toLowerCase().includes("expired")) {
+        if (
+          code === "token_expired" ||
+          message?.toLowerCase().includes("expired") ||
+          message?.toLowerCase().includes("unauthorized")
+        ) {
           setIsRealtimeTokenExpired(true)
         }
         return
@@ -633,7 +994,7 @@ export function UnpriceEntitlementsRealtimeProvider({
 
       if (!partySocketRef.current || partySocketRef.current.readyState !== WebSocket.OPEN) {
         if (isRealtimeTokenExpiredRef.current) {
-          await refreshRealtimeTokenInternal()
+          await refreshRealtimeTokenInternal("expired")
         }
       }
 
@@ -696,10 +1057,6 @@ export function UnpriceEntitlementsRealtimeProvider({
   )
 
   useEffect(() => {
-    void refreshEntitlements()
-  }, [refreshEntitlements])
-
-  useEffect(() => {
     if (!activeRealtimeToken || !activeRealtimeTokenExpiresAt) {
       setIsRealtimeTokenExpired(true)
       return
@@ -718,16 +1075,15 @@ export function UnpriceEntitlementsRealtimeProvider({
       setIsRealtimeTokenExpired(true)
     }, expiresInMs)
 
-    const canAutoRefreshToken = Boolean(refreshRealtimeToken) || allowClientSideTicketFetch
     const refreshInMs = Math.max(
       0,
-      activeRealtimeTokenExpiresAt * 1000 - Date.now() - TOKEN_REFRESH_LEAD_SECONDS * 1000
+      activeRealtimeTokenExpiresAt * 1000 - Date.now() - refreshLeadSeconds * 1000
     )
 
     const refreshTimer =
-      canAutoRefreshToken && refreshInMs > 0
+      refreshInMs > 0
         ? setTimeout(() => {
-            void refreshRealtimeTokenInternal()
+            void refreshRealtimeTokenInternal("pre_expiry")
           }, refreshInMs)
         : null
 
@@ -740,15 +1096,12 @@ export function UnpriceEntitlementsRealtimeProvider({
   }, [
     activeRealtimeToken,
     activeRealtimeTokenExpiresAt,
-    allowClientSideTicketFetch,
-    refreshRealtimeToken,
+    refreshLeadSeconds,
     refreshRealtimeTokenInternal,
   ])
 
   useEffect(() => {
-    const canAutoRefreshToken = Boolean(refreshRealtimeToken) || allowClientSideTicketFetch
-
-    if (!canAutoRefreshToken || disableWebsocket) {
+    if (disableWebsocket) {
       return
     }
 
@@ -760,15 +1113,8 @@ export function UnpriceEntitlementsRealtimeProvider({
       return
     }
 
-    void refreshRealtimeTokenInternal()
-  }, [
-    activeRealtimeToken,
-    allowClientSideTicketFetch,
-    disableWebsocket,
-    isRealtimeTokenExpired,
-    refreshRealtimeToken,
-    refreshRealtimeTokenInternal,
-  ])
+    void refreshRealtimeTokenInternal(activeRealtimeToken ? "expired" : "init")
+  }, [activeRealtimeToken, disableWebsocket, isRealtimeTokenExpired, refreshRealtimeTokenInternal])
 
   const socket = usePartySocket({
     enabled: realtimeSocketEnabled,
@@ -795,8 +1141,17 @@ export function UnpriceEntitlementsRealtimeProvider({
     onClose: (event) => {
       setSocketStatus("closed")
       const reason = event.reason.toLowerCase()
-      if (reason.includes("expired") || event.code === 4001 || event.code === 4401) {
+      if (
+        reason.includes("expired") ||
+        reason.includes("unauthorized") ||
+        event.code === 4001 ||
+        event.code === 4401 ||
+        event.code === 1008
+      ) {
         setIsRealtimeTokenExpired(true)
+        if (!disableWebsocket && !hasAutoRefreshFailedRef.current) {
+          void refreshRealtimeTokenInternal("reconnect")
+        }
       }
       rejectPendingVerifyRequests("Realtime websocket disconnected")
     },
@@ -821,55 +1176,96 @@ export function UnpriceEntitlementsRealtimeProvider({
     })
   }, [realtimeSocketEnabled, rejectPendingVerifyRequests, requestSnapshot, socket])
 
+  useEffect(() => {
+    if (!realtimeSocketEnabled || socketStatus !== "open") {
+      return
+    }
+
+    const retryIntervalMs = Math.max(1_000, Math.floor(snapshotRetryIntervalMs))
+    const thresholdMs = Math.max(5_000, Math.floor(snapshotStaleThresholdMs))
+
+    const intervalId = setInterval(() => {
+      const ageMs =
+        typeof lastSnapshotAt === "number" ? Date.now() - lastSnapshotAt : Number.POSITIVE_INFINITY
+
+      if (ageMs >= thresholdMs) {
+        requestSnapshot({ force: true })
+      }
+    }, retryIntervalMs)
+
+    return () => {
+      clearInterval(intervalId)
+    }
+  }, [
+    lastSnapshotAt,
+    realtimeSocketEnabled,
+    requestSnapshot,
+    snapshotRetryIntervalMs,
+    snapshotStaleThresholdMs,
+    socketStatus,
+  ])
+
   const entitlementSlugs = useMemo(() => {
     return new Set(entitlements.map((entitlement) => entitlement.featureSlug))
   }, [entitlements])
 
   const entitlementByFeatureSlug = useMemo(() => {
-    const map = new Map<string, CustomerEntitlement>()
+    const map = new Map<string, RealtimeEntitlement>()
     for (const entitlement of entitlements) {
       map.set(entitlement.featureSlug, entitlement)
     }
     return map
   }, [entitlements])
 
+  const refreshSnapshot = useCallback(() => {
+    requestSnapshot({ force: true })
+  }, [requestSnapshot])
+
   const value = useMemo<EntitlementsRealtimeContextValue>(
     () => ({
       customerId,
       projectId,
+      subscriptionStatus,
+      subscription,
       entitlements,
       entitlementSlugs,
       entitlementByFeatureSlug,
+      features,
       usageByFeature,
       metrics,
+      lastSnapshotAt,
+      stateVersion,
       events,
       validationsByFeature,
       lastValidationEvent,
       socketStatus,
       isConnected: socketStatus === "open",
       isRefreshingToken,
-      isRefreshingEntitlements,
       error,
-      refreshEntitlements,
-      refreshRealtimeToken: refreshRealtimeTokenInternal,
+      refreshRealtimeToken: () => refreshRealtimeTokenInternal("manual"),
+      refreshSnapshot,
       validateEntitlement,
     }),
     [
       customerId,
-      entitlementByFeatureSlug,
+      projectId,
+      subscriptionStatus,
+      subscription,
       entitlements,
       entitlementSlugs,
+      entitlementByFeatureSlug,
+      features,
+      usageByFeature,
+      metrics,
+      lastSnapshotAt,
+      stateVersion,
       error,
       events,
-      isRefreshingEntitlements,
       isRefreshingToken,
       lastValidationEvent,
-      metrics,
-      projectId,
-      refreshEntitlements,
+      refreshSnapshot,
       refreshRealtimeTokenInternal,
       socketStatus,
-      usageByFeature,
       validateEntitlement,
       validationsByFeature,
     ]
@@ -894,6 +1290,107 @@ function useEntitlementsRealtimeContext() {
 
 export function useUnpriceEntitlementsRealtime() {
   return useEntitlementsRealtimeContext()
+}
+
+export function useUnpriceUsage(options: UseUnpriceUsageOptions = {}): UseUnpriceUsageResult {
+  const { featureSlugs = [], seedRows = [] } = options
+  const { entitlements, features, usageByFeature } = useEntitlementsRealtimeContext()
+
+  return useMemo(() => {
+    const seedByFeatureSlug = new Map<string, UnpriceUsageSeedRow>()
+    for (const seedRow of seedRows) {
+      const featureSlug = seedRow.featureSlug.trim()
+      if (!featureSlug || seedByFeatureSlug.has(featureSlug)) {
+        continue
+      }
+      seedByFeatureSlug.set(featureSlug, seedRow)
+    }
+
+    const featureByFeatureSlug = new Map<string, RealtimeFeatureState>()
+    for (const feature of features) {
+      featureByFeatureSlug.set(feature.featureSlug, feature)
+    }
+
+    const uniqueSlugs = new Set<string>()
+    for (const featureSlug of featureSlugs) {
+      const normalized = featureSlug.trim()
+      if (normalized) {
+        uniqueSlugs.add(normalized)
+      }
+    }
+    for (const entitlement of entitlements) {
+      uniqueSlugs.add(entitlement.featureSlug)
+    }
+    for (const feature of features) {
+      uniqueSlugs.add(feature.featureSlug)
+    }
+    for (const featureSlug of Object.keys(usageByFeature)) {
+      uniqueSlugs.add(featureSlug)
+    }
+    for (const featureSlug of seedByFeatureSlug.keys()) {
+      uniqueSlugs.add(featureSlug)
+    }
+
+    const rows: UnpriceUsageRow[] = []
+    let totalUsage = 0
+    let meteredFeatureCount = 0
+    let featuresAtOrOverLimit = 0
+
+    for (const featureSlug of uniqueSlugs) {
+      const feature = featureByFeatureSlug.get(featureSlug)
+      const seedRow = seedByFeatureSlug.get(featureSlug)
+
+      const featureType = normalizeFeatureType(feature?.featureType ?? seedRow?.featureType ?? null)
+      const usage =
+        normalizeUsageValue(usageByFeature[featureSlug]) ??
+        normalizeUsageValue(feature?.usage) ??
+        normalizeUsageValue(seedRow?.usage) ??
+        null
+      const limit =
+        normalizeLimitValue(feature?.limit) ?? normalizeLimitValue(seedRow?.limit) ?? null
+      const hasLimit = limit !== null
+      const limitType = normalizeLimitType(feature?.limitType ?? seedRow?.limitType, hasLimit)
+      const isFlatFeature = featureType === "flat"
+      const allowsOverage = limitType !== "hard"
+
+      if (typeof usage === "number" && usage > 0) {
+        totalUsage += usage
+      }
+
+      if (!isFlatFeature) {
+        meteredFeatureCount += 1
+      }
+
+      if (hasLimit && typeof usage === "number" && usage >= limit) {
+        featuresAtOrOverLimit += 1
+      }
+
+      rows.push({
+        featureSlug,
+        usage,
+        limit,
+        limitType,
+        featureType,
+        hasLimit,
+        isFlatFeature,
+        allowsOverage,
+      })
+    }
+
+    rows.sort((a, b) => a.featureSlug.localeCompare(b.featureSlug))
+    const byFeatureSlug = new Map<string, UnpriceUsageRow>()
+    for (const row of rows) {
+      byFeatureSlug.set(row.featureSlug, row)
+    }
+
+    return {
+      rows,
+      byFeatureSlug,
+      totalUsage,
+      meteredFeatureCount,
+      featuresAtOrOverLimit,
+    }
+  }, [entitlements, featureSlugs, features, seedRows, usageByFeature])
 }
 
 export function useValidateEntitlement() {

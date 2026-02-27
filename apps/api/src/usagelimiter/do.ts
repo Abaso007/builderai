@@ -1,12 +1,24 @@
 import { CloudflareStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
-import { createConnection } from "@unprice/db"
+import {
+  and,
+  createConnection,
+  desc,
+  eq,
+  gte,
+  isNull,
+  lte,
+  or,
+  type Database,
+} from "@unprice/db"
+import { subscriptionPhases, subscriptions, versions } from "@unprice/db/schema"
 import type {
   CurrentUsage,
   EntitlementState,
   MinimalEntitlement,
   ReportUsageRequest,
   ReportUsageResult,
+  SubscriptionStatus,
   VerificationResult,
   VerifyRequest,
 } from "@unprice/db/validators"
@@ -67,6 +79,18 @@ type UsageResultSummary = {
 }
 
 const METADATA_KEY_SAMPLE_LIMIT = 10
+const SUBSCRIPTION_SNAPSHOT_CACHE_TTL_MS = 5_000
+
+type RealtimeSubscriptionSnapshot = {
+  status: SubscriptionStatus | null
+  planSlug: string | null
+  billingInterval: string | null
+  phaseStartAt: number | null
+  phaseEndAt: number | null
+  cycleStartAt: number | null
+  cycleEndAt: number | null
+  timezone: string | null
+}
 
 const summarizeUsageInput = (data: VerifyRequest | ReportUsageRequest): UsageInputSummary => {
   const metadataKeys = data.metadata ? Object.keys(data.metadata) : []
@@ -125,6 +149,62 @@ const buildUsageByFeature = (params: {
   }
 
   return usageByFeature
+}
+
+const buildScopedStates = (params: {
+  states: EntitlementState[]
+  customerId: string
+  projectId: string
+}): EntitlementState[] => {
+  const { states, customerId, projectId } = params
+
+  return states.filter((state) => {
+    return state.customerId === customerId && state.projectId === projectId
+  })
+}
+
+const buildRealtimeEntitlements = (states: EntitlementState[]): MinimalEntitlement[] => {
+  const entitlementsById = new Map<string, MinimalEntitlement>()
+
+  for (const state of states) {
+    if (!entitlementsById.has(state.id)) {
+      entitlementsById.set(state.id, {
+        id: state.id,
+        featureSlug: state.featureSlug,
+        effectiveAt: state.effectiveAt,
+        expiresAt: state.expiresAt ?? null,
+      })
+    }
+  }
+
+  return Array.from(entitlementsById.values())
+}
+
+const buildRealtimeFeatures = (
+  states: EntitlementState[]
+): Array<{
+  featureSlug: string
+  featureType: EntitlementState["featureType"]
+  usage: number | null
+  limit: number | null
+  limitType: "hard" | "soft" | "none"
+  effectiveAt: number | null
+  expiresAt: number | null
+}> => {
+  return states.map((state) => {
+    const usage = Number(state.meter.usage ?? 0)
+    const limit = typeof state.limit === "number" ? state.limit : null
+
+    return {
+      featureSlug: state.featureSlug,
+      featureType: state.featureType,
+      usage: Number.isFinite(usage) ? usage : null,
+      limit,
+      limitType: limit === null ? "none" : "hard",
+      effectiveAt: state.effectiveAt ?? null,
+      expiresAt: state.expiresAt ?? null,
+    }
+  })
 }
 
 const METADATA_MAX_KEYS = 50
@@ -186,6 +266,8 @@ export class DurableObjectUsagelimiter extends Server {
   private logger: Logger
   // entitlement service
   private entitlementService: EntitlementService
+  // database connection
+  private readonly db: Database
   // storage provider
   private storage: SqliteDOStorageProvider
   // metrics service
@@ -209,6 +291,18 @@ export class DurableObjectUsagelimiter extends Server {
     emaOldestAgeSeconds: 0,
     samples: 0,
   }
+  private subscriptionSnapshotCache: {
+    customerId: string
+    projectId: string
+    value: RealtimeSubscriptionSnapshot | null
+    fetchedAt: number
+  } | null = null
+  private entitlementsSnapshotCache: {
+    customerId: string
+    projectId: string
+    value: MinimalEntitlement[] | null
+    fetchedAt: number
+  } | null = null
 
   // hibernate the do when no websocket nor connections are active
   static options = {
@@ -302,7 +396,7 @@ export class DurableObjectUsagelimiter extends Server {
 
     const cache = cacheService.getCache()
 
-    const db = createConnection({
+    this.db = createConnection({
       env: env.NODE_ENV,
       primaryDatabaseUrl: env.DATABASE_URL,
       read1DatabaseUrl: env.DATABASE_READ1_URL,
@@ -356,7 +450,7 @@ export class DurableObjectUsagelimiter extends Server {
 
     // initialize the entitlement service
     this.entitlementService = new EntitlementService({
-      db: db,
+      db: this.db,
       storage: this.storage,
       logger: this.logger,
       analytics: new Analytics({
@@ -835,6 +929,151 @@ export class DurableObjectUsagelimiter extends Server {
     }
   }
 
+  private readBillingInterval(value: unknown): string | null {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return null
+    }
+
+    const billingInterval = (value as Record<string, unknown>).billingInterval
+    return typeof billingInterval === "string" ? billingInterval : null
+  }
+
+  private async resolveRealtimeSubscriptionSnapshot(params: {
+    customerId: string
+    projectId: string
+  }): Promise<RealtimeSubscriptionSnapshot | null> {
+    const now = Date.now()
+    const cached = this.subscriptionSnapshotCache
+    if (
+      cached &&
+      cached.customerId === params.customerId &&
+      cached.projectId === params.projectId &&
+      now - cached.fetchedAt < SUBSCRIPTION_SNAPSHOT_CACHE_TTL_MS
+    ) {
+      return cached.value
+    }
+
+    let resolved: RealtimeSubscriptionSnapshot | null = null
+
+    try {
+      const [subscription] = await this.db
+        .select({
+          id: subscriptions.id,
+          status: subscriptions.status,
+          planSlug: subscriptions.planSlug,
+          currentCycleStartAt: subscriptions.currentCycleStartAt,
+          currentCycleEndAt: subscriptions.currentCycleEndAt,
+          timezone: subscriptions.timezone,
+        })
+        .from(subscriptions)
+        .where(
+          and(
+            eq(subscriptions.customerId, params.customerId),
+            eq(subscriptions.projectId, params.projectId),
+            eq(subscriptions.active, true)
+          )
+        )
+        .orderBy(desc(subscriptions.currentCycleStartAt), desc(subscriptions.createdAtM))
+        .limit(1)
+
+      if (subscription) {
+        const [phase] = await this.db
+          .select({
+            startAt: subscriptionPhases.startAt,
+            endAt: subscriptionPhases.endAt,
+            billingConfig: versions.billingConfig,
+          })
+          .from(subscriptionPhases)
+          .innerJoin(
+            versions,
+            and(
+              eq(subscriptionPhases.planVersionId, versions.id),
+              eq(subscriptionPhases.projectId, versions.projectId)
+            )
+          )
+          .where(
+            and(
+              eq(subscriptionPhases.subscriptionId, subscription.id),
+              eq(subscriptionPhases.projectId, params.projectId),
+              lte(subscriptionPhases.startAt, now),
+              or(isNull(subscriptionPhases.endAt), gte(subscriptionPhases.endAt, now))
+            )
+          )
+          .orderBy(desc(subscriptionPhases.startAt), desc(subscriptionPhases.createdAtM))
+          .limit(1)
+
+        resolved = {
+          status: subscription.status ?? null,
+          planSlug: subscription.planSlug ?? null,
+          billingInterval: this.readBillingInterval(phase?.billingConfig),
+          phaseStartAt: phase?.startAt ?? null,
+          phaseEndAt: phase?.endAt ?? null,
+          cycleStartAt: subscription.currentCycleStartAt ?? null,
+          cycleEndAt: subscription.currentCycleEndAt ?? null,
+          timezone: subscription.timezone ?? null,
+        }
+      }
+    } catch (error) {
+      this.logger.warn("Failed to resolve realtime subscription for snapshot", {
+        customerId: params.customerId,
+        projectId: params.projectId,
+        error: error instanceof Error ? error.message : "unknown error",
+      })
+    }
+
+    this.subscriptionSnapshotCache = {
+      customerId: params.customerId,
+      projectId: params.projectId,
+      value: resolved,
+      fetchedAt: now,
+    }
+
+    return resolved
+  }
+
+  private async resolveRealtimeActiveEntitlements(params: {
+    customerId: string
+    projectId: string
+  }): Promise<MinimalEntitlement[] | null> {
+    const now = Date.now()
+    const cached = this.entitlementsSnapshotCache
+    if (
+      cached &&
+      cached.customerId === params.customerId &&
+      cached.projectId === params.projectId &&
+      now - cached.fetchedAt < SUBSCRIPTION_SNAPSHOT_CACHE_TTL_MS
+    ) {
+      return cached.value
+    }
+
+    let resolved: MinimalEntitlement[] | null = null
+    const result = await this.entitlementService.getActiveEntitlements({
+      customerId: params.customerId,
+      projectId: params.projectId,
+      opts: { now },
+    })
+
+    if (result.err) {
+      this.logger.warn("Failed to resolve active entitlements for snapshot", {
+        customerId: params.customerId,
+        projectId: params.projectId,
+        error: result.err.message,
+      })
+      resolved = cached?.value ?? null
+    } else {
+      resolved = result.val
+    }
+
+    this.entitlementsSnapshotCache = {
+      customerId: params.customerId,
+      projectId: params.projectId,
+      value: resolved,
+      fetchedAt: now,
+    }
+
+    return resolved
+  }
+
   // websocket events handlers
   onStart(): void | Promise<void> {
     this.logger.debug("onStart initializing do")
@@ -893,6 +1132,7 @@ export class DurableObjectUsagelimiter extends Server {
           conn.send(
             JSON.stringify({
               type: "snapshot_error",
+              code: "INTERNAL",
               message: err.message,
             })
           )
@@ -900,6 +1140,18 @@ export class DurableObjectUsagelimiter extends Server {
         }
 
         let usageByFeature: Record<string, number> | undefined
+        let subscriptionStatus: SubscriptionStatus | null = null
+        let subscription: RealtimeSubscriptionSnapshot | null = null
+        let entitlements: MinimalEntitlement[] = []
+        let features: Array<{
+          featureSlug: string
+          featureType: EntitlementState["featureType"]
+          usage: number | null
+          limit: number | null
+          limitType: "hard" | "soft" | "none"
+          effectiveAt: number | null
+          expiresAt: number | null
+        }> = []
 
         if (parsed.customerId && parsed.projectId) {
           const allStatesResult = await this.storage.getAll()
@@ -911,20 +1163,59 @@ export class DurableObjectUsagelimiter extends Server {
               error: allStatesResult.err.message,
             })
           } else {
-            usageByFeature = buildUsageByFeature({
+            const scopedStates = buildScopedStates({
               states: allStatesResult.val,
               customerId: parsed.customerId,
               projectId: parsed.projectId,
             })
+            usageByFeature = buildUsageByFeature({
+              states: scopedStates,
+              customerId: parsed.customerId,
+              projectId: parsed.projectId,
+            })
+            entitlements = buildRealtimeEntitlements(scopedStates)
+            features = buildRealtimeFeatures(scopedStates)
           }
+
+          const activeEntitlements = await this.resolveRealtimeActiveEntitlements({
+            customerId: parsed.customerId,
+            projectId: parsed.projectId,
+          })
+          if (activeEntitlements) {
+            entitlements = activeEntitlements
+          }
+
+          subscription = await this.resolveRealtimeSubscriptionSnapshot({
+            customerId: parsed.customerId,
+            projectId: parsed.projectId,
+          })
+          subscriptionStatus = subscription?.status ?? null
         }
+
+        const snapshotState =
+          parsed.customerId && parsed.projectId
+            ? {
+                customerId: parsed.customerId,
+                projectId: parsed.projectId,
+                subscriptionStatus,
+                subscription,
+                entitlements,
+                features,
+                usageByFeature: usageByFeature ?? {},
+                metrics: val,
+                asOf: Date.now(),
+                stateVersion: `${val.newestTimestamp ?? 0}:${val.usageCount}:${val.verificationCount}:${entitlements.length}:${subscription?.cycleStartAt ?? 0}:${subscription?.status ?? "none"}`,
+              }
+            : undefined
 
         conn.send(
           JSON.stringify({
             type: "snapshot",
+            version: 3,
             metrics: val,
             usageByFeature,
             source: "durable_object",
+            state: snapshotState,
           })
         )
         return

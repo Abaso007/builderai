@@ -278,6 +278,9 @@ importers:
       '@unprice/logging':
         specifier: workspace:^
         version: link:../../internal/logging
+      '@unprice/react':
+        specifier: workspace:^
+        version: link:../../packages/react
       '@unprice/stripe':
         specifier: workspace:^
         version: link:../../internal/stripe
@@ -1208,7 +1211,7 @@ importers:
         specifier: ^5.3.3
         version: 5.9.3
       vitest:
-        specifier: ^2.0.5
+        specifier: ^2.1.9
         version: 2.1.9(@types/node@20.11.24)(terser@5.46.0)
 
   packages/react:

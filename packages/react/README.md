@@ -1,44 +1,45 @@
 # @unprice/react
 
-DX-first React bindings for Unprice.
+DX-first React bindings for Unprice realtime entitlements.
 
-Use one provider, then consume feature access with small hooks/components.
+This package is tokenless in the browser path: you do not pass Unprice API keys to `UnpriceProvider`.
 
 ## Installation
 
 ```bash
-npm install @unprice/react @unprice/api
+npm install @unprice/react
 # or
-yarn add @unprice/react @unprice/api
+yarn add @unprice/react
 # or
-pnpm add @unprice/react @unprice/api
+pnpm add @unprice/react
 ```
 
 ## Quickstart
 
-Set up everything in a single `UnpriceProvider`:
+Set up everything in a single `UnpriceProvider` using a server-issued realtime ticket.
 
 ```tsx
-import { UnpriceProvider } from '@unprice/react'
+import { UnpriceProvider } from "@unprice/react"
 
 function App() {
   return (
     <UnpriceProvider
-      token="your-api-token"
       realtime={{
         customerId: "cus_123",
         projectId: "proj_123",
-        token: "initial-realtime-ticket",
-        tokenExpiresAt: 1735689600,
-        refreshToken: async ({ customerId, projectId }) => {
-          const response = await fetch('/api/unprice/realtime-ticket', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ customerId, projectId }),
+        initialTicket: {
+          ticket: "initial-realtime-ticket",
+          expiresAt: 1735689600,
+        },
+        getRealtimeTicket: async ({ customerId, projectId, reason }) => {
+          const response = await fetch("/api/unprice/realtime-ticket", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ customerId, projectId, reason }),
           })
 
           if (!response.ok) {
-            throw new Error('Failed to refresh realtime ticket')
+            throw new Error("Failed to refresh realtime ticket")
           }
 
           return await response.json()
@@ -110,7 +111,6 @@ function FeatureAction() {
     })
 
     if (!result.allowed) {
-      // paywall / toast / analytics
       return
     }
   }
@@ -119,46 +119,45 @@ function FeatureAction() {
 }
 ```
 
-## Client Access
+### `useUnpriceUsage`
+
+Use this to render usage rows for the current billing cycle from realtime snapshots.
 
 ```tsx
-import { useUnprice } from "@unprice/react"
+import { useUnpriceUsage } from "@unprice/react"
 
-function DebugPanel() {
-  const client = useUnprice()
+function EntitlementsUsageList() {
+  const { rows } = useUnpriceUsage()
 
-  const onRefresh = async () => {
-    await client.customers.getEntitlements({
-      customerId: "cus_123",
-      projectId: "proj_123",
-    })
-  }
-
-  return <button onClick={onRefresh}>Refresh</button>
+  return (
+    <ul>
+      {rows.map((row) => (
+        <li key={row.featureSlug}>
+          <strong>{row.featureSlug}</strong>{" "}
+          {row.isFlatFeature
+            ? "Flat feature"
+            : row.hasLimit
+              ? `${row.usage ?? 0} used of ${row.limit}`
+              : `${row.usage ?? 0} used`}
+        </li>
+      ))}
+    </ul>
+  )
 }
 ```
 
 ## Advanced APIs
 
-If you need lower-level control, these are still available:
-
-- `UnpriceClientProvider`
-- `useUnpriceClient`
 - `UnpriceEntitlementsRealtimeProvider`
 - `useUnpriceEntitlementsRealtime`
+- `useUnpriceUsage`
 - `useEntitlement`
 - `useValidateEntitlement`
 - `EntitlementRealtimeFeature`
 - `EntitlementValidationListener`
 
-## TypeScript Support
-
-This package includes TypeScript types and works seamlessly with TypeScript projects.
-
 ## Security
 
-Do not expose root API keys in client code.
-
+- Do not expose root API keys in client code.
 - Issue short-lived realtime tickets from your backend.
-- Refresh tickets through a backend endpoint.
-- Keep paywall/modal UI in your app components; this package provides data + hooks.
+- Implement `getRealtimeTicket` in your app server and let the provider handle refresh/reconnect lifecycle.
