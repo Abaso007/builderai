@@ -69,6 +69,8 @@ type SocketStatus = "idle" | "connecting" | "open" | "closed" | "error"
 type RealtimeEventType = "verify" | "reportUsage"
 type EventSource = "socket" | "hook"
 type RealtimeTicketReason = "init" | "pre_expiry" | "expired" | "reconnect" | "manual"
+type RealtimeAlertType = "limit_reached" | "limit_recovered"
+export type RealtimeStreamMode = "all" | "events" | "alerts"
 
 type SocketSender = {
   send: (message: string) => void
@@ -109,6 +111,15 @@ export type EntitlementValidationEvent = {
   source: EventSource
 }
 
+export type RealtimeAlertEvent = {
+  at: number
+  featureSlug: string
+  alertType: RealtimeAlertType
+  usage: number | null
+  limit: number | null
+  source: "socket"
+}
+
 export type UnpriceEntitlementsRealtimeProviderProps = PropsWithChildren<{
   customerId: string
   projectId: string
@@ -129,7 +140,9 @@ export type UnpriceEntitlementsRealtimeProviderProps = PropsWithChildren<{
   snapshotRetryIntervalMs?: number
   disableWebsocket?: boolean
   eventBufferSize?: number
+  stream?: RealtimeStreamMode
   onValidationEvent?: (event: EntitlementValidationEvent) => void
+  onAlertEvent?: (event: RealtimeAlertEvent) => void
   onConnectionStateChange?: (value: {
     status: SocketStatus
     attempts: number
@@ -151,14 +164,18 @@ type EntitlementsRealtimeContextValue = {
   lastSnapshotAt: number | null
   stateVersion: string | null
   events: EntitlementRealtimeEvent[]
+  alerts: RealtimeAlertEvent[]
   validationsByFeature: Record<string, EntitlementValidationEvent>
   lastValidationEvent: EntitlementValidationEvent | null
   socketStatus: SocketStatus
+  eventStreamState: "active" | "paused"
+  eventStreamPausedAt: number | null
   isConnected: boolean
   isRefreshingToken: boolean
   error: Error | null
   refreshRealtimeToken: () => Promise<void>
   refreshSnapshot: () => void
+  resumeEventStream: () => void
   validateEntitlement: (input: VerifyEntitlementInput) => Promise<VerifyEntitlementResult>
 }
 
@@ -197,6 +214,7 @@ export type UnpriceUsageRow = {
 export type UseUnpriceUsageOptions = {
   featureSlugs?: string[]
   seedRows?: UnpriceUsageSeedRow[]
+  scope?: "entitlements" | "all"
 }
 
 export type UseUnpriceUsageResult = {
@@ -344,12 +362,17 @@ function parseRealtimeFeature(value: unknown): RealtimeFeatureState | null {
     return null
   }
 
-  if (
-    featureType !== "flat" &&
-    featureType !== "tiered" &&
-    featureType !== "usage" &&
-    featureType !== "package"
-  ) {
+  const normalizedFeatureType =
+    featureType === "tier"
+      ? "tiered"
+      : featureType === "flat" ||
+          featureType === "tiered" ||
+          featureType === "usage" ||
+          featureType === "package"
+        ? featureType
+        : null
+
+  if (!normalizedFeatureType) {
     return null
   }
 
@@ -365,7 +388,7 @@ function parseRealtimeFeature(value: unknown): RealtimeFeatureState | null {
 
   return {
     featureSlug,
-    featureType,
+    featureType: normalizedFeatureType,
     usage: typeof usage === "number" && Number.isFinite(usage) ? usage : null,
     limit: typeof limit === "number" && Number.isFinite(limit) ? limit : null,
     limitType,
@@ -465,7 +488,9 @@ export function UnpriceEntitlementsRealtimeProvider({
   snapshotRetryIntervalMs = DEFAULT_SNAPSHOT_RETRY_INTERVAL_MS,
   disableWebsocket = false,
   eventBufferSize = DEFAULT_EVENT_BUFFER_SIZE,
+  stream = "all",
   onValidationEvent,
+  onAlertEvent,
   onConnectionStateChange,
 }: UnpriceEntitlementsRealtimeProviderProps) {
   const maxEvents = Math.max(1, Math.floor(eventBufferSize))
@@ -495,6 +520,8 @@ export function UnpriceEntitlementsRealtimeProvider({
   const [lastSnapshotAt, setLastSnapshotAt] = useState<number | null>(null)
   const [stateVersion, setStateVersion] = useState<string | null>(null)
   const [events, setEvents] = useState<EntitlementRealtimeEvent[]>([])
+  const [alerts, setAlerts] = useState<RealtimeAlertEvent[]>([])
+  const [eventStreamPausedAt, setEventStreamPausedAt] = useState<number | null>(null)
   const [validationsByFeature, setValidationsByFeature] = useState<
     Record<string, EntitlementValidationEvent>
   >({})
@@ -519,6 +546,8 @@ export function UnpriceEntitlementsRealtimeProvider({
     [runtimeEnv, projectId, customerId]
   )
   const socketHost = useMemo(() => toWebSocketBaseUrl(apiBaseUrl), [apiBaseUrl])
+  const isEventsStreamEnabled = stream !== "alerts"
+  const isAlertsStreamEnabled = stream !== "events"
   const realtimeSocketEnabled =
     Boolean(activeRealtimeToken) && !isRealtimeTokenExpired && !disableWebsocket
 
@@ -547,6 +576,12 @@ export function UnpriceEntitlementsRealtimeProvider({
   }, [customerId, projectId])
 
   useEffect(() => {
+    if (!isEventsStreamEnabled) {
+      setEventStreamPausedAt(null)
+    }
+  }, [isEventsStreamEnabled])
+
+  useEffect(() => {
     onConnectionStateChange?.({
       status: socketStatus,
       attempts: refreshRetryAttemptRef.current,
@@ -573,6 +608,8 @@ export function UnpriceEntitlementsRealtimeProvider({
     setMetrics(null)
     setUsageByFeature({})
     setEvents([])
+    setAlerts([])
+    setEventStreamPausedAt(null)
     setValidationsByFeature({})
     setLastValidationEvent(null)
     rejectPendingVerifyRequests("Realtime context changed")
@@ -595,6 +632,14 @@ export function UnpriceEntitlementsRealtimeProvider({
       setEvents((previous) => [event, ...previous].slice(0, maxEvents))
     },
     [maxEvents]
+  )
+
+  const appendAlertEvent = useCallback(
+    (event: RealtimeAlertEvent) => {
+      setAlerts((previous) => [event, ...previous].slice(0, maxEvents))
+      onAlertEvent?.(event)
+    },
+    [maxEvents, onAlertEvent]
   )
 
   const appendValidationEvent = useCallback(
@@ -632,12 +677,10 @@ export function UnpriceEntitlementsRealtimeProvider({
         JSON.stringify({
           type: "snapshot_request",
           windowSeconds: snapshotWindowSeconds,
-          customerId,
-          projectId,
         })
       )
     },
-    [customerId, projectId, snapshotWindowSeconds]
+    [snapshotWindowSeconds]
   )
 
   const scheduleTokenRefreshRetry = useCallback(() => {
@@ -800,6 +843,10 @@ export function UnpriceEntitlementsRealtimeProvider({
         type === "snapshot_error" ||
         type === "verify_result" ||
         type === "verify_error" ||
+        type === "alert" ||
+        type === "tail_expired" ||
+        type === "tail_resumed" ||
+        type === "tail_resume_error" ||
         type === "verify" ||
         type === "reportUsage"
       ) {
@@ -837,7 +884,9 @@ export function UnpriceEntitlementsRealtimeProvider({
           nextUsageByFeature = parseUsageByFeature(state.usageByFeature)
 
           setSubscription(parsedSubscription)
-          setSubscriptionStatus(parsedSubscription?.status ?? parseSubscriptionStatus(state.subscriptionStatus))
+          setSubscriptionStatus(
+            parsedSubscription?.status ?? parseSubscriptionStatus(state.subscriptionStatus)
+          )
           setEntitlements(parsedEntitlements)
           setFeatures(parsedFeatures)
           setStateVersion(readString(state, "stateVersion") ?? null)
@@ -881,6 +930,57 @@ export function UnpriceEntitlementsRealtimeProvider({
         return
       }
 
+      if (type === "tail_expired") {
+        if (!isEventsStreamEnabled) {
+          return
+        }
+        setEventStreamPausedAt(readNumber(payload, "timestamp") ?? Date.now())
+        return
+      }
+
+      if (type === "tail_resumed") {
+        setEventStreamPausedAt(null)
+        return
+      }
+
+      if (type === "tail_resume_error") {
+        const message = readString(payload, "message") ?? "Failed to resume live event stream"
+        setError(new Error(message))
+        return
+      }
+
+      if (type === "alert") {
+        if (!isAlertsStreamEnabled) {
+          return
+        }
+
+        const payloadCustomerId = readString(payload, "customerId")
+        if (payloadCustomerId && payloadCustomerId !== customerId) {
+          return
+        }
+
+        const featureSlug = readString(payload, "featureSlug")
+        const alertTypeRaw = readString(payload, "alertType")
+        const alertType =
+          alertTypeRaw === "limit_reached" || alertTypeRaw === "limit_recovered"
+            ? alertTypeRaw
+            : null
+
+        if (!featureSlug || !alertType) {
+          return
+        }
+
+        appendAlertEvent({
+          at: readNumber(payload, "timestamp") ?? Date.now(),
+          featureSlug,
+          alertType,
+          usage: normalizeUsageValue(readNumber(payload, "usage")),
+          limit: normalizeLimitValue(readNumber(payload, "limit")),
+          source: "socket",
+        })
+        return
+      }
+
       if (type === "verify_result" || type === "verify_error") {
         const requestId = readString(payload, "requestId")
         if (!requestId) {
@@ -918,6 +1018,10 @@ export function UnpriceEntitlementsRealtimeProvider({
       }
 
       if (type !== "verify" && type !== "reportUsage") {
+        return
+      }
+
+      if (!isEventsStreamEnabled) {
         return
       }
 
@@ -973,7 +1077,15 @@ export function UnpriceEntitlementsRealtimeProvider({
 
       requestSnapshot()
     },
-    [appendRealtimeEvent, appendValidationEvent, customerId, requestSnapshot]
+    [
+      appendAlertEvent,
+      appendRealtimeEvent,
+      appendValidationEvent,
+      customerId,
+      isAlertsStreamEnabled,
+      isEventsStreamEnabled,
+      requestSnapshot,
+    ]
   )
 
   const validateEntitlement = useCallback(
@@ -1007,8 +1119,6 @@ export function UnpriceEntitlementsRealtimeProvider({
       const payload = {
         type: "verify_request",
         requestId,
-        customerId: resolvedCustomerId,
-        projectId,
         featureSlug: input.featureSlug,
         usage: input.usage,
         action: input.action,
@@ -1124,11 +1234,14 @@ export function UnpriceEntitlementsRealtimeProvider({
     party: "usagelimit",
     query: {
       ticket: activeRealtimeToken ?? "",
+      tail: isEventsStreamEnabled ? "1" : "0",
+      alerts: isAlertsStreamEnabled ? "1" : "0",
     },
     onOpen: (event) => {
       if (isRealtimeTokenExpiredRef.current) {
         return
       }
+      setEventStreamPausedAt(null)
       setSocketStatus("open")
       requestSnapshot({
         force: true,
@@ -1221,6 +1334,24 @@ export function UnpriceEntitlementsRealtimeProvider({
     requestSnapshot({ force: true })
   }, [requestSnapshot])
 
+  const resumeEventStream = useCallback(() => {
+    if (!isEventsStreamEnabled) {
+      return
+    }
+
+    const socket = partySocketRef.current
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return
+    }
+
+    setEventStreamPausedAt(null)
+    socket.send(
+      JSON.stringify({
+        type: "resume_tail",
+      })
+    )
+  }, [isEventsStreamEnabled])
+
   const value = useMemo<EntitlementsRealtimeContextValue>(
     () => ({
       customerId,
@@ -1236,14 +1367,18 @@ export function UnpriceEntitlementsRealtimeProvider({
       lastSnapshotAt,
       stateVersion,
       events,
+      alerts,
       validationsByFeature,
       lastValidationEvent,
       socketStatus,
+      eventStreamState: eventStreamPausedAt === null ? "active" : "paused",
+      eventStreamPausedAt,
       isConnected: socketStatus === "open",
       isRefreshingToken,
       error,
       refreshRealtimeToken: () => refreshRealtimeTokenInternal("manual"),
       refreshSnapshot,
+      resumeEventStream,
       validateEntitlement,
     }),
     [
@@ -1259,12 +1394,15 @@ export function UnpriceEntitlementsRealtimeProvider({
       metrics,
       lastSnapshotAt,
       stateVersion,
+      alerts,
       error,
+      eventStreamPausedAt,
       events,
       isRefreshingToken,
       lastValidationEvent,
       refreshSnapshot,
       refreshRealtimeTokenInternal,
+      resumeEventStream,
       socketStatus,
       validateEntitlement,
       validationsByFeature,
@@ -1293,7 +1431,7 @@ export function useUnpriceEntitlementsRealtime() {
 }
 
 export function useUnpriceUsage(options: UseUnpriceUsageOptions = {}): UseUnpriceUsageResult {
-  const { featureSlugs = [], seedRows = [] } = options
+  const { featureSlugs = [], seedRows = [], scope = "entitlements" } = options
   const { entitlements, features, usageByFeature } = useEntitlementsRealtimeContext()
 
   return useMemo(() => {
@@ -1312,6 +1450,8 @@ export function useUnpriceUsage(options: UseUnpriceUsageOptions = {}): UseUnpric
     }
 
     const uniqueSlugs = new Set<string>()
+    const includeAllFeatures = scope === "all" || entitlements.length === 0
+
     for (const featureSlug of featureSlugs) {
       const normalized = featureSlug.trim()
       if (normalized) {
@@ -1321,11 +1461,13 @@ export function useUnpriceUsage(options: UseUnpriceUsageOptions = {}): UseUnpric
     for (const entitlement of entitlements) {
       uniqueSlugs.add(entitlement.featureSlug)
     }
-    for (const feature of features) {
-      uniqueSlugs.add(feature.featureSlug)
-    }
-    for (const featureSlug of Object.keys(usageByFeature)) {
-      uniqueSlugs.add(featureSlug)
+    if (includeAllFeatures) {
+      for (const feature of features) {
+        uniqueSlugs.add(feature.featureSlug)
+      }
+      for (const featureSlug of Object.keys(usageByFeature)) {
+        uniqueSlugs.add(featureSlug)
+      }
     }
     for (const featureSlug of seedByFeatureSlug.keys()) {
       uniqueSlugs.add(featureSlug)
@@ -1390,7 +1532,7 @@ export function useUnpriceUsage(options: UseUnpriceUsageOptions = {}): UseUnpric
       meteredFeatureCount,
       featuresAtOrOverLimit,
     }
-  }, [entitlements, featureSlugs, features, seedRows, usageByFeature])
+  }, [entitlements, featureSlugs, features, scope, seedRows, usageByFeature])
 }
 
 export function useValidateEntitlement() {

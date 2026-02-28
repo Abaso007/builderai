@@ -3,6 +3,8 @@
 import type { PropsWithChildren } from "react"
 import {
   type EntitlementValidationEvent,
+  type RealtimeAlertEvent,
+  type RealtimeStreamMode,
   type RealtimeTokenPayload,
   type RealtimeWindowSeconds,
   type SubscriptionStatus,
@@ -30,7 +32,9 @@ export type UnpriceRealtimeConfig = {
   snapshotRetryIntervalMs?: number
   disableWebsocket?: boolean
   eventBufferSize?: number
+  stream?: RealtimeStreamMode
   onValidationEvent?: (event: EntitlementValidationEvent) => void
+  onAlertEvent?: (event: RealtimeAlertEvent) => void
   onConnectionStateChange?: (value: {
     status: "idle" | "connecting" | "open" | "closed" | "error"
     attempts: number
@@ -61,7 +65,9 @@ export function UnpriceProvider({ children, realtime }: UnpriceProviderProps) {
       snapshotRetryIntervalMs={realtime.snapshotRetryIntervalMs}
       disableWebsocket={realtime.disableWebsocket}
       eventBufferSize={realtime.eventBufferSize}
+      stream={realtime.stream}
       onValidationEvent={realtime.onValidationEvent}
+      onAlertEvent={realtime.onAlertEvent}
       onConnectionStateChange={realtime.onConnectionStateChange}
     >
       {children}

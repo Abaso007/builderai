@@ -1,13 +1,13 @@
 "use client"
 
+import { useMutation } from "@tanstack/react-query"
+import { API_DOMAIN } from "@unprice/config"
 import {
   type EntitlementRealtimeEvent,
   UnpriceProvider,
   useUnpriceEntitlementsRealtime,
   useUnpriceUsage,
 } from "@unprice/react"
-import { useMutation } from "@tanstack/react-query"
-import { API_DOMAIN } from "@unprice/config"
 import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
@@ -240,10 +240,13 @@ function RealtimePanelContent(
     subscription,
     lastSnapshotAt,
     socketStatus,
+    eventStreamState,
+    eventStreamPausedAt,
     error: realtimeError,
     isRefreshingToken: isRefreshingTicket,
     refreshRealtimeToken,
     refreshSnapshot,
+    resumeEventStream,
   } = useUnpriceEntitlementsRealtime()
   const metrics = realtimeMetrics as Metrics | null
   const events = useMemo<RealtimeEvent[]>(() => {
@@ -258,6 +261,7 @@ function RealtimePanelContent(
       deniedReason: event.deniedReason,
     }))
   }, [realtimeEvents])
+
   const [browserTimezone, setBrowserTimezone] = useState<string | null>(null)
   const [snapshotClockMs, setSnapshotClockMs] = useState(() => Date.now())
 
@@ -398,7 +402,7 @@ function RealtimePanelContent(
     return Math.min(100, Math.max(0, (metrics.allowedCount / metrics.verificationCount) * 100))
   }, [metrics?.verificationCount, metrics?.allowedCount])
 
-  const { rows: entitlementRows } = useUnpriceUsage()
+  const { rows: entitlementRows } = useUnpriceUsage({ scope: "entitlements" })
   const currentPlanSlug = subscription?.planSlug ?? null
   const currentCycleStartAt = subscription?.cycleStartAt ?? null
   const currentCycleEndAt = subscription?.cycleEndAt ?? null
@@ -461,6 +465,7 @@ function RealtimePanelContent(
   const bucketLabel = formatBucketLabel(chartBucketSizeSeconds)
   const isRealtimeLive = socketStatus === "open"
   const isRealtimeConnecting = socketStatus === "connecting"
+  const isEventStreamPaused = eventStreamState === "paused"
   const shouldShowRefreshNotice =
     socketStatus === "closed" || socketStatus === "error" || Boolean(realtimeError)
   const isSnapshotStale =
@@ -468,9 +473,11 @@ function RealtimePanelContent(
     (typeof lastSnapshotAt !== "number" ||
       snapshotClockMs - lastSnapshotAt > SNAPSHOT_STALE_THRESHOLD_MS)
   const realtimeStatusLabel = isRealtimeLive
-    ? isSnapshotStale
-      ? "Live (stale)"
-      : "Live"
+    ? isEventStreamPaused
+      ? "Live (events paused)"
+      : isSnapshotStale
+        ? "Live (stale)"
+        : "Live"
     : isRealtimeConnecting
       ? "Connecting"
       : realtimeError
@@ -493,7 +500,9 @@ function RealtimePanelContent(
                     className={cn(
                       "relative inline-flex h-2 w-2 rounded-full",
                       isRealtimeLive
-                        ? "bg-emerald-500"
+                        ? isEventStreamPaused
+                          ? "bg-amber-500"
+                          : "bg-emerald-500"
                         : isRealtimeConnecting
                           ? "bg-amber-500"
                           : "bg-muted-foreground/50"
@@ -543,6 +552,27 @@ function RealtimePanelContent(
               onClick={() => refreshSnapshot()}
             >
               Retry snapshot now
+            </Button>
+          </p>
+        </div>
+      )}
+
+      {isEventStreamPaused && !shouldShowRefreshNotice && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/20">
+          <p className="text-amber-800 text-sm dark:text-amber-200">
+            Live event stream paused
+            {typeof eventStreamPausedAt === "number"
+              ? ` at ${new Date(eventStreamPausedAt).toLocaleTimeString()}`
+              : ""}
+            .{" "}
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="h-auto p-0 text-amber-800 underline-offset-2 hover:text-amber-900 dark:text-amber-200 dark:hover:text-amber-100"
+              onClick={() => resumeEventStream()}
+            >
+              Resume event stream
             </Button>
           </p>
         </div>
@@ -794,7 +824,9 @@ function RealtimePanelContent(
                     const featureType = entitlement.featureType
                     const isFlatFeature = featureType === "flat"
                     const limitValue =
-                      typeof entitlement.limit === "number" && entitlement.limit > 0
+                      typeof entitlement.limit === "number" &&
+                      Number.isFinite(entitlement.limit) &&
+                      entitlement.limit >= 0
                         ? entitlement.limit
                         : null
                     const hasLimit = limitValue !== null
@@ -832,7 +864,7 @@ function RealtimePanelContent(
                       ? "Flat feature"
                       : hasLimit
                         ? `${formatNumber(usageValue)} used of ${formatNumber(limitValue)}`
-                        : `${formatNumber(usageValue)} used of ${formatNumber(Number.POSITIVE_INFINITY)}`
+                        : `${formatNumber(usageValue)} used (unlimited)`
 
                     const usageBarColor = isFlatFeature
                       ? "hsl(var(--muted-foreground) / 0.35)"
@@ -886,9 +918,11 @@ function RealtimePanelContent(
                 <CardTitle className="text-base">Live Event Stream</CardTitle>
                 <CardDescription>Real-time verification and usage logs</CardDescription>
               </div>
-              <Badge variant="outline" className="font-mono text-xs">
-                {events.length} events
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="font-mono text-xs">
+                  {events.length} events
+                </Badge>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="lg:flex-1">

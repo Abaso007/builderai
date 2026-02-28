@@ -52,6 +52,106 @@ function App() {
 }
 ```
 
+## Realtime Stream Mode
+
+Choose what each provider instance subscribes to:
+
+- `all` (default): usage/verification events + alerts
+- `events`: usage/verification events only
+- `alerts`: alerts only
+
+```tsx
+<UnpriceProvider
+  realtime={{
+    customerId: "cus_123",
+    projectId: "proj_123",
+    getRealtimeTicket,
+    stream: "alerts",
+  }}
+>
+  <App />
+</UnpriceProvider>
+```
+
+Typical split:
+
+- App root provider: `stream: "alerts"` to listen for limit-reached notifications globally.
+- Realtime/debug page provider: `stream: "events"` or `stream: "all"` where live activity is needed.
+
+## Realtime Snapshot Model
+
+The realtime snapshot sent to the SDK includes:
+
+- `subscription`: active subscription/phase details for the customer
+- `entitlements`: active entitlements for the customer
+- `usageByFeature` and `features`: current usage/limits from durable object state
+
+This means your panel can render subscription status, entitlement list, and current cycle usage from one realtime source.
+
+## Build a Customer Realtime Panel
+
+```tsx
+import { useUnpriceEntitlementsRealtime, useUnpriceUsage } from "@unprice/react"
+
+export function CustomerRealtimePanel() {
+  const { subscription, socketStatus, refreshSnapshot, alerts } = useUnpriceEntitlementsRealtime()
+  const { rows } = useUnpriceUsage({ scope: "entitlements" })
+
+  return (
+    <section>
+      <h2>Realtime</h2>
+      <p>Status: {socketStatus}</p>
+      <p>Plan: {subscription?.planSlug ?? "No active plan"}</p>
+
+      <button onClick={refreshSnapshot}>Refresh snapshot</button>
+
+      <h3>Entitlements</h3>
+      <ul>
+        {rows.map((row) => (
+          <li key={row.featureSlug}>
+            {row.featureSlug}: {row.isFlatFeature ? "Flat feature" : `${row.usage ?? 0} / ${row.limit ?? "∞"}`}
+          </li>
+        ))}
+      </ul>
+
+      <h3>Recent alerts</h3>
+      <ul>
+        {alerts.slice(0, 5).map((alert) => (
+          <li key={`${alert.at}-${alert.featureSlug}-${alert.alertType}`}>
+            {alert.featureSlug} - {alert.alertType}
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+```
+
+## Listen for Limit Alerts
+
+```tsx
+import { UnpriceProvider } from "@unprice/react"
+
+function App() {
+  return (
+    <UnpriceProvider
+      realtime={{
+        customerId: "cus_123",
+        projectId: "proj_123",
+        getRealtimeTicket,
+        onAlertEvent: (event) => {
+          if (event.alertType === "limit_reached") {
+            // Open paywall, toast, or trigger in-app CTA
+          }
+        },
+      }}
+    >
+      <YourApp />
+    </UnpriceProvider>
+  )
+}
+```
+
 ## Feature Checks
 
 ### `useFeature`

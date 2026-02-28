@@ -1,17 +1,6 @@
 import { CloudflareStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
-import {
-  and,
-  createConnection,
-  desc,
-  eq,
-  gte,
-  isNull,
-  lte,
-  or,
-  type Database,
-} from "@unprice/db"
-import { subscriptionPhases, subscriptions, versions } from "@unprice/db/schema"
+import { type Database, createConnection } from "@unprice/db"
 import type {
   CurrentUsage,
   EntitlementState,
@@ -33,10 +22,10 @@ import {
 } from "@unprice/logging"
 import { shouldEmitLogsToBackend, shouldEmitMetrics } from "@unprice/logging/env"
 import { CacheService } from "@unprice/services/cache"
-import type { DenyReason } from "@unprice/services/customers"
+import { CustomerService, type DenyReason } from "@unprice/services/customers"
 import { EntitlementService } from "@unprice/services/entitlements"
 import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/metrics"
-import { type Connection, Server } from "partyserver"
+import { type Connection, type ConnectionContext, Server } from "partyserver"
 import type { Env } from "~/env"
 import { LakehousePipelineService } from "~/lakehouse/pipeline"
 import type { BufferMetricsResponse } from "./interface"
@@ -80,6 +69,8 @@ type UsageResultSummary = {
 
 const METADATA_KEY_SAMPLE_LIMIT = 10
 const SUBSCRIPTION_SNAPSHOT_CACHE_TTL_MS = 5_000
+const CONNECTION_TAG_TAIL = "tail"
+const CONNECTION_TAG_ALERTS = "alerts"
 
 type RealtimeSubscriptionSnapshot = {
   status: SubscriptionStatus | null
@@ -91,6 +82,44 @@ type RealtimeSubscriptionSnapshot = {
   cycleEndAt: number | null
   timezone: string | null
 }
+
+type RealtimeFeatureSnapshot = {
+  featureSlug: string
+  featureType: "flat" | "tiered" | "usage" | "package"
+  usage: number | null
+  limit: number | null
+  limitType: "hard" | "soft" | "none"
+  effectiveAt: number | null
+  expiresAt: number | null
+}
+
+type RealtimeAlertType = "limit_reached" | "limit_recovered"
+
+type RealtimeConnectionState = {
+  joinedAt: number
+  tailActive: boolean
+  tailExpiredAt: number | null
+}
+
+type SnapshotRequestMessage = {
+  type: "snapshot_request"
+  windowSeconds?: unknown
+}
+
+type VerifyRequestMessage = {
+  type: "verify_request"
+  requestId?: unknown
+  featureSlug?: unknown
+  usage?: unknown
+  action?: unknown
+  metadata?: unknown
+}
+
+type ResumeTailMessage = {
+  type: "resume_tail"
+}
+
+type RealtimeClientMessage = SnapshotRequestMessage | VerifyRequestMessage | ResumeTailMessage
 
 const summarizeUsageInput = (data: VerifyRequest | ReportUsageRequest): UsageInputSummary => {
   const metadataKeys = data.metadata ? Object.keys(data.metadata) : []
@@ -132,72 +161,30 @@ const summarizeUsageResult = (
   }
 }
 
-const buildUsageByFeature = (params: {
-  states: EntitlementState[]
-  customerId: string
-  projectId: string
-}): Record<string, number> => {
-  const { states, customerId, projectId } = params
+const buildUsageByFeature = (states: EntitlementState[]): Record<string, number> => {
   const usageByFeature: Record<string, number> = {}
 
   for (const state of states) {
-    if (state.customerId !== customerId || state.projectId !== projectId) {
-      continue
-    }
-
     usageByFeature[state.featureSlug] = Number(state.meter.usage ?? 0)
   }
 
   return usageByFeature
 }
 
-const buildScopedStates = (params: {
-  states: EntitlementState[]
-  customerId: string
-  projectId: string
-}): EntitlementState[] => {
-  const { states, customerId, projectId } = params
-
-  return states.filter((state) => {
-    return state.customerId === customerId && state.projectId === projectId
-  })
-}
-
-const buildRealtimeEntitlements = (states: EntitlementState[]): MinimalEntitlement[] => {
-  const entitlementsById = new Map<string, MinimalEntitlement>()
-
-  for (const state of states) {
-    if (!entitlementsById.has(state.id)) {
-      entitlementsById.set(state.id, {
-        id: state.id,
-        featureSlug: state.featureSlug,
-        effectiveAt: state.effectiveAt,
-        expiresAt: state.expiresAt ?? null,
-      })
-    }
+const buildRealtimeFeatures = (states: EntitlementState[]): RealtimeFeatureSnapshot[] => {
+  const normalizeFeatureType = (
+    featureType: EntitlementState["featureType"]
+  ): RealtimeFeatureSnapshot["featureType"] => {
+    return featureType === "tier" ? "tiered" : featureType
   }
 
-  return Array.from(entitlementsById.values())
-}
-
-const buildRealtimeFeatures = (
-  states: EntitlementState[]
-): Array<{
-  featureSlug: string
-  featureType: EntitlementState["featureType"]
-  usage: number | null
-  limit: number | null
-  limitType: "hard" | "soft" | "none"
-  effectiveAt: number | null
-  expiresAt: number | null
-}> => {
   return states.map((state) => {
     const usage = Number(state.meter.usage ?? 0)
     const limit = typeof state.limit === "number" ? state.limit : null
 
     return {
       featureSlug: state.featureSlug,
-      featureType: state.featureType,
+      featureType: normalizeFeatureType(state.featureType),
       usage: Number.isFinite(usage) ? usage : null,
       limit,
       limitType: limit === null ? "none" : "hard",
@@ -256,6 +243,74 @@ function normalizeWsMetadata(metadata: unknown): Record<string, string | number 
   return normalized
 }
 
+function parseRealtimeClientMessage(message: string):
+  | {
+      ok: true
+      value: RealtimeClientMessage
+    }
+  | {
+      ok: false
+      error: string
+    } {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(message)
+  } catch {
+    return {
+      ok: false,
+      error: "Invalid JSON message",
+    }
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {
+      ok: false,
+      error: "Invalid message payload",
+    }
+  }
+
+  const record = parsed as Record<string, unknown>
+  const type = record.type
+
+  if (type === "snapshot_request") {
+    return {
+      ok: true,
+      value: {
+        type: "snapshot_request",
+        windowSeconds: record.windowSeconds,
+      },
+    }
+  }
+
+  if (type === "verify_request") {
+    return {
+      ok: true,
+      value: {
+        type: "verify_request",
+        requestId: record.requestId,
+        featureSlug: record.featureSlug,
+        usage: record.usage,
+        action: record.action,
+        metadata: record.metadata,
+      },
+    }
+  }
+
+  if (type === "resume_tail") {
+    return {
+      ok: true,
+      value: {
+        type: "resume_tail",
+      },
+    }
+  }
+
+  return {
+    ok: false,
+    error: "Unsupported message type",
+  }
+}
+
 // This durable object takes care of handling the usage of every feature per customer.
 // It is used to validate the usage of a feature and to report the usage to tinybird.
 // think of it as a queue that will be flushed to the db periodically
@@ -266,6 +321,8 @@ export class DurableObjectUsagelimiter extends Server {
   private logger: Logger
   // entitlement service
   private entitlementService: EntitlementService
+  // customer service
+  private customerService: CustomerService
   // database connection
   private readonly db: Database
   // storage provider
@@ -276,6 +333,8 @@ export class DurableObjectUsagelimiter extends Server {
   private LAST_BROADCAST_MSG = Date.now()
   // debounce delay for the broadcast events
   private readonly DEBOUNCE_DELAY = 1000 * 1 // 1 second (1 per second)
+  // max lifetime for a debug WebSocket session (5 minutes)
+  private readonly MAX_DEBUG_SESSION_MS = 5 * 60 * 1000
   // sample rate for the wide event
   private SAMPLE_RATE = 0.1
   private readonly FLUSH_SEC_MIN = 5
@@ -291,15 +350,12 @@ export class DurableObjectUsagelimiter extends Server {
     emaOldestAgeSeconds: 0,
     samples: 0,
   }
+  private readonly featureLimitReachedBySlug = new Map<string, boolean>()
   private subscriptionSnapshotCache: {
-    customerId: string
-    projectId: string
     value: RealtimeSubscriptionSnapshot | null
     fetchedAt: number
   } | null = null
   private entitlementsSnapshotCache: {
-    customerId: string
-    projectId: string
     value: MinimalEntitlement[] | null
     fetchedAt: number
   } | null = null
@@ -470,6 +526,20 @@ export class DurableObjectUsagelimiter extends Server {
       },
     })
 
+    this.customerService = new CustomerService({
+      db: this.db,
+      logger: this.logger,
+      analytics: new Analytics({
+        emit: true,
+        tinybirdToken: env.TINYBIRD_TOKEN,
+        tinybirdUrl: env.TINYBIRD_URL,
+        logger: this.logger,
+      }),
+      waitUntil: (promise) => this.ctx.waitUntil(promise),
+      cache: cache,
+      metrics: this.metrics,
+    })
+
     // set the colo of the do
     this.setColo()
   }
@@ -564,6 +634,62 @@ export class DurableObjectUsagelimiter extends Server {
     return await this.storage.getBufferStats(data?.windowSeconds)
   }
 
+  getConnectionTags(_connection: Connection, context: ConnectionContext): string[] {
+    const url = new URL(context.request.url)
+    const wantsTail = url.searchParams.get("tail") !== "0"
+    const wantsAlerts = url.searchParams.get("alerts") !== "0"
+
+    const tags: string[] = []
+    if (wantsTail) {
+      tags.push(CONNECTION_TAG_TAIL)
+    }
+    if (wantsAlerts) {
+      tags.push(CONNECTION_TAG_ALERTS)
+    }
+
+    // Keep at least one channel enabled so important alerts are still delivered.
+    if (tags.length === 0) {
+      tags.push(CONNECTION_TAG_ALERTS)
+    }
+
+    return tags
+  }
+
+  private sendConnectionPayload(connection: Connection, payload: string): void {
+    try {
+      connection.send(payload)
+    } catch (err) {
+      this.logger.warn("Failed to send live event to connection", {
+        connectionId: connection.id,
+        error: err instanceof Error ? err.message : String(err),
+      })
+      try {
+        connection.close(1011, "Send failed")
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  private expireTailConnection(connection: Connection<RealtimeConnectionState>, at: number): void {
+    const currentState = connection.state
+    const nextState: RealtimeConnectionState = {
+      joinedAt: currentState?.joinedAt ?? at,
+      tailActive: false,
+      tailExpiredAt: at,
+    }
+    connection.setState(nextState)
+
+    this.sendConnectionPayload(
+      connection,
+      JSON.stringify({
+        type: "tail_expired",
+        timestamp: at,
+        message: "Live tail paused to reduce costs. Alerts remain active.",
+      })
+    )
+  }
+
   // when connected through websocket we can broadcast events to the client
   // realtime events are used to debug events in dashboard
   async broadcastEvents(data: {
@@ -576,16 +702,117 @@ export class DurableObjectUsagelimiter extends Server {
     type: "verify" | "reportUsage"
     success: boolean
   }) {
+    const connections = Array.from(
+      this.getConnections<RealtimeConnectionState>(CONNECTION_TAG_TAIL)
+    )
+
+    // return early if there are no connections
+    if (connections.length === 0) return
+
     const now = Date.now()
 
     // Only broadcast if enough time has passed since last broadcast
-    // defailt 1 per second
-    // this is used to debug events in real time in dashboard
-    if (now - this.LAST_BROADCAST_MSG >= this.DEBOUNCE_DELAY) {
-      // under the hood this validates if there are connections
-      // and sends the event to all of them
-      this.broadcast(JSON.stringify(data))
-      this.LAST_BROADCAST_MSG = now
+    // default 1 per second — used to debug events in real time in dashboard
+    if (now - this.LAST_BROADCAST_MSG < this.DEBOUNCE_DELAY) {
+      return
+    }
+
+    // build payload once
+    const payload = JSON.stringify({
+      ...data,
+      kind: "tail",
+      timestamp: now,
+    })
+
+    for (const conn of connections) {
+      const joinedAt = conn.state?.joinedAt ?? now
+      const tailActive = conn.state?.tailActive ?? true
+
+      if (!tailActive) {
+        continue
+      }
+
+      // time-box debug sessions to avoid forgotten tabs running forever
+      if (now - joinedAt > this.MAX_DEBUG_SESSION_MS) {
+        this.expireTailConnection(conn, now)
+        continue
+      }
+
+      this.sendConnectionPayload(conn, payload)
+    }
+
+    this.LAST_BROADCAST_MSG = now
+  }
+
+  private buildLimitAlert(data: {
+    featureSlug: string
+    usage?: number
+    limit?: number
+  }): {
+    alertType: RealtimeAlertType
+    featureSlug: string
+    usage: number
+    limit: number
+  } | null {
+    if (
+      typeof data.usage !== "number" ||
+      !Number.isFinite(data.usage) ||
+      typeof data.limit !== "number" ||
+      !Number.isFinite(data.limit) ||
+      data.limit <= 0
+    ) {
+      this.featureLimitReachedBySlug.delete(data.featureSlug)
+      return null
+    }
+
+    const reachedLimit = data.usage >= data.limit
+    const previous = this.featureLimitReachedBySlug.get(data.featureSlug)
+    if (previous === reachedLimit) {
+      return null
+    }
+
+    this.featureLimitReachedBySlug.set(data.featureSlug, reachedLimit)
+
+    // Avoid a recovery event when we have no previous state.
+    if (!reachedLimit && previous === undefined) {
+      return null
+    }
+
+    return {
+      alertType: reachedLimit ? "limit_reached" : "limit_recovered",
+      featureSlug: data.featureSlug,
+      usage: data.usage,
+      limit: data.limit,
+    }
+  }
+
+  private async broadcastAlertEvent(data: {
+    customerId: string
+    featureSlug: string
+    alertType: RealtimeAlertType
+    usage: number
+    limit: number
+    source: "verify" | "reportUsage"
+  }): Promise<void> {
+    const connections = Array.from(this.getConnections(CONNECTION_TAG_ALERTS))
+    if (connections.length === 0) {
+      return
+    }
+
+    const payload = JSON.stringify({
+      type: "alert",
+      kind: "alert",
+      customerId: data.customerId,
+      featureSlug: data.featureSlug,
+      alertType: data.alertType,
+      usage: data.usage,
+      limit: data.limit,
+      source: data.source,
+      timestamp: Date.now(),
+    })
+
+    for (const connection of connections) {
+      this.sendConnectionPayload(connection, payload)
     }
   }
 
@@ -640,6 +867,24 @@ export class DurableObjectUsagelimiter extends Server {
             limit: result.limit,
           })
         )
+
+        const limitAlert = this.buildLimitAlert({
+          featureSlug: data.featureSlug,
+          usage: result.usage,
+          limit: result.limit,
+        })
+        if (limitAlert) {
+          this.ctx.waitUntil(
+            this.broadcastAlertEvent({
+              customerId: data.customerId,
+              featureSlug: limitAlert.featureSlug,
+              alertType: limitAlert.alertType,
+              usage: limitAlert.usage,
+              limit: limitAlert.limit,
+              source: "verify",
+            })
+          )
+        }
 
         return result
       } catch (error) {
@@ -726,6 +971,24 @@ export class DurableObjectUsagelimiter extends Server {
             limit: result.limit,
           })
         )
+
+        const limitAlert = this.buildLimitAlert({
+          featureSlug: data.featureSlug,
+          usage: result.usage,
+          limit: result.limit,
+        })
+        if (limitAlert) {
+          this.ctx.waitUntil(
+            this.broadcastAlertEvent({
+              customerId: data.customerId,
+              featureSlug: limitAlert.featureSlug,
+              alertType: limitAlert.alertType,
+              usage: limitAlert.usage,
+              limit: limitAlert.limit,
+              source: "reportUsage",
+            })
+          )
+        }
 
         return result
       } catch (error) {
@@ -929,13 +1192,10 @@ export class DurableObjectUsagelimiter extends Server {
     }
   }
 
-  private readBillingInterval(value: unknown): string | null {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      return null
-    }
-
-    const billingInterval = (value as Record<string, unknown>).billingInterval
-    return typeof billingInterval === "string" ? billingInterval : null
+  private normalizeSnapshotWindowSeconds(value: unknown): 300 | 3600 | 86400 | 604800 | undefined {
+    return value === 300 || value === 3600 || value === 86400 || value === 604800
+      ? value
+      : undefined
   }
 
   private async resolveRealtimeSubscriptionSnapshot(params: {
@@ -944,129 +1204,48 @@ export class DurableObjectUsagelimiter extends Server {
   }): Promise<RealtimeSubscriptionSnapshot | null> {
     const now = Date.now()
     const cached = this.subscriptionSnapshotCache
-    if (
-      cached &&
-      cached.customerId === params.customerId &&
-      cached.projectId === params.projectId &&
-      now - cached.fetchedAt < SUBSCRIPTION_SNAPSHOT_CACHE_TTL_MS
-    ) {
+    if (cached && now - cached.fetchedAt < SUBSCRIPTION_SNAPSHOT_CACHE_TTL_MS) {
       return cached.value
     }
 
-    let resolved: RealtimeSubscriptionSnapshot | null = null
-
-    try {
-      const [subscription] = await this.db
-        .select({
-          id: subscriptions.id,
-          status: subscriptions.status,
-          planSlug: subscriptions.planSlug,
-          currentCycleStartAt: subscriptions.currentCycleStartAt,
-          currentCycleEndAt: subscriptions.currentCycleEndAt,
-          timezone: subscriptions.timezone,
-        })
-        .from(subscriptions)
-        .where(
-          and(
-            eq(subscriptions.customerId, params.customerId),
-            eq(subscriptions.projectId, params.projectId),
-            eq(subscriptions.active, true)
-          )
-        )
-        .orderBy(desc(subscriptions.currentCycleStartAt), desc(subscriptions.createdAtM))
-        .limit(1)
-
-      if (subscription) {
-        const [phase] = await this.db
-          .select({
-            startAt: subscriptionPhases.startAt,
-            endAt: subscriptionPhases.endAt,
-            billingConfig: versions.billingConfig,
-          })
-          .from(subscriptionPhases)
-          .innerJoin(
-            versions,
-            and(
-              eq(subscriptionPhases.planVersionId, versions.id),
-              eq(subscriptionPhases.projectId, versions.projectId)
-            )
-          )
-          .where(
-            and(
-              eq(subscriptionPhases.subscriptionId, subscription.id),
-              eq(subscriptionPhases.projectId, params.projectId),
-              lte(subscriptionPhases.startAt, now),
-              or(isNull(subscriptionPhases.endAt), gte(subscriptionPhases.endAt, now))
-            )
-          )
-          .orderBy(desc(subscriptionPhases.startAt), desc(subscriptionPhases.createdAtM))
-          .limit(1)
-
-        resolved = {
-          status: subscription.status ?? null,
-          planSlug: subscription.planSlug ?? null,
-          billingInterval: this.readBillingInterval(phase?.billingConfig),
-          phaseStartAt: phase?.startAt ?? null,
-          phaseEndAt: phase?.endAt ?? null,
-          cycleStartAt: subscription.currentCycleStartAt ?? null,
-          cycleEndAt: subscription.currentCycleEndAt ?? null,
-          timezone: subscription.timezone ?? null,
-        }
-      }
-    } catch (error) {
-      this.logger.warn("Failed to resolve realtime subscription for snapshot", {
-        customerId: params.customerId,
-        projectId: params.projectId,
-        error: error instanceof Error ? error.message : "unknown error",
-      })
-    }
-
-    this.subscriptionSnapshotCache = {
+    const result = await this.customerService.getActiveSubscription({
       customerId: params.customerId,
       projectId: params.projectId,
-      value: resolved,
-      fetchedAt: now,
-    }
-
-    return resolved
-  }
-
-  private async resolveRealtimeActiveEntitlements(params: {
-    customerId: string
-    projectId: string
-  }): Promise<MinimalEntitlement[] | null> {
-    const now = Date.now()
-    const cached = this.entitlementsSnapshotCache
-    if (
-      cached &&
-      cached.customerId === params.customerId &&
-      cached.projectId === params.projectId &&
-      now - cached.fetchedAt < SUBSCRIPTION_SNAPSHOT_CACHE_TTL_MS
-    ) {
-      return cached.value
-    }
-
-    let resolved: MinimalEntitlement[] | null = null
-    const result = await this.entitlementService.getActiveEntitlements({
-      customerId: params.customerId,
-      projectId: params.projectId,
-      opts: { now },
+      now,
+      opts: {
+        skipCache: false,
+      },
     })
 
     if (result.err) {
-      this.logger.warn("Failed to resolve active entitlements for snapshot", {
+      this.logger.warn("Failed to resolve realtime subscription for snapshot", {
         customerId: params.customerId,
         projectId: params.projectId,
         error: result.err.message,
       })
-      resolved = cached?.value ?? null
-    } else {
-      resolved = result.val
+      return cached?.value ?? null
     }
 
-    this.entitlementsSnapshotCache = {
-      customerId: params.customerId,
-      projectId: params.projectId,
+    const activeSubscription = result.val
+    const activePhase = activeSubscription.activePhase
+    const billingConfig = activePhase?.planVersion?.billingConfig
+    const billingInterval =
+      billingConfig && typeof billingConfig === "object"
+        ? (billingConfig as Record<string, unknown>).billingInterval
+        : null
+
+    const resolved: RealtimeSubscriptionSnapshot = {
+      status: activeSubscription.status ?? null,
+      planSlug: activeSubscription.planSlug ?? null,
+      billingInterval: typeof billingInterval === "string" ? billingInterval : null,
+      phaseStartAt: activePhase?.startAt ?? null,
+      phaseEndAt: activePhase?.endAt ?? null,
+      cycleStartAt: activeSubscription.currentCycleStartAt ?? null,
+      cycleEndAt: activeSubscription.currentCycleEndAt ?? null,
+      timezone: activeSubscription.timezone ?? null,
+    }
+
+    this.subscriptionSnapshotCache = {
       value: resolved,
       fetchedAt: now,
     }
@@ -1080,10 +1259,20 @@ export class DurableObjectUsagelimiter extends Server {
   }
 
   // when a websocket connection is established
-  onConnect(connection: Connection): void | Promise<void> {
+  onConnect(connection: Connection<RealtimeConnectionState>): void | Promise<void> {
     this.logger.debug("onConnect", {
       connectionId: connection.id,
       room: this.name,
+    })
+
+    const now = Date.now()
+    const tailEnabled = connection.tags.includes(CONNECTION_TAG_TAIL)
+
+    // initialize channel state for cost controls
+    connection.setState({
+      joinedAt: now,
+      tailActive: tailEnabled,
+      tailExpiredAt: null,
     })
   }
 
@@ -1108,227 +1297,236 @@ export class DurableObjectUsagelimiter extends Server {
     )
   }
 
-  // websocket message handler
-  async onMessage(conn: Connection, message: string) {
-    try {
-      const parsed = JSON.parse(message) as {
-        type?: "snapshot_request" | "verify_request"
-        windowSeconds?: 300 | 3600 | 86400 | 604800
-        customerId?: string
-        projectId?: string
-        requestId?: string
-        featureSlug?: string
-        usage?: number
-        action?: string
-        metadata?: Record<string, unknown>
+  private sendMessage(conn: Connection<RealtimeConnectionState>, payload: Record<string, unknown>) {
+    this.sendConnectionPayload(conn, JSON.stringify(payload))
+  }
+
+  private async handleResumeTailMessage(conn: Connection<RealtimeConnectionState>): Promise<void> {
+    const now = Date.now()
+
+    if (!conn.tags.includes(CONNECTION_TAG_TAIL)) {
+      this.sendMessage(conn, {
+        type: "tail_resume_error",
+        message: "Tail channel is not enabled for this connection",
+      })
+      return
+    }
+
+    conn.setState({
+      joinedAt: now,
+      tailActive: true,
+      tailExpiredAt: null,
+    })
+    this.sendMessage(conn, {
+      type: "tail_resumed",
+      timestamp: now,
+    })
+  }
+
+  private async handleSnapshotRequestMessage(
+    conn: Connection<RealtimeConnectionState>,
+    payload: SnapshotRequestMessage
+  ): Promise<void> {
+    const scope = this.resolveRoomScope()
+    if (!scope) {
+      this.sendMessage(conn, {
+        type: "snapshot_error",
+        code: "FORBIDDEN",
+        message: "Invalid realtime room scope",
+      })
+      return
+    }
+
+    const now = Date.now()
+    const [metricsResult, entitlementsResult, allStatesResult, subscription] = await Promise.all([
+      this.getBufferMetrics({
+        windowSeconds: this.normalizeSnapshotWindowSeconds(payload.windowSeconds),
+      }),
+      this.getActiveEntitlements({
+        customerId: scope.customerId,
+        projectId: scope.projectId,
+      }),
+      this.storage.getAll(),
+      this.resolveRealtimeSubscriptionSnapshot({
+        customerId: scope.customerId,
+        projectId: scope.projectId,
+      }),
+    ])
+
+    if (metricsResult.err) {
+      this.sendMessage(conn, {
+        type: "snapshot_error",
+        code: "INTERNAL",
+        message: metricsResult.err.message,
+      })
+      return
+    }
+
+    const cachedEntitlements = this.entitlementsSnapshotCache
+    const canUseCachedEntitlements =
+      cachedEntitlements && now - cachedEntitlements.fetchedAt < SUBSCRIPTION_SNAPSHOT_CACHE_TTL_MS
+    let entitlements = canUseCachedEntitlements ? (cachedEntitlements.value ?? []) : []
+    if (entitlementsResult.err) {
+      this.logger.warn("Failed to resolve active entitlements for snapshot", {
+        customerId: scope.customerId,
+        projectId: scope.projectId,
+        error: entitlementsResult.err.message,
+      })
+    } else {
+      entitlements = entitlementsResult.val
+      this.entitlementsSnapshotCache = {
+        value: entitlements,
+        fetchedAt: now,
       }
+    }
 
-      if (parsed.type === "snapshot_request") {
-        const { err, val } = await this.getBufferMetrics({
-          windowSeconds: parsed.windowSeconds,
+    const entitlementSlugs = new Set(entitlements.map((entitlement) => entitlement.featureSlug))
+    const hasEntitlementsSource = !entitlementsResult.err || Boolean(canUseCachedEntitlements)
+    let features: RealtimeFeatureSnapshot[] = []
+    let usageByFeature: Record<string, number> = {}
+
+    if (allStatesResult.err) {
+      this.logger.warn("Failed to resolve in-memory usage for snapshot", {
+        customerId: scope.customerId,
+        projectId: scope.projectId,
+        error: allStatesResult.err.message,
+      })
+    } else {
+      const scopedStates = hasEntitlementsSource
+        ? allStatesResult.val.filter((state) => entitlementSlugs.has(state.featureSlug))
+        : allStatesResult.val
+
+      features = buildRealtimeFeatures(scopedStates)
+      usageByFeature = buildUsageByFeature(scopedStates)
+    }
+
+    const snapshotState = {
+      customerId: scope.customerId,
+      projectId: scope.projectId,
+      subscriptionStatus: subscription?.status ?? null,
+      subscription,
+      entitlements,
+      features,
+      usageByFeature,
+      metrics: metricsResult.val,
+      asOf: Date.now(),
+      stateVersion: `${metricsResult.val.newestTimestamp ?? 0}:${metricsResult.val.usageCount}:${metricsResult.val.verificationCount}:${entitlements.length}:${subscription?.cycleStartAt ?? 0}:${subscription?.status ?? "none"}`,
+    }
+
+    this.sendMessage(conn, {
+      type: "snapshot",
+      version: 3,
+      metrics: metricsResult.val,
+      usageByFeature,
+      source: "durable_object",
+      state: snapshotState,
+    })
+  }
+
+  private async handleVerifyRequestMessage(
+    conn: Connection<RealtimeConnectionState>,
+    payload: VerifyRequestMessage
+  ): Promise<void> {
+    const scope = this.resolveRoomScope()
+    const requestId =
+      typeof payload.requestId === "string" && payload.requestId.trim().length > 0
+        ? payload.requestId
+        : crypto.randomUUID()
+
+    if (!scope) {
+      this.sendMessage(conn, {
+        type: "verify_error",
+        requestId,
+        message: "Invalid realtime room scope",
+      })
+      return
+    }
+
+    const featureSlug = typeof payload.featureSlug === "string" ? payload.featureSlug.trim() : ""
+    if (!featureSlug) {
+      this.sendMessage(conn, {
+        type: "verify_error",
+        requestId,
+        message: "featureSlug is required",
+      })
+      return
+    }
+
+    if (
+      typeof payload.usage !== "undefined" &&
+      (typeof payload.usage !== "number" || !Number.isFinite(payload.usage))
+    ) {
+      this.sendMessage(conn, {
+        type: "verify_error",
+        requestId,
+        message: "usage must be a finite number",
+      })
+      return
+    }
+
+    let metadata: Record<string, string | number | boolean> | null
+    try {
+      metadata = normalizeWsMetadata(payload.metadata)
+    } catch (error) {
+      this.sendMessage(conn, {
+        type: "verify_error",
+        requestId,
+        message: error instanceof Error ? error.message : "Invalid metadata payload",
+      })
+      return
+    }
+
+    const performanceStart = Date.now()
+    const usage = typeof payload.usage === "number" ? payload.usage : undefined
+    const verifyRequest: VerifyRequest = {
+      customerId: scope.customerId,
+      projectId: scope.projectId,
+      featureSlug,
+      usage,
+      action: normalizeWsAction(payload.action),
+      metadata,
+      requestId,
+      timestamp: performanceStart,
+      performanceStart,
+    }
+
+    const result = await this.verify(verifyRequest)
+    this.sendMessage(conn, {
+      type: "verify_result",
+      requestId,
+      result,
+    })
+  }
+
+  // websocket message handler
+  async onMessage(conn: Connection<RealtimeConnectionState>, message: string) {
+    try {
+      const parsed = parseRealtimeClientMessage(message)
+      if (!parsed.ok) {
+        this.sendMessage(conn, {
+          type: "message_error",
+          message: parsed.error,
         })
-
-        if (err) {
-          conn.send(
-            JSON.stringify({
-              type: "snapshot_error",
-              code: "INTERNAL",
-              message: err.message,
-            })
-          )
-          return
-        }
-
-        let usageByFeature: Record<string, number> | undefined
-        let subscriptionStatus: SubscriptionStatus | null = null
-        let subscription: RealtimeSubscriptionSnapshot | null = null
-        let entitlements: MinimalEntitlement[] = []
-        let features: Array<{
-          featureSlug: string
-          featureType: EntitlementState["featureType"]
-          usage: number | null
-          limit: number | null
-          limitType: "hard" | "soft" | "none"
-          effectiveAt: number | null
-          expiresAt: number | null
-        }> = []
-
-        if (parsed.customerId && parsed.projectId) {
-          const allStatesResult = await this.storage.getAll()
-
-          if (allStatesResult.err) {
-            this.logger.warn("Failed to resolve in-memory usage for snapshot", {
-              customerId: parsed.customerId,
-              projectId: parsed.projectId,
-              error: allStatesResult.err.message,
-            })
-          } else {
-            const scopedStates = buildScopedStates({
-              states: allStatesResult.val,
-              customerId: parsed.customerId,
-              projectId: parsed.projectId,
-            })
-            usageByFeature = buildUsageByFeature({
-              states: scopedStates,
-              customerId: parsed.customerId,
-              projectId: parsed.projectId,
-            })
-            entitlements = buildRealtimeEntitlements(scopedStates)
-            features = buildRealtimeFeatures(scopedStates)
-          }
-
-          const activeEntitlements = await this.resolveRealtimeActiveEntitlements({
-            customerId: parsed.customerId,
-            projectId: parsed.projectId,
-          })
-          if (activeEntitlements) {
-            entitlements = activeEntitlements
-          }
-
-          subscription = await this.resolveRealtimeSubscriptionSnapshot({
-            customerId: parsed.customerId,
-            projectId: parsed.projectId,
-          })
-          subscriptionStatus = subscription?.status ?? null
-        }
-
-        const snapshotState =
-          parsed.customerId && parsed.projectId
-            ? {
-                customerId: parsed.customerId,
-                projectId: parsed.projectId,
-                subscriptionStatus,
-                subscription,
-                entitlements,
-                features,
-                usageByFeature: usageByFeature ?? {},
-                metrics: val,
-                asOf: Date.now(),
-                stateVersion: `${val.newestTimestamp ?? 0}:${val.usageCount}:${val.verificationCount}:${entitlements.length}:${subscription?.cycleStartAt ?? 0}:${subscription?.status ?? "none"}`,
-              }
-            : undefined
-
-        conn.send(
-          JSON.stringify({
-            type: "snapshot",
-            version: 3,
-            metrics: val,
-            usageByFeature,
-            source: "durable_object",
-            state: snapshotState,
-          })
-        )
         return
       }
 
-      if (parsed.type === "verify_request") {
-        const scope = this.resolveRoomScope()
-        const requestId =
-          typeof parsed.requestId === "string" && parsed.requestId.trim().length > 0
-            ? parsed.requestId
-            : crypto.randomUUID()
-
-        if (!scope) {
-          conn.send(
-            JSON.stringify({
-              type: "verify_error",
-              requestId,
-              message: "Invalid realtime room scope",
-            })
-          )
+      switch (parsed.value.type) {
+        case "resume_tail": {
+          await this.handleResumeTailMessage(conn)
           return
         }
-
-        if (parsed.customerId && parsed.customerId !== scope.customerId) {
-          conn.send(
-            JSON.stringify({
-              type: "verify_error",
-              requestId,
-              message: "Customer scope mismatch",
-            })
-          )
+        case "snapshot_request": {
+          await this.handleSnapshotRequestMessage(conn, parsed.value)
           return
         }
-
-        if (parsed.projectId && parsed.projectId !== scope.projectId) {
-          conn.send(
-            JSON.stringify({
-              type: "verify_error",
-              requestId,
-              message: "Project scope mismatch",
-            })
-          )
+        case "verify_request": {
+          await this.handleVerifyRequestMessage(conn, parsed.value)
           return
         }
-
-        const featureSlug =
-          typeof parsed.featureSlug === "string" ? parsed.featureSlug.trim() : undefined
-
-        if (!featureSlug) {
-          conn.send(
-            JSON.stringify({
-              type: "verify_error",
-              requestId,
-              message: "featureSlug is required",
-            })
-          )
-          return
-        }
-
-        if (
-          typeof parsed.usage !== "undefined" &&
-          (typeof parsed.usage !== "number" || !Number.isFinite(parsed.usage))
-        ) {
-          conn.send(
-            JSON.stringify({
-              type: "verify_error",
-              requestId,
-              message: "usage must be a finite number",
-            })
-          )
-          return
-        }
-
-        let metadata: Record<string, string | number | boolean> | null
-        try {
-          metadata = normalizeWsMetadata(parsed.metadata)
-        } catch (error) {
-          conn.send(
-            JSON.stringify({
-              type: "verify_error",
-              requestId,
-              message: error instanceof Error ? error.message : "Invalid metadata payload",
-            })
-          )
-          return
-        }
-
-        const performanceStart = Date.now()
-        const verifyRequest: VerifyRequest = {
-          customerId: scope.customerId,
-          projectId: scope.projectId,
-          featureSlug,
-          usage: parsed.usage,
-          action: normalizeWsAction(parsed.action),
-          metadata,
-          requestId,
-          timestamp: performanceStart,
-          performanceStart,
-        }
-
-        const result = await this.verify(verifyRequest)
-
-        conn.send(
-          JSON.stringify({
-            type: "verify_result",
-            requestId,
-            result,
-          })
-        )
       }
-    } catch (e) {
-      this.logger.error(`onMessage ${message}`, {
-        error: JSON.stringify(e),
+    } catch (error) {
+      this.logger.error("onMessage failed", {
+        error: error instanceof Error ? error.message : "unknown error",
       })
     }
   }
