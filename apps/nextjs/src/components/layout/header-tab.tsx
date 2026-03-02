@@ -27,7 +27,7 @@ export default function HeaderTab({
     >
       <div className="mr-auto space-y-2">
         <div className="flex items-center space-x-2">
-          <Typography variant="h3">{`${Number(title?.length ?? 0) > 15 ? `${title?.slice(0, 15)}...` : title}`}</Typography>
+          <Typography variant="h3">{title}</Typography>
           {label && (
             <Badge
               className={cn("ml-2 hidden md:flex", {

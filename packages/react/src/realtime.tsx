@@ -1,6 +1,6 @@
 "use client"
 
-import type { paths } from "@unprice/api/src/openapi"
+import type { paths } from "@unprice/api"
 import { usePartySocket } from "partysocket/react"
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import type { PropsWithChildren, ReactNode } from "react"
@@ -1263,7 +1263,7 @@ export function UnpriceEntitlementsRealtimeProvider({
     },
     onClose: (event) => {
       setSocketStatus("closed")
-      const reason = event.reason.toLowerCase()
+      const reason = event.reason?.toLowerCase()
       if (
         reason.includes("expired") ||
         reason.includes("unauthorized") ||

@@ -1217,8 +1217,8 @@ importers:
   packages/react:
     dependencies:
       '@unprice/api':
-        specifier: workspace:^
-        version: link:../api
+        specifier: ^0.1.4
+        version: 0.1.4
       partysocket:
         specifier: ^1.1.3
         version: 1.1.13
@@ -5893,6 +5893,9 @@ packages:
 
   '@unkey/error@0.2.0':
     resolution: {integrity: sha512-DFGb4A7SrusZPP0FYuRIF0CO+Gi4etLUAEJ6EKc+TKYmscL0nEJ2Pr38FyX9MvjI4Wx5l35Wc9KsBjMm9Ybh7w==}
+
+  '@unprice/api@0.1.4':
+    resolution: {integrity: sha512-ybfZ3cm+4TpnjlBcJ9MYiFPuh6D+n1THEpcDFCWqHycsAoCctIIFFftHghzrbkwI/qJMFawpeer8TmbYWBvP7g==}
 
   '@upstash/redis@1.36.2':
     resolution: {integrity: sha512-C0Yt8hc12vLaQYRG1fMci8iPrLtnTdbJG0HR5T8vKnvEP/1RdMMblsOJs5/jp0JXZJ1oSzMnQz4J9EVezNpI6A==}
@@ -17884,6 +17887,8 @@ snapshots:
   '@unkey/error@0.2.0':
     dependencies:
       zod: 3.25.76
+
+  '@unprice/api@0.1.4': {}
 
   '@upstash/redis@1.36.2':
     dependencies:
