@@ -13,7 +13,6 @@ const VERIFY_REQUEST_TIMEOUT_MS = 7_000
 const MAX_TOKEN_REFRESH_RETRY_DELAY_MS = 30_000
 const DEFAULT_SNAPSHOT_STALE_THRESHOLD_MS = 20_000
 const DEFAULT_SNAPSHOT_RETRY_INTERVAL_MS = 10_000
-export const REALTIME_PROTOCOL_VERSION = 1
 
 export type RealtimeWindowSeconds = 300 | 3600 | 86400 | 604800
 type RealtimeMetrics =
@@ -85,7 +84,6 @@ function buildRealtimeClientMessage<TPayload extends Record<string, unknown>>(
   payload: TPayload
 ): string {
   return JSON.stringify({
-    protocolVersion: REALTIME_PROTOCOL_VERSION,
     type,
     ...payload,
   })
@@ -850,20 +848,6 @@ export function UnpriceEntitlementsRealtimeProvider({
       }
 
       const payload = parsed as Record<string, unknown>
-      const protocolVersion = readNumber(payload, "protocolVersion")
-      if (
-        typeof protocolVersion === "number" &&
-        protocolVersion !== REALTIME_PROTOCOL_VERSION
-      ) {
-        setSocketStatus("error")
-        setError(
-          new Error(
-            `Unsupported realtime protocol version: ${protocolVersion}. Expected ${REALTIME_PROTOCOL_VERSION}.`
-          )
-        )
-        return
-      }
-
       const type = readString(payload, "type")
 
       if (
