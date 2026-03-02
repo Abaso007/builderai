@@ -52,6 +52,24 @@ function App() {
 }
 ```
 
+
+## Auto Mode (recommended)
+
+Use `mode: "auto"` to apply opinionated defaults for refresh timing, snapshot retries, and event buffer sizing.
+
+```tsx
+<UnpriceProvider
+  realtime={{
+    mode: "auto",
+    customerId: "cus_123",
+    projectId: "proj_123",
+    getRealtimeTicket,
+  }}
+>
+  <App />
+</UnpriceProvider>
+```
+
 ## Realtime Stream Mode
 
 Choose what each provider instance subscribes to:
@@ -261,3 +279,32 @@ function EntitlementsUsageList() {
 - Do not expose root API keys in client code.
 - Issue short-lived realtime tickets from your backend.
 - Implement `getRealtimeTicket` in your app server and let the provider handle refresh/reconnect lifecycle.
+
+
+## Buffered Usage Utility (high-throughput / flaky network)
+
+`UsageBuffer` is a lightweight client-side queue with batching and coalescing. It can be used to buffer usage events when the websocket is disconnected or when throughput spikes.
+
+```ts
+import { UsageBuffer } from "@unprice/react"
+
+const buffer = new UsageBuffer({
+  maxQueueSize: 5000,
+  maxBatchSize: 200,
+  flushIntervalMs: 1000,
+  dropPolicy: "drop_oldest",
+})
+
+buffer.enqueue({
+  featureSlug: "api-calls",
+  usage: 1,
+  action: "request",
+  timestamp: Date.now(),
+})
+
+buffer.startAutoFlush(async (batch) => {
+  // deliver batch via websocket or HTTP fallback
+  return { accepted: batch.length, rejected: 0 }
+})
+```
+

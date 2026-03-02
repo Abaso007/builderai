@@ -13,7 +13,10 @@ import {
 
 export type RealtimeTicketReason = "init" | "pre_expiry" | "expired" | "reconnect" | "manual"
 
+export type UnpriceProviderMode = "manual" | "auto"
+
 export type UnpriceRealtimeConfig = {
+  mode?: UnpriceProviderMode
   customerId: string
   projectId: string
   runtimeEnv?: string
@@ -48,27 +51,43 @@ export type UnpriceProviderProps = PropsWithChildren<{
 
 export type { SubscriptionStatus }
 
+export function createUnpriceRealtimeClient(config: UnpriceRealtimeConfig): UnpriceRealtimeConfig {
+  if (config.mode !== "auto") {
+    return config
+  }
+
+  return {
+    ...config,
+    stream: config.stream ?? "all",
+    refreshLeadSeconds: config.refreshLeadSeconds ?? 45,
+    snapshotStaleThresholdMs: config.snapshotStaleThresholdMs ?? 15_000,
+    snapshotRetryIntervalMs: config.snapshotRetryIntervalMs ?? 8_000,
+    eventBufferSize: config.eventBufferSize ?? 100,
+  }
+}
+
 export function UnpriceProvider({ children, realtime }: UnpriceProviderProps) {
+  const resolvedRealtime = createUnpriceRealtimeClient(realtime)
   return (
     <UnpriceEntitlementsRealtimeProvider
-      customerId={realtime.customerId}
-      projectId={realtime.projectId}
-      runtimeEnv={realtime.runtimeEnv}
-      apiBaseUrl={realtime.apiBaseUrl}
-      snapshotWindowSeconds={realtime.snapshotWindowSeconds}
-      initialRealtimeToken={realtime.initialTicket?.ticket ?? null}
-      initialRealtimeTokenExpiresAt={realtime.initialTicket?.expiresAt ?? null}
-      getRealtimeTicket={realtime.getRealtimeTicket}
-      onRealtimeTokenRefresh={realtime.onTokenRefresh}
-      refreshLeadSeconds={realtime.refreshLeadSeconds}
-      snapshotStaleThresholdMs={realtime.snapshotStaleThresholdMs}
-      snapshotRetryIntervalMs={realtime.snapshotRetryIntervalMs}
-      disableWebsocket={realtime.disableWebsocket}
-      eventBufferSize={realtime.eventBufferSize}
-      stream={realtime.stream}
-      onValidationEvent={realtime.onValidationEvent}
-      onAlertEvent={realtime.onAlertEvent}
-      onConnectionStateChange={realtime.onConnectionStateChange}
+      customerId={resolvedRealtime.customerId}
+      projectId={resolvedRealtime.projectId}
+      runtimeEnv={resolvedRealtime.runtimeEnv}
+      apiBaseUrl={resolvedRealtime.apiBaseUrl}
+      snapshotWindowSeconds={resolvedRealtime.snapshotWindowSeconds}
+      initialRealtimeToken={resolvedRealtime.initialTicket?.ticket ?? null}
+      initialRealtimeTokenExpiresAt={resolvedRealtime.initialTicket?.expiresAt ?? null}
+      getRealtimeTicket={resolvedRealtime.getRealtimeTicket}
+      onRealtimeTokenRefresh={resolvedRealtime.onTokenRefresh}
+      refreshLeadSeconds={resolvedRealtime.refreshLeadSeconds}
+      snapshotStaleThresholdMs={resolvedRealtime.snapshotStaleThresholdMs}
+      snapshotRetryIntervalMs={resolvedRealtime.snapshotRetryIntervalMs}
+      disableWebsocket={resolvedRealtime.disableWebsocket}
+      eventBufferSize={resolvedRealtime.eventBufferSize}
+      stream={resolvedRealtime.stream}
+      onValidationEvent={resolvedRealtime.onValidationEvent}
+      onAlertEvent={resolvedRealtime.onAlertEvent}
+      onConnectionStateChange={resolvedRealtime.onConnectionStateChange}
     >
       {children}
     </UnpriceEntitlementsRealtimeProvider>

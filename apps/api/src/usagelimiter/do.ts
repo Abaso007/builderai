@@ -71,6 +71,7 @@ const METADATA_KEY_SAMPLE_LIMIT = 10
 const SUBSCRIPTION_SNAPSHOT_CACHE_TTL_MS = 5_000
 const CONNECTION_TAG_TAIL = "tail"
 const CONNECTION_TAG_ALERTS = "alerts"
+const REALTIME_PROTOCOL_VERSION = 1
 
 type RealtimeSubscriptionSnapshot = {
   status: SubscriptionStatus | null
@@ -103,11 +104,13 @@ type RealtimeConnectionState = {
 
 type SnapshotRequestMessage = {
   type: "snapshot_request"
+  protocolVersion?: unknown
   windowSeconds?: unknown
 }
 
 type VerifyRequestMessage = {
   type: "verify_request"
+  protocolVersion?: unknown
   requestId?: unknown
   featureSlug?: unknown
   usage?: unknown
@@ -117,6 +120,7 @@ type VerifyRequestMessage = {
 
 type ResumeTailMessage = {
   type: "resume_tail"
+  protocolVersion?: unknown
 }
 
 type RealtimeClientMessage = SnapshotRequestMessage | VerifyRequestMessage | ResumeTailMessage
@@ -277,6 +281,7 @@ function parseRealtimeClientMessage(message: string):
       ok: true,
       value: {
         type: "snapshot_request",
+        protocolVersion: record.protocolVersion,
         windowSeconds: record.windowSeconds,
       },
     }
@@ -287,6 +292,7 @@ function parseRealtimeClientMessage(message: string):
       ok: true,
       value: {
         type: "verify_request",
+        protocolVersion: record.protocolVersion,
         requestId: record.requestId,
         featureSlug: record.featureSlug,
         usage: record.usage,
@@ -301,6 +307,7 @@ function parseRealtimeClientMessage(message: string):
       ok: true,
       value: {
         type: "resume_tail",
+        protocolVersion: record.protocolVersion,
       },
     }
   }
@@ -309,6 +316,10 @@ function parseRealtimeClientMessage(message: string):
     ok: false,
     error: "Unsupported message type",
   }
+}
+
+function isSupportedProtocolVersion(value: unknown): boolean {
+  return value === REALTIME_PROTOCOL_VERSION
 }
 
 // This durable object takes care of handling the usage of every feature per customer.
@@ -1298,7 +1309,13 @@ export class DurableObjectUsagelimiter extends Server {
   }
 
   private sendMessage(conn: Connection<RealtimeConnectionState>, payload: Record<string, unknown>) {
-    this.sendConnectionPayload(conn, JSON.stringify(payload))
+    this.sendConnectionPayload(
+      conn,
+      JSON.stringify({
+        protocolVersion: REALTIME_PROTOCOL_VERSION,
+        ...payload,
+      })
+    )
   }
 
   private async handleResumeTailMessage(conn: Connection<RealtimeConnectionState>): Promise<void> {
@@ -1506,6 +1523,14 @@ export class DurableObjectUsagelimiter extends Server {
         this.sendMessage(conn, {
           type: "message_error",
           message: parsed.error,
+        })
+        return
+      }
+
+      if (!isSupportedProtocolVersion(parsed.value.protocolVersion)) {
+        this.sendMessage(conn, {
+          type: "message_error",
+          message: `Unsupported realtime protocol version. Expected ${REALTIME_PROTOCOL_VERSION}`,
         })
         return
       }
