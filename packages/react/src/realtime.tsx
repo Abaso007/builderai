@@ -89,7 +89,6 @@ function buildRealtimeClientMessage<TPayload extends Record<string, unknown>>(
   })
 }
 
-
 type PendingVerifyRequest = {
   resolve: (result: VerifyEntitlementResult) => void
   reject: (error: Error) => void
@@ -1356,9 +1355,7 @@ export function UnpriceEntitlementsRealtimeProvider({
     }
 
     setEventStreamPausedAt(null)
-    socket.send(
-      buildRealtimeClientMessage("resume_tail", {})
-    )
+    socket.send(buildRealtimeClientMessage("resume_tail", {}))
   }, [isEventsStreamEnabled])
 
   const value = useMemo<EntitlementsRealtimeContextValue>(

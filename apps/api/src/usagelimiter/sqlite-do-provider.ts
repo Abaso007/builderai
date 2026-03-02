@@ -1483,7 +1483,8 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
 
   private getRetentionCutoffDate(currentDateStr: string): string {
     const cutoffDate = new Date(`${currentDateStr}T00:00:00.000Z`)
-    cutoffDate.setUTCDate(cutoffDate.getUTCDate() - METADATA_RETENTION_DAYS)
+    const retentionWindowDays = METADATA_RETENTION_DAYS <= 1 ? 0 : METADATA_RETENTION_DAYS - 1
+    cutoffDate.setUTCDate(cutoffDate.getUTCDate() - retentionWindowDays)
     return cutoffDate.toISOString().slice(0, 10)
   }
 

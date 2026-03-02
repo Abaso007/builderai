@@ -134,7 +134,12 @@ export const realtimeSnapshotMessageSchema = z.object({
 
 export const realtimeSnapshotErrorMessageSchema = z.object({
   type: z.literal("snapshot_error"),
-  code: z.union([z.literal("TOKEN_EXPIRED"), z.literal("UNAUTHORIZED"), z.literal("INTERNAL")]),
+  code: z.union([
+    z.literal("TOKEN_EXPIRED"),
+    z.literal("UNAUTHORIZED"),
+    z.literal("FORBIDDEN"),
+    z.literal("INTERNAL"),
+  ]),
   message: z.string().optional(),
 })
 

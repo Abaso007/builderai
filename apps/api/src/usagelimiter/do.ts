@@ -311,7 +311,6 @@ function parseRealtimeClientMessage(message: string):
   }
 }
 
-
 // This durable object takes care of handling the usage of every feature per customer.
 // It is used to validate the usage of a feature and to report the usage to tinybird.
 // think of it as a queue that will be flushed to the db periodically
@@ -1510,7 +1509,6 @@ export class DurableObjectUsagelimiter extends Server {
         })
         return
       }
-
 
       switch (parsed.value.type) {
         case "resume_tail": {
