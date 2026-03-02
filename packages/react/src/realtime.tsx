@@ -77,6 +77,19 @@ type SocketSender = {
   readyState: number
 }
 
+type RealtimeClientMessageType = "snapshot_request" | "verify_request" | "resume_tail"
+
+function buildRealtimeClientMessage<TPayload extends Record<string, unknown>>(
+  type: RealtimeClientMessageType,
+  payload: TPayload
+): string {
+  return JSON.stringify({
+    type,
+    ...payload,
+  })
+}
+
+
 type PendingVerifyRequest = {
   resolve: (result: VerifyEntitlementResult) => void
   reject: (error: Error) => void
@@ -674,8 +687,7 @@ export function UnpriceEntitlementsRealtimeProvider({
 
       lastSnapshotRequestedAtRef.current = now
       socket.send(
-        JSON.stringify({
-          type: "snapshot_request",
+        buildRealtimeClientMessage("snapshot_request", {
           windowSeconds: snapshotWindowSeconds,
         })
       )
@@ -1117,7 +1129,6 @@ export function UnpriceEntitlementsRealtimeProvider({
 
       const requestId = createVerifyRequestId()
       const payload = {
-        type: "verify_request",
         requestId,
         featureSlug: input.featureSlug,
         usage: input.usage,
@@ -1138,7 +1149,7 @@ export function UnpriceEntitlementsRealtimeProvider({
         })
 
         try {
-          socket.send(JSON.stringify(payload))
+          socket.send(buildRealtimeClientMessage("verify_request", payload))
         } catch (sendError) {
           clearTimeout(timeoutId)
           pendingVerifyRequestsRef.current.delete(requestId)
@@ -1346,9 +1357,7 @@ export function UnpriceEntitlementsRealtimeProvider({
 
     setEventStreamPausedAt(null)
     socket.send(
-      JSON.stringify({
-        type: "resume_tail",
-      })
+      buildRealtimeClientMessage("resume_tail", {})
     )
   }, [isEventsStreamEnabled])
 

@@ -264,6 +264,7 @@ function RealtimePanelContent(
 
   const [browserTimezone, setBrowserTimezone] = useState<string | null>(null)
   const [snapshotClockMs, setSnapshotClockMs] = useState(() => Date.now())
+  const [hasOpenedRealtimeSocket, setHasOpenedRealtimeSocket] = useState(false)
 
   useEffect(() => {
     const resolvedTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -279,6 +280,12 @@ function RealtimePanelContent(
       clearInterval(intervalId)
     }
   }, [])
+
+  useEffect(() => {
+    if (socketStatus === "open") {
+      setHasOpenedRealtimeSocket(true)
+    }
+  }, [socketStatus])
 
   const desiredBucketSizeSeconds = useMemo(
     () => resolveBucketSizeSeconds(windowSeconds),
@@ -467,7 +474,11 @@ function RealtimePanelContent(
   const isRealtimeConnecting = socketStatus === "connecting"
   const isEventStreamPaused = eventStreamState === "paused"
   const shouldShowRefreshNotice =
-    socketStatus === "closed" || socketStatus === "error" || Boolean(realtimeError)
+    (socketStatus === "closed" || socketStatus === "error" || Boolean(realtimeError)) &&
+    !isRefreshingTicket &&
+    socketStatus !== "connecting" &&
+    socketStatus !== "idle" &&
+    (hasOpenedRealtimeSocket || socketStatus === "error")
   const isSnapshotStale =
     socketStatus === "open" &&
     (typeof lastSnapshotAt !== "number" ||
@@ -686,8 +697,8 @@ function RealtimePanelContent(
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="border-muted/60">
+      <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+        <Card className="min-w-0 border-muted/60">
           <CardHeader>
             <div className="flex items-center gap-1.5">
               <CardTitle className="text-base">Usage Volume</CardTitle>
@@ -697,8 +708,8 @@ function RealtimePanelContent(
               Total usage reported over time ({bucketLabel} buckets){rollupLabel}
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <ChartContainer config={usageChartConfig} className="h-[280px] w-full">
+          <CardContent className="min-w-0 overflow-hidden">
+            <ChartContainer config={usageChartConfig} className="h-[280px] w-full min-w-0">
               <AreaChart data={usageSeriesRows}>
                 <defs>
                   <linearGradient id="fillTotalUsage" x1="0" y1="0" x2="0" y2="1">
@@ -734,7 +745,7 @@ function RealtimePanelContent(
           </CardContent>
         </Card>
 
-        <Card className="border-muted/60">
+        <Card className="min-w-0 border-muted/60">
           <CardHeader>
             <div className="flex items-center gap-1.5">
               <CardTitle className="text-base">Verification and Usage Outcomes</CardTitle>
@@ -744,8 +755,8 @@ function RealtimePanelContent(
               Verification outcomes are separated from usage reporting ({bucketLabel} buckets)
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <ChartContainer config={verificationChartConfig} className="h-[280px] w-full">
+          <CardContent className="min-w-0 overflow-hidden">
+            <ChartContainer config={verificationChartConfig} className="h-[280px] w-full min-w-0">
               <BarChart data={verificationSeriesRows}>
                 <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-muted" />
                 <XAxis
