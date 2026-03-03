@@ -618,6 +618,8 @@ export function UnpriceEntitlementsRealtimeProvider({
     setSubscription(null)
     setSubscriptionStatus(null)
     setMetrics(null)
+    setEntitlements([])
+    setFeatures([])
     setUsageByFeature({})
     setEvents([])
     setAlerts([])
@@ -901,7 +903,7 @@ export function UnpriceEntitlementsRealtimeProvider({
           setEntitlements(parsedEntitlements)
           setFeatures(parsedFeatures)
           setStateVersion(readString(state, "stateVersion") ?? null)
-          setLastSnapshotAt(readNumber(state, "asOf") ?? Date.now())
+          setLastSnapshotAt(normalizeEpochMilliseconds(readNumber(state, "asOf")) ?? Date.now())
         }
 
         if (!nextMetrics) {
@@ -919,12 +921,7 @@ export function UnpriceEntitlementsRealtimeProvider({
           nextUsageByFeature = parseUsageByFeature(payload.usageByFeature)
         }
 
-        if (Object.keys(nextUsageByFeature).length > 0) {
-          setUsageByFeature((previous) => ({
-            ...previous,
-            ...nextUsageByFeature,
-          }))
-        }
+        setUsageByFeature(() => nextUsageByFeature)
         return
       }
 

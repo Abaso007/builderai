@@ -68,7 +68,7 @@ export const registerGetRealtimeTicketV1 = (app: App) =>
     const isMain = key.project.workspace.isMain
 
     const finalProjectId = validateIsAllowedToAccessProject({
-      isMain: key.project.isMain ?? false,
+      isMain,
       key,
       requestedProjectId: projectId ?? key.project.id,
     })

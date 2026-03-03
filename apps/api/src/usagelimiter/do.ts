@@ -1500,6 +1500,7 @@ export class DurableObjectUsagelimiter extends Server {
 
   // websocket message handler
   async onMessage(conn: Connection<RealtimeConnectionState>, message: string) {
+    // TODO: we should rate limit this
     try {
       const parsed = parseRealtimeClientMessage(message)
       if (!parsed.ok) {

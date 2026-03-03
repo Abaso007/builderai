@@ -61,11 +61,32 @@ export class UsageBuffer {
   private isFlushing = false
 
   constructor(config: UsageBufferConfig = {}) {
+    const maxBatchSize =
+      typeof config.maxBatchSize === "number" &&
+      Number.isFinite(config.maxBatchSize) &&
+      config.maxBatchSize >= 1
+        ? Math.floor(config.maxBatchSize)
+        : DEFAULT_MAX_BATCH_SIZE
+
+    const flushIntervalMs =
+      typeof config.flushIntervalMs === "number" &&
+      Number.isFinite(config.flushIntervalMs) &&
+      config.flushIntervalMs > 0
+        ? config.flushIntervalMs
+        : DEFAULT_FLUSH_INTERVAL_MS
+
+    const coalesceWindowMs =
+      typeof config.coalesceWindowMs === "number" &&
+      Number.isFinite(config.coalesceWindowMs) &&
+      config.coalesceWindowMs > 0
+        ? config.coalesceWindowMs
+        : DEFAULT_COALESCE_WINDOW_MS
+
     this.maxQueueSize = config.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE
-    this.maxBatchSize = config.maxBatchSize ?? DEFAULT_MAX_BATCH_SIZE
-    this.flushIntervalMs = config.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS
+    this.maxBatchSize = maxBatchSize
+    this.flushIntervalMs = flushIntervalMs
     this.dropPolicy = config.dropPolicy ?? "drop_oldest"
-    this.coalesceWindowMs = config.coalesceWindowMs ?? DEFAULT_COALESCE_WINDOW_MS
+    this.coalesceWindowMs = coalesceWindowMs
   }
 
   size(): number {
@@ -110,9 +131,17 @@ export class UsageBuffer {
     }
 
     this.isFlushing = true
+    const batch = this.dequeueBatch()
     try {
-      const batch = this.dequeueBatch()
-      const result = await flush(batch)
+      let result: UsageBufferFlushResult
+      try {
+        result = await flush(batch)
+      } catch (error) {
+        for (const event of batch) {
+          this.enqueue(event)
+        }
+        throw error
+      }
 
       if (result.rejected > 0) {
         const retry = batch.slice(Math.max(0, result.accepted))
