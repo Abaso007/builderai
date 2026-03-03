@@ -90,6 +90,7 @@ const verificationChartConfig = {
 } satisfies ChartConfig
 
 const SNAPSHOT_STALE_THRESHOLD_MS = 20_000
+const REFRESH_NOTICE_GRACE_MS = 1_000
 
 type RealtimeWindowSeconds = 300 | 3600 | 86400 | 604800
 
@@ -265,6 +266,7 @@ function RealtimePanelContent(
   const [browserTimezone, setBrowserTimezone] = useState<string | null>(null)
   const [snapshotClockMs, setSnapshotClockMs] = useState(() => Date.now())
   const [hasOpenedRealtimeSocket, setHasOpenedRealtimeSocket] = useState(false)
+  const [showRefreshNotice, setShowRefreshNotice] = useState(false)
 
   useEffect(() => {
     const resolvedTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -473,12 +475,27 @@ function RealtimePanelContent(
   const isRealtimeLive = socketStatus === "open"
   const isRealtimeConnecting = socketStatus === "connecting"
   const isEventStreamPaused = eventStreamState === "paused"
-  const shouldShowRefreshNotice =
-    (socketStatus === "closed" || socketStatus === "error" || Boolean(realtimeError)) &&
-    !isRefreshingTicket &&
+  const hasSocketFailure = socketStatus === "closed" || socketStatus === "error"
+  const hasRefreshableFailure =
+    (hasSocketFailure || (!isRealtimeLive && Boolean(realtimeError))) &&
     socketStatus !== "connecting" &&
     socketStatus !== "idle" &&
     (hasOpenedRealtimeSocket || socketStatus === "error")
+  useEffect(() => {
+    if (!hasRefreshableFailure || isRefreshingTicket) {
+      setShowRefreshNotice(false)
+      return
+    }
+
+    const timeoutId = setTimeout(() => {
+      setShowRefreshNotice(true)
+    }, REFRESH_NOTICE_GRACE_MS)
+
+    return () => {
+      clearTimeout(timeoutId)
+    }
+  }, [hasRefreshableFailure, isRefreshingTicket])
+  const shouldShowRefreshNotice = showRefreshNotice
   const isSnapshotStale =
     socketStatus === "open" &&
     (typeof lastSnapshotAt !== "number" ||
@@ -494,6 +511,8 @@ function RealtimePanelContent(
       : realtimeError
         ? "Refresh required"
         : "Unavailable"
+  const shouldShowRealtimeError =
+    Boolean(realtimeError) && (socketStatus === "open" || shouldShowRefreshNotice)
 
   return (
     <div className="space-y-6">
@@ -589,7 +608,9 @@ function RealtimePanelContent(
         </div>
       )}
 
-      {realtimeError && <p className="text-destructive text-sm">{realtimeError.message}</p>}
+      {shouldShowRealtimeError && realtimeError && (
+        <p className="text-destructive text-sm">{realtimeError.message}</p>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[1.25fr_2fr]">
         <Card className="border-muted/60 bg-gradient-to-br from-background to-muted/30">
