@@ -91,6 +91,7 @@ const verificationChartConfig = {
 
 const SNAPSHOT_STALE_THRESHOLD_MS = 20_000
 const REFRESH_NOTICE_GRACE_MS = 1_000
+const INITIAL_CONNECTION_FAILURE_GRACE_MS = 5_000
 
 type RealtimeWindowSeconds = 300 | 3600 | 86400 | 604800
 
@@ -266,6 +267,8 @@ function RealtimePanelContent(
   const [browserTimezone, setBrowserTimezone] = useState<string | null>(null)
   const [snapshotClockMs, setSnapshotClockMs] = useState(() => Date.now())
   const [hasOpenedRealtimeSocket, setHasOpenedRealtimeSocket] = useState(false)
+  const [hasInitialConnectionFailureGraceElapsed, setHasInitialConnectionFailureGraceElapsed] =
+    useState(false)
   const [showRefreshNotice, setShowRefreshNotice] = useState(false)
 
   useEffect(() => {
@@ -288,6 +291,20 @@ function RealtimePanelContent(
       setHasOpenedRealtimeSocket(true)
     }
   }, [socketStatus])
+
+  useEffect(() => {
+    if (hasOpenedRealtimeSocket || hasInitialConnectionFailureGraceElapsed) {
+      return
+    }
+
+    const timeoutId = setTimeout(() => {
+      setHasInitialConnectionFailureGraceElapsed(true)
+    }, INITIAL_CONNECTION_FAILURE_GRACE_MS)
+
+    return () => {
+      clearTimeout(timeoutId)
+    }
+  }, [hasOpenedRealtimeSocket, hasInitialConnectionFailureGraceElapsed])
 
   const desiredBucketSizeSeconds = useMemo(
     () => resolveBucketSizeSeconds(windowSeconds),
@@ -476,11 +493,13 @@ function RealtimePanelContent(
   const isRealtimeConnecting = socketStatus === "connecting"
   const isEventStreamPaused = eventStreamState === "paused"
   const hasSocketFailure = socketStatus === "closed" || socketStatus === "error"
+  const canSurfaceConnectionFailure =
+    hasOpenedRealtimeSocket || hasInitialConnectionFailureGraceElapsed
   const hasRefreshableFailure =
     (hasSocketFailure || (!isRealtimeLive && Boolean(realtimeError))) &&
     socketStatus !== "connecting" &&
     socketStatus !== "idle" &&
-    (hasOpenedRealtimeSocket || socketStatus === "error")
+    canSurfaceConnectionFailure
   useEffect(() => {
     if (!hasRefreshableFailure || isRefreshingTicket) {
       setShowRefreshNotice(false)
@@ -500,6 +519,7 @@ function RealtimePanelContent(
     socketStatus === "open" &&
     (typeof lastSnapshotAt !== "number" ||
       snapshotClockMs - lastSnapshotAt > SNAPSHOT_STALE_THRESHOLD_MS)
+  const shouldShowRefreshRequiredStatus = Boolean(realtimeError) && canSurfaceConnectionFailure
   const realtimeStatusLabel = isRealtimeLive
     ? isEventStreamPaused
       ? "Live (events paused)"
@@ -508,7 +528,7 @@ function RealtimePanelContent(
         : "Live"
     : isRealtimeConnecting
       ? "Connecting"
-      : realtimeError
+      : shouldShowRefreshRequiredStatus
         ? "Refresh required"
         : "Unavailable"
   const shouldShowRealtimeError =
