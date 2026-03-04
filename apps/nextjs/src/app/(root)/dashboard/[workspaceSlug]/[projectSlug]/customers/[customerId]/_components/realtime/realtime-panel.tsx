@@ -169,6 +169,16 @@ function normalizeRealtimeWindowSeconds(windowSeconds: number): RealtimeWindowSe
   return 604800
 }
 
+function isRealtimeAuthErrorMessage(message: string): boolean {
+  const normalized = message.toLowerCase()
+  return (
+    normalized.includes("token") ||
+    normalized.includes("ticket") ||
+    normalized.includes("expired") ||
+    normalized.includes("unauthorized")
+  )
+}
+
 export function RealtimePanel(props: RealtimePanelProps) {
   const { customerId, projectId, realtimeTicket, realtimeTicketExpiresAt, runtimeEnv } = props
   const trpc = useTRPC()
@@ -235,7 +245,7 @@ function RealtimePanelContent(
     windowSeconds: RealtimeWindowSeconds
   }
 ) {
-  const { windowSeconds } = props
+  const { windowSeconds, realtimeTicket } = props
   const {
     metrics: realtimeMetrics,
     events: realtimeEvents,
@@ -495,11 +505,16 @@ function RealtimePanelContent(
   const hasSocketFailure = socketStatus === "closed" || socketStatus === "error"
   const canSurfaceConnectionFailure =
     hasOpenedRealtimeSocket || hasInitialConnectionFailureGraceElapsed
+  const isBootstrappingInitialTicket =
+    !realtimeTicket && !hasOpenedRealtimeSocket && !hasInitialConnectionFailureGraceElapsed
+  const isAuthRealtimeError =
+    typeof realtimeError?.message === "string" && isRealtimeAuthErrorMessage(realtimeError.message)
   const hasRefreshableFailure =
     (hasSocketFailure || (!isRealtimeLive && Boolean(realtimeError))) &&
     socketStatus !== "connecting" &&
     socketStatus !== "idle" &&
-    canSurfaceConnectionFailure
+    canSurfaceConnectionFailure &&
+    !isBootstrappingInitialTicket
   useEffect(() => {
     if (!hasRefreshableFailure || isRefreshingTicket) {
       setShowRefreshNotice(false)
@@ -519,20 +534,26 @@ function RealtimePanelContent(
     socketStatus === "open" &&
     (typeof lastSnapshotAt !== "number" ||
       snapshotClockMs - lastSnapshotAt > SNAPSHOT_STALE_THRESHOLD_MS)
-  const shouldShowRefreshRequiredStatus = Boolean(realtimeError) && canSurfaceConnectionFailure
+  const shouldShowRefreshRequiredStatus =
+    Boolean(realtimeError) &&
+    canSurfaceConnectionFailure &&
+    !isRefreshingTicket &&
+    !isBootstrappingInitialTicket
   const realtimeStatusLabel = isRealtimeLive
     ? isEventStreamPaused
       ? "Live (events paused)"
       : isSnapshotStale
         ? "Live (stale)"
         : "Live"
-    : isRealtimeConnecting
+    : isRealtimeConnecting || isBootstrappingInitialTicket || isRefreshingTicket
       ? "Connecting"
       : shouldShowRefreshRequiredStatus
         ? "Refresh required"
         : "Unavailable"
   const shouldShowRealtimeError =
-    Boolean(realtimeError) && (socketStatus === "open" || shouldShowRefreshNotice)
+    Boolean(realtimeError) &&
+    !isBootstrappingInitialTicket &&
+    (shouldShowRefreshNotice || (socketStatus === "open" && !isAuthRealtimeError))
 
   return (
     <div className="space-y-6">
