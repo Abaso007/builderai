@@ -20,6 +20,7 @@ export const create = protectedProjectProcedure
     })
   )
   .mutation(async (opts) => {
+    const hasMeterConfigOverride = Object.prototype.hasOwnProperty.call(opts.input, "meterConfig")
     const {
       featureId,
       planVersionId,
@@ -34,6 +35,7 @@ export const create = protectedProjectProcedure
       type,
       aggregationMethod,
       unitOfMeasure,
+      meterConfig,
     } = opts.input
     const project = opts.ctx.project
 
@@ -96,9 +98,21 @@ export const create = protectedProjectProcedure
     const billingConfigCreate =
       featureType === "usage" ? billingConfig : planVersionData.billingConfig
 
+    const meterConfigSnapshot =
+      featureType !== "usage"
+        ? null
+        : hasMeterConfigOverride
+          ? (meterConfig ?? null)
+          : (featureData.meterConfig ?? null)
+
+    const aggregationMethodCreate =
+      featureType !== "usage"
+        ? "none"
+        : (meterConfigSnapshot?.aggregationMethod ?? aggregationMethod)
+
     // if the aggregation method is lifetime/accumulated or the billing config name is the same as the reset config name we don't need to store the reset config
     const resetConfigCreate =
-      aggregationMethod?.endsWith("_all") || billingConfigCreate.name === resetConfig?.name
+      aggregationMethodCreate?.endsWith("_all") || billingConfigCreate.name === resetConfig?.name
         ? null
         : resetConfig
 
@@ -125,8 +139,9 @@ export const create = protectedProjectProcedure
         // when null the system will reset given the aggregation method
         resetConfig: resetConfigCreate,
         type,
+        meterConfig: meterConfigSnapshot,
         // flat features don't have a meter so we don't need to store the aggregation method
-        aggregationMethod: featureType !== "usage" ? "none" : aggregationMethod,
+        aggregationMethod: aggregationMethodCreate,
       })
       .returning()
       .then((re) => re[0])

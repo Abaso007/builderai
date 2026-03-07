@@ -12,6 +12,7 @@ import {
   aggregationMethodSchema,
   billingConfigSchema,
   featureConfigType,
+  meterConfigSchema,
   overageStrategySchema,
   resetConfigSchema,
   tierModeSchema,
@@ -487,6 +488,12 @@ export const planVersionFeatureSelectBaseSchema = createSelectSchema(planVersion
   config: configFeatureSchema.describe(
     "Pricing configuration for this feature. Structure depends on featureType"
   ),
+  meterConfig: meterConfigSchema
+    .nullable()
+    .optional()
+    .describe(
+      "Snapshotted event-native meter configuration for this plan version feature. When present, it is the authoritative source for how usage should be measured"
+    ),
   resetConfig: resetConfigSchema
     .optional()
     .describe(
@@ -549,6 +556,12 @@ export const planVersionFeatureInsertBaseSchema = createInsertSchema(planVersion
     .optional()
     .describe(
       "Pricing configuration for this feature. Required structure depends on featureType. See configFlatSchema, configTierSchema, configUsageSchema, or configPackageSchema"
+    ),
+  meterConfig: meterConfigSchema
+    .nullable()
+    .optional()
+    .describe(
+      "Optional event-native meter configuration snapshot. Allowed only for usage features and used to derive the legacy aggregation method for compatibility"
     ),
   metadata: planVersionFeatureMetadataSchema
     .optional()
@@ -617,7 +630,6 @@ export const planVersionFeatureInsertBaseSchema = createInsertSchema(planVersion
           delete data.config.tierMode
           delete data.config.usageMode
           delete data.config.units
-
           return data
 
         case FEATURE_TYPES_MAPS.package.code:
@@ -660,6 +672,17 @@ export const planVersionFeatureInsertBaseSchema = createInsertSchema(planVersion
     return data
   })
   .superRefine((data, ctx) => {
+    if (data.featureType !== FEATURE_TYPES_MAPS.usage.code && data.meterConfig) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Meter config is only supported for usage features",
+        path: ["meterConfig"],
+        fatal: true,
+      })
+
+      return false
+    }
+
     try {
       if (data.config) {
         switch (data.featureType) {

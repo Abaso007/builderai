@@ -8,16 +8,18 @@ import { protectedProjectProcedure } from "#trpc"
 export const update = protectedProjectProcedure
   .input(
     featureSelectBaseSchema
-      .pick({ id: true, title: true, description: true, unitOfMeasure: true })
+      .pick({ id: true, title: true, description: true, unitOfMeasure: true, meterConfig: true })
       .partial({
         description: true,
         unitOfMeasure: true,
+        meterConfig: true,
       })
   )
   .output(z.object({ feature: featureSelectBaseSchema }))
   .mutation(async (opts) => {
-    const { title, id, description, unitOfMeasure } = opts.input
+    const { title, id, description, unitOfMeasure, meterConfig } = opts.input
     const project = opts.ctx.project
+    const hasMeterConfig = Object.prototype.hasOwnProperty.call(opts.input, "meterConfig")
 
     const featureData = await opts.ctx.db.query.features.findFirst({
       where: (feature, { eq, and }) => and(eq(feature.id, id), eq(feature.projectId, project.id)),
@@ -36,6 +38,7 @@ export const update = protectedProjectProcedure
         title,
         description: description ?? "",
         unitOfMeasure: unitOfMeasure ?? "",
+        ...(hasMeterConfig && { meterConfig: meterConfig ?? null }),
         updatedAtM: Date.now(),
       })
       .where(and(eq(schema.features.id, id), eq(schema.features.projectId, project.id)))

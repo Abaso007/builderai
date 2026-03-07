@@ -20,6 +20,7 @@ export const update = protectedProjectProcedure
     })
   )
   .mutation(async (opts) => {
+    const hasMeterConfigOverride = Object.prototype.hasOwnProperty.call(opts.input, "meterConfig")
     const {
       id,
       featureId,
@@ -35,6 +36,7 @@ export const update = protectedProjectProcedure
       resetConfig,
       type,
       unitOfMeasure,
+      meterConfig,
     } = opts.input
 
     // we purposely don't allow to update the currency and the payment provider
@@ -63,6 +65,21 @@ export const update = protectedProjectProcedure
       })
     }
 
+    const existingPlanVersionFeature = await opts.ctx.db.query.planVersionFeatures.findFirst({
+      with: {
+        feature: true,
+      },
+      where: (planVersionFeature, { and, eq }) =>
+        and(eq(planVersionFeature.id, id), eq(planVersionFeature.projectId, project.id)),
+    })
+
+    if (!existingPlanVersionFeature?.id) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "feature version not found",
+      })
+    }
+
     const planVersionData = await opts.ctx.db.query.versions.findFirst({
       where: (version, { and, eq }) =>
         and(eq(version.id, planVersionId), eq(version.projectId, project.id)),
@@ -83,26 +100,36 @@ export const update = protectedProjectProcedure
     }
 
     // only usage items can have a different billing config but the billing anchor should be the same as the plan version billing config
+    const featureTypeUpdate = featureType ?? existingPlanVersionFeature.featureType
     const billingConfigUpdate =
-      featureType === "usage" ? billingConfig : planVersionData.billingConfig
+      featureTypeUpdate === "usage" ? billingConfig : planVersionData.billingConfig
 
-    let unitOfMeasureUpdate = unitOfMeasure
+    const featureData = existingPlanVersionFeature.feature
+    // define the unit of unitOfMeasure
+    const unitOfMeasureUpdate =
+      unitOfMeasure ?? existingPlanVersionFeature.feature.unitOfMeasure ?? "units"
 
-    if (unitOfMeasureUpdate === undefined && featureId) {
-      const featureData = await opts.ctx.db.query.features.findFirst({
-        where: (feature, { eq, and }) =>
-          and(eq(feature.id, featureId), eq(feature.projectId, project.id)),
-      })
+    const shouldUpdateMeterConfig =
+      hasMeterConfigOverride || featureId !== undefined || featureType !== undefined
 
-      if (!featureData?.id) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "feature not found",
-        })
-      }
+    const meterConfigUpdate =
+      featureTypeUpdate !== "usage"
+        ? null
+        : hasMeterConfigOverride
+          ? (meterConfig ?? null)
+          : featureData !== undefined
+            ? (featureData.meterConfig ?? null)
+            : (existingPlanVersionFeature.meterConfig ?? null)
 
-      unitOfMeasureUpdate = featureData.unitOfMeasure ?? "units"
-    }
+    const shouldUpdateAggregationMethod =
+      aggregationMethod !== undefined || shouldUpdateMeterConfig || featureType !== undefined
+
+    const aggregationMethodUpdate =
+      featureTypeUpdate !== "usage"
+        ? "none"
+        : (meterConfigUpdate?.aggregationMethod ??
+          aggregationMethod ??
+          existingPlanVersionFeature.aggregationMethod)
 
     const planVersionFeatureUpdated = await opts.ctx.db
       .update(schema.planVersionFeatures)
@@ -118,8 +145,11 @@ export const update = protectedProjectProcedure
           defaultQuantity: defaultQuantity === 0 ? null : defaultQuantity,
         }),
         ...(limit !== undefined && { limit: limit === 0 ? null : limit }),
-        ...(aggregationMethod !== undefined && {
-          aggregationMethod: featureType !== "usage" ? "none" : aggregationMethod,
+        ...(shouldUpdateMeterConfig && {
+          meterConfig: meterConfigUpdate,
+        }),
+        ...(shouldUpdateAggregationMethod && {
+          aggregationMethod: aggregationMethodUpdate,
         }),
         ...(billingConfigUpdate && {
           billingConfig: {

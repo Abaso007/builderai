@@ -2,9 +2,16 @@ import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import * as z from "zod"
 
 import * as schema from "../schema"
-import { deniedReasonSchema, typeFeatureSchema } from "./shared"
+import { deniedReasonSchema, meterConfigSchema, typeFeatureSchema } from "./shared"
 
-export const featureSelectBaseSchema = createSelectSchema(schema.features)
+export const featureSelectBaseSchema = createSelectSchema(schema.features, {
+  meterConfig: meterConfigSchema
+    .nullable()
+    .optional()
+    .describe(
+      "Default meter template for usage-style features. When present, new plan version feature snapshots can copy this event-native measurement configuration"
+    ),
+})
 
 export const featureInsertBaseSchema = createInsertSchema(schema.features, {
   title: z
@@ -38,6 +45,12 @@ export const featureInsertBaseSchema = createInsertSchema(schema.features, {
     .optional()
     .describe(
       "Detailed explanation of what the feature provides or enables. Helps users understand the feature's purpose and value. Example: 'Number of API requests allowed per billing period'"
+    ),
+  meterConfig: meterConfigSchema
+    .nullable()
+    .optional()
+    .describe(
+      "Optional default meter configuration template. This is snapshotted into plan version features when a metered feature is attached to a draft version"
     ),
 })
   .omit({
