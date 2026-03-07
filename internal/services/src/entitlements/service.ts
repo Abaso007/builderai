@@ -39,6 +39,7 @@ import type { UnPriceEntitlementStorage } from "./storage-provider"
 import { customers, entitlements, subscriptions } from "@unprice/db/schema"
 import { ulid } from "ulid"
 import { CustomerService } from "../customers/service"
+import { deriveLimitType } from "./policy"
 import { UsageMeter } from "./usage-meter"
 
 /**
@@ -2560,7 +2561,11 @@ export class EntitlementService {
     }
 
     // Usage type
-    const isHardLimit = planVersionFeature.metadata?.overageStrategy === "none"
+    const overageStrategy = planVersionFeature.metadata?.overageStrategy ?? "none"
+    const limitType = deriveLimitType({
+      limit,
+      overageStrategy,
+    })
 
     return {
       ...baseFeature,
@@ -2575,10 +2580,10 @@ export class EntitlementService {
         current: usage,
         included,
         limit: limit ?? undefined,
-        limitType: isHardLimit ? "hard" : "soft",
+        limitType,
         unit: planVersionFeature.unitOfMeasure ?? "units",
         notifyThreshold: planVersionFeature.metadata?.notifyUsageThreshold ?? 95,
-        overageStrategy: planVersionFeature.metadata?.overageStrategy ?? "none",
+        overageStrategy,
       },
     }
   }

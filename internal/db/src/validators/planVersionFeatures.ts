@@ -138,7 +138,7 @@ export const planVersionFeatureMetadataSchema = z
       .optional()
       .default("none")
       .describe(
-        "How to handle usage that exceeds the feature limit. Options: 'none' (deny access), 'charge' (bill for overage), 'allow' (permit without extra charge)"
+        "How to handle usage that exceeds the feature limit. Options: 'none' (strict deny), 'last-call' (allow one final call while tokens remain), 'always' (allow and record overage)"
       ),
     blockCustomer: z
       .boolean()

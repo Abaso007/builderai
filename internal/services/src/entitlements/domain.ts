@@ -7,7 +7,7 @@ export const MAX_EVENT_AGE_MS = 30 * 24 * 60 * 60 * 1_000
 
 export interface RawEvent {
   id: string
-  type: string
+  slug: string
   timestamp: number
   properties: Record<string, unknown>
 }
@@ -31,23 +31,6 @@ export interface SyncStorageAdapter {
   getSync<T>(key: string): T | null
   putSync<T>(key: string, value: T): void
   listSync<T>(prefix: string): T[]
-}
-
-export class LimitExceededError extends BaseError<{
-  eventId: string
-  meterId: string
-  limit: number
-  valueAfter: number
-}> {
-  public readonly retry = false
-  public readonly name = LimitExceededError.name
-
-  constructor(params: { eventId: string; meterId: string; limit: number; valueAfter: number }) {
-    super({
-      message: `Limit exceeded for meter ${params.meterId}`,
-      context: params,
-    })
-  }
 }
 
 export class EventTimestampTooFarInFutureError extends BaseError<{

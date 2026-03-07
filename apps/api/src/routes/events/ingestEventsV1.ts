@@ -1,4 +1,5 @@
 import { createRoute } from "@hono/zod-openapi"
+import type { OverageStrategy } from "@unprice/db/validators"
 import {
   EventTimestampTooFarInFutureError,
   EventTimestampTooOldError,
@@ -23,7 +24,7 @@ const rawEventSchema = z.object({
     description: "The unique event id",
     example: "evt_123",
   }),
-  type: z.string().openapi({
+  slug: z.string().openapi({
     description: "The event type",
     example: "tokens.used",
   }),
@@ -53,16 +54,17 @@ const ingestRequestSchema = z.object({
 
 const ingestApplyResultSchema = z.object({
   allowed: z.boolean().openapi({
-    description: "Whether the event was allowed by synchronous enforcement",
+    description: "Whether the event was accepted by synchronous entitlement window evaluation",
     example: true,
   }),
   deniedReason: z.literal("LIMIT_EXCEEDED").optional().openapi({
-    description: "Present when the event is denied by the DO",
+    description:
+      "Present when the event exceeds strict limit policy in the current entitlement window",
     example: "LIMIT_EXCEEDED",
   }),
   message: z.string().optional().openapi({
     description: "Optional explanatory message from the DO",
-    example: "Limit exceeded for meter ent_123:count",
+    example: "Event already processed",
   }),
 })
 
@@ -74,7 +76,8 @@ const acceptedSchema = z.object({
 })
 
 type CachedEntitlementVersion = {
-  limit: number
+  limit: number | null
+  overageStrategy: OverageStrategy
   validFrom: number
   validTo: number | null
   interval: "month" | "lifetime"
@@ -85,7 +88,8 @@ export const route = createRoute({
   path: "/v1/events/ingest",
   operationId: "ingestion.ingestEvent",
   summary: "ingest event",
-  description: "Ingest an event and synchronously enforce it against the authoritative DO window",
+  description:
+    "Ingest an event and synchronously aggregate it into the authoritative DO window with optional strict limit policy",
   method: "post",
   tags,
   request: {
@@ -94,17 +98,13 @@ export const route = createRoute({
   responses: {
     [HttpStatusCodes.OK]: jsonContent(
       ingestApplyResultSchema,
-      "The event was synchronously applied by the Durable Object"
+      "The event was synchronously aggregated by the Durable Object"
     ),
     [HttpStatusCodes.ACCEPTED]: jsonContent(
       acceptedSchema,
-      "The raw event was accepted, but synchronous DO enforcement was skipped"
+      "The raw event was accepted, but synchronous DO aggregation was skipped"
     ),
     ...openApiErrorResponses,
-    [HttpStatusCodes.FORBIDDEN]: jsonContent(
-      ingestApplyResultSchema,
-      "The event was denied by synchronous enforcement"
-    ),
   },
 })
 
@@ -135,6 +135,7 @@ export const registerIngestEventsV1 = (app: App) =>
     }
 
     // 1. send the event to the cloudflare pipeline
+    // TODO: should I wait here?
     c.executionCtx.waitUntil(sendToCloudflarePipeline(body.event))
 
     // 2. get the cached entitlement versions
@@ -179,9 +180,10 @@ export const registerIngestEventsV1 = (app: App) =>
       // this comes from DB configuration for the entitlement
       meters: buildMockMeters(body.event, body.entitlementId),
       limit: activeVersion.limit,
+      overageStrategy: activeVersion.overageStrategy,
     })
 
-    return c.json(result, result.allowed ? HttpStatusCodes.OK : HttpStatusCodes.FORBIDDEN)
+    return c.json(result, HttpStatusCodes.OK)
   })
 
 async function sendToCloudflarePipeline(_event: RawEvent): Promise<void> {}
@@ -191,6 +193,7 @@ async function getCachedEntitlementVersions(): Promise<CachedEntitlementVersion[
   return [
     {
       limit: 100,
+      overageStrategy: "none",
       validFrom: now - 14 * DAY_MS,
       validTo: now - 7 * DAY_MS,
       interval: "month",
@@ -198,6 +201,7 @@ async function getCachedEntitlementVersions(): Promise<CachedEntitlementVersion[
     },
     {
       limit: 250,
+      overageStrategy: "always",
       validFrom: now - 7 * DAY_MS,
       validTo: null,
       interval: "month",
@@ -246,7 +250,7 @@ function buildMockMeters(event: RawEvent, entitlementId: string): MeterConfig[] 
   return [
     {
       eventId: `${entitlementId}:count`,
-      eventSlug: event.type,
+      eventSlug: event.slug,
       aggregationMethod: "count",
     },
   ]

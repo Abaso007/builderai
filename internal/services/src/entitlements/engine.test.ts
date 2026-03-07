@@ -3,28 +3,40 @@ import {
   EventTimestampTooFarInFutureError,
   EventTimestampTooOldError,
   type Fact,
-  LimitExceededError,
   type MeterConfig,
   PeriodKeyComputationError,
   type RawEvent,
   type StorageAdapter,
+  type SyncStorageAdapter,
   computePeriodKey,
   validateEventTimestamp,
 } from "./domain"
 import { AsyncMeterAggregationEngine } from "./engine"
 
-class InMemoryStorageAdapter implements StorageAdapter {
+class InMemoryStorageAdapter implements StorageAdapter, SyncStorageAdapter {
   private readonly store = new Map<string, unknown>()
 
   async get<T>(key: string): Promise<T | null> {
+    return this.getSync<T>(key)
+  }
+
+  getSync<T>(key: string): T | null {
     return (this.store.get(key) as T | undefined) ?? null
   }
 
   async put<T>(key: string, value: T): Promise<void> {
+    this.putSync(key, value)
+  }
+
+  putSync<T>(key: string, value: T): void {
     this.store.set(key, value)
   }
 
   async list<T>(prefix: string): Promise<T[]> {
+    return this.listSync<T>(prefix)
+  }
+
+  listSync<T>(prefix: string): T[] {
     return Array.from(this.store.entries())
       .filter(([key]) => key.startsWith(prefix))
       .map(([, value]) => value as T)
@@ -167,7 +179,7 @@ describe("AsyncMeterAggregationEngine", () => {
     await expect(
       engine.applyEvent({
         id: "evt_missing_amount",
-        type: "purchase",
+        slug: "purchase",
         timestamp: Date.now(),
         properties: {},
       })
@@ -191,7 +203,7 @@ describe("AsyncMeterAggregationEngine", () => {
 
     const facts = await engine.applyEvent({
       id: "evt_count_empty_payload",
-      type: "purchase",
+      slug: "purchase",
       timestamp: Date.now(),
       properties: {},
     })
@@ -218,7 +230,7 @@ describe("AsyncMeterAggregationEngine", () => {
     await expect(
       engine.applyEvent({
         id: "evt_non_numeric_amount",
-        type: "purchase",
+        slug: "purchase",
         timestamp: Date.now(),
         properties: {
           amount: "10",
@@ -266,22 +278,42 @@ describe("AsyncMeterAggregationEngine", () => {
     ])
   })
 
-  it("rejects the event before persisting state when a meter would exceed the limit", async () => {
+  it("does not persist sync state when pre-persist validation throws", () => {
+    const storage = new InMemoryStorageAdapter()
+    const engine = new AsyncMeterAggregationEngine(createMeterConfigs(), storage)
+
+    expect(() =>
+      engine.applyEventSync(
+        createPurchaseEvent({ id: "evt_denied", timestamp: Date.now(), amount: 10 }),
+        {
+          beforePersist: () => {
+            throw new Error("denied")
+          },
+        }
+      )
+    ).toThrow("denied")
+
+    expect(storage.listSync<number>("meter-state:")).toEqual([])
+    expect(storage.listSync<number>("meter-state-updated-at:")).toEqual([])
+  })
+
+  it("does not persist async state when pre-persist validation rejects", async () => {
     const storage = new InMemoryStorageAdapter()
     const engine = new AsyncMeterAggregationEngine(createMeterConfigs(), storage)
 
     await expect(
       engine.applyEvent(
-        createPurchaseEvent({
-          id: "evt_limit",
-          timestamp: Date.now(),
-          amount: 11,
-        }),
-        10
+        createPurchaseEvent({ id: "evt_denied_async", timestamp: Date.now(), amount: 10 }),
+        {
+          beforePersist: async () => {
+            throw new Error("denied")
+          },
+        }
       )
-    ).rejects.toThrow(LimitExceededError)
+    ).rejects.toThrow("denied")
 
     expect(await storage.list<number>("meter-state:")).toEqual([])
+    expect(await storage.list<number>("meter-state-updated-at:")).toEqual([])
   })
 })
 
@@ -324,7 +356,7 @@ function createPurchaseEvent({
 }): RawEvent {
   return {
     id,
-    type: "purchase",
+    slug: "purchase",
     timestamp,
     properties: {
       amount,

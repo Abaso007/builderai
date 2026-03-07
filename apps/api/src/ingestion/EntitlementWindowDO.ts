@@ -1,9 +1,9 @@
 import { DurableObject } from "cloudflare:workers"
+import type { OverageStrategy } from "@unprice/db/validators"
 import {
   AsyncMeterAggregationEngine,
   EventTimestampTooFarInFutureError,
   EventTimestampTooOldError,
-  LimitExceededError,
   type MeterConfig,
   type RawEvent,
 } from "@unprice/services/entitlements"
@@ -14,11 +14,29 @@ import { idempotencyKeysTable, meterFactsOutboxTable } from "./db/schema"
 import { schema } from "./db/schema"
 import { DrizzleStorageAdapter } from "./drizzle-adapter"
 import migrations from "./drizzle/migrations"
+import { findLimitExceededFact } from "./limit-policy"
+
+const VALID_OVERAGE_STRATEGIES = new Set<OverageStrategy>(["none", "last-call", "always"])
+
+class EntitlementWindowLimitExceededError extends Error {
+  constructor(
+    public readonly params: {
+      eventId: string
+      meterId: string
+      limit: number
+      valueAfter: number
+    }
+  ) {
+    super(`Limit exceeded for meter ${params.meterId}`)
+    this.name = EntitlementWindowLimitExceededError.name
+  }
+}
 
 type ApplyInput = {
   event: RawEvent
   meters: MeterConfig[]
-  limit: number
+  limit?: number | null
+  overageStrategy?: OverageStrategy
 }
 
 type ApplyResult = {
@@ -72,7 +90,25 @@ export class EntitlementWindowDO extends DurableObject {
         // create the engine
         const engine = new AsyncMeterAggregationEngine(input.meters, adapter)
         // apply the event
-        const facts = engine.applyEventSync(input.event, input.limit)
+        const facts = engine.applyEventSync(input.event, {
+          beforePersist: (pendingFacts) => {
+            const exceeded = findLimitExceededFact({
+              facts: pendingFacts,
+              limit: input.limit,
+              overageStrategy: input.overageStrategy,
+            })
+
+            if (exceeded && typeof input.limit === "number" && Number.isFinite(input.limit)) {
+              throw new EntitlementWindowLimitExceededError({
+                eventId: input.event.id,
+                meterId: exceeded.meterId,
+                limit: input.limit,
+                valueAfter: exceeded.valueAfter,
+              })
+            }
+          },
+        })
+
         insertedFactCount = facts.length
 
         // create the outbox batch of facts
@@ -108,7 +144,7 @@ export class EntitlementWindowDO extends DurableObject {
 
       return result
     } catch (error) {
-      if (error instanceof LimitExceededError) {
+      if (error instanceof EntitlementWindowLimitExceededError) {
         return {
           allowed: false,
           deniedReason: "LIMIT_EXCEEDED",
@@ -183,12 +219,20 @@ export class EntitlementWindowDO extends DurableObject {
   }
 
   private assertValidInput(input: ApplyInput): void {
+    const hasValidLimit =
+      input.limit === undefined ||
+      input.limit === null ||
+      (typeof input.limit === "number" && Number.isFinite(input.limit))
+
+    const hasValidOverageStrategy =
+      input.overageStrategy === undefined || VALID_OVERAGE_STRATEGIES.has(input.overageStrategy)
+
     if (
       !input ||
       !input.event ||
       !Array.isArray(input.meters) ||
-      typeof input.limit !== "number" ||
-      !Number.isFinite(input.limit)
+      !hasValidLimit ||
+      !hasValidOverageStrategy
     ) {
       throw new TypeError("Invalid apply payload")
     }

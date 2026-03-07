@@ -1,5 +1,5 @@
 import type { Fact, MeterConfig, RawEvent, StorageAdapter, SyncStorageAdapter } from "./domain"
-import { LimitExceededError, validateEventTimestamp } from "./domain"
+import { validateEventTimestamp } from "./domain"
 
 interface MeterStateSnapshot {
   value: number
@@ -11,6 +11,14 @@ interface PendingUpdate {
   nextState: MeterStateSnapshot
 }
 
+type ApplyEventOptions = {
+  beforePersist?: (facts: Fact[]) => void | Promise<void>
+}
+
+type ApplyEventSyncOptions = {
+  beforePersist?: (facts: Fact[]) => void
+}
+
 const METER_STATE_PREFIX = "meter-state:"
 const METER_STATE_UPDATED_AT_PREFIX = "meter-state-updated-at:"
 
@@ -20,11 +28,11 @@ export class AsyncMeterAggregationEngine {
     private readonly storage: StorageAdapter
   ) {}
 
-  async applyEvent(event: RawEvent, limit?: number): Promise<Fact[]> {
+  async applyEvent(event: RawEvent, options?: ApplyEventOptions): Promise<Fact[]> {
     validateEventTimestamp(event.timestamp, Date.now())
 
     const applicableMeters = this.meterConfigs.filter(
-      (meterConfig) => meterConfig.eventSlug === event.type
+      (meterConfig) => meterConfig.eventSlug === event.slug
     )
 
     if (applicableMeters.length === 0) {
@@ -38,7 +46,11 @@ export class AsyncMeterAggregationEngine {
       })
     )
 
-    this.assertLimit(event.id, pendingUpdates, limit)
+    const facts = pendingUpdates.map(({ fact }) => fact)
+
+    if (options?.beforePersist) {
+      await options.beforePersist(facts)
+    }
 
     await Promise.all(
       pendingUpdates.map(async ({ fact, nextState }) => {
@@ -46,14 +58,14 @@ export class AsyncMeterAggregationEngine {
       })
     )
 
-    return pendingUpdates.map(({ fact }) => fact)
+    return facts
   }
 
-  applyEventSync(event: RawEvent, limit?: number): Fact[] {
+  applyEventSync(event: RawEvent, options?: ApplyEventSyncOptions): Fact[] {
     validateEventTimestamp(event.timestamp, Date.now())
 
     const applicableMeters = this.meterConfigs.filter(
-      (meterConfig) => meterConfig.eventSlug === event.type
+      (meterConfig) => meterConfig.eventSlug === event.slug
     )
 
     if (applicableMeters.length === 0) {
@@ -65,13 +77,17 @@ export class AsyncMeterAggregationEngine {
       return this.computePendingUpdate(meterConfig, event, currentState)
     })
 
-    this.assertLimit(event.id, pendingUpdates, limit)
+    const facts = pendingUpdates.map(({ fact }) => fact)
+
+    if (options?.beforePersist) {
+      options.beforePersist(facts)
+    }
 
     for (const { fact, nextState } of pendingUpdates) {
       this.writeCurrentStateSync(fact.meterId, nextState)
     }
 
-    return pendingUpdates.map(({ fact }) => fact)
+    return facts
   }
 
   private async readCurrentState(meterId: string): Promise<MeterStateSnapshot | null> {
@@ -116,24 +132,6 @@ export class AsyncMeterAggregationEngine {
       value: Number(value),
       updatedAt: updatedAt === null ? Number.NEGATIVE_INFINITY : Number(updatedAt),
     }
-  }
-
-  private assertLimit(eventId: string, appliedUpdates: PendingUpdate[], limit?: number): void {
-    if (limit === undefined || !Number.isFinite(limit)) {
-      return
-    }
-
-    const exceeded = appliedUpdates.find(({ fact }) => fact.valueAfter > limit)
-    if (!exceeded) {
-      return
-    }
-
-    throw new LimitExceededError({
-      eventId,
-      meterId: exceeded.fact.meterId,
-      limit,
-      valueAfter: exceeded.fact.valueAfter,
-    })
   }
 
   private getSyncStorage(): SyncStorageAdapter {

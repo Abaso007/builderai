@@ -23,7 +23,7 @@ import {
 import { shouldEmitMetrics } from "@unprice/observability/env"
 import { CacheService } from "@unprice/services/cache"
 import { CustomerService, type DenyReason } from "@unprice/services/customers"
-import { EntitlementService } from "@unprice/services/entitlements"
+import { EntitlementService, deriveLimitType } from "@unprice/services/entitlements"
 import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/metrics"
 import { type Connection, type ConnectionContext, Server } from "partyserver"
 import type { Env } from "~/env"
@@ -181,13 +181,14 @@ const buildRealtimeFeatures = (states: EntitlementState[]): RealtimeFeatureSnaps
   return states.map((state) => {
     const usage = Number(state.meter.usage ?? 0)
     const limit = typeof state.limit === "number" ? state.limit : null
+    const overageStrategy = state.metadata?.overageStrategy ?? "none"
 
     return {
       featureSlug: state.featureSlug,
       featureType: normalizeFeatureType(state.featureType),
       usage: Number.isFinite(usage) ? usage : null,
       limit,
-      limitType: limit === null ? "none" : "hard",
+      limitType: deriveLimitType({ limit, overageStrategy }),
       effectiveAt: state.effectiveAt ?? null,
       expiresAt: state.expiresAt ?? null,
     }
