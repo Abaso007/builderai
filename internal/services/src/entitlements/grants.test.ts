@@ -69,6 +69,7 @@ describe("GrantsManager", () => {
       set: vi.fn(),
       error: vi.fn(),
       debug: vi.fn(),
+      warn: vi.fn(),
     } as unknown as Logger
 
     mockDb = {
@@ -176,7 +177,7 @@ describe("GrantsManager", () => {
       // Verify feature slug and type
       expect(entitlement!.featureSlug).toBe(featureSlug)
       expect(entitlement!.featureType).toBe("usage")
-      expect(entitlement!.aggregationMethod).toBe("sum")
+      expect(entitlement!.meterConfig?.aggregationMethod).toBe("sum")
     })
 
     it("should take max limit for tier features", async () => {
@@ -219,7 +220,7 @@ describe("GrantsManager", () => {
       expect(entitlement!.limit).toBe(500) // Max of 100, 500, 50
       expect(entitlement!.mergingPolicy).toBe("max")
 
-      expect(entitlement!.aggregationMethod).toBeNull()
+      expect(entitlement!.meterConfig).toBeNull()
 
       // Verify only the winning grant is kept in the entitlement
       expect(entitlement!.grants).toHaveLength(1)
@@ -301,6 +302,88 @@ describe("GrantsManager", () => {
       const entitlement = result.val![0]
       expect(entitlement).toBeDefined()
       expect(entitlement!.metadata?.overageStrategy).toBe("always")
+    })
+
+    it("should reject non-fungible grants with different meter configs", async () => {
+      const grants = [
+        {
+          ...baseGrant,
+          id: "g_input_tokens",
+          limit: 100,
+          featurePlanVersion: {
+            ...baseGrant.featurePlanVersion,
+            meterConfig: {
+              ...baseGrant.featurePlanVersion.meterConfig,
+              aggregationField: "input_tokens",
+            },
+          },
+        },
+        {
+          ...baseGrant,
+          id: "g_output_tokens",
+          limit: 50,
+          priority: 20,
+          featurePlanVersion: {
+            ...baseGrant.featurePlanVersion,
+            meterConfig: {
+              ...baseGrant.featurePlanVersion.meterConfig,
+              aggregationField: "output_tokens",
+            },
+          },
+        },
+      ]
+
+      setupMocks(grants)
+
+      const result = await grantsManager.computeGrantsForCustomer({
+        customerId,
+        projectId,
+        now,
+      })
+
+      expect(result.val).toBeUndefined()
+      expect(result.err).toBeDefined()
+      expect(result.err?.message).toContain('feature "merge-test-feature"')
+      expect(result.err?.message).toContain("fungible")
+      expect(result.err?.message).toContain("meterConfig")
+    })
+
+    it("should reject non-fungible grants with different reset periods", async () => {
+      const grants = [
+        {
+          ...baseGrant,
+          id: "g_monthly",
+          limit: 100,
+        },
+        {
+          ...baseGrant,
+          id: "g_yearly",
+          limit: 50,
+          priority: 20,
+          featurePlanVersion: {
+            ...baseGrant.featurePlanVersion,
+            resetConfig: {
+              ...baseGrant.featurePlanVersion.resetConfig,
+              name: "yearly",
+              resetInterval: "year" as const,
+              resetIntervalCount: 1,
+            },
+          },
+        },
+      ]
+
+      setupMocks(grants)
+
+      const result = await grantsManager.computeGrantsForCustomer({
+        customerId,
+        projectId,
+        now,
+      })
+
+      expect(result.val).toBeUndefined()
+      expect(result.err).toBeDefined()
+      expect(result.err?.message).toContain("Non-fungible grants")
+      expect(result.err?.message).toContain("resetConfig")
     })
 
     it("should allow overage if ANY grant allows it (max policy)", async () => {

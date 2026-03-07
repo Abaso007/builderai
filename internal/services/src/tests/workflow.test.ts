@@ -81,7 +81,12 @@ describe("Golden Scenario - Customer Journey", () => {
         feature: { id: "f_1", slug: featureSlug },
         featureType: "usage",
         unitOfMeasure: "units",
-        aggregationMethod: "sum",
+        meterConfig: {
+          eventId: "event_api_requests",
+          eventSlug: featureSlug,
+          aggregationMethod: "sum",
+          aggregationField: "value",
+        },
         config: { usageMode: "sum" },
         billingConfig: {
           name: "standard",
@@ -232,7 +237,12 @@ describe("Golden Scenario - Customer Journey", () => {
                   feature: { slug: featureSlug },
                   featureType: "usage",
                   unitOfMeasure: "units",
-                  aggregationMethod: "sum",
+                  meterConfig: {
+                    eventId: "event_api_requests",
+                    eventSlug: featureSlug,
+                    aggregationMethod: "sum",
+                    aggregationField: "value",
+                  },
                   config: { usageMode: "sum" },
                   billingConfig: {
                     name: "standard",

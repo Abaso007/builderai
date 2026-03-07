@@ -45,6 +45,196 @@ export class GrantsManager {
     this.revalidateInterval = revalidateInterval ?? 300000 // 5 minutes default
   }
 
+  private normalizeUnitOfMeasure(unit: string | null | undefined): string {
+    const trimmed = unit?.trim()
+    return trimmed && trimmed.length > 0 ? trimmed : "units"
+  }
+
+  private getGrantResetSignature(grant: z.infer<typeof grantSchemaExtended>) {
+    if (grant.featurePlanVersion.resetConfig) {
+      return {
+        name: grant.featurePlanVersion.resetConfig.name,
+        resetInterval: grant.featurePlanVersion.resetConfig.resetInterval,
+        resetIntervalCount: grant.featurePlanVersion.resetConfig.resetIntervalCount,
+        planType: grant.featurePlanVersion.resetConfig.planType,
+        resetAnchor: grant.anchor,
+      }
+    }
+
+    if (grant.featurePlanVersion.billingConfig) {
+      return {
+        name: grant.featurePlanVersion.billingConfig.name,
+        resetInterval: grant.featurePlanVersion.billingConfig.billingInterval,
+        resetIntervalCount: grant.featurePlanVersion.billingConfig.billingIntervalCount,
+        planType: grant.featurePlanVersion.billingConfig.planType,
+        resetAnchor: grant.anchor,
+      }
+    }
+
+    return null
+  }
+
+  private getGrantFungibilitySignature(grant: z.infer<typeof grantSchemaExtended>) {
+    const { featurePlanVersion } = grant
+    const config = featurePlanVersion.config
+
+    const usageMode =
+      featurePlanVersion.featureType === "usage" &&
+      config &&
+      typeof config === "object" &&
+      "usageMode" in config
+        ? ((config.usageMode as UsageMode | null | undefined) ?? null)
+        : null
+
+    const meterConfig =
+      featurePlanVersion.featureType === "usage" && featurePlanVersion.meterConfig
+        ? {
+            eventId: featurePlanVersion.meterConfig.eventId,
+            eventSlug: featurePlanVersion.meterConfig.eventSlug,
+            aggregationMethod: featurePlanVersion.meterConfig.aggregationMethod,
+            aggregationField: featurePlanVersion.meterConfig.aggregationField?.trim() ?? null,
+            filters: featurePlanVersion.meterConfig.filters
+              ? Object.fromEntries(
+                  Object.entries(featurePlanVersion.meterConfig.filters).sort(([left], [right]) =>
+                    left.localeCompare(right)
+                  )
+                )
+              : null,
+            groupBy: featurePlanVersion.meterConfig.groupBy
+              ? [...featurePlanVersion.meterConfig.groupBy].sort()
+              : null,
+            windowSize: featurePlanVersion.meterConfig.windowSize ?? null,
+          }
+        : null
+
+    return {
+      featureType: featurePlanVersion.featureType,
+      unitOfMeasure: this.normalizeUnitOfMeasure(featurePlanVersion.unitOfMeasure),
+      usageMode,
+      meterConfig,
+      resetConfig: this.getGrantResetSignature(grant),
+    }
+  }
+
+  private buildMaterializedMeterConfig(grant: z.infer<typeof grantSchemaExtended>) {
+    const meterConfig = grant.featurePlanVersion.meterConfig
+
+    if (!meterConfig) {
+      return null
+    }
+
+    return {
+      eventId: meterConfig.eventId,
+      eventSlug: meterConfig.eventSlug,
+      aggregationMethod: meterConfig.aggregationMethod,
+      ...(meterConfig.aggregationField?.trim()
+        ? { aggregationField: meterConfig.aggregationField.trim() }
+        : {}),
+      ...(meterConfig.filters
+        ? {
+            filters: Object.fromEntries(
+              Object.entries(meterConfig.filters).sort(([left], [right]) =>
+                left.localeCompare(right)
+              )
+            ),
+          }
+        : {}),
+      ...(meterConfig.groupBy ? { groupBy: [...meterConfig.groupBy].sort() } : {}),
+      ...(meterConfig.windowSize ? { windowSize: meterConfig.windowSize } : {}),
+    }
+  }
+
+  private serializeGrantFungibilitySignature(value: unknown): string {
+    return JSON.stringify(value)
+  }
+
+  private getGrantFungibilityDifferences(
+    expected: ReturnType<GrantsManager["getGrantFungibilitySignature"]>,
+    actual: ReturnType<GrantsManager["getGrantFungibilitySignature"]>
+  ): string[] {
+    const differences: string[] = []
+
+    if (expected.featureType !== actual.featureType) {
+      differences.push("featureType")
+    }
+
+    if (expected.unitOfMeasure !== actual.unitOfMeasure) {
+      differences.push("unitOfMeasure")
+    }
+
+    if (expected.usageMode !== actual.usageMode) {
+      differences.push("usageMode")
+    }
+
+    if (
+      this.serializeGrantFungibilitySignature(expected.meterConfig) !==
+      this.serializeGrantFungibilitySignature(actual.meterConfig)
+    ) {
+      differences.push("meterConfig")
+    }
+
+    if (
+      this.serializeGrantFungibilitySignature(expected.resetConfig) !==
+      this.serializeGrantFungibilitySignature(actual.resetConfig)
+    ) {
+      differences.push("resetConfig")
+    }
+
+    return differences
+  }
+
+  private assertFungibleGrantSet(params: {
+    grants: z.infer<typeof grantSchemaExtended>[]
+    featureSlug: string
+    customerId: string
+  }): Result<
+    {
+      orderedGrants: z.infer<typeof grantSchemaExtended>[]
+      signature: ReturnType<GrantsManager["getGrantFungibilitySignature"]>
+    },
+    UnPriceGrantError
+  > {
+    const orderedGrants = [...params.grants].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
+    const baselineGrant = orderedGrants[0]
+
+    if (!baselineGrant) {
+      return Err(new UnPriceGrantError({ message: "No grants provided" }))
+    }
+
+    const baselineSignature = this.getGrantFungibilitySignature(baselineGrant)
+    const nonFungibleGrants = orderedGrants
+      .slice(1)
+      .map((grant) => ({
+        grant,
+        differences: this.getGrantFungibilityDifferences(
+          baselineSignature,
+          this.getGrantFungibilitySignature(grant)
+        ),
+      }))
+      .filter(({ differences }) => differences.length > 0)
+
+    if (nonFungibleGrants.length > 0) {
+      const nonFungibleGrantSummary = nonFungibleGrants
+        .map(({ grant, differences }) => `${grant.id} (${differences.join(", ")})`)
+        .join(", ")
+
+      return Err(
+        new UnPriceGrantError({
+          message: `Cannot materialize feature "${params.featureSlug}" into a
+          single entitlement because the current schema only allows one active entitlement
+          per feature slug. Stacked grants must be fungible and share featureType, unitOfMeasure,
+          usageMode, meterConfig, and resetConfig. Non-fungible grants: ${nonFungibleGrantSummary}`,
+          subjectId: params.customerId,
+        })
+      )
+    }
+
+    return Ok({
+      orderedGrants,
+      signature: baselineSignature,
+    })
+  }
+
   public async deleteGrants(params: {
     grantIds: string[]
     projectId: string
@@ -639,32 +829,23 @@ export class GrantsManager {
       return Err(new UnPriceGrantError({ message: "All grants must have the same feature slug" }))
     }
 
-    const normalizeUnit = (unit: string | null | undefined) => {
-      const trimmed = unit?.trim()
-      return trimmed && trimmed.length > 0 ? trimmed : "units"
+    const { err: fungibilityErr, val: fungibleGrantSet } = this.assertFungibleGrantSet({
+      grants,
+      featureSlug,
+      customerId,
+    })
+
+    if (fungibilityErr) {
+      return Err(fungibilityErr)
     }
 
-    // Sort by priority (higher first) to preserve consumption order and get the best priority grant
-    // This determines the "intent" (feature type) of the entitlement configuration
-    const ordered = [...grants].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
+    // Sort by priority (higher first) to preserve consumption order and get the best priority grant.
+    // This determines the canonical configuration for the materialized entitlement.
+    const ordered = fungibleGrantSet.orderedGrants
     const bestPriorityGrant = ordered[0]!
-    const winningUnitOfMeasure = normalizeUnit(bestPriorityGrant.featurePlanVersion.unitOfMeasure)
+    const winningUnitOfMeasure = fungibleGrantSet.signature.unitOfMeasure
 
-    const unitScopedGrants = ordered.filter(
-      (g) => normalizeUnit(g.featurePlanVersion.unitOfMeasure) === winningUnitOfMeasure
-    )
-
-    if (unitScopedGrants.length !== ordered.length) {
-      this.logger.warn("Dropping grants with mismatched unit of measure", {
-        featureSlug,
-        customerId,
-        projectId,
-        winningUnitOfMeasure,
-        droppedGrants: ordered.length - unitScopedGrants.length,
-      })
-    }
-
-    const grantsSnapshot = unitScopedGrants.map((g) => ({
+    const grantsSnapshot = ordered.map((g) => ({
       id: g.id,
       type: g.type,
       name: g.name,
@@ -672,7 +853,7 @@ export class GrantsManager {
       expiresAt: g.expiresAt,
       limit: g.limit,
       priority: g.priority,
-      unitOfMeasure: normalizeUnit(g.featurePlanVersion.unitOfMeasure),
+      unitOfMeasure: this.normalizeUnitOfMeasure(g.featurePlanVersion.unitOfMeasure),
       config: g.featurePlanVersion.config, // Keep config for pricing calculations
       featurePlanVersionId: g.featurePlanVersionId,
     }))
@@ -690,26 +871,23 @@ export class GrantsManager {
     // for the winning grant ID to get full configuration (resetConfig etc).
 
     const winningGrantSnapshot = merged.grants[0] ?? grantsSnapshot[0]!
-    const winningGrant =
-      unitScopedGrants.find((g) => g.id === winningGrantSnapshot.id) ?? bestPriorityGrant
+    const winningGrant = ordered.find((g) => g.id === winningGrantSnapshot.id) ?? bestPriorityGrant
 
     // Merge overage strategy from all grants based on merging policy
     let overageStrategy = winningGrant.featurePlanVersion.metadata?.overageStrategy ?? "none"
     if (merged.mergingPolicy === "sum" || merged.mergingPolicy === "max") {
-      if (
-        unitScopedGrants.some((g) => g.featurePlanVersion.metadata?.overageStrategy === "always")
-      ) {
+      if (ordered.some((g) => g.featurePlanVersion.metadata?.overageStrategy === "always")) {
         overageStrategy = "always"
       } else if (
-        unitScopedGrants.some((g) => g.featurePlanVersion.metadata?.overageStrategy === "last-call")
+        ordered.some((g) => g.featurePlanVersion.metadata?.overageStrategy === "last-call")
       ) {
         overageStrategy = "last-call"
       }
     } else if (merged.mergingPolicy === "min") {
-      if (unitScopedGrants.some((g) => g.featurePlanVersion.metadata?.overageStrategy === "none")) {
+      if (ordered.some((g) => g.featurePlanVersion.metadata?.overageStrategy === "none")) {
         overageStrategy = "none"
       } else if (
-        unitScopedGrants.some((g) => g.featurePlanVersion.metadata?.overageStrategy === "last-call")
+        ordered.some((g) => g.featurePlanVersion.metadata?.overageStrategy === "last-call")
       ) {
         overageStrategy = "last-call"
       } else {
@@ -750,18 +928,10 @@ export class GrantsManager {
     const localResetConfig = resetConfig ?? billingConfig ?? null
 
     // Compute version hash + current cycle boundaries
-    const version = await hashStringSHA256(
-      JSON.stringify({
-        grants: merged.grants,
-      })
-    )
-
     const isUsageFeature = bestPriorityGrant.featurePlanVersion.featureType === "usage"
-    const aggregationMethod = isUsageFeature
-      ? (bestPriorityGrant.featurePlanVersion.meterConfig?.aggregationMethod ?? null)
-      : null
+    const meterConfig = isUsageFeature ? this.buildMaterializedMeterConfig(bestPriorityGrant) : null
 
-    if (isUsageFeature && !aggregationMethod) {
+    if (isUsageFeature && !meterConfig) {
       return Err(
         new UnPriceGrantError({
           message: "Usage feature plan version is missing meter configuration",
@@ -770,14 +940,26 @@ export class GrantsManager {
       )
     }
 
+    // Compute version hash + current cycle boundaries
+    const version = await hashStringSHA256(
+      JSON.stringify({
+        grants: merged.grants,
+        featureType: bestPriorityGrant.featurePlanVersion.featureType,
+        unitOfMeasure: winningUnitOfMeasure,
+        resetConfig: isUsageFeature ? localResetConfig : null,
+        meterConfig,
+        mergingPolicy: merged.mergingPolicy,
+      })
+    )
+
     return Ok({
       limit: merged.limit,
       mergingPolicy: merged.mergingPolicy,
       effectiveAt: merged.effectiveAt,
       expiresAt: merged.expiresAt,
       resetConfig: isUsageFeature ? localResetConfig : null,
+      meterConfig,
       featureType: bestPriorityGrant.featurePlanVersion.featureType,
-      aggregationMethod,
       unitOfMeasure: winningUnitOfMeasure,
       grants: merged.grants,
       featureSlug,
@@ -843,7 +1025,7 @@ export class GrantsManager {
       featureType: computedState.featureType,
       unitOfMeasure: computedState.unitOfMeasure,
       limit: computedState.limit,
-      aggregationMethod: computedState.aggregationMethod,
+      meterConfig: computedState.meterConfig,
       resetConfig: computedState.resetConfig,
       mergingPolicy: computedState.mergingPolicy,
       grants: computedState.grants,
@@ -940,16 +1122,11 @@ export class GrantsManager {
       }
     }
 
-    const normalizeUnit = (unit: string | null | undefined) => {
-      const trimmed = unit?.trim()
-      return trimmed && trimmed.length > 0 ? trimmed : "units"
-    }
-
     // Sort by priority (higher priority first)
     const sorted = [...grants].sort((a, b) => b.priority - a.priority)
-    const winningUnitOfMeasure = normalizeUnit(sorted[0]?.unitOfMeasure)
+    const winningUnitOfMeasure = this.normalizeUnitOfMeasure(sorted[0]?.unitOfMeasure)
     const unitScoped = sorted.filter(
-      (grant) => normalizeUnit(grant.unitOfMeasure) === winningUnitOfMeasure
+      (grant) => this.normalizeUnitOfMeasure(grant.unitOfMeasure) === winningUnitOfMeasure
     )
     const scopedGrants = unitScoped.length > 0 ? unitScoped : sorted
 

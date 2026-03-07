@@ -129,5 +129,5 @@ export function computePeriodKey(params: Parameters<typeof calculateCycleWindow>
     throw new PeriodKeyComputationError(params)
   }
 
-  return `${params.config.interval}:${cycle.start}:${cycle.end}`
+  return `${params.config.interval}:${cycle.start}`
 }

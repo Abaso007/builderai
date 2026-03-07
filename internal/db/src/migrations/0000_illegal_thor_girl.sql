@@ -491,7 +491,7 @@ CREATE TABLE "unprice_entitlements" (
 	"feature_type" "feature_types" NOT NULL,
 	"unit_of_measure" varchar(24) DEFAULT 'units' NOT NULL,
 	"reset_config" json,
-	"aggregation_method" "aggregation_method",
+	"meter_config" json,
 	"is_current" boolean DEFAULT true NOT NULL,
 	"merging_policy" "merging_policy" DEFAULT 'sum' NOT NULL,
 	"limit" integer,

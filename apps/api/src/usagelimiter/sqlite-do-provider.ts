@@ -1384,6 +1384,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       const normalizedGrants = normalizeJsonValue(state.grants)
       const normalizedResetConfig = normalizeJsonValue(state.resetConfig ?? null)
       const normalizedMetadata = normalizeJsonValue(state.metadata ?? null)
+      const aggregationMethod = state.meterConfig?.aggregationMethod ?? "null"
 
       snapshots.push({
         id: String(state.id),
@@ -1395,7 +1396,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         feature_type: String(state.featureType),
         unit_of_measure: String(state.unitOfMeasure || "unit"),
         reset_config: normalizedResetConfig,
-        aggregation_method: String(state.aggregationMethod),
+        aggregation_method: String(aggregationMethod),
         merging_policy: state.mergingPolicy ? String(state.mergingPolicy) : undefined,
         limit: state.limit != null ? Number(state.limit) : undefined, // Ensure it's a number (int64)
         effective_at: Number(state.effectiveAt), // Ensure it's a number (timestamp)

@@ -31,7 +31,12 @@ export const createMockEntitlementState = (
     featureType: "usage",
     unitOfMeasure: "units",
     limit: 100,
-    aggregationMethod: "sum",
+    meterConfig: {
+      eventId: "event_test_feature",
+      eventSlug: "test-feature",
+      aggregationMethod: "sum",
+      aggregationField: "value",
+    },
     mergingPolicy: "sum",
     effectiveAt: now - 10000,
     expiresAt: now + 10000,

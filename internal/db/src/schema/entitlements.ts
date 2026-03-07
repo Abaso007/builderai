@@ -23,10 +23,9 @@ import type {
   entitlementMetadataSchema,
   grantsMetadataSchema,
 } from "../validators/entitlements"
-import type { resetConfigSchema } from "../validators/shared"
+import type { meterConfigSchema, resetConfigSchema } from "../validators/shared"
 import { customers } from "./customers"
 import {
-  aggregationMethodEnum,
   entitlementMergingPolicyEnum,
   grantTypeEnum,
   overageStrategyEnum,
@@ -43,7 +42,7 @@ import { projects } from "./projects"
 // IMPORTANT: All grants for the same featureSlug MUST have the same:
 //   - featureType
 //   - resetConfig
-//   - aggregationMethod for usage features
+//   - meterConfig for usage features
 //   - unitOfMeasure
 // Only limit and hardLimit can differ (merged by priority)
 // The effective values are stored directly in the entitlement for performance
@@ -61,10 +60,10 @@ export const entitlements = pgTableProject(
     // unit of measurement for the entitlement (computed winner from grants)
     unitOfMeasure: varchar("unit_of_measure", { length: 24 }).notNull().default("units"),
     // null here mean the entitlement never resets
-    resetConfig: json("reset_config").$type<
-      z.infer<typeof resetConfigSchema> & { resetAnchor: number }
-    >(),
-    aggregationMethod: aggregationMethodEnum("aggregation_method"),
+    resetConfig: json("reset_config")
+      .$type<(z.infer<typeof resetConfigSchema> & { resetAnchor: number }) | null>(),
+    // canonical meter definition for usage features
+    meterConfig: json("meter_config").$type<z.infer<typeof meterConfigSchema> | null>(),
     // A flag to mark which version is currently active
     isCurrent: boolean("is_current").notNull().default(true),
 

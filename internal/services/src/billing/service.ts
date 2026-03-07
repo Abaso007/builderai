@@ -1152,10 +1152,12 @@ export class BillingService {
             entitlement,
           })
 
-          if (entitlement.featureType === "usage" && entitlement.aggregationMethod) {
+          const aggregationMethod = entitlement.meterConfig?.aggregationMethod
+
+          if (entitlement.featureType === "usage" && aggregationMethod) {
             usageFeaturesToFetch.push({
               featureSlug,
-              aggregationMethod: entitlement.aggregationMethod,
+              aggregationMethod,
               featureType: entitlement.featureType,
             })
           }
@@ -2242,7 +2244,7 @@ export class BillingService {
     }
 
     const featureType = entitlement.featureType
-    const aggregationMethod = entitlement.aggregationMethod
+    const aggregationMethod = entitlement.meterConfig?.aggregationMethod
     const isUsageFeature = featureType === "usage"
 
     // For non-usage features, return early with zero usage
@@ -2714,12 +2716,12 @@ export class BillingService {
       // Collect usage features for batch fetching
       if (
         entitlement.featureType === "usage" &&
-        entitlement.aggregationMethod &&
+        entitlement.meterConfig?.aggregationMethod &&
         !usageOverrides?.has(featureSlug)
       ) {
         usageFeaturesToFetch.push({
           featureSlug,
-          aggregationMethod: entitlement.aggregationMethod,
+          aggregationMethod: entitlement.meterConfig.aggregationMethod,
           featureType: entitlement.featureType,
           billingStartAt,
           billingEndAt,

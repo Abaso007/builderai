@@ -4394,10 +4394,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "aggregation_method": {
-          "name": "aggregation_method",
-          "type": "aggregation_method",
-          "typeSchema": "public",
+        "meter_config": {
+          "name": "meter_config",
+          "type": "json",
           "primaryKey": false,
           "notNull": false
         },

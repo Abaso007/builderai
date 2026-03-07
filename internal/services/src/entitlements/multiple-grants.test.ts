@@ -62,7 +62,12 @@ describe("EntitlementService - Multiple Grants", () => {
     featureType: "usage",
     unitOfMeasure: "units",
     limit: 150, // Sum of limits (100 + 50)
-    aggregationMethod: "sum",
+    meterConfig: {
+      eventId: "event_multi_grant",
+      eventSlug: featureSlug,
+      aggregationMethod: "sum",
+      aggregationField: "value",
+    },
     mergingPolicy: "sum",
     meter: {
       usage: "0",

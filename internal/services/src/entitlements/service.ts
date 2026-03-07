@@ -136,21 +136,21 @@ export class EntitlementService {
 
   private isUsageEntitlement(state: EntitlementState): state is EntitlementState & {
     featureType: "usage"
-    aggregationMethod: NonNullable<EntitlementState["aggregationMethod"]>
+    meterConfig: NonNullable<EntitlementState["meterConfig"]>
   } {
-    return state.featureType === "usage" && Boolean(state.aggregationMethod)
+    return state.featureType === "usage" && Boolean(state.meterConfig)
   }
 
   private getUsageMeter(
     validatedState: EntitlementState & {
       featureType: "usage"
-      aggregationMethod: NonNullable<EntitlementState["aggregationMethod"]>
+      meterConfig: NonNullable<EntitlementState["meterConfig"]>
     }
   ): UsageMeter {
     return new UsageMeter(
       {
         capacity: validatedState.limit ?? Number.POSITIVE_INFINITY,
-        aggregationMethod: validatedState.aggregationMethod,
+        aggregationMethod: validatedState.meterConfig.aggregationMethod,
         featureType: validatedState.featureType,
         resetConfig: validatedState.resetConfig,
         startDate: validatedState.effectiveAt,
@@ -948,7 +948,8 @@ export class EntitlementService {
       return // fire-and-forget
     }
 
-    const config = AGGREGATION_CONFIG[snapshot.aggregationMethod]
+    const aggregationMethod = snapshot.meterConfig.aggregationMethod
+    const config = AGGREGATION_CONFIG[aggregationMethod]
 
     // drift only makes sense for sum behavior
     if (config.behavior !== "sum") {
@@ -957,7 +958,7 @@ export class EntitlementService {
         featureSlug: snapshot.featureSlug,
         customerId: snapshot.customerId,
         projectId: snapshot.projectId,
-        aggregationMethod: snapshot.aggregationMethod,
+        aggregationMethod,
         featureType: snapshot.featureType,
       })
       return // fire-and-forget
@@ -1011,7 +1012,7 @@ export class EntitlementService {
         featureSlug: snapshot.featureSlug,
         customerId: snapshot.customerId,
         projectId: snapshot.projectId,
-        aggregationMethod: snapshot.aggregationMethod,
+        aggregationMethod,
         featureType: snapshot.featureType,
       })
       return // fire-and-forget
@@ -1073,7 +1074,7 @@ export class EntitlementService {
         projectId: snapshot.projectId,
         feature: {
           featureSlug: snapshot.featureSlug,
-          aggregationMethod: snapshot.aggregationMethod,
+          aggregationMethod,
           featureType: snapshot.featureType,
         },
         afterRecordId: lastReconciledId,
@@ -1140,7 +1141,7 @@ export class EntitlementService {
           featureSlug: snapshot.featureSlug,
           customerId: snapshot.customerId,
           projectId: snapshot.projectId,
-          aggregationMethod: snapshot.aggregationMethod,
+          aggregationMethod,
           featureType: snapshot.featureType,
         })
         return
@@ -1196,9 +1197,11 @@ export class EntitlementService {
       return Ok(entitlementState.meter)
     }
 
-    if (entitlement.featureType !== "usage" || !entitlement.aggregationMethod) {
+    if (entitlement.featureType !== "usage" || !entitlement.meterConfig) {
       return Ok(emptyMeterState)
     }
+
+    const aggregationMethod = entitlement.meterConfig.aggregationMethod
 
     // if the entitlement is not initialized, initialize it from analytics
     const watermarkCycleWindow = entitlement.resetConfig
@@ -1232,7 +1235,7 @@ export class EntitlementService {
         projectId: entitlement.projectId,
         feature: {
           featureSlug: entitlement.featureSlug,
-          aggregationMethod: entitlement.aggregationMethod,
+          aggregationMethod,
           featureType: entitlement.featureType,
         },
         afterRecordId: afterRecordId, // from the start of the cycle

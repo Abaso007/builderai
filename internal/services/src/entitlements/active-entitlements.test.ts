@@ -32,7 +32,12 @@ describe("EntitlementService - Active Entitlements & Cycle Changes", () => {
     featureType: "usage",
     unitOfMeasure: "units",
     limit: 100,
-    aggregationMethod: "sum",
+    meterConfig: {
+      eventId: "event_feature_a",
+      eventSlug: featureSlug,
+      aggregationMethod: "sum",
+      aggregationField: "value",
+    },
     mergingPolicy: "sum",
     grants: [],
     version: "v1",
@@ -223,7 +228,12 @@ describe("EntitlementService - Active Entitlements & Cycle Changes", () => {
         unitOfMeasure: "units",
         limit: 100,
         allowOverage: false,
-        aggregationMethod: "sum" as const,
+        meterConfig: {
+          eventId: "event_feature_a",
+          eventSlug: featureSlug,
+          aggregationMethod: "sum" as const,
+          aggregationField: "value",
+        },
         mergingPolicy: "sum" as const,
         grants: [
           {
