@@ -2,7 +2,7 @@ import { createRoute } from "@hono/zod-openapi"
 import {
   EventTimestampTooFarInFutureError,
   EventTimestampTooOldError,
-  type MeterDefinition,
+  type MeterConfig,
   type RawEvent,
   computePeriodKey,
   validateEventTimestamp,
@@ -210,6 +210,7 @@ function computeEntitlementPeriodKey(
   eventTimestamp: number,
   activeVersion: CachedEntitlementVersion
 ): string {
+  // TODO: migrate this and use reset config instead
   if (activeVersion.interval === "lifetime") {
     return computePeriodKey({
       now: eventTimestamp,
@@ -241,15 +242,12 @@ function computeEntitlementPeriodKey(
   })
 }
 
-function buildMockMeters(event: RawEvent, entitlementId: string): MeterDefinition[] {
+function buildMockMeters(event: RawEvent, entitlementId: string): MeterConfig[] {
   return [
     {
-      id: `${entitlementId}:count`,
-      eventType: event.type,
-      aggregation: {
-        type: "COUNT",
-      },
-      enforcementMode: "hard",
+      eventId: `${entitlementId}:count`,
+      eventSlug: event.type,
+      aggregationMethod: "count",
     },
   ]
 }

@@ -1,4 +1,4 @@
-import type { Fact, MeterDefinition, RawEvent, StorageAdapter, SyncStorageAdapter } from "./domain"
+import type { Fact, MeterConfig, RawEvent, StorageAdapter, SyncStorageAdapter } from "./domain"
 import { LimitExceededError, validateEventTimestamp } from "./domain"
 
 interface MeterStateSnapshot {
@@ -16,15 +16,15 @@ const METER_STATE_UPDATED_AT_PREFIX = "meter-state-updated-at:"
 
 export class AsyncMeterAggregationEngine {
   constructor(
-    private readonly meterDefinitions: MeterDefinition[],
+    private readonly meterConfigs: MeterConfig[],
     private readonly storage: StorageAdapter
   ) {}
 
   async applyEvent(event: RawEvent, limit?: number): Promise<Fact[]> {
     validateEventTimestamp(event.timestamp, Date.now())
 
-    const applicableMeters = this.meterDefinitions.filter(
-      (meterDefinition) => meterDefinition.eventType === event.type
+    const applicableMeters = this.meterConfigs.filter(
+      (meterConfig) => meterConfig.eventSlug === event.type
     )
 
     if (applicableMeters.length === 0) {
@@ -32,48 +32,46 @@ export class AsyncMeterAggregationEngine {
     }
 
     const pendingUpdates = await Promise.all(
-      applicableMeters.map(async (meterDefinition) => {
-        const currentState = await this.readCurrentState(meterDefinition.id)
-        return this.computePendingUpdate(meterDefinition, event, currentState)
+      applicableMeters.map(async (meterConfig) => {
+        const currentState = await this.readCurrentState(meterConfig.eventId)
+        return this.computePendingUpdate(meterConfig, event, currentState)
       })
     )
 
-    const appliedUpdates = this.toAppliedUpdates(pendingUpdates)
-    this.assertLimit(event.id, appliedUpdates, limit)
+    this.assertLimit(event.id, pendingUpdates, limit)
 
     await Promise.all(
-      appliedUpdates.map(async ({ fact, nextState }) => {
+      pendingUpdates.map(async ({ fact, nextState }) => {
         await this.writeCurrentState(fact.meterId, nextState)
       })
     )
 
-    return appliedUpdates.map(({ fact }) => fact)
+    return pendingUpdates.map(({ fact }) => fact)
   }
 
   applyEventSync(event: RawEvent, limit?: number): Fact[] {
     validateEventTimestamp(event.timestamp, Date.now())
 
-    const applicableMeters = this.meterDefinitions.filter(
-      (meterDefinition) => meterDefinition.eventType === event.type
+    const applicableMeters = this.meterConfigs.filter(
+      (meterConfig) => meterConfig.eventSlug === event.type
     )
 
     if (applicableMeters.length === 0) {
       return []
     }
 
-    const pendingUpdates = applicableMeters.map((meterDefinition) => {
-      const currentState = this.readCurrentStateSync(meterDefinition.id)
-      return this.computePendingUpdate(meterDefinition, event, currentState)
+    const pendingUpdates = applicableMeters.map((meterConfig) => {
+      const currentState = this.readCurrentStateSync(meterConfig.eventId)
+      return this.computePendingUpdate(meterConfig, event, currentState)
     })
 
-    const appliedUpdates = this.toAppliedUpdates(pendingUpdates)
-    this.assertLimit(event.id, appliedUpdates, limit)
+    this.assertLimit(event.id, pendingUpdates, limit)
 
-    for (const { fact, nextState } of appliedUpdates) {
+    for (const { fact, nextState } of pendingUpdates) {
       this.writeCurrentStateSync(fact.meterId, nextState)
     }
 
-    return appliedUpdates.map(({ fact }) => fact)
+    return pendingUpdates.map(({ fact }) => fact)
   }
 
   private async readCurrentState(meterId: string): Promise<MeterStateSnapshot | null> {
@@ -120,12 +118,6 @@ export class AsyncMeterAggregationEngine {
     }
   }
 
-  private toAppliedUpdates(pendingUpdates: Array<PendingUpdate | null>): PendingUpdate[] {
-    return pendingUpdates.filter(
-      (pendingUpdate): pendingUpdate is PendingUpdate => pendingUpdate !== null
-    )
-  }
-
   private assertLimit(eventId: string, appliedUpdates: PendingUpdate[], limit?: number): void {
     if (limit === undefined || !Number.isFinite(limit)) {
       return
@@ -159,130 +151,127 @@ export class AsyncMeterAggregationEngine {
   }
 
   private computePendingUpdate(
-    meterDefinition: MeterDefinition,
+    meterConfig: MeterConfig,
     event: RawEvent,
     currentState: MeterStateSnapshot | null
-  ): PendingUpdate | null {
+  ): PendingUpdate {
     const previousValue = currentState?.value ?? 0
     const previousUpdatedAt = currentState?.updatedAt ?? Number.NEGATIVE_INFINITY
 
-    if (meterDefinition.aggregation.type === "COUNT") {
-      const nextValue = previousValue + 1
+    switch (meterConfig.aggregationMethod) {
+      case "count": {
+        const nextValue = previousValue + 1
 
-      return {
-        fact: {
-          eventId: event.id,
-          meterId: meterDefinition.id,
-          delta: 1,
-          valueAfter: nextValue,
-        },
-        nextState: {
-          value: nextValue,
-          updatedAt: Math.max(previousUpdatedAt, event.timestamp),
-        },
+        return {
+          fact: {
+            eventId: event.id,
+            meterId: meterConfig.eventId,
+            delta: 1,
+            valueAfter: nextValue,
+          },
+          nextState: {
+            value: nextValue,
+            updatedAt: Math.max(previousUpdatedAt, event.timestamp),
+          },
+        }
       }
-    }
 
-    const numericValue = this.readNumericFieldValue(meterDefinition, event)
+      case "sum": {
+        const numericValue = this.readNumericFieldValue(meterConfig, event)
 
-    if (numericValue === null) {
-      return null
-    }
+        const nextValue = previousValue + numericValue
 
-    if (meterDefinition.aggregation.type === "SUM") {
-      const nextValue = previousValue + numericValue
-
-      return {
-        fact: {
-          eventId: event.id,
-          meterId: meterDefinition.id,
-          delta: numericValue,
-          valueAfter: nextValue,
-        },
-        nextState: {
-          value: nextValue,
-          updatedAt: Math.max(previousUpdatedAt, event.timestamp),
-        },
+        return {
+          fact: {
+            eventId: event.id,
+            meterId: meterConfig.eventId,
+            delta: numericValue,
+            valueAfter: nextValue,
+          },
+          nextState: {
+            value: nextValue,
+            updatedAt: Math.max(previousUpdatedAt, event.timestamp),
+          },
+        }
       }
-    }
 
-    if (meterDefinition.aggregation.type === "MAX") {
-      const nextValue = currentState === null ? numericValue : Math.max(previousValue, numericValue)
+      case "max": {
+        const numericValue = this.readNumericFieldValue(meterConfig, event)
 
-      return {
-        fact: {
-          eventId: event.id,
-          meterId: meterDefinition.id,
-          delta: nextValue - previousValue,
-          valueAfter: nextValue,
-        },
-        nextState: {
-          value: nextValue,
-          updatedAt: Math.max(previousUpdatedAt, event.timestamp),
-        },
+        const nextValue =
+          currentState === null ? numericValue : Math.max(previousValue, numericValue)
+
+        return {
+          fact: {
+            eventId: event.id,
+            meterId: meterConfig.eventId,
+            delta: nextValue - previousValue,
+            valueAfter: nextValue,
+          },
+          nextState: {
+            value: nextValue,
+            updatedAt: Math.max(previousUpdatedAt, event.timestamp),
+          },
+        }
       }
-    }
 
-    if (event.timestamp < previousUpdatedAt) {
-      return {
-        fact: {
-          eventId: event.id,
-          meterId: meterDefinition.id,
-          delta: 0,
-          valueAfter: previousValue,
-        },
-        nextState: currentState ?? {
-          value: previousValue,
-          updatedAt: previousUpdatedAt,
-        },
+      case "latest": {
+        const numericValue = this.readNumericFieldValue(meterConfig, event)
+
+        if (event.timestamp < previousUpdatedAt) {
+          return {
+            fact: {
+              eventId: event.id,
+              meterId: meterConfig.eventId,
+              delta: 0,
+              valueAfter: previousValue,
+            },
+            nextState: currentState ?? {
+              value: previousValue,
+              updatedAt: previousUpdatedAt,
+            },
+          }
+        }
+
+        return {
+          fact: {
+            eventId: event.id,
+            meterId: meterConfig.eventId,
+            delta: numericValue - previousValue,
+            valueAfter: numericValue,
+          },
+          nextState: {
+            value: numericValue,
+            updatedAt: event.timestamp,
+          },
+        }
       }
-    }
 
-    return {
-      fact: {
-        eventId: event.id,
-        meterId: meterDefinition.id,
-        delta: numericValue - previousValue,
-        valueAfter: numericValue,
-      },
-      nextState: {
-        value: numericValue,
-        updatedAt: event.timestamp,
-      },
+      default:
+        return this.assertUnsupportedAggregationMethod(meterConfig.aggregationMethod)
     }
   }
 
-  private readNumericFieldValue(meterDefinition: MeterDefinition, event: RawEvent): number | null {
-    const field = meterDefinition.aggregation.field
+  private readNumericFieldValue(meterConfig: MeterConfig, event: RawEvent): number {
+    const field = meterConfig.aggregationField
 
     if (!field) {
-      return this.handleMissingNumericValue(
-        meterDefinition,
-        `Meter ${meterDefinition.id} requires an aggregation field`
-      )
+      throw new Error(`Meter ${meterConfig.eventId} requires an aggregation field`)
     }
 
     const rawValue = event.properties[field]
 
     if (typeof rawValue !== "number" || !Number.isFinite(rawValue)) {
-      return this.handleMissingNumericValue(
-        meterDefinition,
-        `Meter ${meterDefinition.id} requires a finite numeric value at properties.${field}`
+      throw new Error(
+        `Meter ${meterConfig.eventId} requires a finite numeric value at properties.${field}`
       )
     }
 
     return rawValue
   }
 
-  private handleMissingNumericValue(
-    meterDefinition: MeterDefinition,
-    message: string
-  ): number | null {
-    if (meterDefinition.enforcementMode === "soft") {
-      return null
-    }
-
-    throw new Error(message)
+  private assertUnsupportedAggregationMethod(_aggregationMethod: never): never {
+    throw new Error("Unsupported aggregation method")
   }
 
   private makeStateKey(meterId: string): string {

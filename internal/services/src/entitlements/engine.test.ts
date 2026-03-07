@@ -4,7 +4,7 @@ import {
   EventTimestampTooOldError,
   type Fact,
   LimitExceededError,
-  type MeterDefinition,
+  type MeterConfig,
   PeriodKeyComputationError,
   type RawEvent,
   type StorageAdapter,
@@ -121,9 +121,9 @@ describe("computePeriodKey", () => {
 })
 
 describe("AsyncMeterAggregationEngine", () => {
-  it("aggregates SUM, COUNT, MAX, and LATEST meters for matching events", async () => {
+  it("aggregates sum, count, max, and latest meters for matching events", async () => {
     const storage = new InMemoryStorageAdapter()
-    const engine = new AsyncMeterAggregationEngine(createMeterDefinitions(), storage)
+    const engine = new AsyncMeterAggregationEngine(createMeterConfigs(), storage)
     const firstEvent = createPurchaseEvent({
       id: "evt_1",
       timestamp: Date.now() - 1_000,
@@ -150,40 +150,15 @@ describe("AsyncMeterAggregationEngine", () => {
     ])
   })
 
-  it("skips soft meters when the numeric aggregation field is missing", async () => {
+  it("throws when the numeric aggregation field is missing", async () => {
     const storage = new InMemoryStorageAdapter()
     const engine = new AsyncMeterAggregationEngine(
       [
         {
-          id: "meter_soft_sum",
-          eventType: "purchase",
-          aggregation: { type: "SUM", field: "amount" },
-          enforcementMode: "soft",
-        },
-      ],
-      storage
-    )
-
-    const facts = await engine.applyEvent({
-      id: "evt_missing_amount",
-      type: "purchase",
-      timestamp: Date.now(),
-      properties: {},
-    })
-
-    expect(facts).toEqual([])
-    expect(await storage.list<number>("meter-state:")).toEqual([])
-  })
-
-  it("throws for hard meters when the numeric aggregation field is missing", async () => {
-    const storage = new InMemoryStorageAdapter()
-    const engine = new AsyncMeterAggregationEngine(
-      [
-        {
-          id: "meter_hard_sum",
-          eventType: "purchase",
-          aggregation: { type: "SUM", field: "amount" },
-          enforcementMode: "hard",
+          eventId: "meter_sum",
+          eventSlug: "purchase",
+          aggregationMethod: "sum",
+          aggregationField: "amount",
         },
       ],
       storage
@@ -201,15 +176,68 @@ describe("AsyncMeterAggregationEngine", () => {
     expect(await storage.list<number>("meter-state:")).toEqual([])
   })
 
+  it("counts events without requiring aggregationField or numeric payload values", async () => {
+    const storage = new InMemoryStorageAdapter()
+    const engine = new AsyncMeterAggregationEngine(
+      [
+        {
+          eventId: "meter_count",
+          eventSlug: "purchase",
+          aggregationMethod: "count",
+        },
+      ],
+      storage
+    )
+
+    const facts = await engine.applyEvent({
+      id: "evt_count_empty_payload",
+      type: "purchase",
+      timestamp: Date.now(),
+      properties: {},
+    })
+
+    expect(facts).toEqual([
+      { eventId: "evt_count_empty_payload", meterId: "meter_count", delta: 1, valueAfter: 1 },
+    ])
+  })
+
+  it("throws when numeric aggregation field is not a finite number", async () => {
+    const storage = new InMemoryStorageAdapter()
+    const engine = new AsyncMeterAggregationEngine(
+      [
+        {
+          eventId: "meter_latest",
+          eventSlug: "purchase",
+          aggregationMethod: "latest",
+          aggregationField: "amount",
+        },
+      ],
+      storage
+    )
+
+    await expect(
+      engine.applyEvent({
+        id: "evt_non_numeric_amount",
+        type: "purchase",
+        timestamp: Date.now(),
+        properties: {
+          amount: "10",
+        },
+      })
+    ).rejects.toThrow("requires a finite numeric value")
+
+    expect(await storage.list<number>("meter-state:")).toEqual([])
+  })
+
   it("does not let a stale LATEST event overwrite a newer value", async () => {
     const storage = new InMemoryStorageAdapter()
     const engine = new AsyncMeterAggregationEngine(
       [
         {
-          id: "meter_latest",
-          eventType: "purchase",
-          aggregation: { type: "LATEST", field: "amount" },
-          enforcementMode: "hard",
+          eventId: "meter_latest",
+          eventSlug: "purchase",
+          aggregationMethod: "latest",
+          aggregationField: "amount",
         },
       ],
       storage
@@ -240,7 +268,7 @@ describe("AsyncMeterAggregationEngine", () => {
 
   it("rejects the event before persisting state when a meter would exceed the limit", async () => {
     const storage = new InMemoryStorageAdapter()
-    const engine = new AsyncMeterAggregationEngine(createMeterDefinitions(), storage)
+    const engine = new AsyncMeterAggregationEngine(createMeterConfigs(), storage)
 
     await expect(
       engine.applyEvent(
@@ -257,31 +285,30 @@ describe("AsyncMeterAggregationEngine", () => {
   })
 })
 
-function createMeterDefinitions(): MeterDefinition[] {
+function createMeterConfigs(): MeterConfig[] {
   return [
     {
-      id: "meter_sum",
-      eventType: "purchase",
-      aggregation: { type: "SUM", field: "amount" },
-      enforcementMode: "hard",
+      eventId: "meter_sum",
+      eventSlug: "purchase",
+      aggregationMethod: "sum",
+      aggregationField: "amount",
     },
     {
-      id: "meter_count",
-      eventType: "purchase",
-      aggregation: { type: "COUNT" },
-      enforcementMode: "hard",
+      eventId: "meter_count",
+      eventSlug: "purchase",
+      aggregationMethod: "count",
     },
     {
-      id: "meter_max",
-      eventType: "purchase",
-      aggregation: { type: "MAX", field: "amount" },
-      enforcementMode: "hard",
+      eventId: "meter_max",
+      eventSlug: "purchase",
+      aggregationMethod: "max",
+      aggregationField: "amount",
     },
     {
-      id: "meter_latest",
-      eventType: "purchase",
-      aggregation: { type: "LATEST", field: "amount" },
-      enforcementMode: "hard",
+      eventId: "meter_latest",
+      eventSlug: "purchase",
+      aggregationMethod: "latest",
+      aggregationField: "amount",
     },
   ]
 }

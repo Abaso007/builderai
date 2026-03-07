@@ -1,4 +1,5 @@
 import { calculateCycleWindow } from "@unprice/db/validators"
+import type { MeterConfig as DbMeterConfig } from "@unprice/db/validators"
 import { BaseError } from "@unprice/error"
 
 export const MAX_FUTURE_EVENT_SKEW_MS = 5_000
@@ -11,39 +12,7 @@ export interface RawEvent {
   properties: Record<string, unknown>
 }
 
-// TODO: implement this later
-// type AggregationType = 'SUM' | 'COUNT' | 'MAX' | 'UNIQUE_COUNT' | 'LATEST';
-
-// interface RawEvent {
-//   id: string;           // idempotency key
-//   customerId: string;
-//   type: string;         // "ai_inference", "storage_write", etc.
-//   timestamp: string;
-//   properties: Record<string, string | number>; // open schema - capture everything
-// }
-
-// interface Meter {
-//   id: string;
-//   slug: string;               // e.g. "ai_tokens_used"
-//   eventType: string;          // matches raw event's `type` field
-//   aggregation: {
-//     type: AggregationType;
-//     field?: string;           // which property from the event payload to aggregate
-//   };
-//   filters?: Record<string, string[]>;  // e.g. { model: ['gpt-4o', 'gpt-4'] }
-//   groupBy?: string[];         // e.g. ['model', 'region'] for drill-down
-//   windowSize?: 'MINUTE' | 'HOUR' | 'DAY';  // pre-aggregation granularity
-// }
-
-export interface MeterDefinition {
-  id: string
-  eventType: string
-  aggregation: {
-    type: "SUM" | "COUNT" | "MAX" | "LATEST"
-    field?: string
-  }
-  enforcementMode: "hard" | "soft"
-}
+export type MeterConfig = DbMeterConfig
 
 export interface Fact {
   eventId: string
@@ -160,5 +129,5 @@ export function computePeriodKey(params: Parameters<typeof calculateCycleWindow>
     throw new PeriodKeyComputationError(params)
   }
 
-  return `${params.config.interval}:${cycle.start}`
+  return `${params.config.interval}:${cycle.start}:${cycle.end}`
 }

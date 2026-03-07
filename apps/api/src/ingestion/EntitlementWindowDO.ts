@@ -4,7 +4,7 @@ import {
   EventTimestampTooFarInFutureError,
   EventTimestampTooOldError,
   LimitExceededError,
-  type MeterDefinition,
+  type MeterConfig,
   type RawEvent,
 } from "@unprice/services/entitlements"
 import { asc, eq, inArray, lt, sql } from "drizzle-orm"
@@ -17,7 +17,7 @@ import migrations from "./drizzle/migrations"
 
 type ApplyInput = {
   event: RawEvent
-  meters: MeterDefinition[]
+  meters: MeterConfig[]
   limit: number
 }
 
