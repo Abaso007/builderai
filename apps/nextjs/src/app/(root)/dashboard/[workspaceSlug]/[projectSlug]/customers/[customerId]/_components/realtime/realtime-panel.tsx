@@ -22,7 +22,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { cn } from "@unprice/ui/utils"
 import { AnimatePresence, motion } from "framer-motion"
 import { Activity, BarChart2, CircleHelp, Clock, Shield, ShieldCheck, Zap } from "lucide-react"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { NumberTicker } from "~/components/analytics/number-ticker"
 import { RealtimeIntervalFilter } from "~/components/analytics/realtime-interval-filter"
@@ -92,6 +92,7 @@ const verificationChartConfig = {
 const SNAPSHOT_STALE_THRESHOLD_MS = 20_000
 const REFRESH_NOTICE_GRACE_MS = 1_000
 const INITIAL_CONNECTION_FAILURE_GRACE_MS = 5_000
+const HIDDEN_REALTIME_CLOSE_GRACE_MS = 60_000
 
 type RealtimeWindowSeconds = 300 | 3600 | 86400 | 604800
 
@@ -183,6 +184,14 @@ export function RealtimePanel(props: RealtimePanelProps) {
   const { customerId, projectId, realtimeTicket, realtimeTicketExpiresAt, runtimeEnv } = props
   const trpc = useTRPC()
   const [windowSeconds] = useRealtimeIntervalFilter()
+  const hiddenRealtimeCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [isRealtimeVisible, setIsRealtimeVisible] = useState(() => {
+    if (typeof document === "undefined") {
+      return true
+    }
+
+    return document.visibilityState === "visible"
+  })
   const realtimeWindowSeconds = useMemo(
     () => normalizeRealtimeWindowSeconds(windowSeconds),
     [windowSeconds]
@@ -223,6 +232,60 @@ export function RealtimePanel(props: RealtimePanelProps) {
     [refreshRealtimeTicketMutation]
   )
 
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return
+    }
+
+    const clearHiddenRealtimeCloseTimer = () => {
+      if (hiddenRealtimeCloseTimerRef.current) {
+        clearTimeout(hiddenRealtimeCloseTimerRef.current)
+        hiddenRealtimeCloseTimerRef.current = null
+      }
+    }
+
+    const handleVisible = () => {
+      clearHiddenRealtimeCloseTimer()
+      setIsRealtimeVisible(true)
+    }
+
+    const handleHidden = () => {
+      clearHiddenRealtimeCloseTimer()
+      hiddenRealtimeCloseTimerRef.current = setTimeout(() => {
+        hiddenRealtimeCloseTimerRef.current = null
+        if (document.visibilityState !== "visible") {
+          setIsRealtimeVisible(false)
+        }
+      }, HIDDEN_REALTIME_CLOSE_GRACE_MS)
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        handleVisible()
+        return
+      }
+
+      handleHidden()
+    }
+
+    const handlePageHide = () => {
+      clearHiddenRealtimeCloseTimer()
+      setIsRealtimeVisible(false)
+    }
+
+    handleVisibilityChange()
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    window.addEventListener("pagehide", handlePageHide)
+    window.addEventListener("pageshow", handleVisible)
+
+    return () => {
+      clearHiddenRealtimeCloseTimer()
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+      window.removeEventListener("pagehide", handlePageHide)
+      window.removeEventListener("pageshow", handleVisible)
+    }
+  }, [])
+
   return (
     <UnpriceProvider
       realtime={{
@@ -233,6 +296,7 @@ export function RealtimePanel(props: RealtimePanelProps) {
         snapshotWindowSeconds: realtimeWindowSeconds,
         initialTicket,
         getRealtimeTicket,
+        disableWebsocket: !isRealtimeVisible,
       }}
     >
       <RealtimePanelContent {...props} windowSeconds={realtimeWindowSeconds} />

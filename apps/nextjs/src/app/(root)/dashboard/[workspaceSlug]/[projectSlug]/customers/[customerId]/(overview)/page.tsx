@@ -30,12 +30,11 @@ export default async function CustomerUsagePage({
     notFound()
   }
 
-  const realtimeTicketPromise = api.analytics
+  const realtimeTicket = await api.analytics
     .getRealtimeTicket({
       customerId,
     })
     .catch(() => null)
-  const realtimeTicket = await realtimeTicketPromise
 
   return (
     <DashboardShell

@@ -1,6 +1,7 @@
 import { CloudflareStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
 import { type Database, createConnection } from "@unprice/db"
+import { newId } from "@unprice/db/utils"
 import type {
   CurrentUsage,
   EntitlementState,
@@ -13,14 +14,13 @@ import type {
 } from "@unprice/db/validators"
 import type { BaseError, Result } from "@unprice/error"
 import {
-  AxiomLogger,
-  ConsoleLogger,
-  type Logger,
+  type AppLogger,
   type WideEventLogger,
-  createWideEventHelpers,
-  createWideEventLogger,
-} from "@unprice/logging"
-import { shouldEmitLogsToBackend, shouldEmitMetrics } from "@unprice/logging/env"
+  createStandaloneRequestLogger,
+  emitWideEvent,
+  runWithRequestLogger,
+} from "@unprice/observability"
+import { shouldEmitMetrics } from "@unprice/observability/env"
 import { CacheService } from "@unprice/services/cache"
 import { CustomerService, type DenyReason } from "@unprice/services/customers"
 import { EntitlementService } from "@unprice/services/entitlements"
@@ -28,7 +28,13 @@ import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/me
 import { type Connection, type ConnectionContext, Server } from "partyserver"
 import type { Env } from "~/env"
 import { LakehousePipelineService } from "~/lakehouse/pipeline"
+import { apiDrain } from "~/observability"
 import type { BufferMetricsResponse } from "./interface"
+import {
+  type RealtimeConnectionState,
+  shouldCloseRealtimeConnection,
+  shouldExpireRealtimeTail,
+} from "./realtime-connection"
 import { type FlushPressureStats, SqliteDOStorageProvider } from "./sqlite-do-provider"
 
 // colo never change after the object is created
@@ -94,12 +100,6 @@ type RealtimeFeatureSnapshot = {
 }
 
 type RealtimeAlertType = "limit_reached" | "limit_recovered"
-
-type RealtimeConnectionState = {
-  joinedAt: number
-  tailActive: boolean
-  tailExpiredAt: number | null
-}
 
 type SnapshotRequestMessage = {
   type: "snapshot_request"
@@ -318,7 +318,7 @@ export class DurableObjectUsagelimiter extends Server {
   // environment variables
   private readonly _env: Env
   // logger service
-  private logger: Logger
+  private logger: AppLogger
   // entitlement service
   private entitlementService: EntitlementService
   // customer service
@@ -335,8 +335,8 @@ export class DurableObjectUsagelimiter extends Server {
   private readonly DEBOUNCE_DELAY = 1000 * 1 // 1 second (1 per second)
   // max lifetime for a debug WebSocket session (5 minutes)
   private readonly MAX_DEBUG_SESSION_MS = 5 * 60 * 1000
-  // sample rate for the wide event
-  private SAMPLE_RATE = 0.1
+  // close abandoned websocket sessions so hibernated sockets do not linger forever
+  private readonly MAX_IDLE_CONNECTION_MS = 5 * 60 * 1000
   private readonly FLUSH_SEC_MIN = 5
   private readonly FLUSH_SEC_MAX = 30 * 60
   private readonly HEARTBEAT_FLUSH_SEC = 60
@@ -366,49 +366,38 @@ export class DurableObjectUsagelimiter extends Server {
   }
 
   constructor(ctx: DurableObjectState, env: Env) {
-    super(ctx, env)
+    super(ctx, env as unknown as Cloudflare.Env)
 
     this._env = env
 
-    if (env.APP_ENV === "development") {
-      this.SAMPLE_RATE = 1
-    }
-
-    if (env.APP_ENV === "preview") {
-      this.SAMPLE_RATE = 0.1
-    }
-
-    const emitLogsToBackend = shouldEmitLogsToBackend(env)
     const emitMetrics = shouldEmitMetrics(env)
+    const { logger } = createStandaloneRequestLogger(
+      {
+        requestId: this.ctx.id.toString(),
+      },
+      {
+        flush: apiDrain?.flush,
+      }
+    )
 
-    this.logger = emitLogsToBackend
-      ? new AxiomLogger({
-          apiKey: env.AXIOM_API_TOKEN,
-          dataset: env.AXIOM_DATASET,
-          requestId: this.ctx.id.toString(),
-          logLevel: env.APP_ENV === "production" ? "warn" : "info",
-          environment: env.NODE_ENV,
-          service: "usagelimiter",
-          defaultFields: {
-            durableObjectId: this.ctx.id.toString(),
-            version: this._env.VERSION,
-          },
-        })
-      : new ConsoleLogger({
-          requestId: this.ctx.id.toString(),
-          service: "usagelimiter",
-          environment: env.NODE_ENV,
-          logLevel: env.APP_ENV === "production" ? "warn" : "info",
-          defaultFields: {
-            durableObjectId: this.ctx.id.toString(),
-            version: this._env.VERSION,
-          },
-        })
+    this.logger = logger
+
+    this.logger.set({
+      requestId: this.ctx.id.toString(),
+      service: "usagelimiter",
+      request: {
+        id: this.ctx.id.toString(),
+      },
+      cloud: {
+        platform: "cloudflare",
+        durable_object_id: this.ctx.id.toString(),
+      },
+    })
 
     this.metrics = emitMetrics
       ? new LogdrainMetrics({
           requestId: this.ctx.id.toString(),
-          environment: env.NODE_ENV,
+          environment: env.APP_ENV,
           logger: this.logger,
           service: "usagelimiter",
           durableObjectId: this.ctx.id.toString(),
@@ -541,7 +530,7 @@ export class DurableObjectUsagelimiter extends Server {
     })
 
     // set the colo of the do
-    this.setColo()
+    this.ctx.waitUntil(this.setColoSafe())
   }
 
   // set colo for metrics and analytics
@@ -569,10 +558,17 @@ export class DurableObjectUsagelimiter extends Server {
       await this.updateConfig(config)
     }
 
-    // block concurrency while setting the colo
-    await this.ctx.blockConcurrencyWhile(async () => {
-      this.metrics.setColo(config.colo)
-    })
+    this.metrics.setColo(config.colo)
+  }
+
+  private async setColoSafe(): Promise<void> {
+    try {
+      await this.setColo()
+    } catch (error) {
+      this.logger.error("Unexpected error setting colo", {
+        error: error instanceof Error ? error.message : String(error ?? "unknown error"),
+      })
+    }
   }
 
   private async getConfig(): Promise<UsageLimiterConfig> {
@@ -586,6 +582,140 @@ export class DurableObjectUsagelimiter extends Server {
     await this.ctx.storage.put("config", {
       ...config,
     })
+  }
+
+  private createOperationRequestLogger(options: {
+    operation: "verify" | "reportUsage" | "alarm" | "websocket"
+    parentRequestId?: string
+    path: string
+  }): {
+    requestId: string
+    requestLogger: WideEventLogger
+  } {
+    const requestId = newId("request")
+    const { requestLogger } = createStandaloneRequestLogger(
+      {
+        method: "POST",
+        path: options.path,
+        requestId,
+      },
+      {
+        flush: apiDrain?.flush,
+      }
+    )
+
+    requestLogger.set({
+      service: "usagelimiter",
+      request: {
+        id: requestId,
+        parent_id: options.parentRequestId,
+        timestamp: new Date().toISOString(),
+        method: "POST",
+        path: options.path,
+        host: "durable-object",
+        protocol: "https",
+      },
+      cloud: {
+        platform: "cloudflare",
+        durable_object_id: this.ctx.id.toString(),
+        region: this.metrics.getColo(),
+      },
+      usagelimiter: {
+        operation: options.operation,
+      },
+    })
+
+    return {
+      requestId,
+      requestLogger,
+    }
+  }
+
+  private shouldSample(percent: number): boolean {
+    if (percent <= 0) {
+      return false
+    }
+
+    if (percent >= 100) {
+      return true
+    }
+
+    return Math.random() * 100 < percent
+  }
+
+  private shouldKeepOperationWideEvent(status: number, duration: number): boolean {
+    return status >= 400 || duration >= 1000
+  }
+
+  private getOperationWideEventSampleRate(): number {
+    return this._env.APP_ENV === "production" ? 10 : 100
+  }
+
+  private getLifecycleDebugSampleRate(): number {
+    return this._env.APP_ENV === "development" ? 10 : 0
+  }
+
+  private debugLifecycle(message: string, fields?: Record<string, unknown>): void {
+    if (!this.shouldSample(this.getLifecycleDebugSampleRate())) {
+      return
+    }
+
+    this.logger.debug(message, fields)
+  }
+
+  private flushBackground(options?: {
+    phase: "verify" | "reportUsage" | "onAlarm" | "onClose"
+    requestLogger?: WideEventLogger
+    status?: number
+    duration?: number
+  }): void {
+    this.ctx.waitUntil(
+      (async () => {
+        try {
+          if (
+            options?.requestLogger &&
+            typeof options.status === "number" &&
+            typeof options.duration === "number"
+          ) {
+            const shouldKeep = this.shouldKeepOperationWideEvent(options.status, options.duration)
+            const shouldEmit =
+              shouldKeep || this.shouldSample(this.getOperationWideEventSampleRate())
+
+            if (shouldEmit) {
+              emitWideEvent(options.requestLogger, {
+                _forceKeep: true,
+                status: options.status,
+                duration: options.duration,
+                request: {
+                  status: options.status,
+                  duration: options.duration,
+                },
+              })
+            }
+          }
+
+          await Promise.all([
+            this.metrics.flush().catch((err: Error) => {
+              this.logger.emit("error", "Failed to flush metrics", {
+                error: err.message,
+                phase: options?.phase,
+              })
+            }),
+            this.logger.flush().catch((err: Error) => {
+              this.logger.emit("error", "Failed to flush logger", {
+                error: err.message,
+                phase: options?.phase,
+              })
+            }),
+          ])
+        } catch (error) {
+          this.logger.emit("error", "Error during background flush", {
+            error: error instanceof Error ? error.message : String(error ?? "unknown"),
+            phase: options?.phase,
+          })
+        }
+      })()
+    )
   }
 
   public async getCurrentUsage(data: {
@@ -655,9 +785,13 @@ export class DurableObjectUsagelimiter extends Server {
     return tags
   }
 
-  private sendConnectionPayload(connection: Connection, payload: string): void {
+  private sendConnectionPayload(
+    connection: Connection<RealtimeConnectionState>,
+    payload: string
+  ): void {
     try {
       connection.send(payload)
+      this.touchRealtimeConnection(connection, Date.now())
     } catch (err) {
       this.logger.warn("Failed to send live event to connection", {
         connectionId: connection.id,
@@ -671,14 +805,53 @@ export class DurableObjectUsagelimiter extends Server {
     }
   }
 
-  private expireTailConnection(connection: Connection<RealtimeConnectionState>, at: number): void {
-    const currentState = connection.state
-    const nextState: RealtimeConnectionState = {
-      joinedAt: currentState?.joinedAt ?? at,
-      tailActive: false,
-      tailExpiredAt: at,
+  private hasTailChannel(connection: Connection<RealtimeConnectionState>): boolean {
+    return connection.tags.includes(CONNECTION_TAG_TAIL)
+  }
+
+  private buildRealtimeConnectionState(params: {
+    connection: Connection<RealtimeConnectionState>
+    at: number
+    joinedAt?: number
+    lastActiveAt?: number
+    tailActive?: boolean
+    tailExpiredAt?: number | null
+  }): RealtimeConnectionState {
+    const currentState = params.connection.state
+    const hasExplicitTailExpiredAt = Object.prototype.hasOwnProperty.call(params, "tailExpiredAt")
+
+    return {
+      joinedAt: params.joinedAt ?? currentState?.joinedAt ?? params.at,
+      lastActiveAt: params.lastActiveAt ?? params.at,
+      tailActive:
+        params.tailActive ?? currentState?.tailActive ?? this.hasTailChannel(params.connection),
+      tailExpiredAt: hasExplicitTailExpiredAt
+        ? (params.tailExpiredAt ?? null)
+        : (currentState?.tailExpiredAt ?? null),
     }
-    connection.setState(nextState)
+  }
+
+  private touchRealtimeConnection(
+    connection: Connection<RealtimeConnectionState>,
+    at: number
+  ): void {
+    connection.setState(
+      this.buildRealtimeConnectionState({
+        connection,
+        at,
+      })
+    )
+  }
+
+  private expireTailConnection(connection: Connection<RealtimeConnectionState>, at: number): void {
+    connection.setState(
+      this.buildRealtimeConnectionState({
+        connection,
+        at,
+        tailActive: false,
+        tailExpiredAt: at,
+      })
+    )
 
     this.sendConnectionPayload(
       connection,
@@ -725,7 +898,6 @@ export class DurableObjectUsagelimiter extends Server {
     })
 
     for (const conn of connections) {
-      const joinedAt = conn.state?.joinedAt ?? now
       const tailActive = conn.state?.tailActive ?? true
 
       if (!tailActive) {
@@ -733,7 +905,7 @@ export class DurableObjectUsagelimiter extends Server {
       }
 
       // time-box debug sessions to avoid forgotten tabs running forever
-      if (now - joinedAt > this.MAX_DEBUG_SESSION_MS) {
+      if (shouldExpireRealtimeTail(conn.state, now, this.MAX_DEBUG_SESSION_MS)) {
         this.expireTailConnection(conn, now)
         continue
       }
@@ -794,7 +966,9 @@ export class DurableObjectUsagelimiter extends Server {
     limit: number
     source: "verify" | "reportUsage"
   }): Promise<void> {
-    const connections = Array.from(this.getConnections(CONNECTION_TAG_ALERTS))
+    const connections = Array.from(
+      this.getConnections<RealtimeConnectionState>(CONNECTION_TAG_ALERTS)
+    )
     if (connections.length === 0) {
       return
     }
@@ -816,45 +990,100 @@ export class DurableObjectUsagelimiter extends Server {
     }
   }
 
+  private countRealtimeConnections(): number {
+    return Array.from(this.getConnections<RealtimeConnectionState>()).length
+  }
+
+  private closeIdleRealtimeConnections(at: number): number {
+    const connections = Array.from(this.getConnections<RealtimeConnectionState>())
+    let closedCount = 0
+
+    for (const connection of connections) {
+      if (shouldCloseRealtimeConnection(connection.state, at, this.MAX_IDLE_CONNECTION_MS)) {
+        closedCount += 1
+
+        try {
+          connection.close(1001, "Idle realtime connection timeout")
+        } catch (error) {
+          this.logger.warn("Failed to close idle realtime connection", {
+            connectionId: connection.id,
+            error: error instanceof Error ? error.message : String(error ?? "unknown error"),
+          })
+        }
+        continue
+      }
+
+      if (
+        this.hasTailChannel(connection) &&
+        shouldExpireRealtimeTail(connection.state, at, this.MAX_DEBUG_SESSION_MS)
+      ) {
+        this.expireTailConnection(connection, at)
+      }
+    }
+
+    return closedCount
+  }
+
+  private async ensureRealtimeCleanupAlarm(): Promise<void> {
+    try {
+      await this.scheduleAlarmWithHeartbeat(this.getHeartbeatFlushSeconds())
+    } catch (error) {
+      this.logger.error("Failed to schedule realtime cleanup alarm", {
+        error: error instanceof Error ? error.message : String(error ?? "unknown error"),
+      })
+    }
+  }
+
+  private async reconcileRealtimeCleanupAlarm(): Promise<void> {
+    try {
+      const connectionCount = this.countRealtimeConnections()
+
+      if (connectionCount > 0) {
+        await this.scheduleAlarmWithHeartbeat(this.getHeartbeatFlushSeconds())
+        return
+      }
+
+      const pressure = await this.getFlushPressureSafe()
+      if (pressure && pressure.pendingTotalRecords === 0) {
+        await this.ctx.storage.deleteAlarm()
+      }
+    } catch (error) {
+      this.logger.error("Failed to reconcile realtime cleanup alarm", {
+        error: error instanceof Error ? error.message : String(error ?? "unknown error"),
+      })
+    }
+  }
+
   public async verify(data: VerifyRequest): Promise<VerificationResult> {
-    const wideEventLogger = createWideEventLogger({
-      "service.name": "usagelimiter",
-      "service.version": this._env.VERSION,
-      "service.environment": this._env.NODE_ENV as
-        | "production"
-        | "staging"
-        | "development"
-        | "preview"
-        | "test",
-      sampleRate: this.SAMPLE_RATE,
-      emitter: (level, message, event) => this.logger.emit(level, message, event),
+    const { requestId, requestLogger } = this.createOperationRequestLogger({
+      operation: "verify",
+      parentRequestId: data.requestId,
+      path: "/durable-objects/usagelimiter/verify",
+    })
+    let status = 200
+
+    requestLogger.set({
+      business: {
+        customer_id: data.customerId,
+        project_id: data.projectId,
+        feature_slug: data.featureSlug,
+      },
+      usagelimiter: {
+        input: summarizeUsageInput(data),
+      },
     })
 
-    const wideEventHelpers = createWideEventHelpers(wideEventLogger)
+    return await runWithRequestLogger(requestLogger, { requestId }, async () => {
+      this.metrics.x(requestId)
 
-    return await wideEventLogger.runAsync(async () => {
       try {
-        // set the wide event helpers
-        this.entitlementService.setWideEventHelpers(wideEventHelpers)
-
-        // set the request id for the metrics and logs
-        this.logger.x(data.requestId)
-        this.metrics.x(data.requestId)
-        wideEventLogger.add("request.id", data.requestId) // We don't need to generate a new id for the DO request
-        wideEventLogger.add("request.timestamp", new Date().toISOString())
-        wideEventHelpers.addParentRequestId(data.requestId) // Link to parent
-        wideEventHelpers.addCloud({
-          platform: "cloudflare",
-          durable_object_id: this.ctx.id.toString(),
-          region: this.metrics.getColo(),
-        })
-        wideEventLogger.add("usagelimiter.operation", "verify")
-        wideEventLogger.add("usagelimiter.input", summarizeUsageInput(data))
-        // All logic handled internally!
         const result = await this.entitlementService.verify(data)
-        wideEventLogger.add("usagelimiter.result", summarizeUsageResult(result))
-        // Set alarm to flush buffers
-        await this.ensureAlarmIsSet(wideEventLogger)
+        requestLogger.set({
+          usagelimiter: {
+            result: summarizeUsageResult(result),
+          },
+        })
+        await this.ensureAlarmIsSet(requestLogger)
 
         this.ctx.waitUntil(
           this.broadcastEvents({
@@ -888,77 +1117,66 @@ export class DurableObjectUsagelimiter extends Server {
 
         return result
       } catch (error) {
-        const err = error as Error
-        wideEventLogger.addError(err)
+        status = 500
+        const err =
+          error instanceof Error ? error : new Error(typeof error === "string" ? error : "unknown")
+        requestLogger.error(err)
         return {
           allowed: false,
           message: err.message,
           deniedReason: "ENTITLEMENT_ERROR",
         }
       } finally {
-        wideEventLogger.add("request.duration", Math.max(0, Date.now() - data.performanceStart))
-        this.ctx.waitUntil(
-          (async () => {
-            try {
-              await Promise.all([
-                // only log if the event should be sampled
-                wideEventLogger.emit(),
-                this.metrics.flush().catch((err: Error) => {
-                  console.error("Failed to flush metrics in DO", err)
-                }),
-                this.logger.flush().catch((err: Error) => {
-                  console.error("Failed to flush logger in DO", err)
-                }),
-              ])
-            } catch (error) {
-              console.error("Error during background flush in DO", error)
-            }
-          })()
-        )
+        const duration = Math.max(0, Date.now() - data.performanceStart)
+        requestLogger.set({
+          status,
+          duration,
+          request: {
+            status,
+            duration,
+          },
+        })
+
+        this.flushBackground({
+          phase: "verify",
+          requestLogger,
+          status,
+          duration,
+        })
       }
     })
   }
 
   public async reportUsage(data: ReportUsageRequest): Promise<ReportUsageResult> {
-    const wideEventLogger = createWideEventLogger({
-      "service.name": "usagelimiter",
-      "service.version": this._env.VERSION,
-      "service.environment": this._env.NODE_ENV as
-        | "production"
-        | "staging"
-        | "development"
-        | "preview"
-        | "test",
-      sampleRate: this.SAMPLE_RATE,
-      emitter: (level, message, event) => this.logger.emit(level, message, event),
+    const { requestId, requestLogger } = this.createOperationRequestLogger({
+      operation: "reportUsage",
+      parentRequestId: data.requestId,
+      path: "/durable-objects/usagelimiter/report-usage",
+    })
+    let status = 200
+
+    requestLogger.set({
+      business: {
+        customer_id: data.customerId,
+        project_id: data.projectId,
+        feature_slug: data.featureSlug,
+      },
+      usagelimiter: {
+        input: summarizeUsageInput(data),
+      },
     })
 
-    const wideEventHelpers = createWideEventHelpers(wideEventLogger)
+    return await runWithRequestLogger(requestLogger, { requestId }, async () => {
+      this.metrics.x(requestId)
 
-    return await wideEventLogger.runAsync(async () => {
       try {
-        // set the wide event helpers
-        this.entitlementService.setWideEventHelpers(wideEventHelpers)
-
-        // set the request id for the metrics and logs
-        this.logger.x(data.requestId)
-        this.metrics.x(data.requestId)
-
-        wideEventLogger.add("request.id", data.requestId)
-        wideEventLogger.add("request.timestamp", new Date().toISOString())
-        wideEventHelpers.addParentRequestId(data.requestId)
-        wideEventHelpers.addCloud({
-          platform: "cloudflare",
-          durable_object_id: this.ctx.id.toString(),
-          region: this.metrics.getColo(),
-        })
-        wideEventLogger.add("usagelimiter.operation", "reportUsage")
-        wideEventLogger.add("usagelimiter.input", summarizeUsageInput(data))
-
         const result = await this.entitlementService.reportUsage(data)
-        wideEventLogger.add("usagelimiter.result", summarizeUsageResult(result))
-        // Set alarm to flush buffers
-        await this.ensureAlarmIsSet(wideEventLogger)
+        requestLogger.set({
+          usagelimiter: {
+            result: summarizeUsageResult(result),
+          },
+        })
+        await this.ensureAlarmIsSet(requestLogger)
 
         this.ctx.waitUntil(
           this.broadcastEvents({
@@ -992,35 +1210,33 @@ export class DurableObjectUsagelimiter extends Server {
 
         return result
       } catch (error) {
-        const err = error as Error
-        wideEventLogger.addError(err)
+        status = 500
+        const err =
+          error instanceof Error ? error : new Error(typeof error === "string" ? error : "unknown")
+        requestLogger.error(err)
 
         return {
-          message: error instanceof Error ? error.message : "unknown error",
+          message: err.message,
           allowed: false,
         }
       } finally {
-        data.performanceStart &&
-          wideEventLogger.add("request.duration", Math.max(0, Date.now() - data.performanceStart))
+        const duration = data.performanceStart ? Math.max(0, Date.now() - data.performanceStart) : 0
 
-        this.ctx.waitUntil(
-          (async () => {
-            try {
-              await Promise.all([
-                // only log if the event should be sampled
-                wideEventLogger.emit(),
-                this.metrics.flush().catch((err: Error) => {
-                  console.error("Failed to flush metrics in DO", err)
-                }),
-                this.logger.flush().catch((err: Error) => {
-                  console.error("Failed to flush logger in DO", err)
-                }),
-              ])
-            } catch (error) {
-              console.error("Error during background flush in DO", error)
-            }
-          })()
-        )
+        requestLogger.set({
+          status,
+          duration,
+          request: {
+            status,
+            duration,
+          },
+        })
+
+        this.flushBackground({
+          phase: "reportUsage",
+          requestLogger,
+          status,
+          duration,
+        })
       }
     })
   }
@@ -1033,13 +1249,21 @@ export class DurableObjectUsagelimiter extends Server {
 
     // Keep healthy alarms untouched so request paths stay lightweight.
     if (currentAlarm !== null && currentAlarm >= now && currentAlarm <= now + heartbeatWindowMs) {
-      wideEventLogger.add("usagelimiter.next_alarm", new Date(currentAlarm).toISOString())
+      wideEventLogger.set({
+        usagelimiter: {
+          next_alarm: new Date(currentAlarm).toISOString(),
+        },
+      })
       return
     }
 
     // The request path only repairs heartbeat scheduling; pressure-based fast retries happen in onAlarm().
     const nextAlarm = await this.scheduleAlarmWithHeartbeat(this.getHeartbeatFlushSeconds())
-    wideEventLogger.add("usagelimiter.next_alarm", new Date(nextAlarm).toISOString())
+    wideEventLogger.set({
+      usagelimiter: {
+        next_alarm: new Date(nextAlarm).toISOString(),
+      },
+    })
   }
 
   private getHeartbeatFlushSeconds(): number {
@@ -1255,12 +1479,12 @@ export class DurableObjectUsagelimiter extends Server {
 
   // websocket events handlers
   onStart(): void | Promise<void> {
-    this.logger.debug("onStart initializing do")
+    this.debugLifecycle("Initializing durable object")
   }
 
   // when a websocket connection is established
   onConnect(connection: Connection<RealtimeConnectionState>): void | Promise<void> {
-    this.logger.debug("onConnect", {
+    this.debugLifecycle("Accepted realtime connection", {
       connectionId: connection.id,
       room: this.name,
     })
@@ -1269,32 +1493,26 @@ export class DurableObjectUsagelimiter extends Server {
     const tailEnabled = connection.tags.includes(CONNECTION_TAG_TAIL)
 
     // initialize channel state for cost controls
-    connection.setState({
-      joinedAt: now,
-      tailActive: tailEnabled,
-      tailExpiredAt: null,
-    })
+    connection.setState(
+      this.buildRealtimeConnectionState({
+        connection,
+        at: now,
+        joinedAt: now,
+        lastActiveAt: now,
+        tailActive: tailEnabled,
+        tailExpiredAt: null,
+      })
+    )
+
+    this.ctx.waitUntil(this.ensureRealtimeCleanupAlarm())
   }
 
   // when a websocket connection is closed
   onClose(): void | Promise<void> {
-    // flush the metrics and logs
-    this.ctx.waitUntil(
-      (async () => {
-        try {
-          await Promise.all([
-            this.metrics.flush().catch((err: Error) => {
-              console.error("Failed to flush metrics in DO onClose", err)
-            }),
-            this.logger.flush().catch((err: Error) => {
-              console.error("Failed to flush logger in DO onClose", err)
-            }),
-          ])
-        } catch (error) {
-          console.error("Error during background flush in DO onClose", error)
-        }
-      })()
-    )
+    this.ctx.waitUntil(this.reconcileRealtimeCleanupAlarm())
+    this.flushBackground({
+      phase: "onClose",
+    })
   }
 
   private sendMessage(conn: Connection<RealtimeConnectionState>, payload: Record<string, unknown>) {
@@ -1312,11 +1530,16 @@ export class DurableObjectUsagelimiter extends Server {
       return
     }
 
-    conn.setState({
-      joinedAt: now,
-      tailActive: true,
-      tailExpiredAt: null,
-    })
+    conn.setState(
+      this.buildRealtimeConnectionState({
+        connection: conn,
+        at: now,
+        joinedAt: now,
+        lastActiveAt: now,
+        tailActive: true,
+        tailExpiredAt: null,
+      })
+    )
     this.sendMessage(conn, {
       type: "tail_resumed",
       timestamp: now,
@@ -1502,6 +1725,8 @@ export class DurableObjectUsagelimiter extends Server {
   async onMessage(conn: Connection<RealtimeConnectionState>, message: string) {
     // TODO: we should rate limit this
     try {
+      this.touchRealtimeConnection(conn, Date.now())
+
       const parsed = parseRealtimeClientMessage(message)
       if (!parsed.ok) {
         this.sendMessage(conn, {
@@ -1534,17 +1759,26 @@ export class DurableObjectUsagelimiter extends Server {
 
   // when the alarm is triggered
   async onAlarm(): Promise<void> {
-    this.logger.debug("Triggering alarm flush")
+    this.debugLifecycle("Running durable object alarm")
 
     const heartbeatFlushSec = this.getHeartbeatFlushSeconds()
     let nextFlushSec = heartbeatFlushSec
+    let pressure: FlushPressureStats | null = null
 
     try {
-      let pressure = await this.getFlushPressureSafe()
+      const now = Date.now()
+      const closedIdleConnections = this.closeIdleRealtimeConnections(now)
+      if (closedIdleConnections > 0) {
+        this.logger.info("Closed idle realtime connections", {
+          closedConnectionCount: closedIdleConnections,
+        })
+      }
+
+      pressure = await this.getFlushPressureSafe()
       const shouldFlush = pressure === null || pressure.pendingTotalRecords > 0
 
       if (!shouldFlush) {
-        this.logger.debug("Skipping alarm flush because buffer is empty")
+        this.debugLifecycle("Skipping alarm flush because buffer is empty")
       } else {
         const flushResult = await this.storage.flush()
         if (flushResult.err) {
@@ -1572,11 +1806,25 @@ export class DurableObjectUsagelimiter extends Server {
       })
     } finally {
       try {
-        const nextAlarm = await this.scheduleAlarmWithHeartbeat(nextFlushSec)
-        this.logger.debug("Scheduled alarm heartbeat", {
-          nextAlarm: new Date(nextAlarm).toISOString(),
-          nextFlushSeconds: nextFlushSec,
-        })
+        const connectionCount = this.countRealtimeConnections()
+        const shouldClearAlarm =
+          pressure !== null && pressure.pendingTotalRecords === 0 && connectionCount === 0
+
+        if (shouldClearAlarm) {
+          await this.ctx.storage.deleteAlarm()
+          this.debugLifecycle("Cleared durable object alarm because it is idle", {
+            connectionCount,
+            pendingTotalRecords: pressure?.pendingTotalRecords ?? 0,
+          })
+        } else {
+          const nextAlarm = await this.scheduleAlarmWithHeartbeat(nextFlushSec)
+          this.debugLifecycle("Scheduled alarm heartbeat", {
+            nextAlarm: new Date(nextAlarm).toISOString(),
+            nextFlushSeconds: nextFlushSec,
+            connectionCount,
+            pendingTotalRecords: pressure?.pendingTotalRecords ?? null,
+          })
+        }
       } catch (error) {
         this.logger.error("Failed to schedule alarm heartbeat", {
           error: error instanceof Error ? error.message : "unknown error",
@@ -1584,22 +1832,8 @@ export class DurableObjectUsagelimiter extends Server {
       }
     }
 
-    // flush the metrics and logs
-    this.ctx.waitUntil(
-      (async () => {
-        try {
-          await Promise.all([
-            this.metrics.flush().catch((err: Error) => {
-              console.error("Failed to flush metrics in DO onAlarm", err)
-            }),
-            this.logger.flush().catch((err: Error) => {
-              console.error("Failed to flush logger in DO onAlarm", err)
-            }),
-          ])
-        } catch (error) {
-          console.error("Error during background flush in DO onAlarm", error)
-        }
-      })()
-    )
+    this.flushBackground({
+      phase: "onAlarm",
+    })
   }
 }

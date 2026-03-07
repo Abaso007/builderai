@@ -21,6 +21,7 @@ declare namespace Cloudflare {
 		AUTH_SECRET: string;
 		DRIZZLE_LOG: boolean;
 		APP_ENV: string;
+        VERSION: string;
 		NODE_ENV: string;
 		AXIOM_API_TOKEN: string;
 		AXIOM_DATASET: string;
@@ -53,6 +54,7 @@ declare namespace Cloudflare {
 		AUTH_SECRET: string;
 		DRIZZLE_LOG: boolean;
 		APP_ENV: string;
+        VERSION: string;
 		NODE_ENV: string;
 		AXIOM_API_TOKEN: string;
 		AXIOM_DATASET: string;
@@ -115,6 +117,7 @@ declare namespace Cloudflare {
 		AUTH_SECRET: string;
 		DRIZZLE_LOG: boolean;
 		APP_ENV: string;
+        VERSION: string;
 		NODE_ENV: string;
 		AXIOM_API_TOKEN: string;
 		AXIOM_DATASET: string;
@@ -139,7 +142,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "LAKEHOUSE_FILE_PLAN_BASE_URL" | "TINYBIRD_TOKEN" | "TINYBIRD_URL" | "CLOUDFLARE_ZONE_ID" | "CLOUDFLARE_API_TOKEN" | "CLOUDFLARE_ACCOUNT_ID" | "DATABASE_URL" | "LAKEHOUSE_API_TOKEN" | "DATABASE_READ1_URL" | "DATABASE_READ2_URL" | "ENCRYPTION_KEY" | "AUTH_SECRET" | "DRIZZLE_LOG" | "APP_ENV" | "NODE_ENV" | "AXIOM_API_TOKEN" | "AXIOM_DATASET" | "UPSTASH_REDIS_REST_URL" | "UPSTASH_REDIS_REST_TOKEN" | "UNPRICE_API_KEY" | "UNPRICE_API_URL">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "LAKEHOUSE_FILE_PLAN_BASE_URL" | "TINYBIRD_TOKEN" | "TINYBIRD_URL" | "CLOUDFLARE_ZONE_ID" | "CLOUDFLARE_API_TOKEN" | "CLOUDFLARE_ACCOUNT_ID" | "DATABASE_URL" | "LAKEHOUSE_API_TOKEN" | "DATABASE_READ1_URL" | "DATABASE_READ2_URL" | "ENCRYPTION_KEY" | "AUTH_SECRET" | "DRIZZLE_LOG" | "APP_ENV" | "VERSION" | "NODE_ENV" | "AXIOM_API_TOKEN" | "AXIOM_DATASET" | "UPSTASH_REDIS_REST_URL" | "UPSTASH_REDIS_REST_TOKEN" | "UNPRICE_API_KEY" | "UNPRICE_API_URL">> {}
 }
 declare module "*.sql" {
 	const value: string;

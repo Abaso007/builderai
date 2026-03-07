@@ -15,7 +15,7 @@ import {
   getLakehouseSourceCurrentVersion,
   getLakehouseSourceEventZodSchema,
 } from "@unprice/lakehouse"
-import type { Logger } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import type { UsageRecord, Verification } from "~/db/types"
 
 type IndexedSource = "usage" | "verification" | "metadata" | "entitlement_snapshot"

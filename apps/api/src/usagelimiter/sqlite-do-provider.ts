@@ -12,7 +12,7 @@ import {
   type LakehouseVerificationEvent,
   getLakehouseSourceCurrentVersion,
 } from "@unprice/lakehouse"
-import type { Logger } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import {
   type UnPriceEntitlementStorage,
   UnPriceEntitlementStorageError,
