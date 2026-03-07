@@ -13,16 +13,6 @@ describe("meterConfigSchema", () => {
     expect(result.success).toBe(true)
   })
 
-  it("accepts count_all without aggregationField", () => {
-    const result = meterConfigSchema.safeParse({
-      eventId: "event_123",
-      eventSlug: "llm_completion",
-      aggregationMethod: "count_all",
-    })
-
-    expect(result.success).toBe(true)
-  })
-
   it("rejects sum without aggregationField", () => {
     const result = meterConfigSchema.safeParse({
       eventId: "event_123",
@@ -43,13 +33,25 @@ describe("meterConfigSchema", () => {
     expect(result.success).toBe(false)
   })
 
-  it("rejects last_during_period without aggregationField", () => {
+  it("rejects latest without aggregationField", () => {
     const result = meterConfigSchema.safeParse({
       eventId: "event_123",
       eventSlug: "llm_completion",
-      aggregationMethod: "last_during_period",
+      aggregationMethod: "latest",
     })
 
     expect(result.success).toBe(false)
+  })
+
+  it("rejects removed lifetime aggregations", () => {
+    for (const aggregationMethod of ["sum", "count", "max"].map((method) => `${method}_all`)) {
+      const result = meterConfigSchema.safeParse({
+        eventId: "event_123",
+        eventSlug: "llm_completion",
+        aggregationMethod,
+      })
+
+      expect(result.success).toBe(false)
+    }
   })
 })

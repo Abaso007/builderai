@@ -8,7 +8,7 @@ SQL >
         countMergeState(count) AS count,
         sumMergeState(sum) AS sum,
         maxMergeState(max) AS max,
-        argMaxMergeState(last_during_period) AS last_during_period,
+        argMaxMergeState(latest) AS latest,
         argMaxMergeState(last_id) AS last_id
     FROM unprice_feature_usage_hourly_mv
     GROUP BY

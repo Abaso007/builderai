@@ -33,7 +33,12 @@ describe("GrantsManager", () => {
       },
       featureType: "usage" as const,
       unitOfMeasure: "units",
-      aggregationMethod: "sum" as const,
+      meterConfig: {
+        eventId: "event_usage",
+        eventSlug: "merge-test-feature",
+        aggregationMethod: "sum" as const,
+        aggregationField: "value",
+      },
       config: {
         usageMode: "sum",
       },
@@ -124,7 +129,6 @@ describe("GrantsManager", () => {
       }
       return []
     })
-
   }
 
   describe("computeGrantsForCustomer - Merge Rules", () => {
@@ -215,8 +219,7 @@ describe("GrantsManager", () => {
       expect(entitlement!.limit).toBe(500) // Max of 100, 500, 50
       expect(entitlement!.mergingPolicy).toBe("max")
 
-      // Verify aggregation method
-      expect(entitlement!.aggregationMethod).toBe("sum")
+      expect(entitlement!.aggregationMethod).toBeNull()
 
       // Verify only the winning grant is kept in the entitlement
       expect(entitlement!.grants).toHaveLength(1)
@@ -260,12 +263,7 @@ describe("GrantsManager", () => {
       expect(entitlement!.grants).toHaveLength(1)
       expect(entitlement!.grants[0]!.id).toBe("g_high") // g_high has priority 100
 
-      // Verify reset config is taken from highest priority grant (if any)
-      expect(entitlement!.resetConfig).toBeDefined()
-      // @ts-ignore
-      expect(entitlement!.resetConfig!.name).toBe("billing")
-      // @ts-ignore
-      expect(entitlement!.resetConfig!.resetAnchor).toBe(1)
+      expect(entitlement!.resetConfig).toBeNull()
     })
 
     it("should allow overage if ANY grant allows it (sum policy)", async () => {

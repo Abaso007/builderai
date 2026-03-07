@@ -8,7 +8,7 @@ SQL >
         countState() AS count,
         sumState(usage) AS sum,
         maxState(usage) AS max,
-        argMaxState(usage, timestamp) AS last_during_period,
+        argMaxState(usage, timestamp) AS latest,
         argMaxState(id, timestamp) AS last_id
     FROM unprice_feature_usage_records
     WHERE deleted = 0

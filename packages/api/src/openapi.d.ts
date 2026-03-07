@@ -3263,20 +3263,6 @@ export interface operations {
                    */
                   hidden: boolean
                 } | null
-                /**
-                 * @description How usage events are aggregated: 'sum' (total all values), 'count' (count events), 'max' (highest value), 'last_during_period' (most recent). Default: 'sum'
-                 * @default sum
-                 * @enum {string}
-                 */
-                aggregationMethod:
-                  | "none"
-                  | "sum"
-                  | "sum_all"
-                  | "last_during_period"
-                  | "count"
-                  | "count_all"
-                  | "max"
-                  | "max_all"
                 order: number
                 /**
                  * @description Default quantity of this feature included when a customer subscribes. Example: 5 for '5 team members included'. Default: 1
@@ -3919,20 +3905,6 @@ export interface operations {
                    */
                   hidden: boolean
                 } | null
-                /**
-                 * @description How usage events are aggregated: 'sum' (total all values), 'count' (count events), 'max' (highest value), 'last_during_period' (most recent). Default: 'sum'
-                 * @default sum
-                 * @enum {string}
-                 */
-                aggregationMethod:
-                  | "none"
-                  | "sum"
-                  | "sum_all"
-                  | "last_during_period"
-                  | "count"
-                  | "count_all"
-                  | "max"
-                  | "max_all"
                 order: number
                 /**
                  * @description Default quantity of this feature included when a customer subscribes. Example: 5 for '5 team members included'. Default: 1
@@ -4081,7 +4053,7 @@ export interface operations {
               count: number
               sum: number
               max: number
-              last_during_period: number
+              latest: number
             }[]
           }
         }

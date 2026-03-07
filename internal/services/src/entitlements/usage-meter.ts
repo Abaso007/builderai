@@ -313,9 +313,8 @@ export class UsageMeter {
       }
     }
 
-    // for negative usage that is not sum, sum_all
-    // count and count_all are not affected by negative usage they are monotonic increasing
-    if (cost < 0 && !["sum", "sum_all"].includes(this.config.aggregationMethod)) {
+    // Negative adjustments are only valid for additive meters.
+    if (cost < 0 && this.config.aggregationMethod !== "sum") {
       return {
         isValid: false,
         message: "Negative usage is not allowed for this aggregation method",
@@ -365,7 +364,7 @@ export class UsageMeter {
       newUsage = (Number(this.usage) + amount).toString()
     } else if (config.behavior === "max") {
       newUsage = Math.max(Number(this.usage), amount).toString()
-    } else if (config.behavior === "last") {
+    } else if (config.behavior === "latest") {
       newUsage = amount.toString()
     }
 
@@ -457,13 +456,7 @@ export class UsageMeter {
   }
 
   private performReset(): void {
-    const config = AGGREGATION_CONFIG[this.config.aggregationMethod]
-
-    // Handle cross-boundary reset: move current cycle usage to accumulated and reset current cycle
-    if (config.scope === "period") {
-      // scope period means there is a cadence for the reset
-      this.usage = "0"
-    }
+    this.usage = "0"
   }
 
   private getTimeUntilNextPeriod(now: number): number {

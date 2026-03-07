@@ -198,7 +198,7 @@ export const getUsageResponseSchema = z.object({
   count: z.number(),
   sum: z.number(),
   max: z.number(),
-  last_during_period: z.number(),
+  latest: z.number(),
 })
 
 export const schemaPageHit = z.object({

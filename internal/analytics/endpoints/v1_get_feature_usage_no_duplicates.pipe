@@ -16,7 +16,7 @@ SQL >
         count() AS count,
         sum(usage) AS sum,
         max(usage) AS max,
-        argMax(usage, ts_latest) AS last_during_period
+        argMax(usage, ts_latest) AS latest
     FROM (
         SELECT
             project_id,

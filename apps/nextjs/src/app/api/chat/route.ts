@@ -563,9 +563,9 @@ If a feature already exists in the plan version, it will not be duplicated.`,
         const aggregationMethod =
           input.aggregationMethod ?? feature.meterConfig?.aggregationMethod ?? "sum"
         const aggregationField =
-          aggregationMethod === "count" || aggregationMethod === "count_all"
+          aggregationMethod === "count"
             ? undefined
-            : feature.meterConfig?.aggregationField ?? "value"
+            : (feature.meterConfig?.aggregationField ?? "value")
 
         const existingEvents = await api.events.listByActiveProject()
         const desiredEventSlug = feature.meterConfig?.eventSlug ?? slugify(feature.slug)
@@ -790,46 +790,27 @@ Aggregation determines HOW usage events are calculated for billing. Choose based
    - Example: Peak users during month was 150 → usage = 150
    - Only the highest value matters, not the sum.
 
-4. **last_during_period**: Uses the last reported value in the period.
+4. **latest**: Uses the most recent reported value in the billing period.
    - Best for: Seat counts, active users, storage snapshots.
    - Example: Customer ends month with 10 seats → usage = 10
    - Each report replaces the previous value.
-
-### Lifetime-Scoped (Never Resets - Accumulation)
-
-5. **sum_all**: Adds up all event values EVER (across all billing cycles).
-   - Best for: Total credits purchased, lifetime data processed, cumulative usage.
-   - Example: Customer has used 50,000 API calls total since signup → usage = 50,000
-   - NEVER resets, keeps accumulating forever.
-
-6. **count_all**: Counts total number of events EVER.
-   - Best for: Lifetime transaction count, total operations performed.
-   - Example: Customer has made 500 transactions since signup → usage = 500
-   - NEVER resets, keeps counting forever.
-
-7. **max_all**: Maximum event value EVER recorded.
-   - Best for: Highest tier ever reached, peak usage ever, record high.
-   - Example: Customer's highest concurrent users ever was 200 → usage = 200
-   - NEVER resets, only updates if a higher value is reported.
 
 ### Choosing the Right Aggregation
 
 | Use Case | Aggregation | Why |
 |----------|-------------|-----|
 | API calls per month | sum | Reset each cycle, add up all calls |
-| Seat-based billing | last_during_period | Current seat count, not cumulative |
+| Seat-based billing | latest | Current seat count, not cumulative |
 | Peak concurrent users | max | Only charge for the peak |
-| Lifetime credits used | sum_all | Track total ever used |
-| Storage used | last_during_period | Current snapshot, not cumulative |
+| Storage used | latest | Current snapshot, not cumulative |
 | Requests this period | count | Count events, ignore values |
 
 ### Important Notes
 
-- **FLAT and PACKAGE types**: Aggregation method is NOT used (set to 'none').
+- **FLAT and PACKAGE types**: Aggregation method is not used.
 - **USAGE type**: Aggregation method is REQUIRED - choose based on billing model.
-- **Period vs Lifetime**: Period-scoped resets each billing cycle. Lifetime-scoped accumulates forever.
 - **Default choice**: For most metered features (API calls, tokens), use **sum**.
-- **For seat-based**: Use **last_during_period** to bill current seat count.
+- **For seat-based**: Use **latest** to bill the current seat count.
 
 ## DECISION GUIDE
 
@@ -876,11 +857,10 @@ Always follow this order:
 - Use descriptive slugs: "pro", "starter", "enterprise", "api-calls", "team-members"
 - For trials: 7-14 days is common
 - Set the aggregation method based on feature behavior:
-  - FLAT/PACKAGE types: Use 'none' (aggregation not applicable)
   - USAGE type with consumables (API calls, tokens, emails): Use 'sum'
-  - USAGE type with seats/licenses: Use 'last_during_period'
+  - USAGE type with seats/licenses or snapshots: Use 'latest'
   - USAGE type with peak billing: Use 'max'
-  - Lifetime tracking (total credits ever): Use 'sum_all', 'count_all', or 'max_all'
+  - USAGE type with event counting: Use 'count'
 - For limits: Set them to prevent abuse, leave undefined for unlimited
 - Suggest appropriate pricing based on industry standards
 

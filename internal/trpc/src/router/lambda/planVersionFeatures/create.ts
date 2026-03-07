@@ -111,12 +111,7 @@ export const create = protectedProjectProcedure
       })
     }
 
-    // if the aggregation method is lifetime/accumulated or the billing config name is the same as the reset config name we don't need to store the reset config
-    const resetConfigCreate =
-      meterConfigSnapshot?.aggregationMethod?.endsWith("_all") ||
-      billingConfigCreate.name === resetConfig?.name
-        ? null
-        : resetConfig
+    const resetConfigCreate = billingConfigCreate.name === resetConfig?.name ? null : resetConfig
 
     const planVersionFeatureCreated = await opts.ctx.db
       .insert(schema.planVersionFeatures)

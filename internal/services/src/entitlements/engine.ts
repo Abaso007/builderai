@@ -120,9 +120,7 @@ export class AsyncMeterAggregationEngine {
     }
   }
 
-  private toAppliedUpdates(
-    pendingUpdates: Array<PendingUpdate | null>
-  ): PendingUpdate[] {
+  private toAppliedUpdates(pendingUpdates: Array<PendingUpdate | null>): PendingUpdate[] {
     return pendingUpdates.filter(
       (pendingUpdate): pendingUpdate is PendingUpdate => pendingUpdate !== null
     )

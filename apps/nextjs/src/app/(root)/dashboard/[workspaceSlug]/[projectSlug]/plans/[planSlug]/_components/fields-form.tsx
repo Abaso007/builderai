@@ -4,11 +4,7 @@ import { DollarSignIcon, HelpCircle, Plus, XCircle } from "lucide-react"
 import type { UseFormReturn } from "react-hook-form"
 import { useFieldArray } from "react-hook-form"
 
-import {
-  BILLING_CONFIG,
-  OVERAGE_STRATEGIES_MAP,
-  RESET_CONFIG,
-} from "@unprice/db/utils"
+import { BILLING_CONFIG, OVERAGE_STRATEGIES_MAP, RESET_CONFIG } from "@unprice/db/utils"
 import type { Currency, PlanVersionFeatureInsert } from "@unprice/db/validators"
 
 import { currencySymbol } from "@unprice/db/utils"

@@ -51,7 +51,7 @@ import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
 
-const AGGREGATION_METHODS_WITHOUT_FIELD = new Set<AggregationMethod>(["count", "count_all", "none"])
+const AGGREGATION_METHODS_WITHOUT_FIELD = new Set<AggregationMethod>(["count"])
 const EVENT_PICKER_SEARCH_THRESHOLD = 6
 
 const eventFormSchema = z.object({
@@ -325,11 +325,9 @@ function EventFormDialog({
 export function MeterConfigFormField({
   form,
   isDisabled,
-  legacyAggregationMethod,
 }: {
   form: UseFormReturn<PlanVersionFeatureInsert>
   isDisabled?: boolean
-  legacyAggregationMethod?: AggregationMethod
 }) {
   const trpc = useTRPC()
   const [isPickerOpen, setIsPickerOpen] = useState(false)
@@ -347,15 +345,14 @@ export function MeterConfigFormField({
   }, [events, meterConfig?.eventId, meterConfig?.eventSlug])
 
   const [draftAggregationMethod, setDraftAggregationMethod] = useState<AggregationMethod>(
-    meterConfig?.aggregationMethod ?? legacyAggregationMethod ?? "sum"
+    meterConfig?.aggregationMethod ?? "sum"
   )
 
   useEffect(() => {
-    setDraftAggregationMethod(meterConfig?.aggregationMethod ?? legacyAggregationMethod ?? "sum")
-  }, [legacyAggregationMethod, meterConfig?.aggregationMethod])
+    setDraftAggregationMethod(meterConfig?.aggregationMethod ?? "sum")
+  }, [meterConfig?.aggregationMethod])
 
-  const selectedAggregationMethod =
-    meterConfig?.aggregationMethod ?? legacyAggregationMethod ?? draftAggregationMethod ?? "sum"
+  const selectedAggregationMethod = meterConfig?.aggregationMethod ?? draftAggregationMethod
   const needsAggregationField = requiresAggregationField(selectedAggregationMethod)
   const selectedEventProperties = selectedEvent?.availableProperties ?? []
   const selectedAggregationConfig = AGGREGATION_METHODS_MAP[selectedAggregationMethod]
@@ -566,7 +563,7 @@ export function MeterConfigFormField({
                 </PopoverTrigger>
                 <PopoverContent
                   align="start"
-                  className="max-h-[--radix-popover-content-available-height] w-[var(--radix-popover-trigger-width)] max-w-[420px] p-0"
+                  className="max-h-[--radix-popover-content-available-height] w-[var(--radix-popover-trigger-width)] p-0"
                 >
                   <Command>
                     {shouldShowEventSearch ? (
@@ -682,7 +679,7 @@ export function MeterConfigFormField({
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent className="text-xs">
-                    {AGGREGATION_METHODS.filter((mode) => mode !== "none").map((mode) => (
+                    {AGGREGATION_METHODS.map((mode) => (
                       <SelectItem
                         value={mode}
                         key={mode}
@@ -748,11 +745,8 @@ export function MeterConfigFormField({
                       </SelectContent>
                     </Select>
                   ) : selectedEventProperties.length === 1 ? (
-                    <div className="rounded-md border bg-background-bgSubtle/40 px-3 py-2">
+                    <div className="rounded-md border bg-background-bgSubtle/40 px-3 py-1.5">
                       <p className="font-medium font-mono text-sm">{selectedEventProperties[0]}</p>
-                      <p className="text-muted-foreground text-xs">
-                        Using the only numeric property available on this event.
-                      </p>
                     </div>
                   ) : (
                     <div className="rounded-md border border-dashed px-3 py-2">

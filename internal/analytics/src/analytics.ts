@@ -363,7 +363,7 @@ export class Analytics {
         count: z.number(),
         sum: z.number(),
         max: z.number(),
-        last_during_period: z.number(),
+        latest: z.number(),
       }),
       opts: {
         cache: "no-store",
@@ -392,7 +392,7 @@ export class Analytics {
         delta_count: z.number(),
         delta_sum: z.number(),
         delta_max: z.number(),
-        last_value: z.number(),
+        latest: z.number(),
         last_record_id: z.string(),
       }),
       opts: {
@@ -420,7 +420,7 @@ export class Analytics {
         sum: z.number(),
         max: z.number(),
         count: z.number(),
-        last_during_period: z.number(),
+        latest: z.number(),
       }),
       opts: {
         cache: "no-store",
@@ -442,16 +442,7 @@ export class Analytics {
     projectId: string
     features: {
       featureSlug: string
-      aggregationMethod:
-        | "none"
-        | "sum"
-        | "count"
-        | "max"
-        | "last"
-        | "sum_all"
-        | "max_all"
-        | "count_all"
-        | "last_during_period"
+      aggregationMethod: "sum" | "count" | "max" | "latest"
       featureType: "usage" | "package" | "tier" | "flat"
     }[]
     startAt: number
@@ -460,25 +451,15 @@ export class Analytics {
     Result<{ featureSlug: string; usage: number }[], FetchError | UnPriceAnalyticsError>
   > {
     const AGGREGATION_CONFIG: Record<
-      "none" | "sum" | "max" | "count" | "sum_all" | "max_all" | "count_all" | "last_during_period",
-      { behavior: "none" | "sum" | "max" | "last"; scope: "period" | "lifetime" }
+      "sum" | "count" | "max" | "latest",
+      { behavior: "sum" | "max" | "latest" }
     > = {
-      // Period Scoped (Resets on Cycle)
-      none: { behavior: "none", scope: "period" },
-      sum: { behavior: "sum", scope: "period" },
-      count: { behavior: "sum", scope: "period" }, // count is just sum(+1)
-      max: { behavior: "max", scope: "period" },
-      last_during_period: { behavior: "last", scope: "period" },
-
-      // Lifetime Scoped (Never Resets)
-      sum_all: { behavior: "sum", scope: "lifetime" },
-      count_all: { behavior: "sum", scope: "lifetime" },
-      max_all: { behavior: "max", scope: "lifetime" },
+      sum: { behavior: "sum" },
+      count: { behavior: "sum" },
+      max: { behavior: "max" },
+      latest: { behavior: "latest" },
     }
-    // filter that only usage, package and tier features are being requested
-    const featuresUsage = features.filter((feature) =>
-      ["usage", "package", "tier"].includes(feature.featureType)
-    )
+    const featuresUsage = features.filter((feature) => feature.featureType === "usage")
 
     const featureSlugsArray = featuresUsage.map((feature) => feature.featureSlug)
 
@@ -559,8 +540,8 @@ export class Analytics {
         }
       } else if (config.behavior === "max") {
         usage = totalPeriodUsage.max ?? 0
-      } else if (config.behavior === "last") {
-        usage = totalPeriodUsage.last_during_period ?? 0
+      } else if (config.behavior === "latest") {
+        usage = totalPeriodUsage.latest ?? 0
       }
 
       result.push({
@@ -585,16 +566,7 @@ export class Analytics {
     projectId: string
     feature: {
       featureSlug: string
-      aggregationMethod:
-        | "none"
-        | "sum"
-        | "count"
-        | "max"
-        | "last"
-        | "sum_all"
-        | "max_all"
-        | "count_all"
-        | "last_during_period"
+      aggregationMethod: "sum" | "count" | "max" | "latest"
       featureType: "usage" | "package" | "tier" | "flat"
     }
     afterRecordId: string
@@ -611,24 +583,16 @@ export class Analytics {
     >
   > {
     const AGGREGATION_CONFIG: Record<
-      "none" | "sum" | "max" | "count" | "sum_all" | "max_all" | "count_all" | "last_during_period",
-      { behavior: "none" | "sum" | "max" | "last"; scope: "period" | "lifetime" }
+      "sum" | "count" | "max" | "latest",
+      { behavior: "sum" | "max" | "latest" }
     > = {
-      // Period Scoped (Resets on Cycle)
-      none: { behavior: "none", scope: "period" },
-      sum: { behavior: "sum", scope: "period" },
-      count: { behavior: "sum", scope: "period" }, // count is just sum(+1)
-      max: { behavior: "max", scope: "period" },
-      last_during_period: { behavior: "last", scope: "period" },
-
-      // Lifetime Scoped (Never Resets)
-      sum_all: { behavior: "sum", scope: "lifetime" },
-      count_all: { behavior: "sum", scope: "lifetime" },
-      max_all: { behavior: "max", scope: "lifetime" },
+      sum: { behavior: "sum" },
+      count: { behavior: "sum" },
+      max: { behavior: "max" },
+      latest: { behavior: "latest" },
     }
 
-    // filter that only usage, package and tier features are being requested
-    if (!["usage", "package", "tier"].includes(feature.featureType)) {
+    if (feature.featureType !== "usage") {
       return Ok({
         featureSlug: feature.featureSlug,
         usage: 0,
@@ -697,8 +661,8 @@ export class Analytics {
       }
     } else if (config.behavior === "max") {
       usage = delta.delta_max
-    } else if (config.behavior === "last") {
-      usage = delta.last_value
+    } else if (config.behavior === "latest") {
+      usage = delta.latest
     }
 
     return Ok({

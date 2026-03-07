@@ -12,7 +12,7 @@ SQL >
         countMerge(count) as count,
         sumMerge(sum) as sum,
         maxMerge(max) as max,
-        argMaxMerge(last_during_period) as last_during_period
+        argMaxMerge(latest) as latest
     FROM
     {% if defined(interval_days) %}
         {% if Int32(interval_days) > 180 %}

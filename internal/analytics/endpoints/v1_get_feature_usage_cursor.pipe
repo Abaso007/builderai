@@ -22,7 +22,7 @@ SQL >
         toUInt64(count()) AS delta_count,
         sum(usage) AS delta_sum,
         max(usage) AS delta_max,
-        argMax(usage, id) AS last_value,
+        argMax(usage, id) AS latest,
 
         -- New cursor position
         argMax(id, timestamp) AS last_record_id

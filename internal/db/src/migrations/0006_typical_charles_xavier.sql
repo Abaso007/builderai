@@ -1,2 +1,0 @@
-ALTER TABLE "unprice_customers" ADD COLUMN "external_id" text;--> statement-breakpoint
-CREATE UNIQUE INDEX "cp_external_id_idx" ON "unprice_customers" USING btree ("project_id","external_id") WHERE "unprice_customers"."external_id" IS NOT NULL;

@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest"
 import {
-  type Fact,
-  type MeterDefinition,
-  type RawEvent,
-  type StorageAdapter,
   EventTimestampTooFarInFutureError,
   EventTimestampTooOldError,
+  type Fact,
   LimitExceededError,
+  type MeterDefinition,
   PeriodKeyComputationError,
+  type RawEvent,
+  type StorageAdapter,
   computePeriodKey,
   validateEventTimestamp,
 } from "./domain"
@@ -233,7 +233,9 @@ describe("AsyncMeterAggregationEngine", () => {
       })
     )
 
-    expect(facts).toEqual([{ eventId: "evt_old", meterId: "meter_latest", delta: 0, valueAfter: 10 }])
+    expect(facts).toEqual([
+      { eventId: "evt_old", meterId: "meter_latest", delta: 0, valueAfter: 10 },
+    ])
   })
 
   it("rejects the event before persisting state when a meter would exceed the limit", async () => {

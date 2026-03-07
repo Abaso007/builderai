@@ -1,1 +1,0 @@
-ALTER TYPE "public"."payment_providers" ADD VALUE 'sandbox';

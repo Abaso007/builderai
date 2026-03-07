@@ -38,7 +38,7 @@ export const usageModeSchema = z.enum(USAGE_MODES)
 export const aggregationMethodSchema = z
   .enum(AGGREGATION_METHODS)
   .describe(
-    "How to aggregate usage events. 'sum' (total values), 'count' (count events), 'max' (highest value), 'last_during_period' (last value during the current cycle period), 'sum_all' (total values ever), 'count_all' (count events ever), 'max_all' (highest value ever)"
+    "How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value."
   )
 
 export const meterConfigSchema = z
@@ -47,13 +47,16 @@ export const meterConfigSchema = z
     eventSlug: z.string().min(1),
     aggregationMethod: aggregationMethodSchema,
     aggregationField: z.string().min(1).optional(),
+    // TODO: implement this later
+    filters: z.record(z.string(), z.string()).optional(),
+    groupBy: z.array(z.string()).optional(),
+    windowSize: z.enum(["MINUTE", "HOUR", "DAY"]).optional(),
   })
   .superRefine((data, ctx) => {
-    if (!["count", "count_all", "none"].includes(data.aggregationMethod) && !data.aggregationField) {
+    if (data.aggregationMethod !== "count" && !data.aggregationField) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message:
-          "Aggregation field is required unless the aggregation method is count, count_all, or none",
+        message: "Aggregation field is required unless the aggregation method is count",
         path: ["aggregationField"],
       })
     }

@@ -104,7 +104,10 @@ export function FeatureConfigForm({
       units: defaultValues.config?.units ?? 1,
     },
     billingConfig: defaultValues.billingConfig ?? planVersion?.billingConfig,
-    meterConfig: defaultValues.meterConfig ?? featureMeterTemplate ?? undefined,
+    meterConfig:
+      defaultValues.featureType === "usage"
+        ? (defaultValues.meterConfig ?? featureMeterTemplate ?? undefined)
+        : null,
     resetConfig: defaultValues.resetConfig ?? {
       name: planVersion?.billingConfig.name,
       planType: planVersion?.billingConfig.planType,
@@ -124,8 +127,6 @@ export function FeatureConfigForm({
     schema: planVersionFeatureInsertBaseSchema,
     defaultValues: controlledDefaultValues as PlanVersionFeatureInsert,
   })
-
-  console.log(form.formState)
 
   const updatePlanVersionFeatures = useMutation(
     trpc.planVersionFeatures.update.mutationOptions({

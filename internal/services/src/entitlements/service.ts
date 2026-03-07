@@ -134,7 +134,19 @@ export class EntitlementService {
     return Math.max(0, Date.now() - performanceStart)
   }
 
-  private getUsageMeter(validatedState: EntitlementState): UsageMeter {
+  private isUsageEntitlement(state: EntitlementState): state is EntitlementState & {
+    featureType: "usage"
+    aggregationMethod: NonNullable<EntitlementState["aggregationMethod"]>
+  } {
+    return state.featureType === "usage" && Boolean(state.aggregationMethod)
+  }
+
+  private getUsageMeter(
+    validatedState: EntitlementState & {
+      featureType: "usage"
+      aggregationMethod: NonNullable<EntitlementState["aggregationMethod"]>
+    }
+  ): UsageMeter {
     return new UsageMeter(
       {
         capacity: validatedState.limit ?? Number.POSITIVE_INFINITY,
@@ -229,6 +241,43 @@ export class EntitlementService {
         deniedReason: "ENTITLEMENT_ERROR",
         latency,
         featureType: state.featureType,
+      }
+    }
+
+    if (!this.isUsageEntitlement(validatedState)) {
+      const latency = this.calculateLatencyMs(params.performanceStart)
+
+      this.waitUntil(
+        this.storage.insertVerification({
+          customer_id: params.customerId,
+          project_id: params.projectId,
+          feature_slug: params.featureSlug,
+          timestamp: params.timestamp,
+          allowed: 1,
+          denied_reason: undefined,
+          metadata: params.metadata,
+          usage: params.usage ?? 0,
+          remaining: validatedState.limit ?? 0,
+          entitlement_id: validatedState.id,
+          latency,
+          request_id: params.requestId,
+          created_at: Date.now(),
+          region: params.region ?? "UNK",
+          meta_id: 0,
+          country: params.country ?? "UNK",
+          action: params.action,
+          key_id: params.keyId,
+        })
+      )
+
+      return {
+        allowed: true,
+        message: "Allowed",
+        usage: Number(validatedState.meter.usage),
+        limit: validatedState.limit ?? undefined,
+        remaining: validatedState.limit ?? undefined,
+        latency,
+        featureType: validatedState.featureType,
       }
     }
 
@@ -423,6 +472,21 @@ export class EntitlementService {
         message: err.message,
         deniedReason: "ENTITLEMENT_ERROR",
         usage: 0,
+      }
+    }
+
+    if (!this.isUsageEntitlement(validatedState)) {
+      const isFlatFeature = validatedState.featureType === "flat"
+      return {
+        allowed: false,
+        message: isFlatFeature
+          ? "Flat feature not allowed to be reported"
+          : "Only usage features support metered reporting",
+        deniedReason: isFlatFeature
+          ? "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE"
+          : "FEATURE_TYPE_NOT_SUPPORTED",
+        usage: Number(validatedState.meter.usage),
+        limit: validatedState.limit ?? undefined,
       }
     }
 
@@ -752,7 +816,9 @@ export class EntitlementService {
     featureSlug: string
     historicalDays?: number
   }): Promise<CacheNamespaces["getEntitlementsFeature"]> {
-    const historicalWindowMs = historicalDays * 24 * 60 * 60 * 1000
+    // Get current entitlement and the entitlements that experied in the last 30 days.
+    // This is for late report
+    const historicalWindowMs = historicalDays * 24 * 60 * 60 * 1000 // in ms
     const historicalCutoff = Date.now() - historicalWindowMs
 
     return this.db.query.entitlements.findMany({
@@ -761,10 +827,7 @@ export class EntitlementService {
           eq(entitlement.projectId, projectId),
           eq(entitlement.customerId, customerId),
           eq(entitlement.featureSlug, featureSlug),
-          or(
-            eq(entitlement.isCurrent, true),
-            gt(entitlement.expiresAt, historicalCutoff - 1)
-          )
+          or(eq(entitlement.isCurrent, true), gt(entitlement.expiresAt, historicalCutoff - 1))
         ),
       orderBy: (entitlement, { desc }) => desc(entitlement.effectiveAt),
     })
@@ -874,18 +937,18 @@ export class EntitlementService {
       feature_slug: snapshot.featureSlug,
     })
 
-    const config = AGGREGATION_CONFIG[snapshot.aggregationMethod]
     const meter = snapshot.meter
 
-    // if the feature is a flat feature we don't need to reconcile
-    if (snapshot.featureType === "flat") {
-      this.logger.debug("skipping reconcile for flat feature", {
+    if (!this.isUsageEntitlement(snapshot)) {
+      this.logger.debug("skipping reconcile for non-usage feature", {
         featureSlug: snapshot.featureSlug,
         customerId: snapshot.customerId,
         projectId: snapshot.projectId,
       })
       return // fire-and-forget
     }
+
+    const config = AGGREGATION_CONFIG[snapshot.aggregationMethod]
 
     // drift only makes sense for sum behavior
     if (config.behavior !== "sum") {
@@ -1108,6 +1171,13 @@ export class EntitlementService {
     forceRefresh?: boolean
   }): Promise<Result<MeterState, FetchError | UnPriceEntitlementError>> {
     const { entitlement, watermark, forceRefresh } = params
+    const emptyMeterState: MeterState = {
+      usage: "0",
+      snapshotUsage: "0",
+      lastReconciledId: "",
+      lastUpdated: Date.now(),
+      lastCycleStart: undefined,
+    }
 
     // this should happen as the initial state is stored in the storage
     // so if there is a storage definition we use that on initialization
@@ -1124,6 +1194,10 @@ export class EntitlementService {
     // if the entitlement is already initialized and we don't want to force refresh, return it
     if (!forceRefresh && entitlementState?.meter) {
       return Ok(entitlementState.meter)
+    }
+
+    if (entitlement.featureType !== "usage" || !entitlement.aggregationMethod) {
+      return Ok(emptyMeterState)
     }
 
     // if the entitlement is not initialized, initialize it from analytics

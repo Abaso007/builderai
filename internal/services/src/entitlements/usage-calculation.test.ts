@@ -81,17 +81,30 @@ describe("UsageMeter Calculation", () => {
       expect(result.message).toContain("Negative usage is not allowed")
     })
 
-    it("should handle last aggregation method", () => {
-      const lastConfig = {
+    it("should handle latest aggregation method", () => {
+      const latestConfig = {
         ...baseConfig,
-        aggregationMethod: "last_during_period" as const,
+        aggregationMethod: "latest" as const,
       }
 
-      const meter = new UsageMeter(lastConfig, { ...baseMeterState, usage: "10" })
+      const meter = new UsageMeter(latestConfig, { ...baseMeterState, usage: "10" })
       const result = meter.consume(25, clock.now())
 
       expect(result.allowed).toBe(true)
       expect(meter.toPersist().usage).toBe("25")
+    })
+
+    it("should count events without needing an aggregation field", () => {
+      const countConfig = {
+        ...baseConfig,
+        aggregationMethod: "count" as const,
+      }
+
+      const meter = new UsageMeter(countConfig, { ...baseMeterState, usage: "10" })
+      const result = meter.consume(1, clock.now())
+
+      expect(result.allowed).toBe(true)
+      expect(meter.toPersist().usage).toBe("11")
     })
 
     it("shouldn't allow report usage for flat features", () => {
@@ -170,35 +183,6 @@ describe("UsageMeter Calculation", () => {
 
       expect(result.allowed).toBe(true)
       expect(meter.toPersist().usage).toBe("30") // Reset to 0 then +30
-    })
-
-    it("should not reset usage for lifetime scoped aggregation", () => {
-      const lifetimeConfig = {
-        ...baseConfig,
-        aggregationMethod: "sum_all" as const,
-        resetConfig: {
-          name: "daily",
-          resetInterval: "day" as const,
-          resetIntervalCount: 1,
-          resetAnchor: 1,
-          planType: "recurring" as const,
-        },
-      }
-
-      // Day 1
-      const meter = new UsageMeter(lifetimeConfig, {
-        ...baseMeterState,
-        lastCycleStart: clock.now() - 1000,
-      })
-
-      meter.consume(60, clock.now())
-      expect(meter.toPersist().usage).toBe("60")
-
-      // Day 2
-      clock.advanceBy(24 * 60 * 60 * 1000 + 1000)
-      meter.consume(30, clock.now())
-
-      expect(meter.toPersist().usage).toBe("90") // 60 + 30 (no reset)
     })
   })
 })

@@ -1,4 +1,4 @@
-import { eq, not, relations } from "drizzle-orm"
+import { not, relations } from "drizzle-orm"
 import {
   bigint,
   boolean,
@@ -15,6 +15,7 @@ import {
 import { pgTableProject } from "../utils/_table"
 import { projectID } from "../utils/sql"
 
+import { sql } from "drizzle-orm"
 import type { z } from "zod"
 import { cuid, timestamps } from "../utils/fields"
 import type {
@@ -34,7 +35,6 @@ import {
 } from "./enums"
 import { planVersionFeatures } from "./planVersionFeatures"
 import { projects } from "./projects"
-import { sql } from "drizzle-orm"
 
 // entitlements are a snapshot of the grants grouped by subject and feature
 // if there are more than one grant for the same subject and feature, the entitlements will be merged using the merging policy
@@ -43,7 +43,7 @@ import { sql } from "drizzle-orm"
 // IMPORTANT: All grants for the same featureSlug MUST have the same:
 //   - featureType
 //   - resetConfig
-//   - aggregationMethod
+//   - aggregationMethod for usage features
 //   - unitOfMeasure
 // Only limit and hardLimit can differ (merged by priority)
 // The effective values are stored directly in the entitlement for performance
@@ -64,7 +64,7 @@ export const entitlements = pgTableProject(
     resetConfig: json("reset_config").$type<
       z.infer<typeof resetConfigSchema> & { resetAnchor: number }
     >(),
-    aggregationMethod: aggregationMethodEnum("aggregation_method").notNull(),
+    aggregationMethod: aggregationMethodEnum("aggregation_method"),
     // A flag to mark which version is currently active
     isCurrent: boolean("is_current").notNull().default(true),
 

@@ -1,11 +1,6 @@
 import type { Analytics } from "@unprice/analytics"
 import { type Database, type SQL, and, eq, inArray, sql } from "@unprice/db"
-import {
-  grants,
-  subscriptionItems,
-  subscriptionPhases,
-  subscriptions,
-} from "@unprice/db/schema"
+import { grants, subscriptionItems, subscriptionPhases, subscriptions } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import {
   type GrantType,
@@ -164,7 +159,8 @@ export class SubscriptionService {
   ): PhaseGrantItemInput[] {
     return items
       .map((item) => {
-        const featurePlanVersionId = item.featurePlanVersionId ?? item.featurePlanVersion?.id ?? null
+        const featurePlanVersionId =
+          item.featurePlanVersionId ?? item.featurePlanVersion?.id ?? null
 
         if (!featurePlanVersionId) {
           return null
@@ -292,7 +288,7 @@ export class SubscriptionService {
   private async syncPhaseGrants({
     customerId,
     subscriptionId,
-      phase,
+    phase,
     items,
     db,
     now,
@@ -1270,7 +1266,6 @@ export class SubscriptionService {
               message: `Error while updating subscription items: ${e.message}`,
             })
           })
-
       }
 
       const updatedPhaseItems = itemsFromPhase.map((item) => {

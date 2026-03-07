@@ -1,6 +1,6 @@
 import { type Database, and, eq, inArray } from "@unprice/db"
 import { entitlements, grants } from "@unprice/db/schema"
-import { AGGREGATION_CONFIG, type UsageMode, hashStringSHA256, newId } from "@unprice/db/utils"
+import { type UsageMode, hashStringSHA256, newId } from "@unprice/db/utils"
 import {
   type FeatureType,
   calculateCycleWindow,
@@ -174,9 +174,7 @@ export class GrantsManager {
     }
 
     const idsToDelete = grantIds?.length
-      ? phaseOwnedGrants
-          .filter((grant) => grantIds.includes(grant.id))
-          .map((grant) => grant.id)
+      ? phaseOwnedGrants.filter((grant) => grantIds.includes(grant.id)).map((grant) => grant.id)
       : phaseOwnedGrants.map((grant) => grant.id)
 
     if (idsToDelete.length === 0) {
@@ -758,12 +756,12 @@ export class GrantsManager {
       })
     )
 
-    const aggregationMethod =
-      bestPriorityGrant.featurePlanVersion.featureType === "usage"
-        ? bestPriorityGrant.featurePlanVersion.meterConfig?.aggregationMethod
-        : "none"
+    const isUsageFeature = bestPriorityGrant.featurePlanVersion.featureType === "usage"
+    const aggregationMethod = isUsageFeature
+      ? (bestPriorityGrant.featurePlanVersion.meterConfig?.aggregationMethod ?? null)
+      : null
 
-    if (!aggregationMethod) {
+    if (isUsageFeature && !aggregationMethod) {
       return Err(
         new UnPriceGrantError({
           message: "Usage feature plan version is missing meter configuration",
@@ -772,20 +770,12 @@ export class GrantsManager {
       )
     }
 
-    const config = AGGREGATION_CONFIG[aggregationMethod]
-
-    // period scoped entitlements use the merged effective at and expires at
-    // lifetime scoped entitlements use the winning grant's effective at and expires at
-    const effectiveAt = config.reset ? merged.effectiveAt : winningGrant.effectiveAt
-    const expiresAt = config.reset ? merged.expiresAt : winningGrant.expiresAt
-    const defaultResetConfig = config.reset ? localResetConfig : null
-
     return Ok({
       limit: merged.limit,
       mergingPolicy: merged.mergingPolicy,
-      effectiveAt: effectiveAt,
-      expiresAt: expiresAt,
-      resetConfig: defaultResetConfig,
+      effectiveAt: merged.effectiveAt,
+      expiresAt: merged.expiresAt,
+      resetConfig: isUsageFeature ? localResetConfig : null,
       featureType: bestPriorityGrant.featurePlanVersion.featureType,
       aggregationMethod,
       unitOfMeasure: winningUnitOfMeasure,

@@ -160,7 +160,7 @@ async function main() {
 
   // get user's email
   let unpriceOwner = await db.query.customers.findFirst({
-    where: (fields, operators) => operators.eq(fields.email, "seb@unprice.dev"),
+    where: (fields, operators) => operators.eq(fields.email, "jhonsfran@gmail.com"),
   })
 
   if (!unpriceOwner) {

@@ -752,6 +752,9 @@ export const planVersionFeatureInsertBaseSchema = planVersionFeatureMutationBase
     featureType: true,
     billingConfig: true,
   })
+  .extend({
+    aggregationMethod: z.never().optional(),
+  })
   .superRefine((data, ctx) => {
     return validatePlanVersionFeatureMutation({
       data,
@@ -783,6 +786,9 @@ export const planVersionFeatureUpdateBaseSchema = planVersionFeatureMutationBase
   .required({
     id: true,
     planVersionId: true,
+  })
+  .extend({
+    aggregationMethod: z.never().optional(),
   })
   .superRefine((data, ctx) => {
     return validatePlanVersionFeatureMutation({ data, ctx })

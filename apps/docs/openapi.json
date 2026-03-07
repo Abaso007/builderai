@@ -4143,16 +4143,7 @@
                                   },
                                   "aggregationMethod": {
                                     "type": "string",
-                                    "enum": [
-                                      "none",
-                                      "sum",
-                                      "sum_all",
-                                      "last_during_period",
-                                      "count",
-                                      "count_all",
-                                      "max",
-                                      "max_all"
-                                    ]
+                                    "enum": ["sum", "count", "max", "latest"]
                                   },
                                   "aggregationField": {
                                     "type": "string",
@@ -5618,16 +5609,7 @@
                                     },
                                     "aggregationMethod": {
                                       "type": "string",
-                                      "enum": [
-                                        "none",
-                                        "sum",
-                                        "sum_all",
-                                        "last_during_period",
-                                        "count",
-                                        "count_all",
-                                        "max",
-                                        "max_all"
-                                      ]
+                                      "enum": ["sum", "count", "max", "latest"]
                                     },
                                     "aggregationField": {
                                       "type": "string",
@@ -5917,18 +5899,11 @@
                           "max": {
                             "type": "number"
                           },
-                          "last_during_period": {
+                          "latest": {
                             "type": "number"
                           }
                         },
-                        "required": [
-                          "projectId",
-                          "featureSlug",
-                          "count",
-                          "sum",
-                          "max",
-                          "last_during_period"
-                        ]
+                        "required": ["projectId", "featureSlug", "count", "sum", "max", "latest"]
                       }
                     }
                   },

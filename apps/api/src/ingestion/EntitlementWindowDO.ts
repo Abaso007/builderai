@@ -48,8 +48,6 @@ export class EntitlementWindowDO extends DurableObject {
   public async apply(input: ApplyInput): Promise<ApplyResult> {
     await this.ready
 
-    console.log(this.ctx.id.toString())
-
     // 1. validate the input
     this.assertValidInput(input)
 

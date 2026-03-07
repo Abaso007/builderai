@@ -18,7 +18,7 @@ import { useTRPC } from "~/trpc/client"
 
 type TemplateStatus = "pending" | "working" | "done" | "error"
 
-const AGGREGATION_METHODS_WITHOUT_FIELD = new Set<AggregationMethod>(["count", "count_all", "none"])
+const AGGREGATION_METHODS_WITHOUT_FIELD = new Set<AggregationMethod>(["count"])
 
 type UsageTier = {
   firstUnit: number
@@ -31,13 +31,13 @@ type UsageConfig =
       mode: "unit"
       price: string
       limit?: number
-      aggregationMethod?: "sum" | "last_during_period"
+      aggregationMethod?: "sum" | "latest"
     }
   | {
       mode: "tier"
       tiers: UsageTier[]
       limit?: number
-      aggregationMethod?: "sum" | "last_during_period"
+      aggregationMethod?: "sum" | "latest"
     }
 
 type FlatFeature = {
@@ -217,7 +217,7 @@ const TEMPLATE_PLANS: TemplatePlan[] = [
         mode: "unit",
         price: "20",
         limit: 500,
-        aggregationMethod: "last_during_period",
+        aggregationMethod: "latest",
       },
     },
     flatFeatures: [
@@ -397,7 +397,9 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
       return cached
     }
 
-    const existingEvents = await queryClient.fetchQuery(trpc.events.listByActiveProject.queryOptions())
+    const existingEvents = await queryClient.fetchQuery(
+      trpc.events.listByActiveProject.queryOptions()
+    )
     const existingEvent = existingEvents.events.find((event) => event.slug === slug)
 
     if (existingEvent?.id) {

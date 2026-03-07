@@ -168,7 +168,7 @@ export const entitlementSchema = createSelectSchema(schema.entitlements, {
   resetConfig: resetConfigSchema.extend({
     resetAnchor: z.number(),
   }),
-  aggregationMethod: aggregationMethodSchema,
+  aggregationMethod: aggregationMethodSchema.nullable(),
   featureType: typeFeatureSchema,
   mergingPolicy: entitlementMergingPolicySchema,
   unitOfMeasure: z

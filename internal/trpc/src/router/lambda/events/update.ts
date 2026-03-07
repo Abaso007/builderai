@@ -1,9 +1,9 @@
 import { TRPCError } from "@trpc/server"
+import { FEATURE_SLUGS } from "@unprice/config"
 import { and, eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
 import { eventSelectBaseSchema, eventUpdateBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
-import { FEATURE_SLUGS } from "@unprice/config"
 import { protectedProjectProcedure } from "#trpc"
 import { featureGuard } from "#utils/feature-guard"
 

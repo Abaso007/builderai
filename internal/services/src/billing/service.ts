@@ -1152,7 +1152,7 @@ export class BillingService {
             entitlement,
           })
 
-          if (entitlement.featureType === "usage") {
+          if (entitlement.featureType === "usage" && entitlement.aggregationMethod) {
             usageFeaturesToFetch.push({
               featureSlug,
               aggregationMethod: entitlement.aggregationMethod,
@@ -2243,7 +2243,7 @@ export class BillingService {
 
     const featureType = entitlement.featureType
     const aggregationMethod = entitlement.aggregationMethod
-    const isUsageFeature = featureType !== "flat"
+    const isUsageFeature = featureType === "usage"
 
     // For non-usage features, return early with zero usage
     if (!isUsageFeature) {
@@ -2251,6 +2251,14 @@ export class BillingService {
         usage: 0,
         isUsageFeature: false,
       })
+    }
+
+    if (!aggregationMethod) {
+      return Err(
+        new UnPriceBillingError({
+          message: `Usage feature ${featureSlug} is missing an aggregation method`,
+        })
+      )
     }
 
     // Use provided usage data if available, otherwise fetch it
@@ -2704,7 +2712,11 @@ export class BillingService {
       })
 
       // Collect usage features for batch fetching
-      if (entitlement.featureType !== "flat" && !usageOverrides?.has(featureSlug)) {
+      if (
+        entitlement.featureType === "usage" &&
+        entitlement.aggregationMethod &&
+        !usageOverrides?.has(featureSlug)
+      ) {
         usageFeaturesToFetch.push({
           featureSlug,
           aggregationMethod: entitlement.aggregationMethod,

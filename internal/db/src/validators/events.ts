@@ -24,11 +24,7 @@ export const eventSelectBaseSchema = createSelectSchema(schema.events, {
   slug: eventSlugSchema.describe(
     "Project-scoped SDK event slug. Example: 'llm_completion' or 'storage_snapshot'"
   ),
-  name: z
-    .string()
-    .min(1)
-    .max(64)
-    .describe("Human-readable event name. Example: 'AI Completion'"),
+  name: z.string().min(1).max(64).describe("Human-readable event name. Example: 'AI Completion'"),
   availableProperties: z
     .array(eventPropertySchema)
     .nullable()
@@ -42,11 +38,7 @@ export const eventInsertBaseSchema = createInsertSchema(schema.events, {
   slug: eventSlugSchema.describe(
     "Project-scoped SDK event slug. Example: 'llm_completion' or 'storage_snapshot'"
   ),
-  name: z
-    .string()
-    .min(1)
-    .max(64)
-    .describe("Human-readable event name. Example: 'AI Completion'"),
+  name: z.string().min(1).max(64).describe("Human-readable event name. Example: 'AI Completion'"),
   availableProperties: z
     .array(eventPropertySchema)
     .nullable()

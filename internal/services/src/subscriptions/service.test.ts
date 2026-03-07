@@ -181,7 +181,8 @@ describe("SubscriptionService - grant lifecycle", () => {
         const phase = state.phases.find((candidate) => candidate.id === phaseId)
         const planVersion = phase ? state.planVersions[phase.planVersionId] : null
         const featurePlanVersion =
-          planVersion?.planFeatures.find((feature) => feature.id === item.featurePlanVersionId) ?? null
+          planVersion?.planFeatures.find((feature) => feature.id === item.featurePlanVersionId) ??
+          null
 
         return {
           ...item,
@@ -337,9 +338,9 @@ describe("SubscriptionService - grant lifecycle", () => {
 
           return {
             where: vi.fn().mockImplementation(() => ({
-              returning: vi.fn().mockResolvedValue([
-                table === subscriptionPhases ? state.phases[0] : set,
-              ]),
+              returning: vi
+                .fn()
+                .mockResolvedValue([table === subscriptionPhases ? state.phases[0] : set]),
             })),
           }
         }),
