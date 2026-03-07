@@ -5,8 +5,6 @@ import type { UseFormReturn } from "react-hook-form"
 import { useFieldArray } from "react-hook-form"
 
 import {
-  AGGREGATION_METHODS,
-  AGGREGATION_METHODS_MAP,
   BILLING_CONFIG,
   OVERAGE_STRATEGIES_MAP,
   RESET_CONFIG,
@@ -393,76 +391,6 @@ export function OverageStrategyFormField({
               </SelectContent>
             </Select>
             <FormMessage />
-          </FormItem>
-        )}
-      />
-    </div>
-  )
-}
-
-export function AggregationMethodFormField({
-  form,
-  isDisabled,
-}: {
-  form: UseFormReturn<PlanVersionFeatureInsert>
-  isDisabled?: boolean
-}) {
-  return (
-    <div className="w-full">
-      <FormField
-        control={form.control}
-        name="aggregationMethod"
-        render={({ field }) => (
-          <FormItem className="flex flex-col">
-            <div className="flex items-center gap-1">
-              <FormLabel>Aggregation Method</FormLabel>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <HelpCircle className="size-3.5 text-muted-foreground" />
-                </TooltipTrigger>
-                <TooltipContent side="right" className="max-w-[320px]">
-                  <div className="space-y-2">
-                    <p className="font-medium">How usage is calculated for billing:</p>
-                    <ul className="space-y-1 text-xs">
-                      <li>
-                        <strong>Sum:</strong> Total of all reported values
-                      </li>
-                      <li>
-                        <strong>Count:</strong> Number of usage events
-                      </li>
-                      <li>
-                        <strong>Max:</strong> Highest value in the period
-                      </li>
-                      <li>
-                        <strong>Last:</strong> Most recent reported value
-                      </li>
-                    </ul>
-                    <p className="border-t pt-2 text-xs">
-                      <strong>Period-based:</strong> Resets with each billing cycle.{" "}
-                      <strong>Accumulated:</strong> Tracks lifetime usage across all periods.
-                    </p>
-                  </div>
-                </TooltipContent>
-              </Tooltip>
-            </div>
-            <Select onValueChange={field.onChange} value={field.value ?? ""} disabled={isDisabled}>
-              <FormControl className="truncate">
-                <SelectTrigger disabled={isDisabled}>
-                  <SelectValue placeholder="Select type" />
-                </SelectTrigger>
-              </FormControl>
-              <SelectContent className="text-xs">
-                {AGGREGATION_METHODS.filter((mode) => mode !== "none").map((mode) => (
-                  <SelectItem
-                    value={mode}
-                    key={mode}
-                    description={AGGREGATION_METHODS_MAP[mode].description}
-                  >
-                    {AGGREGATION_METHODS_MAP[mode].label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </FormItem>
         )}
       />

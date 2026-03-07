@@ -1,5 +1,5 @@
 {
-  "id": "bfc454f2-f9b0-4ae9-afbe-7c4e8751e7b1",
+  "id": "ed9491d1-ba0c-428e-85c1-69c0c66c9a0c",
   "prevId": "b2913bd2-1055-4111-bce2-6f2f6ee80504",
   "version": "7",
   "dialect": "postgresql",
@@ -4499,7 +4499,7 @@
             }
           ],
           "isUnique": true,
-          "where": "\"unprice_entitlements\".\"is_current\" = $1",
+          "where": "\"unprice_entitlements\".\"is_current\" = true",
           "concurrently": false,
           "method": "btree",
           "with": {}

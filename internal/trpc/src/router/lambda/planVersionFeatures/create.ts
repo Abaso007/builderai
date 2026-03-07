@@ -33,7 +33,6 @@ export const create = protectedProjectProcedure
       billingConfig,
       resetConfig,
       type,
-      aggregationMethod,
       unitOfMeasure,
       meterConfig,
     } = opts.input
@@ -105,10 +104,15 @@ export const create = protectedProjectProcedure
           ? (meterConfig ?? null)
           : (featureData.meterConfig ?? null)
 
+    if (featureType === "usage" && !meterConfigSnapshot) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Usage features require meterConfig or a default feature meterConfig",
+      })
+    }
+
     const aggregationMethodCreate =
-      featureType !== "usage"
-        ? "none"
-        : (meterConfigSnapshot?.aggregationMethod ?? aggregationMethod ?? "sum")
+      featureType !== "usage" ? "none" : (meterConfigSnapshot?.aggregationMethod ?? "sum")
 
     // if the aggregation method is lifetime/accumulated or the billing config name is the same as the reset config name we don't need to store the reset config
     const resetConfigCreate =

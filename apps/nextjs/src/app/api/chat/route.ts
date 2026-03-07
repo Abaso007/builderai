@@ -1,5 +1,5 @@
 import { auth } from "@unprice/auth/server"
-import { currencies } from "@unprice/db/utils"
+import { currencies, slugify } from "@unprice/db/utils"
 import {
   type BillingConfig,
   type ConfigFeatureVersionType,
@@ -543,6 +543,64 @@ If a feature already exists in the plan version, it will not be duplicated.`,
         return
       }
 
+      let meterConfig:
+        | {
+            eventId: string
+            eventSlug: string
+            aggregationMethod: z.infer<typeof aggregationMethodSchema>
+            aggregationField?: string
+          }
+        | undefined
+
+      if (input.featureType === "usage") {
+        const { features } = await api.features.searchBy({ search: "" })
+        const feature = features.find((candidate) => candidate.id === input.featureId)
+
+        if (!feature?.id) {
+          throw new Error("Feature not found")
+        }
+
+        const aggregationMethod =
+          input.aggregationMethod ?? feature.meterConfig?.aggregationMethod ?? "sum"
+        const aggregationField =
+          aggregationMethod === "count" || aggregationMethod === "count_all"
+            ? undefined
+            : feature.meterConfig?.aggregationField ?? "value"
+
+        const existingEvents = await api.events.listByActiveProject()
+        const desiredEventSlug = feature.meterConfig?.eventSlug ?? slugify(feature.slug)
+        const existingEvent = existingEvents.events.find((event) => event.slug === desiredEventSlug)
+
+        const event = existingEvent?.id
+          ? aggregationField &&
+            !(existingEvent.availableProperties ?? []).includes(aggregationField)
+            ? (
+                await api.events.update({
+                  id: existingEvent.id,
+                  name: existingEvent.name,
+                  slug: existingEvent.slug,
+                  availableProperties: Array.from(
+                    new Set([...(existingEvent.availableProperties ?? []), aggregationField])
+                  ),
+                })
+              ).event
+            : existingEvent
+          : (
+              await api.events.create({
+                name: feature.title,
+                slug: desiredEventSlug,
+                availableProperties: aggregationField ? [aggregationField] : undefined,
+              })
+            ).event
+
+        meterConfig = {
+          eventId: event.id,
+          eventSlug: event.slug,
+          aggregationMethod,
+          ...(aggregationField ? { aggregationField } : {}),
+        }
+      }
+
       const result = await api.planVersionFeatures.create({
         planVersionId: input.planVersionId,
         featureId: input.featureId,
@@ -558,8 +616,7 @@ If a feature already exists in the plan version, it will not be duplicated.`,
         },
         defaultQuantity: input.defaultQuantity ?? 1,
         limit: input.limit,
-        aggregationMethod:
-          input.featureType === "usage" ? (input.aggregationMethod ?? "sum") : "none",
+        ...(meterConfig && { meterConfig }),
         metadata: {
           hidden: input.hidden ?? false,
         },

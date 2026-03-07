@@ -10,6 +10,7 @@ export const prefixes = {
   project: "proj",
   user: "usr",
   feature: "ft",
+  event: "evt",
   feature_version: "fv",
   plan: "plan",
   apikey: "api",

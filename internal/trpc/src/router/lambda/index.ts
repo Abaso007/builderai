@@ -4,6 +4,7 @@ import { apiKeyRouter } from "./apikeys"
 import { authRouter } from "./auth"
 import { customersRouter } from "./customers"
 import { domainRouter } from "./domains"
+import { eventRouter } from "./events"
 import { featureRouter } from "./features"
 import { pageRouter } from "./pages"
 import { paymentProviderRouter } from "./paymentProvider"
@@ -29,6 +30,7 @@ export const lambdaEndpoints = {
   features: featureRouter,
   subscriptions: subscriptionRouter,
   domains: domainRouter,
+  events: eventRouter,
   customers: customersRouter,
   pages: pageRouter,
   paymentProvider: paymentProviderRouter,

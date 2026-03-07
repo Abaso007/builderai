@@ -11,7 +11,7 @@ const billingConfig = {
 }
 
 describe("planVersionFeatureInsertBaseSchema", () => {
-  it("accepts usage features with meterConfig and normalizes the legacy aggregation field", () => {
+  it("accepts usage features with meterConfig", () => {
     const result = planVersionFeatureInsertBaseSchema.safeParse({
       featureId: "feature_123",
       planVersionId: "plan_version_123",
@@ -32,7 +32,7 @@ describe("planVersionFeatureInsertBaseSchema", () => {
       return
     }
 
-    expect(result.data.aggregationMethod).toBe("count")
+    expect(result.data.meterConfig?.aggregationMethod).toBe("count")
   })
 
   it("rejects non-usage features carrying meterConfig", () => {

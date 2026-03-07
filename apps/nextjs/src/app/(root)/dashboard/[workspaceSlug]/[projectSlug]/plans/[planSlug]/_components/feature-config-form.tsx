@@ -14,8 +14,10 @@ import {
   USAGE_MODES_MAP,
 } from "@unprice/db/utils"
 import type {
+  AggregationMethod,
   PlanVersion,
   PlanVersionFeature,
+  PlanVersionFeatureDragDrop,
   PlanVersionFeatureInsert,
 } from "@unprice/db/validators"
 import { planVersionFeatureInsertBaseSchema } from "@unprice/db/validators"
@@ -45,7 +47,7 @@ export function FeatureConfigForm({
   planVersion,
   className,
 }: {
-  defaultValues: PlanVersionFeatureInsert
+  defaultValues: PlanVersionFeatureInsert | PlanVersionFeature | PlanVersionFeatureDragDrop
   planVersion: PlanVersion | null
   setDialogOpen?: (open: boolean) => void
   className?: string
@@ -59,6 +61,11 @@ export function FeatureConfigForm({
 
   const editMode = !!defaultValues.id
   const isPublished = planVersion?.status === "published"
+  const featureMeterTemplate = "feature" in defaultValues ? defaultValues.feature?.meterConfig : undefined
+  const legacyAggregationMethod =
+    "aggregationMethod" in defaultValues
+      ? (defaultValues.aggregationMethod as AggregationMethod | undefined)
+      : undefined
   // const isProEnabled = useFlags(FEATURE_SLUGS.ACCESS_PRO.SLUG)
 
   // we set all possible values for the form so react-hook-form don't complain
@@ -101,6 +108,7 @@ export function FeatureConfigForm({
       units: defaultValues.config?.units ?? 1,
     },
     billingConfig: defaultValues.billingConfig ?? planVersion?.billingConfig,
+    meterConfig: defaultValues.meterConfig ?? featureMeterTemplate ?? undefined,
     resetConfig: defaultValues.resetConfig ?? {
       name: planVersion?.billingConfig.name,
       planType: planVersion?.billingConfig.planType,
@@ -118,7 +126,7 @@ export function FeatureConfigForm({
 
   const form = useZodForm({
     schema: planVersionFeatureInsertBaseSchema,
-    defaultValues: controlledDefaultValues,
+    defaultValues: controlledDefaultValues as PlanVersionFeatureInsert,
   })
 
   const updatePlanVersionFeatures = useMutation(
@@ -162,7 +170,7 @@ export function FeatureConfigForm({
   const featureType = form.watch("featureType")
   const usageMode = form.watch("config.usageMode")
 
-  const onSubmitForm = async (data: PlanVersionFeatureInsert | PlanVersionFeature) => {
+  const onSubmitForm = async (data: PlanVersionFeatureInsert) => {
     if (defaultValues.id) {
       await updatePlanVersionFeatures.mutateAsync({
         ...data,
@@ -292,9 +300,14 @@ export function FeatureConfigForm({
                           field.onChange(value)
 
                           if (value === "usage") {
-                            form.setValue("aggregationMethod", "sum")
+                            const currentMeterConfig = form.getValues("meterConfig")
+
+                            form.setValue(
+                              "meterConfig",
+                              currentMeterConfig ?? featureMeterTemplate ?? undefined
+                            )
                           } else {
-                            form.setValue("aggregationMethod", "none")
+                            form.setValue("meterConfig", null)
                           }
                         }}
                         value={field.value ?? ""}
@@ -418,6 +431,7 @@ export function FeatureConfigForm({
             currency={planVersion.currency}
             units={activeFeature?.unitOfMeasure ?? "units"}
             isDisabled={isPublished}
+            legacyAggregationMethod={legacyAggregationMethod}
           />
         )}
 

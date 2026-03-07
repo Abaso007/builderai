@@ -5,7 +5,7 @@ import { and, eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
 import {
   planVersionFeatureDragDropSchema,
-  planVersionFeatureSelectBaseSchema,
+  planVersionFeatureUpdateBaseSchema,
 } from "@unprice/db/validators"
 
 import { FEATURE_SLUGS } from "@unprice/config"
@@ -13,7 +13,7 @@ import { protectedProjectProcedure } from "#trpc"
 import { featureGuard } from "#utils/feature-guard"
 
 export const update = protectedProjectProcedure
-  .input(planVersionFeatureSelectBaseSchema.partial().required({ id: true, planVersionId: true }))
+  .input(planVersionFeatureUpdateBaseSchema)
   .output(
     z.object({
       planVersionFeature: planVersionFeatureDragDropSchema,
@@ -30,7 +30,6 @@ export const update = protectedProjectProcedure
       planVersionId,
       order,
       defaultQuantity,
-      aggregationMethod,
       limit,
       billingConfig,
       resetConfig,
@@ -121,14 +120,19 @@ export const update = protectedProjectProcedure
             ? (featureData.meterConfig ?? null)
             : (existingPlanVersionFeature.meterConfig ?? null)
 
-    const shouldUpdateAggregationMethod =
-      aggregationMethod !== undefined || shouldUpdateMeterConfig || featureType !== undefined
+    if (featureTypeUpdate === "usage" && shouldUpdateMeterConfig && !meterConfigUpdate) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Usage features require meterConfig or a default feature meterConfig",
+      })
+    }
+
+    const shouldUpdateAggregationMethod = shouldUpdateMeterConfig || featureType !== undefined
 
     const aggregationMethodUpdate =
       featureTypeUpdate !== "usage"
         ? "none"
         : (meterConfigUpdate?.aggregationMethod ??
-          aggregationMethod ??
           existingPlanVersionFeature.aggregationMethod ??
           "sum")
 

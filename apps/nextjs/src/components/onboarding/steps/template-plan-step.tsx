@@ -1,7 +1,14 @@
 import * as currencies from "@dinero.js/currencies"
 import { type StepComponentProps, useOnboarding } from "@onboardjs/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import type { Currency, PaymentProvider } from "@unprice/db/validators"
+import { slugify } from "@unprice/db/utils"
+import type {
+  AggregationMethod,
+  Currency,
+  Event,
+  Feature,
+  PaymentProvider,
+} from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@unprice/ui/card"
 import { cn } from "@unprice/ui/utils"
@@ -10,6 +17,8 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useTRPC } from "~/trpc/client"
 
 type TemplateStatus = "pending" | "working" | "done" | "error"
+
+const AGGREGATION_METHODS_WITHOUT_FIELD = new Set<AggregationMethod>(["count", "count_all", "none"])
 
 type UsageTier = {
   firstUnit: number
@@ -269,7 +278,7 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const hasRunRef = useRef(false)
-  const featureCacheRef = useRef(new Map<string, { id: string } & Record<string, unknown>>())
+  const featureCacheRef = useRef(new Map<string, Feature>())
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isComplete, setIsComplete] = useState(false)
@@ -290,8 +299,11 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
   const createPlan = useMutation(trpc.plans.create.mutationOptions())
   const createPlanVersion = useMutation(trpc.planVersions.create.mutationOptions())
   const createFeature = useMutation(trpc.features.create.mutationOptions())
+  const createEvent = useMutation(trpc.events.create.mutationOptions())
+  const updateEvent = useMutation(trpc.events.update.mutationOptions())
   const createPlanVersionFeature = useMutation(trpc.planVersionFeatures.create.mutationOptions())
   const publishPlanVersion = useMutation(trpc.planVersions.publish.mutationOptions())
+  const eventCacheRef = useRef(new Map<string, Event>())
 
   const resetState = () => {
     setProgress(createProgressState())
@@ -366,6 +378,83 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
 
       featureCacheRef.current.set(feature.slug, featureResult.feature)
       return featureResult.feature
+    }
+  }
+
+  const getOrCreateEvent = async ({
+    slug,
+    name,
+    availableProperties = [],
+  }: {
+    slug: string
+    name: string
+    availableProperties?: string[]
+  }) => {
+    const cached = eventCacheRef.current.get(slug)
+    const normalizedProperties = Array.from(new Set(availableProperties.filter(Boolean)))
+
+    if (cached?.id) {
+      return cached
+    }
+
+    const existingEvents = await queryClient.fetchQuery(trpc.events.listByActiveProject.queryOptions())
+    const existingEvent = existingEvents.events.find((event) => event.slug === slug)
+
+    if (existingEvent?.id) {
+      const mergedProperties = Array.from(
+        new Set([...(existingEvent.availableProperties ?? []), ...normalizedProperties])
+      )
+
+      if (mergedProperties.length !== (existingEvent.availableProperties ?? []).length) {
+        const result = await updateEvent.mutateAsync({
+          id: existingEvent.id,
+          name: existingEvent.name,
+          slug: existingEvent.slug,
+          availableProperties: mergedProperties,
+        })
+
+        eventCacheRef.current.set(slug, result.event)
+        return result.event
+      }
+
+      eventCacheRef.current.set(slug, existingEvent)
+      return existingEvent
+    }
+
+    const result = await createEvent.mutateAsync({
+      name,
+      slug,
+      availableProperties: normalizedProperties.length ? normalizedProperties : undefined,
+    })
+
+    eventCacheRef.current.set(slug, result.event)
+    return result.event
+  }
+
+  const buildMeterConfig = async ({
+    eventSlug,
+    eventName,
+    aggregationMethod,
+  }: {
+    eventSlug: string
+    eventName: string
+    aggregationMethod: AggregationMethod
+  }) => {
+    const aggregationField = AGGREGATION_METHODS_WITHOUT_FIELD.has(aggregationMethod)
+      ? undefined
+      : "value"
+
+    const event = await getOrCreateEvent({
+      slug: eventSlug,
+      name: eventName,
+      availableProperties: aggregationField ? [aggregationField] : [],
+    })
+
+    return {
+      eventId: event.id,
+      eventSlug: event.slug,
+      aggregationMethod,
+      ...(aggregationField ? { aggregationField } : {}),
     }
   }
 
@@ -447,7 +536,6 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
             planType: planVersion.billingConfig.planType,
           },
           defaultQuantity: 1,
-          aggregationMethod: "none",
           metadata: {
             hidden: true,
           },
@@ -473,7 +561,6 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
             },
             defaultQuantity: 1,
             limit: template.seatPack.units,
-            aggregationMethod: "none",
           })
         }
 
@@ -496,7 +583,6 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
               planType: planVersion.billingConfig.planType,
             },
             defaultQuantity: 1,
-            aggregationMethod: "none",
           })
         }
 
@@ -509,6 +595,13 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
                 description: template.usage.description,
                 unitOfMeasure: template.usage.unitOfMeasure,
               })
+
+        const usageAggregationMethod = template.usage.config.aggregationMethod ?? "sum"
+        const usageMeterConfig = await buildMeterConfig({
+          eventSlug: slugify(template.usage.slug),
+          eventName: template.usage.title,
+          aggregationMethod: usageAggregationMethod,
+        })
 
         if (template.usage.config.mode === "unit") {
           await createPlanVersionFeature.mutateAsync({
@@ -530,7 +623,7 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
             },
             defaultQuantity: 1,
             limit: template.usage.config.limit,
-            aggregationMethod: template.usage.config.aggregationMethod ?? "sum",
+            meterConfig: usageMeterConfig,
           })
         } else {
           await createPlanVersionFeature.mutateAsync({
@@ -558,9 +651,15 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
             },
             defaultQuantity: 1,
             limit: template.usage.config.limit,
-            aggregationMethod: template.usage.config.aggregationMethod ?? "sum",
+            meterConfig: usageMeterConfig,
           })
         }
+
+        const creditsMeterConfig = await buildMeterConfig({
+          eventSlug: slugify(creditsFeature.slug),
+          eventName: creditsFeature.title,
+          aggregationMethod: "sum",
+        })
 
         await createPlanVersionFeature.mutateAsync({
           planVersionId: planVersion.id,
@@ -581,7 +680,7 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
           },
           defaultQuantity: 1,
           limit: 100,
-          aggregationMethod: "sum",
+          meterConfig: creditsMeterConfig,
         })
 
         await publishPlanVersion.mutateAsync({

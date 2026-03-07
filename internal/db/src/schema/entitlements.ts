@@ -34,6 +34,7 @@ import {
 } from "./enums"
 import { planVersionFeatures } from "./planVersionFeatures"
 import { projects } from "./projects"
+import { sql } from "drizzle-orm"
 
 // entitlements are a snapshot of the grants grouped by subject and feature
 // if there are more than one grant for the same subject and feature, the entitlements will be merged using the merging policy
@@ -113,7 +114,7 @@ export const entitlements = pgTableProject(
     // but unlimited historical (isCurrent = false) entitlements!
     uniqueCurrentSubjectFeature: uniqueIndex("unique_current_subject_feature")
       .on(table.projectId, table.customerId, table.featureSlug)
-      .where(eq(table.isCurrent, true)),
+      .where(sql`${table.isCurrent} = true`),
     // Index for the Edge Cache Worker to quickly grab the 30-day window
     idxEdgeCache: index("idx_entitlements_edge_cache").on(
       table.projectId,
