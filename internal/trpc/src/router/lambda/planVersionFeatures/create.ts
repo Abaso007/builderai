@@ -108,7 +108,7 @@ export const create = protectedProjectProcedure
     const aggregationMethodCreate =
       featureType !== "usage"
         ? "none"
-        : (meterConfigSnapshot?.aggregationMethod ?? aggregationMethod)
+        : (meterConfigSnapshot?.aggregationMethod ?? aggregationMethod ?? "sum")
 
     // if the aggregation method is lifetime/accumulated or the billing config name is the same as the reset config name we don't need to store the reset config
     const resetConfigCreate =

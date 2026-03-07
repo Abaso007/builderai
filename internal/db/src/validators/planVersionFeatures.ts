@@ -513,7 +513,7 @@ export const planVersionFeatureSelectBaseSchema = createSelectSchema(planVersion
   aggregationMethod: aggregationMethodSchema
     .default("sum")
     .describe(
-      "How usage events are aggregated: 'sum' (total all values), 'count' (count events), 'max' (highest value), 'last_during_period' (most recent). Default: 'sum'"
+      "Derived compatibility aggregation field. When meterConfig exists, its aggregationMethod is the authoritative source and this field reflects that value for legacy runtime consumers"
     ),
   limit: z.coerce
     .number()
@@ -561,7 +561,7 @@ export const planVersionFeatureInsertBaseSchema = createInsertSchema(planVersion
     .nullable()
     .optional()
     .describe(
-      "Optional event-native meter configuration snapshot. Allowed only for usage features and used to derive the legacy aggregation method for compatibility"
+      "Optional event-native meter configuration snapshot. Allowed only for usage features and treated as the authoritative usage measurement configuration when present"
     ),
   metadata: planVersionFeatureMetadataSchema
     .optional()
@@ -571,7 +571,7 @@ export const planVersionFeatureInsertBaseSchema = createInsertSchema(planVersion
   aggregationMethod: aggregationMethodSchema
     .default("count")
     .describe(
-      "How to aggregate usage events for billing: 'sum', 'count', 'max', 'last_during_period', 'sum_all', 'count_all', 'max_all'. Default: 'count'"
+      "Deprecated compatibility aggregation input. meterConfig.aggregationMethod is the authoritative source when meterConfig exists, and this field is normalized from it for legacy callers"
     ),
   billingConfig: billingConfigSchema.describe(
     "Required billing cycle settings: billingInterval ('month', 'year', 'week', 'day'), billingIntervalCount, billingAnchor, and planType ('recurring', 'onetime')"
@@ -622,6 +622,12 @@ export const planVersionFeatureInsertBaseSchema = createInsertSchema(planVersion
     billingConfig: true,
   })
   .transform((data) => {
+    if (data.featureType !== FEATURE_TYPES_MAPS.usage.code) {
+      data.aggregationMethod = "none"
+    } else if (data.meterConfig?.aggregationMethod) {
+      data.aggregationMethod = data.meterConfig.aggregationMethod
+    }
+
     if (data.config) {
       // remove unnecessary fields
       switch (data.featureType) {

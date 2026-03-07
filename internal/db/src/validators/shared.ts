@@ -49,10 +49,11 @@ export const meterConfigSchema = z
     aggregationField: z.string().min(1).optional(),
   })
   .superRefine((data, ctx) => {
-    if (data.aggregationMethod !== "count" && !data.aggregationField) {
+    if (!["count", "count_all", "none"].includes(data.aggregationMethod) && !data.aggregationField) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Aggregation field is required unless the aggregation method is count",
+        message:
+          "Aggregation field is required unless the aggregation method is count, count_all, or none",
         path: ["aggregationField"],
       })
     }

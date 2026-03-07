@@ -129,7 +129,8 @@ export const update = protectedProjectProcedure
         ? "none"
         : (meterConfigUpdate?.aggregationMethod ??
           aggregationMethod ??
-          existingPlanVersionFeature.aggregationMethod)
+          existingPlanVersionFeature.aggregationMethod ??
+          "sum")
 
     const planVersionFeatureUpdated = await opts.ctx.db
       .update(schema.planVersionFeatures)
