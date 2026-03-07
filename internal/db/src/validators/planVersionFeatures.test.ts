@@ -52,4 +52,36 @@ describe("planVersionFeatureInsertBaseSchema", () => {
 
     expect(result.success).toBe(false)
   })
+
+  it("rejects usage features without meterConfig", () => {
+    const result = planVersionFeatureInsertBaseSchema.safeParse({
+      featureId: "feature_123",
+      planVersionId: "plan_version_123",
+      featureType: "usage",
+      billingConfig,
+      order: 1024,
+      defaultQuantity: 1,
+    })
+
+    expect(result.success).toBe(false)
+  })
+
+  it("rejects legacy top-level aggregationMethod", () => {
+    const result = planVersionFeatureInsertBaseSchema.safeParse({
+      featureId: "feature_123",
+      planVersionId: "plan_version_123",
+      featureType: "usage",
+      billingConfig,
+      order: 1024,
+      defaultQuantity: 1,
+      meterConfig: {
+        eventId: "event_123",
+        eventSlug: "llm_completion",
+        aggregationMethod: "count",
+      },
+      aggregationMethod: "count",
+    })
+
+    expect(result.success).toBe(false)
+  })
 })

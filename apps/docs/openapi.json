@@ -4129,19 +4129,37 @@
                                   }
                                 }
                               },
-                              "aggregationMethod": {
-                                "type": "string",
-                                "enum": [
-                                  "none",
-                                  "sum",
-                                  "sum_all",
-                                  "last_during_period",
-                                  "count",
-                                  "count_all",
-                                  "max",
-                                  "max_all"
-                                ],
-                                "default": "sum"
+                              "meterConfig": {
+                                "type": "object",
+                                "nullable": true,
+                                "properties": {
+                                  "eventId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "eventSlug": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "aggregationMethod": {
+                                    "type": "string",
+                                    "enum": [
+                                      "none",
+                                      "sum",
+                                      "sum_all",
+                                      "last_during_period",
+                                      "count",
+                                      "count_all",
+                                      "max",
+                                      "max_all"
+                                    ]
+                                  },
+                                  "aggregationField": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": ["eventId", "eventSlug", "aggregationMethod"]
                               },
                               "order": {
                                 "type": "number"
@@ -5586,19 +5604,37 @@
                                     }
                                   }
                                 },
-                                "aggregationMethod": {
-                                  "type": "string",
-                                  "enum": [
-                                    "none",
-                                    "sum",
-                                    "sum_all",
-                                    "last_during_period",
-                                    "count",
-                                    "count_all",
-                                    "max",
-                                    "max_all"
-                                  ],
-                                  "default": "sum"
+                                "meterConfig": {
+                                  "type": "object",
+                                  "nullable": true,
+                                  "properties": {
+                                    "eventId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "eventSlug": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "aggregationMethod": {
+                                      "type": "string",
+                                      "enum": [
+                                        "none",
+                                        "sum",
+                                        "sum_all",
+                                        "last_during_period",
+                                        "count",
+                                        "count_all",
+                                        "max",
+                                        "max_all"
+                                      ]
+                                    },
+                                    "aggregationField": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": ["eventId", "eventSlug", "aggregationMethod"]
                                 },
                                 "order": {
                                   "type": "number"

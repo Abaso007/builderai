@@ -758,7 +758,21 @@ export class GrantsManager {
       })
     )
 
-    const config = AGGREGATION_CONFIG[bestPriorityGrant.featurePlanVersion.aggregationMethod]
+    const aggregationMethod =
+      bestPriorityGrant.featurePlanVersion.featureType === "usage"
+        ? bestPriorityGrant.featurePlanVersion.meterConfig?.aggregationMethod
+        : "none"
+
+    if (!aggregationMethod) {
+      return Err(
+        new UnPriceGrantError({
+          message: "Usage feature plan version is missing meter configuration",
+          subjectId: customerId,
+        })
+      )
+    }
+
+    const config = AGGREGATION_CONFIG[aggregationMethod]
 
     // period scoped entitlements use the merged effective at and expires at
     // lifetime scoped entitlements use the winning grant's effective at and expires at
@@ -773,7 +787,7 @@ export class GrantsManager {
       expiresAt: expiresAt,
       resetConfig: defaultResetConfig,
       featureType: bestPriorityGrant.featurePlanVersion.featureType,
-      aggregationMethod: bestPriorityGrant.featurePlanVersion.aggregationMethod,
+      aggregationMethod,
       unitOfMeasure: winningUnitOfMeasure,
       grants: merged.grants,
       featureSlug,

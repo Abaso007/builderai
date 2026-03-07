@@ -65,5 +65,17 @@ export const eventInsertBaseSchema = createInsertSchema(schema.events, {
     availableProperties: true,
   })
 
+export const eventUpdateBaseSchema = eventSelectBaseSchema
+  .pick({
+    id: true,
+    name: true,
+    availableProperties: true,
+  })
+  .partial({
+    availableProperties: true,
+  })
+  .strict()
+
 export type Event = z.infer<typeof eventSelectBaseSchema>
 export type InsertEvent = z.infer<typeof eventInsertBaseSchema>
+export type UpdateEvent = z.infer<typeof eventUpdateBaseSchema>

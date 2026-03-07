@@ -111,12 +111,10 @@ export const create = protectedProjectProcedure
       })
     }
 
-    const aggregationMethodCreate =
-      featureType !== "usage" ? "none" : (meterConfigSnapshot?.aggregationMethod ?? "sum")
-
     // if the aggregation method is lifetime/accumulated or the billing config name is the same as the reset config name we don't need to store the reset config
     const resetConfigCreate =
-      aggregationMethodCreate?.endsWith("_all") || billingConfigCreate.name === resetConfig?.name
+      meterConfigSnapshot?.aggregationMethod?.endsWith("_all") ||
+      billingConfigCreate.name === resetConfig?.name
         ? null
         : resetConfig
 
@@ -144,8 +142,6 @@ export const create = protectedProjectProcedure
         resetConfig: resetConfigCreate,
         type,
         meterConfig: meterConfigSnapshot,
-        // flat features don't have a meter so we don't need to store the aggregation method
-        aggregationMethod: aggregationMethodCreate,
       })
       .returning()
       .then((re) => re[0])

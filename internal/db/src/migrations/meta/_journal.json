@@ -78,6 +78,13 @@
       "when": 1773509547372,
       "tag": "0010_special_katie_power",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1773514348259,
+      "tag": "0011_petite_leper_queen",
+      "breakpoints": true
     }
   ]
 }

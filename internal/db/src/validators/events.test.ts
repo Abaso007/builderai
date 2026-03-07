@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { eventInsertBaseSchema } from "./events"
+import { eventInsertBaseSchema, eventUpdateBaseSchema } from "./events"
 
 describe("eventInsertBaseSchema", () => {
   it("accepts lowercase SDK-style slugs and reusable properties", () => {
@@ -18,6 +18,16 @@ describe("eventInsertBaseSchema", () => {
       name: "AI Completion",
       slug: "LLM Completion",
       availableProperties: ["input_tokens"],
+    })
+
+    expect(result.success).toBe(false)
+  })
+
+  it("rejects slug updates after creation", () => {
+    const result = eventUpdateBaseSchema.safeParse({
+      id: "evt_123",
+      name: "AI Completion",
+      slug: "renamed_event",
     })
 
     expect(result.success).toBe(false)

@@ -578,7 +578,6 @@ If a feature already exists in the plan version, it will not be duplicated.`,
                 await api.events.update({
                   id: existingEvent.id,
                   name: existingEvent.name,
-                  slug: existingEvent.slug,
                   availableProperties: Array.from(
                     new Set([...(existingEvent.availableProperties ?? []), aggregationField])
                   ),

@@ -19,7 +19,7 @@ import type {
   planVersionFeatureMetadataSchema,
 } from "../validators/planVersionFeatures"
 import type { BillingConfig, ResetConfig, meterConfigSchema } from "../validators/shared"
-import { aggregationMethodEnum, typeFeatureConfigEnum, typeFeatureEnum } from "./enums"
+import { typeFeatureConfigEnum, typeFeatureEnum } from "./enums"
 import { features } from "./features"
 import { versions } from "./planVersions"
 import { projects } from "./projects"
@@ -49,9 +49,6 @@ export const planVersionFeatures = pgTableProject(
     resetConfig: json("reset_config").$type<ResetConfig>(),
     // metadata probably will be useful to save external data, etc.
     metadata: json("metadata").$type<z.infer<typeof planVersionFeatureMetadataSchema>>(),
-    // derived compatibility mirror of the meter aggregation method.
-    // when meterConfig exists, meterConfig.aggregationMethod is the source of truth.
-    aggregationMethod: aggregationMethodEnum("aggregation_method").default("sum").notNull(),
     order: doublePrecision("order").notNull(),
     // if nulls the feature quantity must be provided at subscription time
     defaultQuantity: integer("default_quantity").default(1),

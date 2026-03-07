@@ -1,18 +1,14 @@
 import { TRPCError } from "@trpc/server"
 import { and, eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
-import { eventSelectBaseSchema } from "@unprice/db/validators"
+import { eventSelectBaseSchema, eventUpdateBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { FEATURE_SLUGS } from "@unprice/config"
 import { protectedProjectProcedure } from "#trpc"
 import { featureGuard } from "#utils/feature-guard"
 
 export const update = protectedProjectProcedure
-  .input(
-    eventSelectBaseSchema.pick({ id: true, name: true, availableProperties: true }).partial({
-      availableProperties: true,
-    })
-  )
+  .input(eventUpdateBaseSchema)
   .output(z.object({ event: eventSelectBaseSchema }))
   .mutation(async (opts) => {
     const { id, name, availableProperties } = opts.input

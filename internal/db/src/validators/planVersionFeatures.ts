@@ -9,7 +9,6 @@ import { planVersionFeatures } from "../schema/planVersionFeatures"
 import { FEATURE_TYPES_MAPS, USAGE_MODES_MAP } from "../utils"
 import { featureSelectBaseSchema } from "./features"
 import {
-  aggregationMethodSchema,
   billingConfigSchema,
   featureConfigType,
   meterConfigSchema,
@@ -510,11 +509,6 @@ export const planVersionFeatureSelectBaseSchema = createSelectSchema(planVersion
     .describe(
       "Default quantity of this feature included when a customer subscribes. Example: 5 for '5 team members included'. Default: 1"
     ),
-  aggregationMethod: aggregationMethodSchema
-    .default("sum")
-    .describe(
-      "Derived compatibility aggregation field. When meterConfig exists, its aggregationMethod is the authoritative source and this field reflects that value for legacy runtime consumers"
-    ),
   limit: z.coerce
     .number()
     .int()
@@ -596,12 +590,10 @@ const planVersionFeatureMutationBaseObject = createInsertSchema(planVersionFeatu
     .describe(
       "Feature configuration type for categorization. Options vary based on system configuration"
     ),
+}).omit({
+  createdAtM: true,
+  updatedAtM: true,
 })
-  .omit({
-    aggregationMethod: true,
-    createdAtM: true,
-    updatedAtM: true,
-  })
 
 const normalizePlanVersionFeatureMutation = <
   T extends {
@@ -665,6 +657,7 @@ const validatePlanVersionFeatureMutation = ({
   data,
   ctx,
   validateConfigWithoutFeatureType = false,
+  requireMeterConfigForUsage = false,
 }: {
   data: {
     featureType?: z.infer<typeof typeFeatureSchema>
@@ -673,11 +666,27 @@ const validatePlanVersionFeatureMutation = ({
   }
   ctx: z.RefinementCtx
   validateConfigWithoutFeatureType?: boolean
+  requireMeterConfigForUsage?: boolean
 }) => {
   if (data.featureType && data.featureType !== FEATURE_TYPES_MAPS.usage.code && data.meterConfig) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: "Meter config is only supported for usage features",
+      path: ["meterConfig"],
+      fatal: true,
+    })
+
+    return false
+  }
+
+  if (
+    requireMeterConfigForUsage &&
+    data.featureType === FEATURE_TYPES_MAPS.usage.code &&
+    !data.meterConfig
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Meter config is required for usage features",
       path: ["meterConfig"],
       fatal: true,
     })
@@ -744,7 +753,12 @@ export const planVersionFeatureInsertBaseSchema = planVersionFeatureMutationBase
     billingConfig: true,
   })
   .superRefine((data, ctx) => {
-    return validatePlanVersionFeatureMutation({ data, ctx, validateConfigWithoutFeatureType: true })
+    return validatePlanVersionFeatureMutation({
+      data,
+      ctx,
+      validateConfigWithoutFeatureType: true,
+      requireMeterConfigForUsage: true,
+    })
   })
   .transform((data) => normalizePlanVersionFeatureMutation(data))
 

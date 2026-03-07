@@ -127,15 +127,6 @@ export const update = protectedProjectProcedure
       })
     }
 
-    const shouldUpdateAggregationMethod = shouldUpdateMeterConfig || featureType !== undefined
-
-    const aggregationMethodUpdate =
-      featureTypeUpdate !== "usage"
-        ? "none"
-        : (meterConfigUpdate?.aggregationMethod ??
-          existingPlanVersionFeature.aggregationMethod ??
-          "sum")
-
     const planVersionFeatureUpdated = await opts.ctx.db
       .update(schema.planVersionFeatures)
       .set({
@@ -152,9 +143,6 @@ export const update = protectedProjectProcedure
         ...(limit !== undefined && { limit: limit === 0 ? null : limit }),
         ...(shouldUpdateMeterConfig && {
           meterConfig: meterConfigUpdate,
-        }),
-        ...(shouldUpdateAggregationMethod && {
-          aggregationMethod: aggregationMethodUpdate,
         }),
         ...(billingConfigUpdate && {
           billingConfig: {

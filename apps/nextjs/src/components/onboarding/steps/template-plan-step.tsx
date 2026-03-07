@@ -409,7 +409,6 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
         const result = await updateEvent.mutateAsync({
           id: existingEvent.id,
           name: existingEvent.name,
-          slug: existingEvent.slug,
           availableProperties: mergedProperties,
         })
 

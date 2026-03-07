@@ -14,7 +14,6 @@ import {
   USAGE_MODES_MAP,
 } from "@unprice/db/utils"
 import type {
-  AggregationMethod,
   PlanVersion,
   PlanVersionFeature,
   PlanVersionFeatureDragDrop,
@@ -61,11 +60,8 @@ export function FeatureConfigForm({
 
   const editMode = !!defaultValues.id
   const isPublished = planVersion?.status === "published"
-  const featureMeterTemplate = "feature" in defaultValues ? defaultValues.feature?.meterConfig : undefined
-  const legacyAggregationMethod =
-    "aggregationMethod" in defaultValues
-      ? (defaultValues.aggregationMethod as AggregationMethod | undefined)
-      : undefined
+  const featureMeterTemplate =
+    "feature" in defaultValues ? defaultValues.feature?.meterConfig : undefined
   // const isProEnabled = useFlags(FEATURE_SLUGS.ACCESS_PRO.SLUG)
 
   // we set all possible values for the form so react-hook-form don't complain
@@ -128,6 +124,8 @@ export function FeatureConfigForm({
     schema: planVersionFeatureInsertBaseSchema,
     defaultValues: controlledDefaultValues as PlanVersionFeatureInsert,
   })
+
+  console.log(form.formState)
 
   const updatePlanVersionFeatures = useMutation(
     trpc.planVersionFeatures.update.mutationOptions({
@@ -431,7 +429,6 @@ export function FeatureConfigForm({
             currency={planVersion.currency}
             units={activeFeature?.unitOfMeasure ?? "units"}
             isDisabled={isPublished}
-            legacyAggregationMethod={legacyAggregationMethod}
           />
         )}
 

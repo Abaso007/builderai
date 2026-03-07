@@ -18,7 +18,7 @@ import { startTransition, useState } from "react"
 import { createPortal } from "react-dom"
 
 import { useMutation } from "@tanstack/react-query"
-import type { PlanVersionFeatureDragDrop } from "@unprice/db/validators"
+import type { PlanVersionFeatureDragDrop, PlanVersionFeatureInsert } from "@unprice/db/validators"
 import { useActiveFeature, useActivePlanVersion, usePlanFeaturesList } from "~/hooks/use-features"
 import { toastAction } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
@@ -32,6 +32,26 @@ const dropAnimation: DropAnimation = {
       },
     },
   }),
+}
+
+function toPlanVersionFeatureCreatePayload(
+  planFeatureVersion: PlanVersionFeatureDragDrop
+): PlanVersionFeatureInsert {
+  return {
+    planVersionId: planFeatureVersion.planVersionId,
+    featureId: planFeatureVersion.featureId,
+    featureType: planFeatureVersion.featureType,
+    config: planFeatureVersion.config,
+    billingConfig: planFeatureVersion.billingConfig,
+    resetConfig: planFeatureVersion.resetConfig,
+    metadata: planFeatureVersion.metadata,
+    order: planFeatureVersion.order,
+    defaultQuantity: planFeatureVersion.defaultQuantity ?? 1,
+    limit: planFeatureVersion.limit ?? undefined,
+    type: planFeatureVersion.type,
+    unitOfMeasure: planFeatureVersion.unitOfMeasure,
+    meterConfig: planFeatureVersion.meterConfig ?? undefined,
+  }
 }
 
 export default function DragDrop({ children }: { children: React.ReactNode }) {
@@ -99,13 +119,14 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
 
         return { previousFeatures }
       },
-      onError: (_, __, context) => {
+      onError: (error, __, context) => {
         // Rollback on error
         if (context?.previousFeatures) {
           setPlanFeaturesList(context.previousFeatures)
         } else {
           setPlanFeaturesList(clonedFeatures ?? [])
         }
+        toastAction("error", error.message)
       },
     })
   )
@@ -139,7 +160,9 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
 
       if (!planFeatureVersion.id) {
         // create a new plan feature
-        void createPlanVersionFeatures.mutateAsync({ ...planFeatureVersion })
+        void createPlanVersionFeatures.mutateAsync(
+          toPlanVersionFeatureCreatePayload(planFeatureVersion)
+        )
       } else {
         const clonedOrderFeatures = clonedFeatures?.filter((f) => f.id).map((t) => t.order) ?? []
 
