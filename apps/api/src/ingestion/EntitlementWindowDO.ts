@@ -7,7 +7,7 @@ import {
   type MeterDefinition,
   type RawEvent,
 } from "@unprice/services/entitlements"
-import { eq } from "drizzle-orm"
+import { asc, eq, inArray, lt, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import { DrizzleStorageAdapter } from "./drizzle-adapter"
@@ -24,6 +24,11 @@ type ApplyResult = {
   allowed: boolean
   deniedReason?: "LIMIT_EXCEEDED"
   message?: string
+}
+
+type OutboxBatchRow = {
+  id: number
+  payload: string
 }
 
 export class EntitlementWindowDO extends DurableObject {
@@ -43,9 +48,10 @@ export class EntitlementWindowDO extends DurableObject {
     await this.ready
 
     this.assertValidInput(input)
+    let insertedFactCount = 0
 
     try {
-      return this.db.transaction((tx) => {
+      const result = this.db.transaction((tx) => {
         const existing = tx
           .select({ result: idempotencyKeysTable.result })
           .from(idempotencyKeysTable)
@@ -59,6 +65,7 @@ export class EntitlementWindowDO extends DurableObject {
         const adapter = new DrizzleStorageAdapter(tx)
         const engine = new AsyncMeterAggregationEngine(input.meters, adapter)
         const facts = engine.applyEventSync(input.event, input.limit)
+        insertedFactCount = facts.length
 
         for (const fact of facts) {
           tx.insert(meterFactsOutboxTable)
@@ -78,6 +85,15 @@ export class EntitlementWindowDO extends DurableObject {
 
         return successResult
       })
+
+      if (result.allowed && insertedFactCount > 0) {
+        const currentAlarm = await this.ctx.storage.getAlarm()
+        if (currentAlarm === null) {
+          await this.ctx.storage.setAlarm(Date.now() + 30_000)
+        }
+      }
+
+      return result
     } catch (error) {
       if (error instanceof LimitExceededError) {
         return {
@@ -96,6 +112,55 @@ export class EntitlementWindowDO extends DurableObject {
 
       throw error
     }
+  }
+
+  async alarm(): Promise<void> {
+    await this.ready
+
+    const batch = this.db
+      .select({
+        id: meterFactsOutboxTable.id,
+        payload: meterFactsOutboxTable.payload,
+      })
+      .from(meterFactsOutboxTable)
+      .orderBy(asc(meterFactsOutboxTable.id))
+      .limit(1000)
+      .all()
+
+    if (batch.length > 0) {
+      const flushed = await this.flushToTinybird(batch)
+      if (flushed) {
+        this.db
+          .delete(meterFactsOutboxTable)
+          .where(
+            inArray(
+              meterFactsOutboxTable.id,
+              batch.map((row) => row.id)
+            )
+          )
+          .run()
+      }
+    }
+
+    this.db
+      .delete(idempotencyKeysTable)
+      .where(lt(idempotencyKeysTable.createdAt, Date.now() - 24 * 60 * 60 * 1000))
+      .run()
+
+    const remainingOutboxCount = this.getOutboxCount()
+    const selfDestructAt = this.getPeriodEndMs() + 30 * 24 * 60 * 60 * 1000
+
+    if (Date.now() > selfDestructAt && remainingOutboxCount === 0) {
+      await this.ctx.storage.deleteAll()
+      return
+    }
+
+    if (remainingOutboxCount > 0) {
+      await this.ctx.storage.setAlarm(Date.now() + 30_000)
+      return
+    }
+
+    await this.ctx.storage.setAlarm(selfDestructAt)
   }
 
   private assertValidInput(input: ApplyInput): void {
@@ -117,5 +182,22 @@ export class EntitlementWindowDO extends DurableObject {
       deniedReason: parsed.deniedReason,
       message: parsed.message,
     }
+  }
+
+  private async flushToTinybird(_batch: OutboxBatchRow[]): Promise<boolean> {
+    return true
+  }
+
+  private getPeriodEndMs(): number {
+    return Date.now() - 10 * 24 * 60 * 60 * 1000
+  }
+
+  private getOutboxCount(): number {
+    const row = this.db
+      .select({ count: sql<number>`count(*)` })
+      .from(meterFactsOutboxTable)
+      .get()
+
+    return Number(row?.count ?? 0)
   }
 }
