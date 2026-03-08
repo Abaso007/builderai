@@ -9,6 +9,7 @@ import serveEmojiFavicon from "stoker/middlewares/serve-emoji-favicon"
 
 export { DurableObjectUsagelimiter } from "~/usagelimiter/do"
 export { DurableObjectProject } from "~/project/do"
+export { EntitlementWindowDO } from "~/ingestion/EntitlementWindowDO"
 
 import { registerReportUsageV1 } from "~/routes/customer/reportUsageV1"
 import { registerCreatePaymentMethodV1 } from "./routes/customer/createPaymentMethodV1"

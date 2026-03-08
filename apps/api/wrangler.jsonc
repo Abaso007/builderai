@@ -77,6 +77,10 @@
           {
             "name": "projectdo",
             "class_name": "DurableObjectProject"
+          },
+          {
+            "name": "entitlementwindow",
+            "class_name": "EntitlementWindowDO"
           }
         ]
       },
@@ -88,6 +92,10 @@
         {
           "tag": "v2",
           "new_sqlite_classes": ["DurableObjectProject"]
+        },
+        {
+          "tag": "v3",
+          "new_sqlite_classes": ["EntitlementWindowDO"]
         }
       ]
     },
@@ -166,6 +174,10 @@
           {
             "name": "projectdo",
             "class_name": "DurableObjectProject"
+          },
+          {
+            "name": "entitlementwindow",
+            "class_name": "EntitlementWindowDO"
           }
         ]
       },
@@ -177,6 +189,10 @@
         {
           "tag": "v2",
           "new_sqlite_classes": ["DurableObjectProject"]
+        },
+        {
+          "tag": "v3",
+          "new_sqlite_classes": ["EntitlementWindowDO"]
         }
       ]
     },
@@ -226,6 +242,10 @@
           {
             "name": "projectdo",
             "class_name": "DurableObjectProject"
+          },
+          {
+            "name": "entitlementwindow",
+            "class_name": "EntitlementWindowDO"
           }
         ]
       },
@@ -259,6 +279,10 @@
         {
           "tag": "v2",
           "new_sqlite_classes": ["DurableObjectProject"]
+        },
+        {
+          "tag": "v3",
+          "new_sqlite_classes": ["EntitlementWindowDO"]
         }
       ]
     }
