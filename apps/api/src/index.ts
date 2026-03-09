@@ -21,6 +21,7 @@ import { registerResetEntitlementsV1 } from "./routes/customer/resetEntitlements
 import { registerResetUsageV1 } from "./routes/customer/resetUsageV1"
 import { registerSignUpV1 } from "./routes/customer/signUpV1"
 import { registerVerifyV1 } from "./routes/customer/verifyV1"
+import { registerIngestEventsV1 } from "./routes/events/ingestEventsV1"
 import { registerGetLakehouseFilePlanV1 } from "./routes/lakehouse/getLakehouseFilePlanV1"
 import { registerStripeSetupV1 } from "./routes/paymentProvider/stripeSetupV1"
 import { registerStripeSignUpV1 } from "./routes/paymentProvider/stripeSignUpV1"
@@ -124,6 +125,7 @@ app.use(
 
 // Customer routes
 registerReportUsageV1(app)
+registerIngestEventsV1(app)
 registerGetEntitlementsV1(app)
 registerVerifyV1(app)
 registerGetSubscriptionV1(app)

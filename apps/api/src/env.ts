@@ -5,6 +5,7 @@ import { env as envDb } from "@unprice/db/env"
 import { env as envObservability } from "@unprice/observability/env"
 import { env as envServices } from "@unprice/services/env"
 import { z } from "zod"
+import type { EntitlementWindowDO } from "~/ingestion/EntitlementWindowDO"
 import type { DurableObjectUsagelimiter } from "~/usagelimiter/do"
 import type { DurableObjectProject } from "./project/do"
 
@@ -37,6 +38,9 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
         (ns) => typeof ns === "object"
       ),
       projectdo: z.custom<DurableObjectNamespace<DurableObjectProject>>(
+        (ns) => typeof ns === "object"
+      ),
+      entitlementwindow: z.custom<DurableObjectNamespace<EntitlementWindowDO>>(
         (ns) => typeof ns === "object"
       ),
       RL_FREE_1000_60s: cloudflareRatelimiter,

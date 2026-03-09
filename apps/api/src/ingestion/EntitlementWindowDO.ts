@@ -10,9 +10,10 @@ import {
 import { asc, eq, inArray, lt, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
+import { idempotencyKeysTable, meterFactsOutboxTable } from "./db/schema"
+import { schema } from "./db/schema"
 import { DrizzleStorageAdapter } from "./drizzle-adapter"
 import migrations from "./drizzle/migrations"
-import { idempotencyKeysTable, meterFactsOutboxTable, schema } from "./schema"
 
 type ApplyInput = {
   event: RawEvent
@@ -47,10 +48,16 @@ export class EntitlementWindowDO extends DurableObject {
   public async apply(input: ApplyInput): Promise<ApplyResult> {
     await this.ready
 
+    console.log(this.ctx.id.toString())
+
+    // 1. validate the input
     this.assertValidInput(input)
+
+    // 2. check if the event is already processed
     let insertedFactCount = 0
 
     try {
+      // fan out pattern to avoid losing events if the transaction fails
       const result = this.db.transaction((tx) => {
         const existing = tx
           .select({ result: idempotencyKeysTable.result })
@@ -62,19 +69,25 @@ export class EntitlementWindowDO extends DurableObject {
           return this.parseStoredResult(existing.result)
         }
 
+        // create the adapter and the engine
         const adapter = new DrizzleStorageAdapter(tx)
+        // create the engine
         const engine = new AsyncMeterAggregationEngine(input.meters, adapter)
+        // apply the event
         const facts = engine.applyEventSync(input.event, input.limit)
         insertedFactCount = facts.length
 
+        // create the outbox batch of facts
         for (const fact of facts) {
           tx.insert(meterFactsOutboxTable)
             .values({ payload: JSON.stringify(fact) })
             .run()
         }
 
+        // create the idempotency key
         const successResult: ApplyResult = { allowed: true }
 
+        // store the result
         tx.insert(idempotencyKeysTable)
           .values({
             eventId: input.event.id,
@@ -83,10 +96,12 @@ export class EntitlementWindowDO extends DurableObject {
           })
           .run()
 
+        // return the result
         return successResult
       })
 
       if (result.allowed && insertedFactCount > 0) {
+        // set the alarm to flush the outbox to tinybird
         const currentAlarm = await this.ctx.storage.getAlarm()
         if (currentAlarm === null) {
           await this.ctx.storage.setAlarm(Date.now() + 30_000)
@@ -128,8 +143,10 @@ export class EntitlementWindowDO extends DurableObject {
       .all()
 
     if (batch.length > 0) {
+      // this needs to be reliable and idempotent
       const flushed = await this.flushToTinybird(batch)
       if (flushed) {
+        // delete the outbox records with cursor based deletion
         this.db
           .delete(meterFactsOutboxTable)
           .where(
@@ -142,15 +159,19 @@ export class EntitlementWindowDO extends DurableObject {
       }
     }
 
+    // we need to keep to idempotency keys for the same period as late arrival of events meaning 30 days
     this.db
       .delete(idempotencyKeysTable)
-      .where(lt(idempotencyKeysTable.createdAt, Date.now() - 24 * 60 * 60 * 1000))
+      .where(lt(idempotencyKeysTable.createdAt, Date.now() - 30 * 24 * 60 * 60 * 1000)) // 30 days
       .run()
 
     const remainingOutboxCount = this.getOutboxCount()
-    const selfDestructAt = this.getPeriodEndMs() + 30 * 24 * 60 * 60 * 1000
+    // after the entitlement end we give 30 days to self destruct
+    const selfDestructAt = this.getPeriodEndMs() + 30 * 24 * 60 * 60 * 1000 // 30 days
 
+    // delete the DO if the period is over and there are no remaining outbox records
     if (Date.now() > selfDestructAt && remainingOutboxCount === 0) {
+      await this.ctx.storage.deleteAlarm()
       await this.ctx.storage.deleteAll()
       return
     }
@@ -193,10 +214,7 @@ export class EntitlementWindowDO extends DurableObject {
   }
 
   private getOutboxCount(): number {
-    const row = this.db
-      .select({ count: sql<number>`count(*)` })
-      .from(meterFactsOutboxTable)
-      .get()
+    const row = this.db.select({ count: sql<number>`count(*)` }).from(meterFactsOutboxTable).get()
 
     return Number(row?.count ?? 0)
   }

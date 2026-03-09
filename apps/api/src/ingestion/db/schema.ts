@@ -21,4 +21,5 @@ export const schema = {
   meterFactsOutboxTable,
   idempotencyKeysTable,
 }
-export type schema = typeof schema
+
+export type SchemaIngestion = typeof schema

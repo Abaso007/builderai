@@ -11,6 +11,30 @@ export interface RawEvent {
   properties: Record<string, unknown>
 }
 
+// TODO: implement this later
+// type AggregationType = 'SUM' | 'COUNT' | 'MAX' | 'UNIQUE_COUNT' | 'LATEST';
+
+// interface RawEvent {
+//   id: string;           // idempotency key
+//   customerId: string;
+//   type: string;         // "ai_inference", "storage_write", etc.
+//   timestamp: string;
+//   properties: Record<string, string | number>; // open schema - capture everything
+// }
+
+// interface Meter {
+//   id: string;
+//   slug: string;               // e.g. "ai_tokens_used"
+//   eventType: string;          // matches raw event's `type` field
+//   aggregation: {
+//     type: AggregationType;
+//     field?: string;           // which property from the event payload to aggregate
+//   };
+//   filters?: Record<string, string[]>;  // e.g. { model: ['gpt-4o', 'gpt-4'] }
+//   groupBy?: string[];         // e.g. ['model', 'region'] for drill-down
+//   windowSize?: 'MINUTE' | 'HOUR' | 'DAY';  // pre-aggregation granularity
+// }
+
 export interface MeterDefinition {
   id: string
   eventType: string

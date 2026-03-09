@@ -1,7 +1,7 @@
 import type { StorageAdapter } from "@unprice/services/entitlements"
 import { eq, like } from "drizzle-orm"
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite"
-import { meterStateTable, type schema } from "./schema"
+import { meterStateTable, type schema } from "./db/schema"
 
 export class DrizzleStorageAdapter implements StorageAdapter {
   constructor(private db: DrizzleSqliteDODatabase<typeof schema>) {}
