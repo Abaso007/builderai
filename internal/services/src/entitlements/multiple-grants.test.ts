@@ -73,6 +73,7 @@ describe("EntitlementService - Multiple Grants", () => {
     },
     grants: [grantA, grantB],
     version: "v1",
+    isCurrent: true,
     effectiveAt: now - 10000,
     expiresAt: now + 10000,
     nextRevalidateAt: now + 300000,

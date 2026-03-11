@@ -78,6 +78,20 @@ describe("GrantsManager", () => {
           findFirst: vi.fn(),
         },
       },
+      transaction: vi.fn(async (callback) =>
+        callback({
+          update: vi.fn(() => ({
+            set: vi.fn(() => ({
+              where: vi.fn().mockResolvedValue([]),
+            })),
+          })),
+          insert: vi.fn(() => ({
+            values: vi.fn().mockImplementation((values) => ({
+              returning: vi.fn().mockResolvedValue([{ ...values }]),
+            })),
+          })),
+        })
+      ),
       insert: vi.fn(() => ({
         values: vi.fn(() => ({
           onConflictDoUpdate: vi.fn(() => ({
@@ -111,24 +125,6 @@ describe("GrantsManager", () => {
       return []
     })
 
-    // Mock existing entitlement (not found -> create new)
-    vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue(undefined)
-
-    // Mock insert to return the object passed to it (simulating DB behavior for test purposes)
-    vi.spyOn(mockDb, "insert").mockReturnValue({
-      values: vi.fn().mockImplementation((values) => ({
-        onConflictDoUpdate: vi.fn().mockImplementation((params) => ({
-          returning: vi.fn().mockResolvedValue([
-            {
-              ...values, // Return the values we just inserted
-              ...params.set, // Apply any updates
-              id: "ent_new_1",
-            },
-          ]),
-        })),
-      })),
-      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-    } as any)
   }
 
   describe("computeGrantsForCustomer - Merge Rules", () => {
@@ -165,12 +161,12 @@ describe("GrantsManager", () => {
       expect(entitlement!.limit).toBe(150) // 100 + 50
       expect(entitlement!.mergingPolicy).toBe("sum")
 
-      // Verify effectiveAt/expiresAt from min/max of grants
+      // Verify effectiveAt is set when the snapshot is materialized,
+      // and expiresAt remains derived from grant windows.
       expect(grants[0]).toBeDefined()
       expect(grants[1]).toBeDefined()
-      const minStart = Math.min(grants[0]!.effectiveAt, grants[1]!.effectiveAt)
       const maxEnd = Math.max(grants[0]!.expiresAt, grants[1]!.expiresAt)
-      expect(entitlement!.effectiveAt).toBe(minStart)
+      expect(entitlement!.effectiveAt).toBeGreaterThanOrEqual(now)
       expect(entitlement!.expiresAt).toBe(maxEnd)
 
       // Verify feature slug and type

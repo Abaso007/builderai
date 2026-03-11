@@ -657,6 +657,7 @@ export class GrantsManager {
       featureSlug,
       customerId,
       projectId,
+      isCurrent: true,
       version,
       nextRevalidateAt: Date.now() + this.revalidateInterval,
       computedAt: Date.now(),
@@ -706,19 +707,10 @@ export class GrantsManager {
 
     const computedState = computedStateResult.val
 
-    // get the current entitlement for the customer and feature
-    const currentEntitlement = await this.db.query.entitlements.findFirst({
-      where: (entitlement, { and, eq }) =>
-        and(
-          eq(entitlement.projectId, projectId),
-          eq(entitlement.customerId, customerId),
-          eq(entitlement.featureSlug, computedState.featureSlug)
-        ),
-    })
+    const entitlementId = newId("entitlement")
 
     // Prepare base entitlement data
     const entitlementData = {
-      id: currentEntitlement?.id ?? newId("entitlement"),
       projectId,
       customerId,
       featureSlug: computedState.featureSlug,
@@ -730,22 +722,46 @@ export class GrantsManager {
       mergingPolicy: computedState.mergingPolicy,
       grants: computedState.grants,
       version: computedState.version,
-      effectiveAt: computedState.effectiveAt,
-      expiresAt: computedState.expiresAt,
-      nextRevalidateAt: Date.now() + this.revalidateInterval,
-      computedAt: Date.now(),
-      updatedAtM: Date.now(),
       metadata: computedState.metadata,
     }
 
     const newEntitlement = await this.db
-      .insert(entitlements)
-      .values(entitlementData)
-      .onConflictDoUpdate({
-        target: [entitlements.projectId, entitlements.customerId, entitlements.featureSlug],
-        set: entitlementData,
+      .transaction(async (tx) => {
+        const now = Date.now()
+
+        // Close old active entitlement snapshot for this subject+feature.
+        await tx
+          .update(entitlements)
+          .set({
+            isCurrent: false,
+            expiresAt: now,
+            updatedAtM: now,
+          })
+          .where(
+            and(
+              eq(entitlements.projectId, projectId),
+              eq(entitlements.customerId, customerId),
+              eq(entitlements.featureSlug, computedState.featureSlug),
+              eq(entitlements.isCurrent, true)
+            )
+          )
+
+        // Insert new current materialized snapshot.
+        return tx
+          .insert(entitlements)
+          .values({
+            ...entitlementData,
+            id: entitlementId,
+            isCurrent: true,
+            effectiveAt: now,
+            expiresAt: computedState.expiresAt,
+            nextRevalidateAt: now + this.revalidateInterval,
+            computedAt: now,
+            updatedAtM: now,
+          })
+          .returning()
+          .then((rows) => rows?.[0] ?? null)
       })
-      .returning()
       .catch((error) => {
         this.logger.error(`Error computeEntitlementFromGrants: ${error.message}`, {
           error: {
@@ -753,11 +769,10 @@ export class GrantsManager {
             type: error instanceof Error ? error.name : undefined,
             stack: error instanceof Error ? error.stack : undefined,
           },
-          entitlementId: entitlementData.id,
+          entitlementId,
         })
         return null
       })
-      .then((rows) => rows?.[0] ?? null)
 
     if (!newEntitlement) {
       return Err(

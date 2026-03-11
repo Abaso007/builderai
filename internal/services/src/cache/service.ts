@@ -186,6 +186,14 @@ export class CacheService {
         fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
         stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
       }),
+      getEntitlementsFeature: new Namespace<CacheNamespaces["getEntitlementsFeature"]>(
+        this.context,
+        {
+          ...defaultOpts,
+          fresh: 1000 * 60 * 60 * 24, // 24 hours
+          stale: 1000 * 60 * 60, // 1 hour
+        }
+      ),
     })
 
     this.isInitialized = true

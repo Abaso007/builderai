@@ -76,6 +76,7 @@ export type CacheNamespaces = {
   getVerifications: Verifications | null
   getVerificationRegions: VerificationRegions | null
   getCurrentUsage: CurrentUsage | null
+  getEntitlementsFeature: Entitlement[]
 }
 
 export type CacheNamespace = keyof CacheNamespaces

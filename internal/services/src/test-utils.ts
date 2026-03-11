@@ -38,6 +38,7 @@ export const createMockEntitlementState = (
     nextRevalidateAt: now + 300000,
     computedAt: now,
     version: "v1",
+    isCurrent: true,
     grants: [],
     resetConfig: null,
     metadata: {

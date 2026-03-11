@@ -741,6 +741,101 @@ export class EntitlementService {
     return Ok(entitlements)
   }
 
+  private async getEntitlementsFeatureFromDB({
+    projectId,
+    customerId,
+    featureSlug,
+    historicalDays = 30,
+  }: {
+    projectId: string
+    customerId: string
+    featureSlug: string
+    historicalDays?: number
+  }): Promise<CacheNamespaces["getEntitlementsFeature"]> {
+    const historicalWindowMs = historicalDays * 24 * 60 * 60 * 1000
+    const historicalCutoff = Date.now() - historicalWindowMs
+
+    return this.db.query.entitlements.findMany({
+      where: (entitlement, { and, eq, gt, or }) =>
+        and(
+          eq(entitlement.projectId, projectId),
+          eq(entitlement.customerId, customerId),
+          eq(entitlement.featureSlug, featureSlug),
+          or(
+            eq(entitlement.isCurrent, true),
+            gt(entitlement.expiresAt, historicalCutoff - 1)
+          )
+        ),
+      orderBy: (entitlement, { desc }) => desc(entitlement.effectiveAt),
+    })
+  }
+
+  public async getEntitlementsFeature({
+    projectId,
+    customerId,
+    featureSlug,
+    historicalDays = 30,
+    opts,
+  }: {
+    projectId: string
+    customerId: string
+    featureSlug: string
+    historicalDays?: number
+    opts?: {
+      skipCache?: boolean
+    }
+  }): Promise<Result<CacheNamespaces["getEntitlementsFeature"], FetchError>> {
+    const cacheKey = `${projectId}:${customerId}:${featureSlug}:${historicalDays}`
+
+    const { val, err } = opts?.skipCache
+      ? await wrapResult(
+          this.getEntitlementsFeatureFromDB({
+            projectId,
+            customerId,
+            featureSlug,
+            historicalDays,
+          }),
+          (error) =>
+            new FetchError({
+              message: `unable to query entitlements from db in getEntitlementsFeatureFromDB - ${error.message}`,
+              retry: false,
+              context: {
+                error: error.message,
+                url: "",
+                customerId,
+                projectId,
+                featureSlug,
+                method: "getEntitlementsFeatureFromDB",
+              },
+            })
+        )
+      : await retry(
+          3,
+          async () =>
+            this.cache.getEntitlementsFeature.swr(cacheKey, () =>
+              this.getEntitlementsFeatureFromDB({
+                projectId,
+                customerId,
+                featureSlug,
+                historicalDays,
+              })
+            ),
+          () => {}
+        )
+
+    if (err) {
+      return Err(
+        new FetchError({
+          message: err.message,
+          retry: true,
+          cause: err,
+        })
+      )
+    }
+
+    return Ok(val ?? [])
+  }
+
   /**
    * RECONCILE: We need to reconcile the usage in storage with the source of truth in analytics.
    * This is extremly important to avoid double counting usage and other race conditions.
@@ -1602,7 +1697,8 @@ export class EntitlementService {
         and(
           eq(e.customerId, customerId),
           eq(e.projectId, projectId),
-          eq(e.featureSlug, featureSlug)
+          eq(e.featureSlug, featureSlug),
+          eq(e.isCurrent, true)
         ),
     })
 
@@ -1631,7 +1727,8 @@ export class EntitlementService {
         effectiveAt: true,
         expiresAt: true,
       },
-      where: (e, { and, eq }) => and(eq(e.customerId, customerId), eq(e.projectId, projectId)),
+      where: (e, { and, eq }) =>
+        and(eq(e.customerId, customerId), eq(e.projectId, projectId), eq(e.isCurrent, true)),
     })
 
     return entitlements

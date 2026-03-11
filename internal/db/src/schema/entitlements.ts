@@ -1,4 +1,4 @@
-import { not, relations } from "drizzle-orm"
+import { eq, not, relations } from "drizzle-orm"
 import {
   bigint,
   boolean,
@@ -8,6 +8,7 @@ import {
   json,
   primaryKey,
   unique,
+  uniqueIndex,
   varchar,
 } from "drizzle-orm/pg-core"
 
@@ -63,6 +64,8 @@ export const entitlements = pgTableProject(
       z.infer<typeof resetConfigSchema> & { resetAnchor: number }
     >(),
     aggregationMethod: aggregationMethodEnum("aggregation_method").notNull(),
+    // A flag to mark which version is currently active
+    isCurrent: boolean("is_current").notNull().default(true),
 
     // merging policy for the entitlement - sum, max, min, replace, etc.
     // sum limits, max limit, min limit, replace limit and units
@@ -106,14 +109,18 @@ export const entitlements = pgTableProject(
       columns: [table.id, table.projectId],
       name: "pk_entitlement",
     }),
-    // Unique constraint: one entitlement per subject + feature
-    uniqueSubjectFeature: unique("unique_subject_feature").on(
+    // customer can only have ONE "current" entitlement per feature,
+    // but unlimited historical (isCurrent = false) entitlements!
+    uniqueCurrentSubjectFeature: uniqueIndex("unique_current_subject_feature")
+      .on(table.projectId, table.customerId, table.featureSlug)
+      .where(eq(table.isCurrent, true)),
+    // Index for the Edge Cache Worker to quickly grab the 30-day window
+    idxEdgeCache: index("idx_entitlements_edge_cache").on(
       table.projectId,
       table.customerId,
-      table.featureSlug
+      table.featureSlug,
+      table.effectiveAt
     ),
-    // Index for grant version checking
-    idxVersion: index("idx_entitlements_version").on(table.projectId, table.version),
     projectfk: foreignKey({
       columns: [table.projectId],
       foreignColumns: [projects.id],
