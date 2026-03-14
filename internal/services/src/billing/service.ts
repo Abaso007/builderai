@@ -3,7 +3,6 @@ import { type Database, and, eq, inArray, sql } from "@unprice/db"
 import {
   billingPeriods,
   creditGrants,
-  grants,
   invoiceCreditApplications,
   invoiceItems,
   invoices,
@@ -56,7 +55,7 @@ interface ComputeInvoiceItemsResult {
 }
 
 interface ComputeCurrentUsageResult {
-  grantId: string | null
+  grantId?: string | null
   price: CalculatedPrice
   prorate: number
   cycleStartAt: number
@@ -1191,28 +1190,6 @@ export class BillingService {
           const featureGrants = metadata.grants
           const featureItems = metadata.items
 
-          // Resolver to map grantId to subscriptionItemId
-          const subscriptionItemIdResolver = (grantId: string) => {
-            // Check if any of the feature items match this grant
-            const grant = featureGrants.find((g) => g.id === grantId)
-            // Try to match based on direct link or feature version
-            // If grant has subscriptionItem populated, good.
-            // But we fetched grants with getGrantsForCustomer which uses grantSchemaExtended.
-            // The items have subscriptionItemId.
-
-            // If the grant corresponds to a subscription item in our invoice items list, return that ID.
-            if (grant?.subscriptionItem?.id) return grant.subscriptionItem.id
-
-            // Fallback: match by feature plan version id?
-            // If there's an invoice item with same feature plan version, use its subscriptionItemId
-            // But what if multiple items?
-            // Generally unique per feature plan version in a subscription phase.
-            const matchingItem = featureItems.find(
-              (i) => i.featurePlanVersionId === grant?.featurePlanVersionId
-            )
-            return matchingItem?.subscriptionItemId ?? undefined
-          }
-
           const calcResult = await this.calculateFeaturePrice({
             projectId: invoice.projectId,
             customerId: invoice.customerId,
@@ -1231,14 +1208,6 @@ export class BillingService {
             // Continue with other features? Or fail invoice?
             // Existing logic failed the invoice on error.
             return Err(new UnPriceBillingError({ message: calcResult.err.message }))
-          }
-
-          // Map results back to updatedItems
-          const itemBySubId = new Map<string, InvoiceItemExtended>()
-          for (const item of featureItems) {
-            if (item.subscriptionItemId) {
-              itemBySubId.set(item.subscriptionItemId, item)
-            }
           }
 
           if (calcResult.val.length === 0) {
@@ -1261,23 +1230,7 @@ export class BillingService {
             }
           } else {
             for (const res of calcResult.val) {
-              let targetItem: InvoiceItemExtended | undefined
-
-              // If we have a grantId, try to find the subscription item
-              if (res.grantId) {
-                // We rely on calculateFeaturePrice resolving the subscriptionItemId
-                // Or we resolve it again?
-                // calculateFeaturePrice uses resolver to fetch usage.
-                // result doesn't have subscriptionItemId.
-                // We need to map grantId -> subscriptionItemId again.
-                const subId = subscriptionItemIdResolver(res.grantId)
-                if (subId) {
-                  targetItem = itemBySubId.get(subId)
-                }
-              } else {
-                // Overage: default to first item
-                targetItem = featureItems[0]
-              }
+              const targetItem = featureItems[0]
 
               if (targetItem) {
                 const unitAmountCents = formatAmountDinero(res.price.unitPrice.dinero).amount
@@ -1922,19 +1875,13 @@ export class BillingService {
 
     const result = await trx
       .transaction(async (tx) => {
-        const txGrantsManager = new GrantsManager({
-          db: tx,
-          logger: this.logger,
-        })
-
         for (const phase of phases) {
           // 0. Cap any existing pending periods for this phase that exceed the phase end date
           // this is useful for mid-cycle cancellations or plan changes
           if (phase.endAt) {
             // update billing periods
-            let peiriodsUpdated: (typeof billingPeriods.$inferSelect)[] = []
             if (!dryRun) {
-              peiriodsUpdated = await tx
+              await tx
                 .update(billingPeriods)
                 .set({
                   cycleEndAt: sql`LEAST(${billingPeriods.cycleEndAt}, ${phase.endAt})`,
@@ -1950,19 +1897,6 @@ export class BillingService {
                     sql`${billingPeriods.cycleEndAt} > ${phase.endAt}`
                   )
                 )
-                .returning()
-            }
-
-            // update grants enddate
-            if (!dryRun && peiriodsUpdated && peiriodsUpdated.length > 0) {
-              for (const period of peiriodsUpdated) {
-                await tx
-                  .update(grants)
-                  .set({
-                    expiresAt: period.cycleEndAt,
-                  })
-                  .where(and(eq(grants.id, period.grantId), eq(grants.projectId, phase.projectId)))
-              }
             }
 
             // 0.1 Handle credits for already invoiced/paid periods that are now shortened (Prepaid Billing)
@@ -2103,66 +2037,6 @@ export class BillingService {
 
             if (windows.length === 0) continue
 
-            // 2. Resolve grants (fetch existing or create) for needed types
-            const needsTrial = windows.some((w) => w.isTrial)
-            const needsNormal = windows.some((w) => !w.isTrial)
-            const grantIds: Record<string, string> = {}
-
-            for (const type of [
-              needsTrial ? ("trial" as const) : null,
-              needsNormal ? ("subscription" as const) : null,
-            ].filter(Boolean)) {
-              if (!type) continue
-              const expiresAt = type === "trial" ? phase.trialEndsAt : phase.endAt
-
-              const existingGrant = await tx.query.grants.findFirst({
-                where: (g, { and, eq, or, isNull, lte, gte }) =>
-                  and(
-                    eq(g.projectId, phase.projectId),
-                    eq(g.subjectType, "customer"),
-                    eq(g.subjectId, phase.subscription.customerId),
-                    eq(g.featurePlanVersionId, item.featurePlanVersion.id),
-                    eq(g.type, type),
-                    eq(g.deleted, false),
-                    lte(g.effectiveAt, phase.startAt),
-                    or(isNull(g.expiresAt), expiresAt ? gte(g.expiresAt, expiresAt) : undefined)
-                  ),
-                orderBy: (g, { desc }) => desc(g.effectiveAt),
-              })
-
-              if (existingGrant) {
-                grantIds[type] = existingGrant.id
-              } else {
-                if (!dryRun) {
-                  const createGrantResult = await txGrantsManager.createGrant({
-                    grant: {
-                      id: newId("grant"),
-                      name: "Base Plan",
-                      projectId: phase.projectId,
-                      effectiveAt: phase.startAt,
-                      expiresAt: expiresAt,
-                      type: type,
-                      subjectType: "customer",
-                      subjectId: phase.subscription.customerId,
-                      featurePlanVersionId: item.featurePlanVersion.id,
-                      autoRenew: false,
-                      limit: item.units ?? item.featurePlanVersion.limit ?? null,
-                      overageStrategy: item.featurePlanVersion.metadata?.overageStrategy ?? "none",
-                      units: item.units,
-                      anchor: phase.billingAnchor,
-                      metadata: {
-                        note: "Billing period grant created by billing service",
-                      },
-                    },
-                  })
-                  if (createGrantResult.err) throw createGrantResult.err
-                  grantIds[type] = createGrantResult.val.id
-                } else {
-                  grantIds[type] = `mock_grant_${type}`
-                }
-              }
-            }
-
             // 3. Prepare all billing period values for this item
             const billingPeriodValues = await Promise.all(
               windows.map(async (w) => {
@@ -2182,10 +2056,6 @@ export class BillingService {
                   collectionMethod: phase.planVersion.collectionMethod,
                 })
 
-                const type = w.isTrial ? "trial" : "subscription"
-                const grantId = grantIds[type]
-                if (!grantId) throw new Error(`Failed to resolve grant for type: ${type}`)
-
                 return {
                   id: newId("billing_period"),
                   projectId: phase.projectId,
@@ -2203,7 +2073,6 @@ export class BillingService {
                   invoiceId: null,
                   amountEstimateCents: null,
                   reason: w.isTrial ? ("trial" as const) : ("normal" as const),
-                  grantId,
                 }
               })
             )

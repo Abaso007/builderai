@@ -392,6 +392,132 @@ describe("Golden Scenario - Customer Journey", () => {
     expect(stored.val?.meter.usage).toBe("50")
   })
 
+  it("materializes billing periods without resolving or storing grantId", async () => {
+    const allInsertValues: unknown[] = []
+    const grantsFindFirstSpy = vi.spyOn(mockDb.query.grants, "findFirst")
+
+    vi.spyOn(mockDb, "insert").mockImplementation(
+      () =>
+        ({
+          values: vi.fn().mockImplementation((values) => {
+            allInsertValues.push(values)
+            return {
+              returning: vi.fn().mockResolvedValue(Array.isArray(values) ? values : [values]),
+              onConflictDoNothing: vi.fn().mockImplementation(() => ({
+                returning: vi.fn().mockResolvedValue(Array.isArray(values) ? values : [values]),
+              })),
+              onConflictDoUpdate: vi.fn().mockImplementation((params) => ({
+                returning: vi.fn().mockResolvedValue([{ ...values, ...params.set }]),
+              })),
+            }
+          }),
+          // biome-ignore lint/suspicious/noExplicitAny: test double shape
+        }) as any
+    )
+
+    const billingResult = await _billingService.generateBillingPeriods({
+      subscriptionId: "sub_123",
+      projectId,
+      now: clock.now(),
+      dryRun: false,
+    })
+
+    expect(billingResult.err).toBeUndefined()
+    expect(grantsFindFirstSpy).not.toHaveBeenCalled()
+
+    const billingPeriodInsert = allInsertValues
+      .flatMap((value) => (Array.isArray(value) ? value : [value]))
+      .find(
+        (value): value is Record<string, unknown> =>
+          typeof value === "object" &&
+          value !== null &&
+          String((value as { id?: unknown }).id ?? "").startsWith("billing_period_")
+      )
+
+    expect(billingPeriodInsert).toBeDefined()
+    expect(billingPeriodInsert).not.toHaveProperty("grantId")
+    expect(billingPeriodInsert).toMatchObject({
+      projectId,
+      subscriptionId: "sub_123",
+      customerId,
+      subscriptionPhaseId: "phase_123",
+      subscriptionItemId: "item_123",
+    })
+  })
+
+  it("creates phase-owned grants with subscription metadata for active phases", async () => {
+    vi.spyOn(mockDb.query.versions, "findFirst").mockResolvedValue(
+      mockPlanVersion as unknown as PlanVersion
+    )
+
+    const allInsertValues: unknown[] = []
+
+    vi.spyOn(mockDb, "insert").mockImplementation(
+      () =>
+        ({
+          values: vi.fn().mockImplementation((values) => {
+            allInsertValues.push(values)
+            return {
+              returning: vi.fn().mockResolvedValue(Array.isArray(values) ? values : [values]),
+              onConflictDoNothing: vi.fn().mockImplementation(() => ({
+                returning: vi.fn().mockResolvedValue(Array.isArray(values) ? values : [values]),
+              })),
+              onConflictDoUpdate: vi.fn().mockImplementation((params) => ({
+                returning: vi.fn().mockResolvedValue([{ ...values, ...params.set }]),
+              })),
+            }
+          }),
+          // biome-ignore lint/suspicious/noExplicitAny: test double shape
+        }) as any
+    )
+
+    const createPhaseResult = await subscriptionService.createPhase({
+      input: {
+        subscriptionId: "sub_123",
+        planVersionId: "pv_123",
+        startAt: clock.now(),
+        config: [
+          {
+            featurePlanId: "pf_1",
+            units: 1000,
+            featureSlug,
+          },
+        ],
+        customerId,
+        paymentMethodRequired: false,
+      },
+      projectId,
+      now: clock.now(),
+    })
+
+    expect(createPhaseResult.err).toBeUndefined()
+
+    const grantInsert = allInsertValues
+      .flatMap((value) => (Array.isArray(value) ? value : [value]))
+      .find(
+        (value): value is Record<string, unknown> =>
+          typeof value === "object" &&
+          value !== null &&
+          (value as { subjectType?: unknown }).subjectType === "customer" &&
+          (value as { featurePlanVersionId?: unknown }).featurePlanVersionId === "pf_1"
+      )
+
+    expect(grantInsert).toBeDefined()
+    expect(grantInsert).toMatchObject({
+      projectId,
+      subjectType: "customer",
+      subjectId: customerId,
+      featurePlanVersionId: "pf_1",
+      type: "subscription",
+      autoRenew: false,
+      metadata: {
+        subscriptionId: "sub_123",
+        subscriptionPhaseId: expect.any(String),
+        subscriptionItemId: expect.any(String),
+      },
+    })
+  })
+
   it("should handle phase changes: upgrade -> downgrade with entitlement resets", async () => {
     // 1. Sign up & Subscription
     vi.spyOn(mockDb.query.versions, "findFirst").mockResolvedValue(

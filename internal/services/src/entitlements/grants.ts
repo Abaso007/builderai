@@ -69,6 +69,128 @@ export class GrantsManager {
     return Ok(undefined)
   }
 
+  /**
+   * Returns subscription-sourced grants that belong to a specific phase window.
+   *
+   * Lookup is based on the phase's subscription items (`featurePlanVersionId`) plus
+   * the phase time range, so metadata remains informational instead of acting as
+   * the primary ownership key.
+   */
+  public async getPhaseOwnedGrants(params: {
+    projectId: string
+    customerId: string
+    subscriptionPhaseId: string
+    featurePlanVersionIds: string[]
+    phaseStartAt: number
+    phaseEndAt: number | null
+  }): Promise<Result<z.infer<typeof grantSchema>[], FetchError | UnPriceGrantError>> {
+    const {
+      projectId,
+      customerId,
+      subscriptionPhaseId,
+      featurePlanVersionIds,
+      phaseStartAt,
+      phaseEndAt,
+    } = params
+
+    if (featurePlanVersionIds.length === 0) {
+      return Ok([])
+    }
+
+    try {
+      const customerGrants = await this.db.query.grants.findMany({
+        where: (grant, { and, eq, inArray, lte, gt, or, isNull }) =>
+          and(
+            eq(grant.projectId, projectId),
+            eq(grant.subjectType, "customer"),
+            eq(grant.subjectId, customerId),
+            eq(grant.deleted, false),
+            inArray(grant.featurePlanVersionId, featurePlanVersionIds),
+            inArray(grant.type, ["subscription", "trial"]),
+            phaseEndAt ? lte(grant.effectiveAt, phaseEndAt) : undefined,
+            or(isNull(grant.expiresAt), gt(grant.expiresAt, phaseStartAt))
+          ),
+        orderBy: (grant, { desc }) => desc(grant.effectiveAt),
+      })
+
+      return Ok(customerGrants)
+    } catch (error) {
+      this.logger.error("Error getting phase-owned grants", {
+        error: {
+          message: error instanceof Error ? error.message : String(error),
+          type: error instanceof Error ? error.name : undefined,
+          stack: error instanceof Error ? error.stack : undefined,
+        },
+        projectId,
+        customerId,
+        subscriptionPhaseId,
+      })
+
+      return Err(
+        new FetchError({
+          message: `Failed to get phase-owned grants: ${error instanceof Error ? error.message : String(error)}`,
+          retry: true,
+        })
+      )
+    }
+  }
+
+  /**
+   * Soft-deletes the subset of grants that belong to a phase.
+   *
+   * Callers can optionally pass explicit `grantIds` when they already resolved the
+   * precise rows to remove during a reconciliation pass.
+   */
+  public async deletePhaseOwnedGrants(params: {
+    projectId: string
+    customerId: string
+    subscriptionPhaseId: string
+    featurePlanVersionIds: string[]
+    phaseStartAt: number
+    phaseEndAt: number | null
+    grantIds?: string[]
+  }): Promise<Result<void, FetchError | UnPriceGrantError>> {
+    const {
+      projectId,
+      customerId,
+      subscriptionPhaseId,
+      featurePlanVersionIds,
+      phaseStartAt,
+      phaseEndAt,
+      grantIds,
+    } = params
+
+    const { err, val: phaseOwnedGrants } = await this.getPhaseOwnedGrants({
+      projectId,
+      customerId,
+      subscriptionPhaseId,
+      featurePlanVersionIds,
+      phaseStartAt,
+      phaseEndAt,
+    })
+
+    if (err) {
+      return Err(err)
+    }
+
+    const idsToDelete = grantIds?.length
+      ? phaseOwnedGrants
+          .filter((grant) => grantIds.includes(grant.id))
+          .map((grant) => grant.id)
+      : phaseOwnedGrants.map((grant) => grant.id)
+
+    if (idsToDelete.length === 0) {
+      return Ok(undefined)
+    }
+
+    return this.deleteGrants({
+      grantIds: idsToDelete,
+      projectId,
+      subjectType: "customer",
+      subjectId: customerId,
+    })
+  }
+
   public async getGrantsForCustomer(
     params:
       | {
