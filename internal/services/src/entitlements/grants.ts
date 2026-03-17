@@ -708,6 +708,7 @@ export class GrantsManager {
    * @throws UnPriceGrantError if the entitlements cannot be computed
    * @throws FetchError if the entitlements cannot be computed
    */
+  // TODO: we need to change this to compute entitlements customer
   public async computeGrantsForCustomer({
     customerId,
     projectId,

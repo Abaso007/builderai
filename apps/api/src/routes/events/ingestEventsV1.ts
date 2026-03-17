@@ -25,8 +25,12 @@ const rawEventSchema = z.object({
     example: "evt_123",
   }),
   slug: z.string().openapi({
-    description: "The event type",
-    example: "tokens.used",
+    description: "The event slug",
+    example: "tokens_used",
+  }),
+  customerId: z.string().openapi({
+    description: "The unprice customer id",
+    example: "cus_123",
   }),
   timestamp: z.number().openapi({
     description: "Event timestamp in epoch milliseconds",
@@ -37,18 +41,6 @@ const rawEventSchema = z.object({
     example: {
       amount: 1,
     },
-  }),
-})
-
-const ingestRequestSchema = z.object({
-  event: rawEventSchema,
-  customerId: z.string().openapi({
-    description: "The unprice customer id",
-    example: "cus_123",
-  }),
-  entitlementId: z.string().openapi({
-    description: "The entitlement id",
-    example: "ent_123",
   }),
 })
 
@@ -93,7 +85,7 @@ export const route = createRoute({
   method: "post",
   tags,
   request: {
-    body: jsonContentRequired(ingestRequestSchema, "The event ingestion payload"),
+    body: jsonContentRequired(rawEventSchema, "The event ingestion payload"),
   },
   responses: {
     [HttpStatusCodes.OK]: jsonContent(
@@ -108,7 +100,7 @@ export const route = createRoute({
   },
 })
 
-type IngestRequest = z.infer<typeof ingestRequestSchema>
+type IngestRequest = z.infer<typeof rawEventSchema>
 
 export const registerIngestEventsV1 = (app: App) =>
   app.openapi(route, async (c) => {
@@ -119,7 +111,7 @@ export const registerIngestEventsV1 = (app: App) =>
 
     try {
       // validate that the event timestamp is not too far in the future or too old
-      validateEventTimestamp(body.event.timestamp, Date.now())
+      validateEventTimestamp(body.timestamp, Date.now())
     } catch (error) {
       if (
         error instanceof EventTimestampTooFarInFutureError ||
@@ -134,9 +126,11 @@ export const registerIngestEventsV1 = (app: App) =>
       throw error
     }
 
+    // I think I need to get the entitlements first.
+
     // 1. send the event to the cloudflare pipeline
     // TODO: should I wait here?
-    c.executionCtx.waitUntil(sendToCloudflarePipeline(body.event))
+    c.executionCtx.waitUntil(sendToCloudflarePipeline(body))
 
     // 2. get the cached entitlement versions
     // this adds aprox 10ms - 20ms to the request
@@ -145,8 +139,8 @@ export const registerIngestEventsV1 = (app: App) =>
     // 3. find the active entitlement version
     const activeVersion = versions.find(
       (version) =>
-        version.validFrom <= body.event.timestamp &&
-        (version.validTo === null || body.event.timestamp < version.validTo)
+        version.validFrom <= body.timestamp &&
+        (version.validTo === null || body.timestamp < version.validTo)
     )
 
     if (!activeVersion) {
@@ -166,19 +160,19 @@ export const registerIngestEventsV1 = (app: App) =>
     // 4. compute the period key and the DO name
     // this simplifies everything because we don't need to rotate the DOs state, we just pass the new period key
     // Old DOs remain for one month to support late arrival of events, pass that the DO is deleted by alarm
-    const periodKey = computeEntitlementPeriodKey(body.event.timestamp, activeVersion)
+    const periodKey = computeEntitlementPeriodKey(body.timestamp, activeVersion)
     // TODO: const entitlementId should come from activeVersion configuration
     // The key should add the environment as well to support multiple environments
     // data base is copied between envs so we differentiate by environment in the key
-    const doName = `${body.customerId}:${body.entitlementId}:${periodKey}`
+    const doName = `${body.customerId}:${body.slug}:${periodKey}`
     // we need to improve this to support location hints like usagelimiter DOs
     const id = c.env.entitlementwindow.idFromName(doName)
     const stub = c.env.entitlementwindow.get(id)
     // this add aprox 30ms - 50ms to the request
     const result = await stub.apply({
-      event: body.event,
+      event: body,
       // this comes from DB configuration for the entitlement
-      meters: buildMockMeters(body.event, body.entitlementId),
+      meters: buildMockMeters(body, body.slug),
       limit: activeVersion.limit,
       overageStrategy: activeVersion.overageStrategy,
     })
