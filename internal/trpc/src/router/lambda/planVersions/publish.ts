@@ -100,11 +100,10 @@ export const publish = protectedProjectProcedure
         metrics: opts.ctx.metrics,
       })
 
-      const { err: validatePaymentMethodErr } = await customerService.validatePaymentMethod({
+      const { err: validatePaymentMethodErr } = await customerService.getPaymentProvider({
         customerId: workspace.unPriceCustomerId,
         projectId: project.id,
-        paymentProvider: planVersionData.paymentProvider,
-        requiredPaymentMethod: true,
+        provider: planVersionData.paymentProvider,
       })
 
       if (validatePaymentMethodErr) {

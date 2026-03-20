@@ -5,6 +5,7 @@ export interface LakehouseCursorState {
   lastR2VerificationId: number | null
 }
 
+export type LakehouseEventsEvent = LakehouseEventForSource<"events">
 export type LakehouseUsageEvent = LakehouseEventForSource<"usage">
 export type LakehouseVerificationEvent = LakehouseEventForSource<"verification">
 export type LakehouseMetadataEvent = LakehouseEventForSource<"metadata">

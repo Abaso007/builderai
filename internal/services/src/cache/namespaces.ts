@@ -53,6 +53,7 @@ export type CacheNamespaces = {
   customer: CustomerCache | null
   customerByExternalId: CustomerCache | null
   customerEntitlement: Entitlement | null
+  customerRelevantEntitlements: Entitlement[]
   accessControlList: {
     customerUsageLimitReached: boolean | null
     customerDisabled: boolean | null

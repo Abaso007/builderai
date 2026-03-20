@@ -88,6 +88,10 @@ export class CacheService {
         fresh: 1000 * 60 * 60 * 24, // 24 hours
         stale: 1000 * 60 * 60 * 1, // 1 hour
       }),
+      customerRelevantEntitlements: new Namespace<CacheNamespaces["customerRelevantEntitlements"]>(
+        this.context,
+        defaultOpts
+      ),
       accessControlList: new Namespace<CacheNamespaces["accessControlList"]>(this.context, {
         ...defaultOpts,
         fresh: 1000 * 60 * 1, // Consider them "fresh" for 1 minute

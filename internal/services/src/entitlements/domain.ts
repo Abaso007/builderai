@@ -2,8 +2,8 @@ import { calculateCycleWindow } from "@unprice/db/validators"
 import type { MeterConfig as DbMeterConfig } from "@unprice/db/validators"
 import { BaseError } from "@unprice/error"
 
-export const MAX_FUTURE_EVENT_SKEW_MS = 5_000
-export const MAX_EVENT_AGE_MS = 30 * 24 * 60 * 60 * 1_000
+export const MAX_FUTURE_EVENT_SKEW_MS = 5_000 // 5 secs is more than enough to avoid clock skews
+export const MAX_EVENT_AGE_MS = 30 * 24 * 60 * 60 * 1_000 // 30 days to allow late events
 
 export interface RawEvent {
   id: string
@@ -95,6 +95,11 @@ export class PeriodKeyComputationError extends BaseError<{
   }
 }
 
+/**
+ * This function validates the events timestamp is not too old or too far in the future
+ * @param eventTimeMs
+ * @param serverTimeMs
+ */
 export function validateEventTimestamp(eventTimeMs: number, serverTimeMs: number): void {
   if (eventTimeMs - serverTimeMs >= MAX_FUTURE_EVENT_SKEW_MS) {
     throw new EventTimestampTooFarInFutureError(eventTimeMs, serverTimeMs)

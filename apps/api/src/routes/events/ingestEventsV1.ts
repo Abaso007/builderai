@@ -1,30 +1,38 @@
 import { createRoute } from "@hono/zod-openapi"
-import type { OverageStrategy } from "@unprice/db/validators"
+import type { AppLogger } from "@unprice/observability"
 import {
   EventTimestampTooFarInFutureError,
   EventTimestampTooOldError,
-  type MeterConfig,
-  type RawEvent,
-  computePeriodKey,
   validateEventTimestamp,
 } from "@unprice/services/entitlements"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
+import { ulid } from "ulid"
 import { z } from "zod"
-import { keyAuth } from "~/auth/key"
+import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { type IngestionQueueMessage, ingestionQueueMessageSchema } from "~/ingestion/message"
 
 const tags = ["ingestion"]
-const DAY_MS = 24 * 60 * 60 * 1000
+const SAFE_QUEUE_SEND_RETRIES = 3
+const SAFE_QUEUE_SEND_BASE_DELAY_MS = 100
 
 const rawEventSchema = z.object({
-  id: z.string().openapi({
-    description: "The unique event id",
-    example: "evt_123",
+  id: z
+    .string()
+    .openapi({
+      description:
+        "Optional event id. If omitted, the API will generate an internal event id for processing.",
+      example: "evt_123",
+    })
+    .optional(),
+  idempotencyKey: z.string().openapi({
+    description: "Logical idempotency key for deduplicating raw events",
+    example: "idem_123",
   }),
-  slug: z.string().openapi({
+  eventSlug: z.string().openapi({
     description: "The event slug",
     example: "tokens_used",
   }),
@@ -32,10 +40,14 @@ const rawEventSchema = z.object({
     description: "The unprice customer id",
     example: "cus_123",
   }),
-  timestamp: z.number().openapi({
-    description: "Event timestamp in epoch milliseconds",
-    example: 1_741_454_800_000,
-  }),
+  timestamp: z
+    .number()
+    .openapi({
+      description:
+        "Event timestamp in epoch milliseconds, if not provided will use the time of the request",
+      example: 1_741_454_800_000,
+    })
+    .optional(),
   properties: z.record(z.string(), z.unknown()).openapi({
     description: "Arbitrary event properties",
     example: {
@@ -44,74 +56,52 @@ const rawEventSchema = z.object({
   }),
 })
 
-const ingestApplyResultSchema = z.object({
-  allowed: z.boolean().openapi({
-    description: "Whether the event was accepted by synchronous entitlement window evaluation",
-    example: true,
-  }),
-  deniedReason: z.literal("LIMIT_EXCEEDED").optional().openapi({
-    description:
-      "Present when the event exceeds strict limit policy in the current entitlement window",
-    example: "LIMIT_EXCEEDED",
-  }),
-  message: z.string().optional().openapi({
-    description: "Optional explanatory message from the DO",
-    example: "Event already processed",
-  }),
-})
-
 const acceptedSchema = z.object({
   accepted: z.literal(true).openapi({
-    description: "The event was accepted for asynchronous processing only",
+    description: "The raw event was accepted for asynchronous processing",
     example: true,
   }),
 })
-
-type CachedEntitlementVersion = {
-  limit: number | null
-  overageStrategy: OverageStrategy
-  validFrom: number
-  validTo: number | null
-  interval: "month" | "lifetime"
-  anchorDay: number
-}
 
 export const route = createRoute({
   path: "/v1/events/ingest",
   operationId: "ingestion.ingestEvent",
-  summary: "ingest event",
-  description:
-    "Ingest an event and synchronously aggregate it into the authoritative DO window with optional strict limit policy",
+  summary: "ingest raw event",
+  description: "Ingest a raw events",
   method: "post",
   tags,
   request: {
-    body: jsonContentRequired(rawEventSchema, "The event ingestion payload"),
+    body: jsonContentRequired(rawEventSchema, "The raw event ingestion payload"),
   },
   responses: {
-    [HttpStatusCodes.OK]: jsonContent(
-      ingestApplyResultSchema,
-      "The event was synchronously aggregated by the Durable Object"
-    ),
     [HttpStatusCodes.ACCEPTED]: jsonContent(
       acceptedSchema,
-      "The raw event was accepted, but synchronous DO aggregation was skipped"
+      "The raw event was accepted for asynchronous processing"
     ),
     ...openApiErrorResponses,
   },
 })
 
-type IngestRequest = z.infer<typeof rawEventSchema>
-
 export const registerIngestEventsV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const body = c.req.valid("json")
+    const requestId = c.get("requestId")
+    // we use this as the time of the request to avoid clock skews
+    const receivedAt = c.get("requestStartedAt")
+    const timestamp = body.timestamp ?? receivedAt
+    const { logger } = c.get("services")
 
-    // authenticate the request
-    await keyAuth(c)
+    // we shard the load in 2 queues for now, more than enough as we scale we add more
+    const availableQueues = [c.env.QUEUE_SHARD_0, c.env.QUEUE_SHARD_1]
+
+    // 1. auth for the request
+    const key = await keyAuth(c)
+    // 2. resolve the proper project Id if this is called from main project
+    const projectId = await resolveContextProjectId(c, key.projectId, body.customerId)
 
     try {
-      // validate that the event timestamp is not too far in the future or too old
-      validateEventTimestamp(body.timestamp, Date.now())
+      // 3. events that are too old doesn't get pass, also events that are too far from the future.
+      validateEventTimestamp(timestamp, receivedAt)
     } catch (error) {
       if (
         error instanceof EventTimestampTooFarInFutureError ||
@@ -126,129 +116,116 @@ export const registerIngestEventsV1 = (app: App) =>
       throw error
     }
 
-    // I think I need to get the entitlements first.
+    // 4. the event should be parsed to be sure we don't receive garbage, before sending it
+    // to the queue
+    // TODO: we could deduplicate this here in memory
+    const eventId = body.id ?? generateEventId(receivedAt)
 
-    // 1. send the event to the cloudflare pipeline
-    // TODO: should I wait here?
-    c.executionCtx.waitUntil(sendToCloudflarePipeline(body))
+    const message: IngestionQueueMessage = ingestionQueueMessageSchema.parse({
+      version: 1,
+      projectId,
+      customerId: body.customerId,
+      requestId,
+      receivedAt,
+      idempotencyKey: body.idempotencyKey,
+      id: eventId,
+      slug: body.eventSlug,
+      timestamp,
+      properties: body.properties,
+    })
 
-    // 2. get the cached entitlement versions
-    // this adds aprox 10ms - 20ms to the request
-    const versions = await getCachedEntitlementVersions()
+    // shard by customerid to make sure the messages of specific customer go to the same queue
+    // this way we can group them together in background
+    const selectedQueue =
+      availableQueues[selectQueueShardIndex(body.customerId, availableQueues.length)]!
 
-    // 3. find the active entitlement version
-    const activeVersion = versions.find(
-      (version) =>
-        version.validFrom <= body.timestamp &&
-        (version.validTo === null || body.timestamp < version.validTo)
+    // This sends the message in background to avoid blocking the requests
+    // There is a retry mechanism and last option we send to analytics events
+    c.executionCtx.waitUntil(
+      safeSendToQueue({
+        env: c.env,
+        queue: selectedQueue,
+        message,
+        logger,
+      })
     )
 
-    if (!activeVersion) {
-      return c.json({ accepted: true as const }, HttpStatusCodes.ACCEPTED)
-    }
-
-    // TODO: implement this later from DB configuration
-    // if the entitltment doesn't have meters we use the default meters
-    // const defaultMeters = [
-    //   {
-    //   id: "default_usage",
-    //     eventType: body.event.type,
-    //     aggregation: { type: "SUM", field: "$usage" },
-    //   },
-    // ]
-
-    // 4. compute the period key and the DO name
-    // this simplifies everything because we don't need to rotate the DOs state, we just pass the new period key
-    // Old DOs remain for one month to support late arrival of events, pass that the DO is deleted by alarm
-    const periodKey = computeEntitlementPeriodKey(body.timestamp, activeVersion)
-    // TODO: const entitlementId should come from activeVersion configuration
-    // The key should add the environment as well to support multiple environments
-    // data base is copied between envs so we differentiate by environment in the key
-    const doName = `${body.customerId}:${body.slug}:${periodKey}`
-    // we need to improve this to support location hints like usagelimiter DOs
-    const id = c.env.entitlementwindow.idFromName(doName)
-    const stub = c.env.entitlementwindow.get(id)
-    // this add aprox 30ms - 50ms to the request
-    const result = await stub.apply({
-      event: body,
-      // this comes from DB configuration for the entitlement
-      meters: buildMockMeters(body, body.slug),
-      limit: activeVersion.limit,
-      overageStrategy: activeVersion.overageStrategy,
-    })
-
-    return c.json(result, HttpStatusCodes.OK)
+    // after proccessed return 202
+    return c.json({ accepted: true as const }, HttpStatusCodes.ACCEPTED)
   })
 
-async function sendToCloudflarePipeline(_event: RawEvent): Promise<void> {}
+/**
+ * simple hash algo to shared queues
+ * @param customerId
+ * @param shardCount
+ * @returns
+ */
+export function selectQueueShardIndex(customerId: string, shardCount = 2): number {
+  let hash = 0
 
-async function getCachedEntitlementVersions(): Promise<CachedEntitlementVersion[]> {
-  const now = 1773081881795
-  return [
-    {
-      limit: 100,
-      overageStrategy: "none",
-      validFrom: now - 14 * DAY_MS,
-      validTo: now - 7 * DAY_MS,
-      interval: "month",
-      anchorDay: 1,
-    },
-    {
-      limit: 250,
-      overageStrategy: "always",
-      validFrom: now - 7 * DAY_MS,
-      validTo: null,
-      interval: "month",
-      anchorDay: 1,
-    },
-  ]
-}
-
-function computeEntitlementPeriodKey(
-  eventTimestamp: number,
-  activeVersion: CachedEntitlementVersion
-): string {
-  // TODO: migrate this and use reset config instead
-  if (activeVersion.interval === "lifetime") {
-    return computePeriodKey({
-      now: eventTimestamp,
-      effectiveStartDate: activeVersion.validFrom,
-      effectiveEndDate: activeVersion.validTo,
-      trialEndsAt: null,
-      config: {
-        name: "ingestion",
-        interval: "onetime",
-        intervalCount: 1,
-        anchor: "dayOfCreation",
-        planType: "onetime",
-      },
-    })
+  for (let index = 0; index < customerId.length; index++) {
+    hash = (hash * 31 + customerId.charCodeAt(index)) >>> 0
   }
 
-  return computePeriodKey({
-    now: eventTimestamp,
-    effectiveStartDate: activeVersion.validFrom,
-    effectiveEndDate: activeVersion.validTo,
-    trialEndsAt: null,
-    config: {
-      name: "ingestion",
-      interval: "month",
-      intervalCount: 1,
-      anchor: activeVersion.anchorDay,
-      planType: "recurring",
-    },
-  })
+  return hash % shardCount
 }
 
-function buildMockMeters(event: RawEvent, entitlementId: string): MeterConfig[] {
-  return [
-    {
-      eventId: `${entitlementId}:count`,
-      eventSlug: event.slug,
-      aggregationMethod: "count",
-    },
-  ]
+export async function safeSendToQueue(params: {
+  env: {
+    FALLBACK_ANALYTICS: AnalyticsEngineDataset
+  }
+  logger: AppLogger
+  queue: Queue<IngestionQueueMessage>
+  message: IngestionQueueMessage
+}): Promise<void> {
+  const { env, logger, queue, message } = params
+
+  try {
+    for (let attempt = 0; attempt < SAFE_QUEUE_SEND_RETRIES; attempt++) {
+      try {
+        await queue.send(message)
+        return
+      } catch (error) {
+        logger.warn("raw ingestion queue send failed", {
+          attempt: attempt + 1,
+          maxAttempts: SAFE_QUEUE_SEND_RETRIES,
+          projectId: message.projectId,
+          customerId: message.customerId,
+          eventId: message.id,
+          idempotencyKey: message.idempotencyKey,
+          error,
+        })
+
+        if (attempt < SAFE_QUEUE_SEND_RETRIES - 1) {
+          await sleep(SAFE_QUEUE_SEND_BASE_DELAY_MS * 2 ** attempt)
+        }
+      }
+    }
+
+    // write the message to analytics as fallback
+    env.FALLBACK_ANALYTICS.writeDataPoint({
+      indexes: [message.projectId, message.customerId, message.slug],
+      doubles: [message.timestamp, message.receivedAt],
+      blobs: [message.id, message.requestId, JSON.stringify(message)],
+    })
+  } catch (error) {
+    logger.error("raw ingestion background send failed permanently", {
+      projectId: message.projectId,
+      customerId: message.customerId,
+      eventId: message.id,
+      idempotencyKey: message.idempotencyKey,
+      error,
+    })
+  }
 }
 
-export type IngestEventsRequest = IngestRequest
-export type IngestEventsResponse = z.infer<typeof ingestApplyResultSchema>
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+export function generateEventId(now = Date.now()): string {
+  return `evt_${ulid(now)}`
+}
+
+export type IngestEventsRequest = z.infer<typeof rawEventSchema>
+export type IngestEventsResponse = z.infer<typeof acceptedSchema>

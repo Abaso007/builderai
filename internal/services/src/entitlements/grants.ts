@@ -1037,13 +1037,42 @@ export class GrantsManager {
     const newEntitlement = await this.db
       .transaction(async (tx) => {
         const now = Date.now()
+        const currentEntitlement = await tx.query.entitlements.findFirst({
+          where: (entitlement, { and, eq }) =>
+            and(
+              eq(entitlement.projectId, projectId),
+              eq(entitlement.customerId, customerId),
+              eq(entitlement.featureSlug, computedState.featureSlug),
+              eq(entitlement.isCurrent, true)
+            ),
+        })
+
+        const hasSameWindow =
+          currentEntitlement &&
+          currentEntitlement.version === computedState.version &&
+          currentEntitlement.effectiveAt === computedState.effectiveAt &&
+          currentEntitlement.expiresAt === computedState.expiresAt
+
+        if (hasSameWindow) {
+          return tx
+            .update(entitlements)
+            .set({
+              computedAt: now,
+              nextRevalidateAt: now + this.revalidateInterval,
+              updatedAtM: now,
+            })
+            .where(
+              and(eq(entitlements.projectId, projectId), eq(entitlements.id, currentEntitlement.id))
+            )
+            .returning()
+            .then((rows) => rows?.[0] ?? null)
+        }
 
         // Close old active entitlement snapshot for this subject+feature.
         await tx
           .update(entitlements)
           .set({
             isCurrent: false,
-            expiresAt: now,
             updatedAtM: now,
           })
           .where(
@@ -1062,7 +1091,7 @@ export class GrantsManager {
             ...entitlementData,
             id: entitlementId,
             isCurrent: true,
-            effectiveAt: now,
+            effectiveAt: computedState.effectiveAt,
             expiresAt: computedState.expiresAt,
             nextRevalidateAt: now + this.revalidateInterval,
             computedAt: now,

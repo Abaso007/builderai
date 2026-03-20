@@ -66,6 +66,132 @@ export type CloudflarePipelineFieldType =
   | "string"
 
 export const lakehouseSourceSchemaRegistry = {
+  events: {
+    source: "events",
+    firstVersion: 1,
+    currentVersion: 1,
+    streamName: "lakehouse_events_stream",
+    schemaFile: "events.json",
+    sinkTable: "events",
+    frontendTable: "events",
+    tableAliases: ["events"],
+    partitionColumns: LAKEHOUSE_PARTITION_COLUMNS,
+    fields: [
+      {
+        name: "event_date",
+        type: "datetime",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "UTC date partition key formatted as YYYY-MM-DD.",
+      },
+      {
+        name: "schema_version",
+        type: "int32",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: 1,
+        description: "Schema version for this event payload.",
+      },
+      {
+        name: "id",
+        type: "string",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Unique ingestion event identifier.",
+      },
+      {
+        name: "project_id",
+        type: "string",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Project identifier.",
+      },
+      {
+        name: "customer_id",
+        type: "string",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Customer identifier.",
+      },
+      {
+        name: "request_id",
+        type: "string",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Request identifier tied to the raw ingestion event.",
+      },
+      {
+        name: "idempotency_key",
+        type: "string",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Logical idempotency key used to deduplicate ingestion events.",
+      },
+      {
+        name: "slug",
+        type: "string",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Raw event slug.",
+      },
+      {
+        name: "timestamp",
+        type: "timestamp",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Raw event timestamp (epoch milliseconds).",
+      },
+      {
+        name: "received_at",
+        type: "timestamp",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Timestamp when the ingestion request was received.",
+      },
+      {
+        name: "handled_at",
+        type: "timestamp",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Timestamp when the queue consumer handled the event.",
+      },
+      {
+        name: "state",
+        type: "string",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Ingestion lifecycle state: processed or rejected.",
+      },
+      {
+        name: "rejection_reason",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description:
+          "Business rejection reason such as CUSTOMER_NOT_FOUND, NO_MATCHING_ENTITLEMENT, INVALID_AGGREGATION_PROPERTIES, or UNROUTABLE_EVENT.",
+      },
+      {
+        name: "properties",
+        type: "json",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: {},
+        description: "Raw event properties payload.",
+      },
+    ],
+  },
   usage: {
     source: "usage",
     firstVersion: 1,
@@ -822,6 +948,7 @@ export function buildCloudflareLakehousePipelineDefinitions(
 ): CloudflareLakehousePipelineDefinition[] {
   return listLakehouseSourceSchemas().map((entry) => {
     const suffixBySource: Record<LakehouseSource, string> = {
+      events: "events",
       usage: "usage",
       verification: "verifications",
       metadata: "metadata",
@@ -892,6 +1019,9 @@ type LakehouseEventFromFields<T extends readonly unknown[]> = Simplify<
 type UsageEventFromRegistry = LakehouseEventFromFields<
   (typeof lakehouseSourceSchemaRegistry)["usage"]["fields"]
 >
+type EventsEventFromRegistry = LakehouseEventFromFields<
+  (typeof lakehouseSourceSchemaRegistry)["events"]["fields"]
+>
 type VerificationEventFromRegistry = LakehouseEventFromFields<
   (typeof lakehouseSourceSchemaRegistry)["verification"]["fields"]
 >
@@ -903,6 +1033,7 @@ type EntitlementSnapshotEventFromRegistry = LakehouseEventFromFields<
 >
 
 export type LakehouseEventBySource = {
+  events: EventsEventFromRegistry
   usage: UsageEventFromRegistry
   verification: VerificationEventFromRegistry
   metadata: MetadataEventFromRegistry

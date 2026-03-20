@@ -834,6 +834,92 @@ export class EntitlementService {
     })
   }
 
+  private async getRelevantEntitlementsForIngestionFromDB({
+    projectId,
+    customerId,
+    historicalDays = 30,
+  }: {
+    projectId: string
+    customerId: string
+    historicalDays?: number
+  }): Promise<CacheNamespaces["customerRelevantEntitlements"]> {
+    const historicalWindowMs = historicalDays * 24 * 60 * 60 * 1000
+    const historicalCutoff = Date.now() - historicalWindowMs
+
+    const data = await this.db.query.entitlements.findMany({
+      where: (entitlement, { and, eq, gt, or }) =>
+        and(
+          eq(entitlement.projectId, projectId),
+          eq(entitlement.customerId, customerId),
+          or(eq(entitlement.isCurrent, true), gt(entitlement.expiresAt, historicalCutoff - 1))
+        ),
+      orderBy: (entitlement, { asc }) => asc(entitlement.effectiveAt),
+    })
+
+    return data ?? []
+  }
+
+  public async getRelevantEntitlementsForIngestion({
+    projectId,
+    customerId,
+    historicalDays = 30,
+    opts,
+  }: {
+    projectId: string
+    customerId: string
+    historicalDays?: number
+    opts?: {
+      skipCache?: boolean
+    }
+  }): Promise<Result<CacheNamespaces["customerRelevantEntitlements"], FetchError>> {
+    const cacheKey = `${projectId}:${customerId}:${historicalDays}`
+
+    const { val, err } = opts?.skipCache
+      ? await wrapResult(
+          this.getRelevantEntitlementsForIngestionFromDB({
+            projectId,
+            customerId,
+            historicalDays,
+          }),
+          (error) =>
+            new FetchError({
+              message: `unable to query entitlements from db in getRelevantEntitlementsForIngestionFromDB - ${error.message}`,
+              retry: false,
+              context: {
+                error: error.message,
+                url: "",
+                customerId,
+                projectId,
+                method: "getRelevantEntitlementsForIngestionFromDB",
+              },
+            })
+        )
+      : await retry(
+          3,
+          async () =>
+            this.cache.customerRelevantEntitlements.swr(cacheKey, () =>
+              this.getRelevantEntitlementsForIngestionFromDB({
+                projectId,
+                customerId,
+                historicalDays,
+              })
+            ),
+          () => {}
+        )
+
+    if (err) {
+      return Err(
+        new FetchError({
+          message: err.message,
+          retry: true,
+          cause: err,
+        })
+      )
+    }
+
+    return Ok(val ?? [])
+  }
+
   public async getEntitlementsFeature({
     projectId,
     customerId,
@@ -1558,6 +1644,7 @@ export class EntitlementService {
     const [storageResetResult] = await Promise.all([
       this.storage.reset(),
       this.cache.customerEntitlements.remove(cacheKey),
+      this.cache.customerRelevantEntitlements.remove(`${projectId}:${customerId}:30`),
       this.cache.negativeEntitlements.remove(`negative:${projectId}:${customerId}:all`),
       this.customerService.invalidateAccessControlList(customerId, projectId),
       this.cache.getCurrentUsage.remove(cacheKey),
@@ -1658,6 +1745,7 @@ export class EntitlementService {
 
     await Promise.all([
       this.cache.customerEntitlements.remove(cacheKey),
+      this.cache.customerRelevantEntitlements.remove(`${projectId}:${customerId}:30`),
       this.cache.negativeEntitlements.remove(`negative:${projectId}:${customerId}:all`),
       this.customerService.invalidateAccessControlList(customerId, projectId),
       this.cache.getCurrentUsage.remove(cacheKey),

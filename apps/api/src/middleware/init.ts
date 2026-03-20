@@ -57,7 +57,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
 
     const requestStartedAt = Date.now()
     const performanceStart = Date.now()
-    // start a new timer
 
     c.set("isolateId", isolateId)
     c.set("isolateCreatedAt", isolateCreatedAt)

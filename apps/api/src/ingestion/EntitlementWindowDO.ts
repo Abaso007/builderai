@@ -10,7 +10,7 @@ import {
 import { asc, eq, inArray, lt, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
-import { idempotencyKeysTable, meterFactsOutboxTable } from "./db/schema"
+import { idempotencyKeysTable, meterFactsOutboxTable, meterStateTable } from "./db/schema"
 import { schema } from "./db/schema"
 import { DrizzleStorageAdapter } from "./drizzle-adapter"
 import migrations from "./drizzle/migrations"
@@ -34,9 +34,11 @@ class EntitlementWindowLimitExceededError extends Error {
 
 type ApplyInput = {
   event: RawEvent
+  idempotencyKey: string
   meters: MeterConfig[]
   limit?: number | null
   overageStrategy?: OverageStrategy
+  enforceLimit: boolean
 }
 
 type ApplyResult = {
@@ -68,8 +70,9 @@ export class EntitlementWindowDO extends DurableObject {
 
     // 1. validate the input
     this.assertValidInput(input)
+    // The DO has a idempotency key per period to deduplicate
+    const idempotencyKey = input.idempotencyKey
 
-    // 2. check if the event is already processed
     let insertedFactCount = 0
 
     try {
@@ -78,80 +81,101 @@ export class EntitlementWindowDO extends DurableObject {
         const existing = tx
           .select({ result: idempotencyKeysTable.result })
           .from(idempotencyKeysTable)
-          .where(eq(idempotencyKeysTable.eventId, input.event.id))
+          .where(eq(idempotencyKeysTable.eventId, idempotencyKey))
           .get()
 
         if (existing?.result) {
+          // if exist we don't reprocess the meter
           return this.parseStoredResult(existing.result)
         }
 
-        // create the adapter and the engine
-        const adapter = new DrizzleStorageAdapter(tx)
-        // create the engine
-        const engine = new AsyncMeterAggregationEngine(input.meters, adapter)
-        // apply the event
-        const facts = engine.applyEventSync(input.event, {
-          beforePersist: (pendingFacts) => {
-            const exceeded = findLimitExceededFact({
-              facts: pendingFacts,
-              limit: input.limit,
-              overageStrategy: input.overageStrategy,
-            })
+        try {
+          // create the adapter and the engine
+          const adapter = new DrizzleStorageAdapter(tx)
+          // create the engine
+          const engine = new AsyncMeterAggregationEngine(input.meters, adapter)
+          // apply the event
+          const facts = engine.applyEventSync(input.event, {
+            // A limit hit is still a valid ingestion event. We store the denied
+            // result in the DO idempotency table so queue retries stay stable,
+            // while the ingestion service treats the event as processed.
+            beforePersist: (pendingFacts) => {
+              // only enforce the limits when needed
+              if (!input.enforceLimit) {
+                return
+              }
 
-            if (exceeded && typeof input.limit === "number" && Number.isFinite(input.limit)) {
-              throw new EntitlementWindowLimitExceededError({
-                eventId: input.event.id,
-                meterId: exceeded.meterId,
+              const exceeded = findLimitExceededFact({
+                facts: pendingFacts,
                 limit: input.limit,
-                valueAfter: exceeded.valueAfter,
+                overageStrategy: input.overageStrategy,
               })
-            }
-          },
-        })
 
-        insertedFactCount = facts.length
-
-        // create the outbox batch of facts
-        for (const fact of facts) {
-          tx.insert(meterFactsOutboxTable)
-            .values({ payload: JSON.stringify(fact) })
-            .run()
-        }
-
-        // create the idempotency key
-        const successResult: ApplyResult = { allowed: true }
-
-        // store the result
-        tx.insert(idempotencyKeysTable)
-          .values({
-            eventId: input.event.id,
-            createdAt: Date.now(),
-            result: JSON.stringify(successResult),
+              if (exceeded && typeof input.limit === "number" && Number.isFinite(input.limit)) {
+                throw new EntitlementWindowLimitExceededError({
+                  eventId: input.event.id,
+                  meterId: exceeded.meterId,
+                  limit: input.limit,
+                  valueAfter: exceeded.valueAfter,
+                })
+              }
+            },
           })
-          .run()
 
-        // return the result
-        return successResult
+          insertedFactCount = facts.length
+
+          // create the outbox batch of facts
+          for (const fact of facts) {
+            tx.insert(meterFactsOutboxTable)
+              .values({ payload: JSON.stringify(fact) })
+              .run()
+          }
+
+          const successResult: ApplyResult = { allowed: true }
+
+          tx.insert(idempotencyKeysTable)
+            .values({
+              eventId: idempotencyKey,
+              createdAt: Date.now(),
+              result: JSON.stringify(successResult),
+            })
+            .run()
+
+          return successResult
+        } catch (error) {
+          if (error instanceof EntitlementWindowLimitExceededError) {
+            const deniedResult: ApplyResult = {
+              allowed: false,
+              deniedReason: "LIMIT_EXCEEDED",
+              message: error.message,
+            }
+
+            tx.insert(idempotencyKeysTable)
+              .values({
+                eventId: idempotencyKey,
+                createdAt: Date.now(),
+                result: JSON.stringify(deniedResult),
+              })
+              .run()
+
+            return deniedResult
+          }
+
+          throw error
+        }
       })
 
+      // if there are facts inserted lets set an alarm to flush to analytics
       if (result.allowed && insertedFactCount > 0) {
         // set the alarm to flush the outbox to tinybird
         const currentAlarm = await this.ctx.storage.getAlarm()
         if (currentAlarm === null) {
-          await this.ctx.storage.setAlarm(Date.now() + 30_000)
+          await this.ctx.storage.setAlarm(Date.now() + 30_000) // every 30secs
         }
       }
 
       return result
     } catch (error) {
-      if (error instanceof EntitlementWindowLimitExceededError) {
-        return {
-          allowed: false,
-          deniedReason: "LIMIT_EXCEEDED",
-          message: error.message,
-        }
-      }
-
       if (
         error instanceof EventTimestampTooFarInFutureError ||
         error instanceof EventTimestampTooOldError
@@ -160,6 +184,40 @@ export class EntitlementWindowDO extends DurableObject {
       }
 
       throw error
+    }
+  }
+
+  public async getEnforcementState(input: {
+    limit?: number | null
+    meterId: string
+    overageStrategy?: OverageStrategy | null
+  }): Promise<{
+    isLimitReached: boolean
+    limit: number | null
+    usage: number
+  }> {
+    await this.ready
+
+    const stateRow = this.db
+      .select({
+        value: meterStateTable.value,
+      })
+      .from(meterStateTable)
+      .where(eq(meterStateTable.key, this.makeMeterStateKey(input.meterId)))
+      .get()
+
+    const usage = Number(stateRow?.value ?? 0)
+    const limit = this.normalizeLimit(input.limit)
+    const isLimitReached =
+      typeof limit === "number" &&
+      Number.isFinite(limit) &&
+      input.overageStrategy !== "always" &&
+      usage >= limit
+
+    return {
+      usage,
+      limit,
+      isLimitReached,
     }
   }
 
@@ -226,10 +284,13 @@ export class EntitlementWindowDO extends DurableObject {
 
     const hasValidOverageStrategy =
       input.overageStrategy === undefined || VALID_OVERAGE_STRATEGIES.has(input.overageStrategy)
+    const hasValidIdempotencyKey =
+      typeof input.idempotencyKey === "string" && input.idempotencyKey.length > 0
 
     if (
       !input ||
       !input.event ||
+      !hasValidIdempotencyKey ||
       !Array.isArray(input.meters) ||
       !hasValidLimit ||
       !hasValidOverageStrategy
@@ -259,5 +320,17 @@ export class EntitlementWindowDO extends DurableObject {
     const row = this.db.select({ count: sql<number>`count(*)` }).from(meterFactsOutboxTable).get()
 
     return Number(row?.count ?? 0)
+  }
+
+  private normalizeLimit(limit: number | null | undefined): number | null {
+    if (typeof limit !== "number" || !Number.isFinite(limit)) {
+      return null
+    }
+
+    return limit
+  }
+
+  private makeMeterStateKey(meterId: string): string {
+    return `meter-state:${meterId}`
   }
 }

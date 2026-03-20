@@ -25,6 +25,44 @@
           "bucket_name": "unprice-lakehouse-prod"
         }
       ],
+      "analytics_engine_datasets": [
+        {
+          "binding": "FALLBACK_ANALYTICS",
+          "dataset": "unprice_api_ingestion_fallback_prod"
+        }
+      ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "QUEUE_SHARD_0",
+            "queue": "unprice-api-ingestion-shard-0-prod"
+          },
+          {
+            "binding": "QUEUE_SHARD_1",
+            "queue": "unprice-api-ingestion-shard-1-prod"
+          },
+          {
+            "binding": "INGESTION_DLQ",
+            "queue": "unprice-api-ingestion-dlq-prod"
+          }
+        ],
+        "consumers": [
+          {
+            "queue": "unprice-api-ingestion-shard-0-prod",
+            "max_batch_size": 50,
+            "max_batch_timeout": 5,
+            "max_retries": 3,
+            "dead_letter_queue": "unprice-api-ingestion-dlq-prod"
+          },
+          {
+            "queue": "unprice-api-ingestion-shard-1-prod",
+            "max_batch_size": 50,
+            "max_batch_timeout": 5,
+            "max_retries": 3,
+            "dead_letter_queue": "unprice-api-ingestion-dlq-prod"
+          }
+        ]
+      },
       "vars": {
         "LAKEHOUSE_FILE_PLAN_BASE_URL": "https://lakehouse.unprice.dev"
       },
@@ -51,6 +89,11 @@
         ]
       },
       "pipelines": [
+        {
+          // TODO: replace with the real production PIPELINE_EVENTS id
+          "pipeline": "",
+          "binding": "PIPELINE_EVENTS"
+        },
         {
           "pipeline": "46b501b75391484e84cd3a3b363af0db",
           "binding": "PIPELINE_VERIFICATIONS"
@@ -81,6 +124,10 @@
           {
             "name": "entitlementwindow",
             "class_name": "EntitlementWindowDO"
+          },
+          {
+            "name": "ingestionidempotency",
+            "class_name": "IngestionIdempotencyDO"
           }
         ]
       },
@@ -96,6 +143,10 @@
         {
           "tag": "v3",
           "new_sqlite_classes": ["EntitlementWindowDO"]
+        },
+        {
+          "tag": "v4",
+          "new_sqlite_classes": ["IngestionIdempotencyDO"]
         }
       ]
     },
@@ -115,6 +166,44 @@
           "bucket_name": "unprice-lakehouse-dev"
         }
       ],
+      "analytics_engine_datasets": [
+        {
+          "binding": "FALLBACK_ANALYTICS",
+          "dataset": "unprice_api_ingestion_fallback_preview"
+        }
+      ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "QUEUE_SHARD_0",
+            "queue": "unprice-api-ingestion-shard-0-preview"
+          },
+          {
+            "binding": "QUEUE_SHARD_1",
+            "queue": "unprice-api-ingestion-shard-1-preview"
+          },
+          {
+            "binding": "INGESTION_DLQ",
+            "queue": "unprice-api-ingestion-dlq-preview"
+          }
+        ],
+        "consumers": [
+          {
+            "queue": "unprice-api-ingestion-shard-0-preview",
+            "max_batch_size": 50,
+            "max_batch_timeout": 5,
+            "max_retries": 3,
+            "dead_letter_queue": "unprice-api-ingestion-dlq-preview"
+          },
+          {
+            "queue": "unprice-api-ingestion-shard-1-preview",
+            "max_batch_size": 50,
+            "max_batch_timeout": 5,
+            "max_retries": 3,
+            "dead_letter_queue": "unprice-api-ingestion-dlq-preview"
+          }
+        ]
+      },
       "vars": {
         "LAKEHOUSE_FILE_PLAN_BASE_URL": "https://lakehouse.unprice.dev"
       },
@@ -144,6 +233,11 @@
         ]
       },
       "pipelines": [
+        {
+          // TODO: replace with the real preview PIPELINE_EVENTS id
+          "pipeline": "",
+          "binding": "PIPELINE_EVENTS"
+        },
         {
           "pipeline": "75cfca9093854dd88f4d46e2088f235b",
           "binding": "PIPELINE_VERIFICATIONS",
@@ -178,6 +272,10 @@
           {
             "name": "entitlementwindow",
             "class_name": "EntitlementWindowDO"
+          },
+          {
+            "name": "ingestionidempotency",
+            "class_name": "IngestionIdempotencyDO"
           }
         ]
       },
@@ -193,6 +291,10 @@
         {
           "tag": "v3",
           "new_sqlite_classes": ["EntitlementWindowDO"]
+        },
+        {
+          "tag": "v4",
+          "new_sqlite_classes": ["IngestionIdempotencyDO"]
         }
       ]
     },
@@ -205,6 +307,44 @@
           "remote": true
         }
       ],
+      "analytics_engine_datasets": [
+        {
+          "binding": "FALLBACK_ANALYTICS",
+          "dataset": "unprice_api_ingestion_fallback_dev"
+        }
+      ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "QUEUE_SHARD_0",
+            "queue": "unprice-api-ingestion-shard-0-dev"
+          },
+          {
+            "binding": "QUEUE_SHARD_1",
+            "queue": "unprice-api-ingestion-shard-1-dev"
+          },
+          {
+            "binding": "INGESTION_DLQ",
+            "queue": "unprice-api-ingestion-dlq-dev"
+          }
+        ],
+        "consumers": [
+          {
+            "queue": "unprice-api-ingestion-shard-0-dev",
+            "max_batch_size": 50,
+            "max_batch_timeout": 1, // to avoid wait in dev
+            "max_retries": 3,
+            "dead_letter_queue": "unprice-api-ingestion-dlq-dev"
+          },
+          {
+            "queue": "unprice-api-ingestion-shard-1-dev",
+            "max_batch_size": 50,
+            "max_batch_timeout": 1, // to avoid wait in dev
+            "max_retries": 3,
+            "dead_letter_queue": "unprice-api-ingestion-dlq-dev"
+          }
+        ]
+      },
       "vars": {
         "LAKEHOUSE_FILE_PLAN_BASE_URL": "https://lakehouse.unprice.dev"
       },
@@ -246,10 +386,19 @@
           {
             "name": "entitlementwindow",
             "class_name": "EntitlementWindowDO"
+          },
+          {
+            "name": "ingestionidempotency",
+            "class_name": "IngestionIdempotencyDO"
           }
         ]
       },
       "pipelines": [
+        {
+          // TODO: replace with the real dev PIPELINE_EVENTS id
+          "pipeline": "",
+          "binding": "PIPELINE_EVENTS"
+        },
         {
           "pipeline": "75cfca9093854dd88f4d46e2088f235b",
           "binding": "PIPELINE_VERIFICATIONS",
@@ -283,6 +432,10 @@
         {
           "tag": "v3",
           "new_sqlite_classes": ["EntitlementWindowDO"]
+        },
+        {
+          "tag": "v4",
+          "new_sqlite_classes": ["IngestionIdempotencyDO"]
         }
       ]
     }

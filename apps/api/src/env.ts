@@ -6,6 +6,7 @@ import { env as envObservability } from "@unprice/observability/env"
 import { env as envServices } from "@unprice/services/env"
 import { z } from "zod"
 import type { EntitlementWindowDO } from "~/ingestion/EntitlementWindowDO"
+import type { IngestionIdempotencyDO } from "~/ingestion/IngestionIdempotencyDO"
 import type { DurableObjectUsagelimiter } from "~/usagelimiter/do"
 import type { DurableObjectProject } from "./project/do"
 
@@ -22,6 +23,21 @@ function isCloudflarePipeline(value: unknown): value is Pipeline {
 }
 
 export const cloudflarePipeline = z.custom<Pipeline>(isCloudflarePipeline)
+export const cloudflareQueue = z.custom<Queue<unknown>>(
+  (queue) =>
+    !!queue && typeof queue === "object" && "send" in queue && typeof queue.send === "function"
+)
+export const cloudflareAnalyticsEngine = z.custom<AnalyticsEngineDataset>(
+  (dataset) =>
+    !!dataset &&
+    typeof dataset === "object" &&
+    "writeDataPoint" in dataset &&
+    typeof dataset.writeDataPoint === "function"
+)
+export const cloudflareR2Bucket = z.custom<R2Bucket>(
+  (bucket) =>
+    !!bucket && typeof bucket === "object" && "put" in bucket && typeof bucket.put === "function"
+)
 
 // This function should be called at the start of each request.
 export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
@@ -43,16 +59,24 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       entitlementwindow: z.custom<DurableObjectNamespace<EntitlementWindowDO>>(
         (ns) => typeof ns === "object"
       ),
+      ingestionidempotency: z.custom<DurableObjectNamespace<IngestionIdempotencyDO>>(
+        (ns) => typeof ns === "object"
+      ),
       RL_FREE_1000_60s: cloudflareRatelimiter,
       RL_FREE_6000_60s: cloudflareRatelimiter,
       CLOUDFLARE_ZONE_ID: z.string().optional(),
       CLOUDFLARE_API_TOKEN: z.string().optional(),
       CLOUDFLARE_ACCOUNT_ID: z.string(),
       CLOUDFLARE_CACHE_DOMAIN: z.string().optional(),
+      PIPELINE_EVENTS: cloudflarePipeline,
       PIPELINE_USAGE: cloudflarePipeline,
       PIPELINE_VERIFICATIONS: cloudflarePipeline,
       PIPELINE_METADATA: cloudflarePipeline,
       PIPELINE_ENTITLEMENTS: cloudflarePipeline,
+      QUEUE_SHARD_0: cloudflareQueue,
+      QUEUE_SHARD_1: cloudflareQueue,
+      FALLBACK_ANALYTICS: cloudflareAnalyticsEngine,
+      LAKEHOUSE: cloudflareR2Bucket,
       LAKEHOUSE_FILE_PLAN_BASE_URL: z.string().url(),
       LAKEHOUSE_API_TOKEN: z.string(),
     },

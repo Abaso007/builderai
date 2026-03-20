@@ -60,8 +60,9 @@ export const entitlements = pgTableProject(
     // unit of measurement for the entitlement (computed winner from grants)
     unitOfMeasure: varchar("unit_of_measure", { length: 24 }).notNull().default("units"),
     // null here mean the entitlement never resets
-    resetConfig: json("reset_config")
-      .$type<(z.infer<typeof resetConfigSchema> & { resetAnchor: number }) | null>(),
+    resetConfig: json("reset_config").$type<
+      (z.infer<typeof resetConfigSchema> & { resetAnchor: number }) | null
+    >(),
     // canonical meter definition for usage features
     meterConfig: json("meter_config").$type<z.infer<typeof meterConfigSchema> | null>(),
     // A flag to mark which version is currently active

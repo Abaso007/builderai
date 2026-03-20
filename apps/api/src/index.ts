@@ -10,6 +10,7 @@ import serveEmojiFavicon from "stoker/middlewares/serve-emoji-favicon"
 export { DurableObjectUsagelimiter } from "~/usagelimiter/do"
 export { DurableObjectProject } from "~/project/do"
 export { EntitlementWindowDO } from "~/ingestion/EntitlementWindowDO"
+export { IngestionIdempotencyDO } from "~/ingestion/IngestionIdempotencyDO"
 
 import { registerReportUsageV1 } from "~/routes/customer/reportUsageV1"
 import { registerCreatePaymentMethodV1 } from "./routes/customer/createPaymentMethodV1"
@@ -32,6 +33,8 @@ import { registerGetFeaturesV1 } from "./routes/project/getFeaturesV1"
 import { env } from "cloudflare:workers"
 import { timing } from "hono/timing"
 import { verifyRealtimeTicket } from "~/auth/ticket"
+import type { IngestionQueueMessage } from "~/ingestion/message"
+import { consumeIngestionBatch } from "~/ingestion/service"
 import { obs } from "~/middleware/obs"
 import { apiEvlog } from "~/observability"
 import { registerGetRealtimeTicketV1 } from "./routes/analitycs/getRealtimeTicketV1"
@@ -160,9 +163,7 @@ registerGetLakehouseFilePlanV1(app)
 const handler = {
   fetch: (req: Request, env: Env, executionCtx: ExecutionContext) => {
     try {
-      const parsedEnv = createRuntimeEnv(
-        env as unknown as Record<string, string | number | boolean>
-      )
+      const parsedEnv = createRuntimeEnv(env as unknown as Record<string, unknown>)
 
       return app.fetch(req, parsedEnv, executionCtx)
     } catch (error) {
@@ -180,6 +181,14 @@ const handler = {
       )
     }
   },
-} satisfies ExportedHandler<Env>
+  queue: async (
+    batch: MessageBatch<IngestionQueueMessage>,
+    env: Env,
+    executionCtx: ExecutionContext
+  ) => {
+    const parsedEnv = createRuntimeEnv(env as unknown as Record<string, unknown>)
+    await consumeIngestionBatch(batch, parsedEnv, executionCtx)
+  },
+} satisfies ExportedHandler<Env, IngestionQueueMessage>
 
 export default handler

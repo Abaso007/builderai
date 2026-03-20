@@ -8,6 +8,11 @@ describe("GrantsManager", () => {
   let grantsManager: GrantsManager
   let mockDb: Database
   let mockLogger: Logger
+  let txInsertValuesMock: ReturnType<typeof vi.fn>
+  let txQueryEntitlementsFindFirstMock: ReturnType<typeof vi.fn>
+  let txUpdateSetMock: ReturnType<typeof vi.fn>
+  let txUpdateWhereMock: ReturnType<typeof vi.fn>
+  let txUpdateReturningMock: ReturnType<typeof vi.fn>
 
   const now = Date.now()
   const customerId = "cust_grants_123"
@@ -65,6 +70,18 @@ describe("GrantsManager", () => {
   beforeEach(() => {
     vi.clearAllMocks()
 
+    txQueryEntitlementsFindFirstMock = vi.fn().mockResolvedValue(null)
+    txUpdateReturningMock = vi.fn().mockResolvedValue([])
+    txUpdateWhereMock = vi.fn().mockImplementation(() => ({
+      returning: txUpdateReturningMock,
+    }))
+    txUpdateSetMock = vi.fn().mockImplementation(() => ({
+      where: txUpdateWhereMock,
+    }))
+    txInsertValuesMock = vi.fn().mockImplementation((values) => ({
+      returning: vi.fn().mockResolvedValue([{ ...values }]),
+    }))
+
     mockLogger = {
       set: vi.fn(),
       error: vi.fn(),
@@ -86,15 +103,16 @@ describe("GrantsManager", () => {
       },
       transaction: vi.fn(async (callback) =>
         callback({
+          query: {
+            entitlements: {
+              findFirst: txQueryEntitlementsFindFirstMock,
+            },
+          },
           update: vi.fn(() => ({
-            set: vi.fn(() => ({
-              where: vi.fn().mockResolvedValue([]),
-            })),
+            set: txUpdateSetMock,
           })),
           insert: vi.fn(() => ({
-            values: vi.fn().mockImplementation((values) => ({
-              returning: vi.fn().mockResolvedValue([{ ...values }]),
-            })),
+            values: txInsertValuesMock,
           })),
         })
       ),
@@ -166,18 +184,133 @@ describe("GrantsManager", () => {
       expect(entitlement!.limit).toBe(150) // 100 + 50
       expect(entitlement!.mergingPolicy).toBe("sum")
 
-      // Verify effectiveAt is set when the snapshot is materialized,
-      // and expiresAt remains derived from grant windows.
+      // Verify the materialized snapshot preserves the business window bounds.
       expect(grants[0]).toBeDefined()
       expect(grants[1]).toBeDefined()
+      const minStart = Math.min(grants[0]!.effectiveAt, grants[1]!.effectiveAt)
       const maxEnd = Math.max(grants[0]!.expiresAt, grants[1]!.expiresAt)
-      expect(entitlement!.effectiveAt).toBeGreaterThanOrEqual(now)
+      expect(entitlement!.effectiveAt).toBe(minStart)
       expect(entitlement!.expiresAt).toBe(maxEnd)
+      expect(txUpdateSetMock.mock.calls[0]?.[0]).toEqual({
+        isCurrent: false,
+        updatedAtM: expect.any(Number),
+      })
 
       // Verify feature slug and type
       expect(entitlement!.featureSlug).toBe(featureSlug)
       expect(entitlement!.featureType).toBe("usage")
       expect(entitlement!.meterConfig?.aggregationMethod).toBe("sum")
+    })
+
+    it("reuses the current entitlement snapshot when version and window are unchanged", async () => {
+      vi.useFakeTimers()
+      vi.setSystemTime(now)
+
+      try {
+        const grants = [
+          {
+            ...baseGrant,
+            id: "g1",
+            limit: 100,
+          },
+        ]
+
+        setupMocks(grants)
+
+        const firstResult = await grantsManager.computeGrantsForCustomer({
+          customerId,
+          projectId,
+          now,
+        })
+
+        expect(firstResult.err).toBeUndefined()
+        const firstEntitlement = firstResult.val![0]!
+        const refreshTime = now + 60_000
+
+        txQueryEntitlementsFindFirstMock.mockResolvedValue({
+          ...firstEntitlement,
+          id: "ent_existing",
+          isCurrent: true,
+        })
+        txUpdateReturningMock.mockResolvedValue([
+          {
+            ...firstEntitlement,
+            id: "ent_existing",
+            isCurrent: true,
+            computedAt: refreshTime,
+            nextRevalidateAt: refreshTime + 300_000,
+            updatedAtM: refreshTime,
+          },
+        ])
+
+        setupMocks(grants)
+        vi.setSystemTime(refreshTime)
+
+        const secondResult = await grantsManager.computeGrantsForCustomer({
+          customerId,
+          projectId,
+          now: refreshTime,
+        })
+
+        expect(secondResult.err).toBeUndefined()
+        expect(txInsertValuesMock).toHaveBeenCalledTimes(1)
+        expect(txUpdateSetMock).toHaveBeenLastCalledWith({
+          computedAt: refreshTime,
+          nextRevalidateAt: refreshTime + 300_000,
+          updatedAtM: refreshTime,
+        })
+        expect(secondResult.val?.[0]).toEqual(
+          expect.objectContaining({
+            id: "ent_existing",
+            effectiveAt: firstEntitlement.effectiveAt,
+            expiresAt: firstEntitlement.expiresAt,
+          })
+        )
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it("preserves the resolved trial and paid window starts when materializing snapshots", async () => {
+      const phaseStart = Date.UTC(2026, 2, 1)
+      const trialEndsAt = Date.UTC(2026, 2, 15)
+      const phaseEnd = Date.UTC(2026, 3, 1)
+
+      const trialGrant = {
+        ...baseGrant,
+        id: "g_trial",
+        type: "trial" as const,
+        effectiveAt: phaseStart,
+        expiresAt: trialEndsAt,
+      }
+      const paidGrant = {
+        ...baseGrant,
+        id: "g_paid",
+        type: "subscription" as const,
+        effectiveAt: trialEndsAt,
+        expiresAt: phaseEnd,
+      }
+
+      setupMocks([trialGrant])
+      const trialResult = await grantsManager.computeGrantsForCustomer({
+        customerId,
+        projectId,
+        now: phaseStart + 1_000,
+      })
+
+      setupMocks([paidGrant])
+      const paidResult = await grantsManager.computeGrantsForCustomer({
+        customerId,
+        projectId,
+        now: trialEndsAt + 1_000,
+      })
+
+      expect(trialResult.err).toBeUndefined()
+      expect(paidResult.err).toBeUndefined()
+      expect(trialResult.val?.[0]?.effectiveAt).toBe(phaseStart)
+      expect(trialResult.val?.[0]?.expiresAt).toBe(trialEndsAt)
+      expect(paidResult.val?.[0]?.effectiveAt).toBe(trialEndsAt)
+      expect(paidResult.val?.[0]?.expiresAt).toBe(phaseEnd)
     })
 
     it("should take max limit for tier features", async () => {

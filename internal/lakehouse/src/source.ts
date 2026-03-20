@@ -1,4 +1,5 @@
 export const LAKEHOUSE_SOURCES = [
+  "events",
   "usage",
   "verification",
   "metadata",

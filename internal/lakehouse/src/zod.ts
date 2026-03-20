@@ -107,6 +107,9 @@ export function getLakehouseSourceEventZodSchemaForVersion(
 export const LAKEHOUSE_EVENT_ZOD_SCHEMAS: {
   [S in LakehouseSource]: z.ZodType<LakehouseEventForSource<S>>
 } = {
+  events: buildLakehouseEventZodSchema("events") as unknown as z.ZodType<
+    LakehouseEventForSource<"events">
+  >,
   usage: buildLakehouseEventZodSchema("usage") as unknown as z.ZodType<
     LakehouseEventForSource<"usage">
   >,
