@@ -7,7 +7,6 @@ import { env as envServices } from "@unprice/services/env"
 import { z } from "zod"
 import type { EntitlementWindowDO } from "~/ingestion/EntitlementWindowDO"
 import type { IngestionIdempotencyDO } from "~/ingestion/IngestionIdempotencyDO"
-import type { DurableObjectUsagelimiter } from "~/usagelimiter/do"
 import type { DurableObjectProject } from "./project/do"
 
 export const cloudflareRatelimiter = z.custom<{
@@ -50,9 +49,6 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       AUTH_SECRET: z.string(),
       VERSION: z.string().default("unknown"),
       MAIN_PROJECT_ID: z.string().optional(),
-      usagelimit: z.custom<DurableObjectNamespace<DurableObjectUsagelimiter>>(
-        (ns) => typeof ns === "object"
-      ),
       projectdo: z.custom<DurableObjectNamespace<DurableObjectProject>>(
         (ns) => typeof ns === "object"
       ),

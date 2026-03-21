@@ -1,5 +1,9 @@
 import type { Entitlement } from "@unprice/db/validators"
-import { type RawEvent, computePeriodKey } from "@unprice/services/entitlements"
+import {
+  type IngestionResolvedState,
+  type RawEvent,
+  computePeriodKey,
+} from "@unprice/services/entitlements"
 import { z } from "zod"
 import type { Env } from "~/env"
 
@@ -70,6 +74,22 @@ export function buildEntitlementWindowName(params: {
   ].join(":")
 }
 
+export function buildIngestionWindowName(params: {
+  appEnv: Env["APP_ENV"]
+  customerId: string
+  periodKey: string
+  projectId: string
+  streamId: string
+}): string {
+  return [
+    params.appEnv,
+    params.projectId,
+    params.customerId,
+    params.streamId,
+    params.periodKey,
+  ].join(":")
+}
+
 export function computeEntitlementPeriodKey(
   entitlement: Entitlement,
   timestamp: number
@@ -113,6 +133,49 @@ export function computeEntitlementPeriodKey(
   })
 }
 
+export function computeResolvedStatePeriodKey(
+  state: Pick<IngestionResolvedState, "resetConfig" | "streamEndAt" | "streamStartAt">,
+  timestamp: number
+): string | null {
+  if (timestamp < state.streamStartAt) {
+    return null
+  }
+
+  if (typeof state.streamEndAt === "number" && timestamp >= state.streamEndAt) {
+    return null
+  }
+
+  if (!state.resetConfig) {
+    return computePeriodKey({
+      now: timestamp,
+      effectiveStartDate: state.streamStartAt,
+      effectiveEndDate: state.streamEndAt,
+      trialEndsAt: null,
+      config: {
+        name: "ingestion",
+        interval: "onetime",
+        intervalCount: 1,
+        anchor: "dayOfCreation",
+        planType: "onetime",
+      },
+    })
+  }
+
+  return computePeriodKey({
+    now: timestamp,
+    effectiveStartDate: state.streamStartAt,
+    effectiveEndDate: state.streamEndAt,
+    trialEndsAt: null,
+    config: {
+      name: state.resetConfig.name,
+      interval: state.resetConfig.resetInterval,
+      intervalCount: state.resetConfig.resetIntervalCount,
+      anchor: state.resetConfig.resetAnchor,
+      planType: state.resetConfig.planType,
+    },
+  })
+}
+
 export function filterMatchingEntitlements(params: {
   entitlements: Entitlement[]
   event: RawEvent
@@ -143,6 +206,41 @@ export function filterEntitlementsWithValidAggregationPayload(params: {
     if (!meterConfig) {
       return false
     }
+
+    if (meterConfig.aggregationMethod === "count") {
+      return true
+    }
+
+    const aggregationField = meterConfig.aggregationField
+
+    if (!aggregationField) {
+      return false
+    }
+
+    const value = params.event.properties[aggregationField]
+
+    return typeof value === "number" && Number.isFinite(value)
+  })
+}
+
+export function filterMatchingResolvedStates(params: {
+  event: RawEvent
+  states: IngestionResolvedState[]
+}): IngestionResolvedState[] {
+  return params.states.filter((state) => {
+    return (
+      state.meterConfig.eventSlug === params.event.slug &&
+      computeResolvedStatePeriodKey(state, params.event.timestamp) !== null
+    )
+  })
+}
+
+export function filterResolvedStatesWithValidAggregationPayload(params: {
+  event: RawEvent
+  states: IngestionResolvedState[]
+}): IngestionResolvedState[] {
+  return params.states.filter((state) => {
+    const meterConfig = state.meterConfig
 
     if (meterConfig.aggregationMethod === "count") {
       return true

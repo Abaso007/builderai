@@ -13,7 +13,7 @@
       "workers_dev": false,
       "observability": {
         "enabled": true,
-        "head_sampling_rate": 1 // TODO: change to 10% of requests with more traffic
+        "head_sampling_rate": 1
       },
       "route": {
         "pattern": "api.unprice.dev",
@@ -91,32 +91,12 @@
       "pipelines": [
         {
           // TODO: replace with the real production PIPELINE_EVENTS id
-          "pipeline": "",
+          "pipeline": "PIPELINE_EVENTS",
           "binding": "PIPELINE_EVENTS"
-        },
-        {
-          "pipeline": "46b501b75391484e84cd3a3b363af0db",
-          "binding": "PIPELINE_VERIFICATIONS"
-        },
-        {
-          "pipeline": "b83ecba6d5d8427a815c4f328d2d4a6a",
-          "binding": "PIPELINE_USAGE"
-        },
-        {
-          "pipeline": "fccba46a55274b9a9208402fc5ab4f6f",
-          "binding": "PIPELINE_METADATA"
-        },
-        {
-          "pipeline": "1eb2c54f16ea4d15becc07a0a85e10d0",
-          "binding": "PIPELINE_ENTITLEMENTS"
         }
       ],
       "durable_objects": {
         "bindings": [
-          {
-            "name": "usagelimit",
-            "class_name": "DurableObjectUsagelimiter"
-          },
           {
             "name": "projectdo",
             "class_name": "DurableObjectProject"
@@ -132,10 +112,6 @@
         ]
       },
       "migrations": [
-        {
-          "tag": "v1",
-          "new_sqlite_classes": ["DurableObjectUsagelimiter"]
-        },
         {
           "tag": "v2",
           "new_sqlite_classes": ["DurableObjectProject"]
@@ -235,36 +211,12 @@
       "pipelines": [
         {
           // TODO: replace with the real preview PIPELINE_EVENTS id
-          "pipeline": "",
+          "pipeline": "PIPELINE_EVENTS",
           "binding": "PIPELINE_EVENTS"
-        },
-        {
-          "pipeline": "75cfca9093854dd88f4d46e2088f235b",
-          "binding": "PIPELINE_VERIFICATIONS",
-          "remote": true
-        },
-        {
-          "pipeline": "a636dd5b2ca3485aab7de834efccf099",
-          "binding": "PIPELINE_USAGE",
-          "remote": true
-        },
-        {
-          "pipeline": "c0c1af506adb4e0c9394dde8e0c66241",
-          "binding": "PIPELINE_METADATA",
-          "remote": true
-        },
-        {
-          "pipeline": "ac1eb44429dc40f9992d38e5daff6c6c",
-          "binding": "PIPELINE_ENTITLEMENTS",
-          "remote": true
         }
       ],
       "durable_objects": {
         "bindings": [
-          {
-            "name": "usagelimit",
-            "class_name": "DurableObjectUsagelimiter"
-          },
           {
             "name": "projectdo",
             "class_name": "DurableObjectProject"
@@ -280,10 +232,6 @@
         ]
       },
       "migrations": [
-        {
-          "tag": "v1",
-          "new_sqlite_classes": ["DurableObjectUsagelimiter"]
-        },
         {
           "tag": "v2",
           "new_sqlite_classes": ["DurableObjectProject"]
@@ -376,10 +324,6 @@
       "durable_objects": {
         "bindings": [
           {
-            "name": "usagelimit",
-            "class_name": "DurableObjectUsagelimiter"
-          },
-          {
             "name": "projectdo",
             "class_name": "DurableObjectProject"
           },
@@ -396,35 +340,11 @@
       "pipelines": [
         {
           // TODO: replace with the real dev PIPELINE_EVENTS id
-          "pipeline": "",
+          "pipeline": "PIPELINE_EVENTS",
           "binding": "PIPELINE_EVENTS"
-        },
-        {
-          "pipeline": "75cfca9093854dd88f4d46e2088f235b",
-          "binding": "PIPELINE_VERIFICATIONS",
-          "remote": true
-        },
-        {
-          "pipeline": "a636dd5b2ca3485aab7de834efccf099",
-          "binding": "PIPELINE_USAGE",
-          "remote": true
-        },
-        {
-          "pipeline": "c0c1af506adb4e0c9394dde8e0c66241",
-          "binding": "PIPELINE_METADATA",
-          "remote": true
-        },
-        {
-          "pipeline": "ac1eb44429dc40f9992d38e5daff6c6c",
-          "binding": "PIPELINE_ENTITLEMENTS",
-          "remote": true
         }
       ],
       "migrations": [
-        {
-          "tag": "v1",
-          "new_sqlite_classes": ["DurableObjectUsagelimiter"]
-        },
         {
           "tag": "v2",
           "new_sqlite_classes": ["DurableObjectProject"]

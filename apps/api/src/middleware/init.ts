@@ -11,11 +11,10 @@ import type { MiddlewareHandler } from "hono"
 import type { HonoEnv } from "~/hono/env"
 import { createApiLogger } from "~/observability"
 import { ApiProjectService } from "~/project"
-import { UsageLimiterService } from "~/usagelimiter/service"
 
+import { EntitlementService, GrantsManager } from "@unprice/services/entitlements"
 import { SubscriptionService } from "@unprice/services/subscriptions"
-import { LakehousePipelineService } from "~/lakehouse/pipeline"
-import { NoopUsageLimiter } from "~/usagelimiter/noop"
+import { IngestionService } from "~/ingestion/service"
 
 /**
  * These maps persist between worker executions and are used for caching
@@ -183,24 +182,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
       metrics,
     })
 
-    const usageLimiterService = c.env.usagelimit
-      ? new UsageLimiterService({
-          namespace: c.env.usagelimit,
-          projectNamespace: c.env.projectdo,
-          requestId,
-          logger,
-          metrics,
-          analytics,
-          cache,
-          db,
-          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-          waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
-          customer,
-          stats: c.get("stats"),
-          hashCache,
-        })
-      : new NoopUsageLimiter()
-
     const project = new ApiProjectService({
       cache,
       analytics,
@@ -223,21 +204,32 @@ export function init(): MiddlewareHandler<HonoEnv> {
       hashCache,
     })
 
-    const lakehouse = new LakehousePipelineService({
+    const entitlement = new EntitlementService({
+      db,
+      logger: logger,
+      analytics,
+      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+      waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
+      cache,
+      metrics,
+    })
+
+    const ingestion = new IngestionService({
+      customerService: customer,
+      grantsManager: new GrantsManager({
+        db,
+        logger,
+      }),
+      env: c.env,
       logger,
-      pipelines: {
-        usage: c.env.PIPELINE_USAGE,
-        verification: c.env.PIPELINE_VERIFICATIONS,
-        metadata: c.env.PIPELINE_METADATA,
-        entitlement_snapshot: c.env.PIPELINE_ENTITLEMENTS,
-      },
     })
 
     c.set("services", {
       version: "1.0.0",
-      usagelimiter: usageLimiterService,
       subscription,
+      entitlement,
       analytics,
+      ingestion,
       project,
       cache,
       logger,
@@ -245,7 +237,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
       apikey,
       db,
       customer,
-      lakehouse,
     })
 
     metrics.emit({

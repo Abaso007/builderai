@@ -1,6 +1,6 @@
 import { createRoute } from "@hono/zod-openapi"
 import { getPlanVersionApiResponseSchema, getPlanVersionListSchema } from "@unprice/db/validators"
-import * as HttpStatusCodes from "stoker/http-status-codes"
+import * as HttpStatusCodes from "~/util/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 
 import { PlanService } from "@unprice/services/plans"

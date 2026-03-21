@@ -1,11 +1,10 @@
 import { createRoute } from "@hono/zod-openapi"
 import { minimalEntitlementSchema } from "@unprice/db/validators"
 import { endTime, startTime } from "hono/timing"
-import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
+import * as HttpStatusCodes from "~/util/http-status-codes"
 
 import { z } from "zod"
-import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 
@@ -54,35 +53,34 @@ export type GetEntitlementsResponse = z.infer<
 
 export const registerGetEntitlementsV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId, projectId } = c.req.valid("json")
-    const { usagelimiter } = c.get("services")
-    const requestStartedAt = c.get("requestStartedAt")
+    // const { customerId, projectId } = c.req.valid("json")
+    // const requestStartedAt = c.get("requestStartedAt")
 
     // validate the request
-    const key = await keyAuth(c)
+    // const key = await keyAuth(c)
 
     // start a new timer
     startTime(c, "getEntitlements")
 
-    const finalProjectId = validateIsAllowedToAccessProject({
-      isMain: key.project.isMain ?? false,
-      key,
-      requestedProjectId: projectId ?? key.project.id,
-    })
+    // const finalProjectId = validateIsAllowedToAccessProject({
+    //   isMain: key.project.isMain ?? false,
+    //   key,
+    //   requestedProjectId: projectId ?? key.project.id,
+    // })
 
     // validate usage from db
-    const { err, val: result } = await usagelimiter.getActiveEntitlements({
-      customerId,
-      projectId: finalProjectId,
-      now: requestStartedAt,
-    })
+    // const { err, val: result } = await usagelimiter.getActiveEntitlements({
+    //   customerId,
+    //   projectId: finalProjectId,
+    //   now: requestStartedAt,
+    // })
 
     // end the timer
     endTime(c, "getEntitlements")
 
-    if (err) {
-      throw err
-    }
+    // if (err) {
+    //   throw err
+    // }
 
-    return c.json(result, HttpStatusCodes.OK)
+    return c.json([], HttpStatusCodes.OK)
   })

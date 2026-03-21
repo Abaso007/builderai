@@ -1,15 +1,24 @@
 import { DurableObject } from "cloudflare:workers"
+import {
+  Analytics,
+  type AnalyticsEntitlementMeterFact,
+  entitlementMeterFactSchemaV1,
+} from "@unprice/analytics"
 import type { OverageStrategy } from "@unprice/db/validators"
+import { type AppLogger, createStandaloneRequestLogger } from "@unprice/observability"
 import {
   AsyncMeterAggregationEngine,
   EventTimestampTooFarInFutureError,
   EventTimestampTooOldError,
+  type Fact,
+  MAX_EVENT_AGE_MS,
   type MeterConfig,
   type RawEvent,
 } from "@unprice/services/entitlements"
 import { asc, eq, inArray, lt, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
+import { apiDrain } from "~/observability"
 import { idempotencyKeysTable, meterFactsOutboxTable, meterStateTable } from "./db/schema"
 import { schema } from "./db/schema"
 import { DrizzleStorageAdapter } from "./drizzle-adapter"
@@ -35,6 +44,11 @@ class EntitlementWindowLimitExceededError extends Error {
 type ApplyInput = {
   event: RawEvent
   idempotencyKey: string
+  projectId: string
+  customerId: string
+  streamId: string
+  featureSlug: string
+  periodKey: string
   meters: MeterConfig[]
   limit?: number | null
   overageStrategy?: OverageStrategy
@@ -53,11 +67,45 @@ type OutboxBatchRow = {
 }
 
 export class EntitlementWindowDO extends DurableObject {
+  private readonly analytics: Analytics
   private readonly db: DrizzleSqliteDODatabase<typeof schema>
+  private readonly fallbackAnalytics: AnalyticsEngineDataset | null
+  private readonly logger: AppLogger
   private readonly ready: Promise<void>
 
   constructor(state: DurableObjectState, env: Env) {
-    super(state, env)
+    super(state, env as unknown as Cloudflare.Env)
+
+    const requestId = this.ctx.id.toString()
+    const { logger } = createStandaloneRequestLogger(
+      {
+        requestId,
+      },
+      {
+        flush: apiDrain?.flush,
+      }
+    )
+
+    this.logger = logger
+    this.logger.set({
+      requestId,
+      service: "entitlementwindow",
+      request: {
+        id: requestId,
+      },
+      cloud: {
+        platform: "cloudflare",
+        durable_object_id: requestId,
+      },
+    })
+
+    this.analytics = new Analytics({
+      emit: true,
+      tinybirdToken: env.TINYBIRD_TOKEN,
+      tinybirdUrl: env.TINYBIRD_URL,
+      logger: this.logger,
+    })
+    this.fallbackAnalytics = env.FALLBACK_ANALYTICS ?? null
 
     this.db = drizzle(this.ctx.storage, { schema, logger: false })
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
@@ -72,6 +120,7 @@ export class EntitlementWindowDO extends DurableObject {
     this.assertValidInput(input)
     // The DO has a idempotency key per period to deduplicate
     const idempotencyKey = input.idempotencyKey
+    const createdAt = Date.now()
 
     let insertedFactCount = 0
 
@@ -123,11 +172,25 @@ export class EntitlementWindowDO extends DurableObject {
           })
 
           insertedFactCount = facts.length
+          const meterConfigsById = new Map(input.meters.map((meter) => [meter.eventId, meter]))
 
           // create the outbox batch of facts
           for (const fact of facts) {
+            const meterConfig = meterConfigsById.get(fact.meterId)
+
+            if (!meterConfig) {
+              throw new Error(`Missing meter config for fact meter ${fact.meterId}`)
+            }
+
+            const payload = this.buildOutboxFactPayload({
+              createdAt,
+              fact,
+              input,
+              meterConfig,
+            })
+
             tx.insert(meterFactsOutboxTable)
-              .values({ payload: JSON.stringify(fact) })
+              .values({ payload: JSON.stringify(payload) })
               .run()
           }
 
@@ -136,7 +199,7 @@ export class EntitlementWindowDO extends DurableObject {
           tx.insert(idempotencyKeysTable)
             .values({
               eventId: idempotencyKey,
-              createdAt: Date.now(),
+              createdAt,
               result: JSON.stringify(successResult),
             })
             .run()
@@ -153,7 +216,7 @@ export class EntitlementWindowDO extends DurableObject {
             tx.insert(idempotencyKeysTable)
               .values({
                 eventId: idempotencyKey,
-                createdAt: Date.now(),
+                createdAt,
                 result: JSON.stringify(deniedResult),
               })
               .run()
@@ -254,12 +317,12 @@ export class EntitlementWindowDO extends DurableObject {
     // we need to keep to idempotency keys for the same period as late arrival of events meaning 30 days
     this.db
       .delete(idempotencyKeysTable)
-      .where(lt(idempotencyKeysTable.createdAt, Date.now() - 30 * 24 * 60 * 60 * 1000)) // 30 days
+      .where(lt(idempotencyKeysTable.createdAt, Date.now() - MAX_EVENT_AGE_MS)) // 30 days
       .run()
 
     const remainingOutboxCount = this.getOutboxCount()
     // after the entitlement end we give 30 days to self destruct
-    const selfDestructAt = this.getPeriodEndMs() + 30 * 24 * 60 * 60 * 1000 // 30 days
+    const selfDestructAt = this.getPeriodEndMs() + MAX_EVENT_AGE_MS // 30 days
 
     // delete the DO if the period is over and there are no remaining outbox records
     if (Date.now() > selfDestructAt && remainingOutboxCount === 0) {
@@ -286,11 +349,23 @@ export class EntitlementWindowDO extends DurableObject {
       input.overageStrategy === undefined || VALID_OVERAGE_STRATEGIES.has(input.overageStrategy)
     const hasValidIdempotencyKey =
       typeof input.idempotencyKey === "string" && input.idempotencyKey.length > 0
+    const hasValidContext =
+      typeof input.projectId === "string" &&
+      input.projectId.length > 0 &&
+      typeof input.customerId === "string" &&
+      input.customerId.length > 0 &&
+      typeof input.streamId === "string" &&
+      input.streamId.length > 0 &&
+      typeof input.featureSlug === "string" &&
+      input.featureSlug.length > 0 &&
+      typeof input.periodKey === "string" &&
+      input.periodKey.length > 0
 
     if (
       !input ||
       !input.event ||
       !hasValidIdempotencyKey ||
+      !hasValidContext ||
       !Array.isArray(input.meters) ||
       !hasValidLimit ||
       !hasValidOverageStrategy
@@ -308,8 +383,109 @@ export class EntitlementWindowDO extends DurableObject {
     }
   }
 
-  private async flushToTinybird(_batch: OutboxBatchRow[]): Promise<boolean> {
-    return true
+  private buildOutboxFactPayload(params: {
+    createdAt: number
+    fact: Fact
+    input: ApplyInput
+    meterConfig: MeterConfig
+  }): AnalyticsEntitlementMeterFact {
+    const { createdAt, fact, input, meterConfig } = params
+
+    return entitlementMeterFactSchemaV1.parse({
+      id: [input.streamId, input.periodKey, input.event.id, fact.meterId].join(":"),
+      event_id: input.event.id,
+      idempotency_key: input.idempotencyKey,
+      project_id: input.projectId,
+      customer_id: input.customerId,
+      entitlement_id: input.streamId,
+      feature_slug: input.featureSlug,
+      period_key: input.periodKey,
+      event_slug: input.event.slug,
+      aggregation_method: meterConfig.aggregationMethod,
+      meter_id: fact.meterId,
+      timestamp: input.event.timestamp,
+      created_at: createdAt,
+      delta: fact.delta,
+      value_after: fact.valueAfter,
+    })
+  }
+
+  private parseOutboxFactPayload(payload: string): AnalyticsEntitlementMeterFact {
+    return entitlementMeterFactSchemaV1.parse(JSON.parse(payload))
+  }
+
+  private async flushToTinybird(batch: OutboxBatchRow[]): Promise<boolean> {
+    let facts: AnalyticsEntitlementMeterFact[]
+
+    try {
+      facts = batch.map((row) => this.parseOutboxFactPayload(row.payload))
+    } catch (error) {
+      this.logger.error("Failed to parse entitlement meter fact outbox payload", {
+        error: this.errorMessage(error),
+        batchSize: batch.length,
+      })
+      return false
+    }
+
+    try {
+      const result = await this.analytics.ingestEntitlementMeterFacts(facts)
+      const successful = result?.successful_rows ?? 0
+      const quarantined = result?.quarantined_rows ?? 0
+
+      if (successful === facts.length && quarantined === 0) {
+        return true
+      }
+
+      this.logger.error("Tinybird entitlement meter facts ingestion failed", {
+        expected: facts.length,
+        successful,
+        quarantined,
+      })
+    } catch (error) {
+      this.logger.error("Failed to ingest entitlement meter facts to Tinybird", {
+        error: this.errorMessage(error),
+        batchSize: facts.length,
+      })
+    }
+
+    return this.writeBatchToFallbackAnalytics(facts)
+  }
+
+  private async writeBatchToFallbackAnalytics(
+    facts: AnalyticsEntitlementMeterFact[]
+  ): Promise<boolean> {
+    if (!this.fallbackAnalytics) {
+      this.logger.error("Fallback analytics dataset is not configured", {
+        batchSize: facts.length,
+      })
+      return false
+    }
+
+    try {
+      for (const fact of facts) {
+        this.fallbackAnalytics.writeDataPoint({
+          indexes: [fact.project_id, fact.customer_id, fact.meter_id],
+          doubles: [fact.timestamp, fact.created_at, fact.delta, fact.value_after],
+          blobs: [fact.id, fact.entitlement_id, JSON.stringify(fact)],
+        })
+      }
+
+      return true
+    } catch (error) {
+      this.logger.error("Failed to write entitlement meter facts to fallback analytics", {
+        error: this.errorMessage(error),
+        batchSize: facts.length,
+      })
+      return false
+    }
+  }
+
+  private errorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message
+    }
+
+    return String(error ?? "unknown error")
   }
 
   private getPeriodEndMs(): number {

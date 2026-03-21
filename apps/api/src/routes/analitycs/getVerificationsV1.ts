@@ -5,7 +5,7 @@ import {
   prepareInterval,
 } from "@unprice/analytics"
 import { endTime, startTime } from "hono/timing"
-import * as HttpStatusCodes from "stoker/http-status-codes"
+import * as HttpStatusCodes from "~/util/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 
 import { z } from "zod"

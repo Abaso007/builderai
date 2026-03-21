@@ -1,68 +1,46 @@
 import { CloudflareStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
-import type { Entitlement } from "@unprice/db/validators"
-import {
-  type LakehouseEventForSource,
-  getLakehouseSourceCurrentVersion,
-  parseLakehouseEvent,
-} from "@unprice/lakehouse"
+import { parseLakehouseEvent } from "@unprice/lakehouse"
 import { type AppLogger, createStandaloneRequestLogger } from "@unprice/observability"
 import { CacheService } from "@unprice/services/cache"
 import { CustomerService } from "@unprice/services/customers"
-import {
-  EntitlementService,
-  MemoryEntitlementStorageProvider,
-} from "@unprice/services/entitlements"
+import { GrantsManager, MAX_EVENT_AGE_MS } from "@unprice/services/entitlements"
 import { NoopMetrics } from "@unprice/services/metrics"
 import type { Env } from "~/env"
 import { buildIngestionIdempotencyShardName } from "./idempotency"
 import {
+  type CustomerQueueGroup,
+  EVENTS_SCHEMA_VERSION,
+  type IngestionOutcome,
+  type IngestionRejectionReason,
+} from "./interface"
+import {
   type IngestionQueueConsumerMessage,
   type IngestionQueueMessage,
-  buildEntitlementWindowName,
-  computeEntitlementPeriodKey,
-  filterEntitlementsWithValidAggregationPayload,
-  filterMatchingEntitlements,
+  buildIngestionWindowName,
+  computeResolvedStatePeriodKey,
+  filterMatchingResolvedStates,
+  filterResolvedStatesWithValidAggregationPayload,
   ingestionQueueMessageSchema,
   partitionDuplicateQueuedMessages,
   sortQueuedMessages,
 } from "./message"
 
-const EVENTS_SCHEMA_VERSION = getLakehouseSourceCurrentVersion("events")
-
-export type IngestionPipelineEvent = LakehouseEventForSource<"events">
-
-type IngestionRejectionReason =
-  | "CUSTOMER_NOT_FOUND"
-  | "INVALID_AGGREGATION_PROPERTIES"
-  | "NO_MATCHING_ENTITLEMENT"
-  | "UNROUTABLE_EVENT"
-
-type IngestionOutcome = {
-  rejectionReason?: IngestionRejectionReason
-  state: "processed" | "rejected"
-}
-
-type QueueCustomerService = Pick<CustomerService, "getCustomer">
-type QueueEntitlementService = Pick<EntitlementService, "getRelevantEntitlementsForIngestion">
-
-type CustomerQueueGroup = {
-  customerId: string
-  messages: IngestionQueueConsumerMessage[]
-  projectId: string
-}
+type IngestionCandidateGrants = Parameters<
+  GrantsManager["resolveIngestionStatesFromGrants"]
+>[0]["grants"]
 
 export class IngestionService {
-  private readonly customerService: QueueCustomerService
-  private readonly entitlementService: QueueEntitlementService
+  private readonly customerService: CustomerService
+  private readonly grantsManager: GrantsManager
   private readonly env: Env
   private readonly logger: AppLogger
   private readonly now: () => number
 
   constructor(opts: {
-    customerService: QueueCustomerService
-    entitlementService: QueueEntitlementService
+    customerService: CustomerService
+    grantsManager: GrantsManager
     env: Env
     logger: AppLogger
     now?: () => number
@@ -70,9 +48,29 @@ export class IngestionService {
     this.customerService = opts.customerService
     this.env = opts.env
     this.logger = opts.logger
-    this.entitlementService = opts.entitlementService
+    this.grantsManager = opts.grantsManager
     this.now = opts.now ?? (() => Date.now())
   }
+
+  // // for EU countries we have to keep the stub in the EU namespace
+  // private getStub(
+  //   name: string,
+  //   locationHint?: DurableObjectLocationHint
+  // ): DurableObjectStub<DurableObjectUsagelimiter> {
+  //   // jurisdiction is only available in production
+  //   if (this.stats.isEUCountry && this.env.APP_ENV === "production") {
+  //     const euSubnamespace = this.namespace.jurisdiction("eu")
+  //     const euStub = euSubnamespace.get(euSubnamespace.idFromName(name), {
+  //       locationHint,
+  //     })
+
+  //     return euStub
+  //   }
+
+  //   return this.namespace.get(this.namespace.idFromName(name), {
+  //     locationHint,
+  //   })
+  // }
 
   public async consumeBatch(batch: MessageBatch<IngestionQueueMessage>): Promise<void> {
     const validMessages = batch.messages.flatMap((message) => {
@@ -145,35 +143,48 @@ export class IngestionService {
       }
 
       let groupRejectionReason: IngestionRejectionReason | undefined
-      let entitlements: Entitlement[] = []
+      let candidateGrants: IngestionCandidateGrants = []
 
       if (!customer || customer.projectId !== projectId) {
         groupRejectionReason = "CUSTOMER_NOT_FOUND"
       } else {
-        // current entitlements or entitlements expired 30 days in the past
-        const { err, val } = await this.entitlementService.getRelevantEntitlementsForIngestion({
+        const earliestMessage = messages[0]?.body
+        const latestMessage = messages.at(-1)?.body
+
+        if (!earliestMessage || !latestMessage) {
+          return
+        }
+
+        const { err, val } = await this.grantsManager.getGrantsForCustomer({
           projectId,
           customerId,
-          historicalDays: 30, // last 30 days to support late arriving from past periods
+          startAt: Math.max(0, earliestMessage.timestamp - MAX_EVENT_AGE_MS),
+          endAt: latestMessage.timestamp,
         })
 
         if (err) {
           throw err
         }
 
-        entitlements = val
+        candidateGrants = val.grants
 
-        if (entitlements.length === 0) {
+        const hasUsageGrant = candidateGrants.some(
+          (grant) =>
+            grant.featurePlanVersion.featureType === "usage" &&
+            Boolean(grant.featurePlanVersion.meterConfig)
+        )
+
+        if (!hasUsageGrant) {
           groupRejectionReason = "NO_MATCHING_ENTITLEMENT"
         }
       }
 
-      // once we are sure the customer exists and there are entitlements listening that event,
+      // once we are sure the customer exists and there are grants that can resolve the event,
       // then we can call the DO
       for (const message of messages) {
         await this.processMessage({
+          candidateGrants,
           customerId,
-          entitlements,
           message,
           projectId,
           rejectionReason: groupRejectionReason,
@@ -194,18 +205,16 @@ export class IngestionService {
   }
 
   /**
-   * Process all entitlements of the customer
-   * @param params
-   * @returns
+   * Process one queued event for the customer after the batch-level grant lookup.
    */
   private async processMessage(params: {
+    candidateGrants: IngestionCandidateGrants
     customerId: string
-    entitlements: Entitlement[]
     message: IngestionQueueConsumerMessage
     projectId: string
     rejectionReason?: IngestionRejectionReason
   }): Promise<void> {
-    const { customerId, entitlements, message, projectId, rejectionReason } = params
+    const { candidateGrants, customerId, message, projectId, rejectionReason } = params
     const now = this.now()
     const idempotencyKey = message.body.idempotencyKey
 
@@ -256,8 +265,8 @@ export class IngestionService {
 
       // if all those validations are good then lets process the message
       const outcome = await this.handleMessage({
+        candidateGrants,
         customerId,
-        entitlements,
         message: message.body,
         projectId,
         rejectionReason,
@@ -305,13 +314,13 @@ export class IngestionService {
   }
 
   private async handleMessage(params: {
+    candidateGrants: IngestionCandidateGrants
     customerId: string
-    entitlements: Entitlement[]
     message: IngestionQueueMessage
     projectId: string
     rejectionReason?: IngestionRejectionReason
   }): Promise<IngestionOutcome> {
-    const { customerId, entitlements, message, projectId, rejectionReason } = params
+    const { candidateGrants, customerId, message, projectId, rejectionReason } = params
 
     // we validate the rejection here because we need to check every idempotency key no matter what
     // double counting is the worse
@@ -331,19 +340,47 @@ export class IngestionService {
       return outcome
     }
 
-    // get the entitlements listening for the event slug
-    const matchingEntitlements = filterMatchingEntitlements({
-      entitlements,
+    const resolvedStatesResult = await this.grantsManager.resolveIngestionStatesFromGrants({
+      customerId,
+      grants: candidateGrants,
+      projectId,
+      timestamp: message.timestamp,
+    })
+
+    if (resolvedStatesResult.err) {
+      const outcome: IngestionOutcome = {
+        state: "rejected",
+        rejectionReason: "INVALID_ENTITLEMENT_CONFIGURATION",
+      }
+
+      this.logger.warn("invalid active grant configuration for ingestion", {
+        projectId,
+        customerId,
+        event: message,
+        error: resolvedStatesResult.err.message,
+      })
+
+      await this.publishPipelineEvent({
+        handledAt: this.now(),
+        message,
+        outcome,
+      })
+
+      return outcome
+    }
+
+    const matchingStates = filterMatchingResolvedStates({
+      states: resolvedStatesResult.val,
       event: message,
     })
 
-    if (matchingEntitlements.length === 0) {
+    if (matchingStates.length === 0) {
       const outcome: IngestionOutcome = {
         state: "rejected",
         rejectionReason: "UNROUTABLE_EVENT",
       }
 
-      this.logger.debug("no matching entitlements", {
+      this.logger.debug("no matching ingestion streams", {
         event: message,
         outcome,
       })
@@ -360,12 +397,12 @@ export class IngestionService {
 
     // before going to the DO let's validate the event itself has the property the meter is using
     // for the aggregation
-    const processableEntitlements = filterEntitlementsWithValidAggregationPayload({
-      entitlements: matchingEntitlements,
+    const processableStates = filterResolvedStatesWithValidAggregationPayload({
+      states: matchingStates,
       event: message,
     })
 
-    if (processableEntitlements.length === 0) {
+    if (processableStates.length === 0) {
       const outcome: IngestionOutcome = {
         state: "rejected",
         rejectionReason: "INVALID_AGGREGATION_PROPERTIES",
@@ -386,16 +423,9 @@ export class IngestionService {
       return outcome
     }
 
-    for (const entitlement of processableEntitlements) {
-      // this shouldn't happen as we validated before but in case, also make types happy
-      if (!entitlement.meterConfig) {
-        this.logger.debug("meterConfig doesn't exist")
-        continue
-      }
-
-      // this is the way DO rotate overtime, generating a new key given the reset config
-      // seamlessly reseting limits
-      const periodKey = computeEntitlementPeriodKey(entitlement, message.timestamp)
+    for (const state of processableStates) {
+      // This keeps counters stable across mid-cycle grant changes.
+      const periodKey = computeResolvedStatePeriodKey(state, message.timestamp)
 
       if (!periodKey) {
         this.logger.debug("period key doesn't exist")
@@ -404,11 +434,11 @@ export class IngestionService {
 
       // DO for handling entitlement usage
       const stub = this.env.entitlementwindow.getByName(
-        buildEntitlementWindowName({
+        buildIngestionWindowName({
           appEnv: this.env.APP_ENV,
           projectId,
           customerId,
-          entitlementId: entitlement.id,
+          streamId: state.streamId,
           periodKey,
         })
       )
@@ -422,9 +452,14 @@ export class IngestionService {
           properties: message.properties,
         },
         idempotencyKey: message.idempotencyKey,
-        meters: [entitlement.meterConfig],
-        limit: entitlement.limit,
-        overageStrategy: entitlement.metadata?.overageStrategy ?? "none",
+        projectId,
+        customerId,
+        streamId: state.streamId,
+        featureSlug: state.featureSlug,
+        periodKey,
+        meters: [state.meterConfig],
+        limit: state.limit,
+        overageStrategy: state.overageStrategy,
         enforceLimit: false, // we don't enforce limits here, every valid event that is sent we ingest
       })
     }
@@ -504,7 +539,7 @@ export async function consumeIngestionBatch(
 
   const service = new IngestionService({
     customerService: services.customerService,
-    entitlementService: services.entitlementService,
+    grantsManager: services.grantsManager,
     env,
     logger,
   })
@@ -549,7 +584,7 @@ function createQueueServices(params: {
   logger: AppLogger
 }): {
   customerService: CustomerService
-  entitlementService: EntitlementService
+  grantsManager: GrantsManager
 } {
   const db = createConnection({
     env: params.env.APP_ENV,
@@ -601,14 +636,9 @@ function createQueueServices(params: {
       cache,
       metrics,
     }),
-    entitlementService: new EntitlementService({
+    grantsManager: new GrantsManager({
       db,
-      storage: new MemoryEntitlementStorageProvider({ logger: params.logger }),
       logger: params.logger,
-      analytics,
-      waitUntil,
-      cache,
-      metrics,
     }),
   }
 }

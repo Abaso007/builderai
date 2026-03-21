@@ -1,6 +1,6 @@
 import { createRoute } from "@hono/zod-openapi"
-import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
+import * as HttpStatusCodes from "~/util/http-status-codes"
 
 import { currentUsageSchema } from "@unprice/db/validators"
 import { z } from "zod"
@@ -56,7 +56,6 @@ export type GetUsageResponse = z.infer<
 export const registerGetUsageV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customerId, projectId } = c.req.valid("json")
-    const { usagelimiter } = c.get("services")
     const now = Date.now()
 
     // validate the request
@@ -68,15 +67,15 @@ export const registerGetUsageV1 = (app: App) =>
       requestedProjectId: projectId ?? key.project.id,
     })
 
-    const { err, val: result } = await usagelimiter.getCurrentUsage({
-      customerId,
-      projectId: finalProjectId,
-      now,
-    })
+    // const { err, val: result } = await usagelimiter.getCurrentUsage({
+    //   customerId,
+    //   projectId: finalProjectId,
+    //   now,
+    // })
 
-    if (err) {
-      throw err
-    }
+    // if (err) {
+    //   throw err
+    // }
 
-    return c.json(result, HttpStatusCodes.OK)
+    return c.json([], HttpStatusCodes.OK)
   })

@@ -5,7 +5,7 @@ import {
   EventTimestampTooOldError,
   validateEventTimestamp,
 } from "@unprice/services/entitlements"
-import * as HttpStatusCodes from "stoker/http-status-codes"
+import * as HttpStatusCodes from "~/util/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { ulid } from "ulid"
 import { z } from "zod"

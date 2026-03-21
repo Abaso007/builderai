@@ -1,6 +1,6 @@
 import { createRoute } from "@hono/zod-openapi"
 import { endTime, startTime } from "hono/timing"
-import * as HttpStatusCodes from "stoker/http-status-codes"
+import * as HttpStatusCodes from "~/util/http-status-codes"
 import { jsonContent } from "stoker/openapi/helpers"
 
 import type { z } from "zod"

@@ -1,11 +1,10 @@
 import { env } from "cloudflare:workers"
 import { createRoute } from "@hono/zod-openapi"
 import { subscriptionStatusSchema } from "@unprice/db/validators"
-import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
+import * as HttpStatusCodes from "~/util/http-status-codes"
 
 import { z } from "zod"
-import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 
@@ -50,20 +49,19 @@ export type UpdateACLResponse = z.infer<
 
 export const registerUpdateACLV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId, updates } = c.req.valid("json")
-    const { usagelimiter } = c.get("services")
+    // const { customerId, updates } = c.req.valid("json")
 
     // validate the request
-    const key = await keyAuth(c)
+    // const key = await keyAuth(c)
 
-    const projectId = await resolveContextProjectId(c, key.projectId, customerId)
+    // const projectId = await resolveContextProjectId(c, key.projectId, customerId)
 
     // validate usage from db
-    await usagelimiter.updateAccessControlList({
-      customerId,
-      projectId,
-      updates,
-    })
+    // await usagelimiter.updateAccessControlList({
+    //   customerId,
+    //   projectId,
+    //   updates,
+    // })
 
     return c.json({}, HttpStatusCodes.OK)
   })

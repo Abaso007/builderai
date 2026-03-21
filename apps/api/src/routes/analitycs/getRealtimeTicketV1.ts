@@ -1,5 +1,5 @@
 import { createRoute } from "@hono/zod-openapi"
-import * as HttpStatusCodes from "stoker/http-status-codes"
+import * as HttpStatusCodes from "~/util/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
 import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"

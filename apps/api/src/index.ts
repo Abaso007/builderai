@@ -7,7 +7,6 @@ import { init } from "~/middleware/init"
 
 import serveEmojiFavicon from "stoker/middlewares/serve-emoji-favicon"
 
-export { DurableObjectUsagelimiter } from "~/usagelimiter/do"
 export { DurableObjectProject } from "~/project/do"
 export { EntitlementWindowDO } from "~/ingestion/EntitlementWindowDO"
 export { IngestionIdempotencyDO } from "~/ingestion/IngestionIdempotencyDO"
@@ -18,8 +17,6 @@ import { registerGetEntitlementsV1 } from "./routes/customer/getEntitlementsV1"
 import { registerGetPaymentMethodsV1 } from "./routes/customer/getPaymentMethodsV1"
 import { registerGetSubscriptionV1 } from "./routes/customer/getSubscriptionV1"
 import { registerGetUsageV1 } from "./routes/customer/getUsageV1"
-import { registerResetEntitlementsV1 } from "./routes/customer/resetEntitlementsV1"
-import { registerResetUsageV1 } from "./routes/customer/resetUsageV1"
 import { registerSignUpV1 } from "./routes/customer/signUpV1"
 import { registerVerifyV1 } from "./routes/customer/verifyV1"
 import { registerIngestEventsV1 } from "./routes/events/ingestEventsV1"
@@ -38,7 +35,6 @@ import { consumeIngestionBatch } from "~/ingestion/service"
 import { obs } from "~/middleware/obs"
 import { apiEvlog } from "~/observability"
 import { registerGetRealtimeTicketV1 } from "./routes/analitycs/getRealtimeTicketV1"
-import { registerGetRealtimeUsageV1 } from "./routes/analitycs/getRealtimeUsageV1"
 import { registerGetAnalyticsUsageV1 } from "./routes/analitycs/getUsageV1"
 import { registerGetAnalyticsVerificationsV1 } from "./routes/analitycs/getVerificationsV1"
 import { registerUpdateACLV1 } from "./routes/customer/updateACLV1"
@@ -136,8 +132,6 @@ registerGetUsageV1(app)
 registerGetPaymentMethodsV1(app)
 registerSignUpV1(app)
 registerCreatePaymentMethodV1(app)
-registerResetEntitlementsV1(app)
-registerResetUsageV1(app)
 registerUpdateACLV1(app)
 // Project routes
 registerGetFeaturesV1(app)
@@ -153,7 +147,6 @@ registerStripeSetupV1(app)
 // Analytics routes
 registerGetAnalyticsUsageV1(app)
 registerGetAnalyticsVerificationsV1(app)
-registerGetRealtimeUsageV1(app)
 registerGetRealtimeTicketV1(app)
 
 // Lakehouse routes

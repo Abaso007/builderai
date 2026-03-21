@@ -1,4 +1,4 @@
-import * as HttpStatusCodes from "stoker/http-status-codes"
+import * as HttpStatusCodes from "~/util/http-status-codes"
 import { jsonContent } from "stoker/openapi/helpers"
 import { z } from "zod"
 import { errorSchemaFactory } from "./http"

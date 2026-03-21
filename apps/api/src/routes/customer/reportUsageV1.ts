@@ -1,13 +1,13 @@
 import { createRoute } from "@hono/zod-openapi"
 import { metadataSchema, reportUsageResultSchema } from "@unprice/db/validators"
 import { endTime, startTime } from "hono/timing"
-import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
 import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { bouncer } from "~/util/bouncer"
+import * as HttpStatusCodes from "~/util/http-status-codes"
 import { reportUsageEvents } from "~/util/reportUsageEvents"
 
 const tags = ["customer"]
@@ -96,7 +96,7 @@ export const registerReportUsageV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customerId, externalId, featureSlug, usage, idempotenceKey, metadata, action } =
       c.req.valid("json")
-    const { usagelimiter, customer } = c.get("services")
+    const { ingestion, customer } = c.get("services")
     const stats = c.get("stats")
     const requestId = c.get("requestId")
     const requestStartedAt = c.get("requestStartedAt")
@@ -136,7 +136,7 @@ export const registerReportUsageV1 = (app: App) =>
     startTime(c, "reportUsage")
 
     // validate usage from db
-    const { err, val: result } = await usagelimiter.reportUsage({
+    const { err, val: result } = await ingestion({
       customerId: resolvedCustomerId,
       featureSlug,
       usage,
