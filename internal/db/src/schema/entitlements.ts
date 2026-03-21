@@ -81,19 +81,6 @@ export const entitlements = pgTableProject(
     // expires at is the date when the entitlement will expire
     expiresAt: bigint("expires_at", { mode: "number" }),
 
-    // Cache invalidation ----------------------------
-    computedAt: bigint("computed_at", { mode: "number" })
-      .notNull()
-      .$defaultFn(() => Date.now()),
-
-    // next revalidate at is the date when the entitlement will be revalidated
-    // often times is the same as the cycle end at
-    nextRevalidateAt: bigint("next_revalidate_at", { mode: "number" }).notNull(),
-
-    // Version is string because it's a hash of the grants
-    // every time the grants are recomputed, the version is updated
-    version: varchar("version", { length: 64 }).notNull().default(""),
-
     // grants snapshot is the snapshot of the grants that were applied to the customer at the time of the entitlement
     // grants are consumed by priority, so the higher priority will be consumed first
     // usage records are associated to the entitlement and the grant id for billing attribution

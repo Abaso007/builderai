@@ -110,18 +110,6 @@ export const LAKEHOUSE_EVENT_ZOD_SCHEMAS: {
   events: buildLakehouseEventZodSchema("events") as unknown as z.ZodType<
     LakehouseEventForSource<"events">
   >,
-  usage: buildLakehouseEventZodSchema("usage") as unknown as z.ZodType<
-    LakehouseEventForSource<"usage">
-  >,
-  verification: buildLakehouseEventZodSchema("verification") as unknown as z.ZodType<
-    LakehouseEventForSource<"verification">
-  >,
-  metadata: buildLakehouseEventZodSchema("metadata") as unknown as z.ZodType<
-    LakehouseEventForSource<"metadata">
-  >,
-  entitlement_snapshot: buildLakehouseEventZodSchema(
-    "entitlement_snapshot"
-  ) as unknown as z.ZodType<LakehouseEventForSource<"entitlement_snapshot">>,
 }
 
 export function getLakehouseSourceEventZodSchema<S extends LakehouseSource>(

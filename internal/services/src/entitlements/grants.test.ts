@@ -690,4 +690,82 @@ describe("GrantsManager", () => {
       expect(result.val).toHaveLength(0)
     })
   })
+
+  describe("resolveIngestionStatesFromGrants", () => {
+    it("keeps the stream coverage anchored across a continuous same-signature grant chain", async () => {
+      const march1 = Date.UTC(2026, 2, 1)
+      const march15 = Date.UTC(2026, 2, 15)
+      const march31 = Date.UTC(2026, 2, 31)
+      const march20 = Date.UTC(2026, 2, 20)
+
+      const result = await grantsManager.resolveIngestionStatesFromGrants({
+        customerId,
+        projectId,
+        timestamp: march20,
+        grants: [
+          {
+            ...baseGrant,
+            id: "g_chain_1",
+            limit: 100,
+            effectiveAt: march1,
+            expiresAt: march15,
+          },
+          {
+            ...baseGrant,
+            id: "g_chain_2",
+            limit: 50,
+            effectiveAt: march15,
+            expiresAt: march31,
+          },
+        ],
+      })
+
+      expect(result.err).toBeUndefined()
+      expect(result.val).toHaveLength(1)
+      expect(result.val?.[0]).toEqual(
+        expect.objectContaining({
+          activeGrantIds: ["g_chain_2"],
+          featureSlug,
+          limit: 50,
+          streamStartAt: march1,
+          streamEndAt: march31,
+        })
+      )
+      expect(result.val?.[0]?.streamId).toContain("stream_")
+    })
+
+    it("rejects active stacked grants that disagree on meter configuration", async () => {
+      const timestamp = Date.UTC(2026, 2, 20)
+
+      const result = await grantsManager.resolveIngestionStatesFromGrants({
+        customerId,
+        projectId,
+        timestamp,
+        grants: [
+          {
+            ...baseGrant,
+            id: "g_meter_a",
+            effectiveAt: timestamp - 10_000,
+            expiresAt: timestamp + 10_000,
+          },
+          {
+            ...baseGrant,
+            id: "g_meter_b",
+            effectiveAt: timestamp - 5_000,
+            expiresAt: timestamp + 5_000,
+            featurePlanVersion: {
+              ...baseGrant.featurePlanVersion,
+              meterConfig: {
+                ...baseGrant.featurePlanVersion.meterConfig,
+                aggregationField: "other_value",
+              },
+            },
+          },
+        ],
+      })
+
+      expect(result.err).toBeDefined()
+      expect(result.err?.message).toContain("Non-fungible grants")
+    })
+  })
 })

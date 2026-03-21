@@ -5,7 +5,6 @@ import {
   EventTimestampTooOldError,
   validateEventTimestamp,
 } from "@unprice/services/entitlements"
-import * as HttpStatusCodes from "~/util/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { ulid } from "ulid"
 import { z } from "zod"
@@ -14,12 +13,13 @@ import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { type IngestionQueueMessage, ingestionQueueMessageSchema } from "~/ingestion/message"
+import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["ingestion"]
 const SAFE_QUEUE_SEND_RETRIES = 3
 const SAFE_QUEUE_SEND_BASE_DELAY_MS = 100
 
-const rawEventSchema = z.object({
+export const rawEventSchema = z.object({
   id: z
     .string()
     .openapi({
@@ -65,9 +65,10 @@ const acceptedSchema = z.object({
 
 export const route = createRoute({
   path: "/v1/events/ingest",
-  operationId: "ingestion.ingestEvent",
+  operationId: "events.ingest",
   summary: "ingest raw event",
-  description: "Ingest a raw events",
+  description:
+    "Ingest a raw events. All ingested events are reported and a notification will be triggered when the limit is hit.",
   method: "post",
   tags,
   request: {
@@ -119,19 +120,12 @@ export const registerIngestEventsV1 = (app: App) =>
     // 4. the event should be parsed to be sure we don't receive garbage, before sending it
     // to the queue
     // TODO: we could deduplicate this here in memory
-    const eventId = body.id ?? generateEventId(receivedAt)
-
-    const message: IngestionQueueMessage = ingestionQueueMessageSchema.parse({
-      version: 1,
+    const message = buildIngestionQueueMessage({
+      body,
       projectId,
-      customerId: body.customerId,
-      requestId,
       receivedAt,
-      idempotencyKey: body.idempotencyKey,
-      id: eventId,
-      slug: body.eventSlug,
+      requestId,
       timestamp,
-      properties: body.properties,
     })
 
     // shard by customerid to make sure the messages of specific customer go to the same queue
@@ -225,6 +219,30 @@ async function sleep(ms: number): Promise<void> {
 
 export function generateEventId(now = Date.now()): string {
   return `evt_${ulid(now)}`
+}
+
+export function buildIngestionQueueMessage(params: {
+  body: IngestEventsRequest
+  projectId: string
+  receivedAt: number
+  requestId: string
+  timestamp: number
+}): IngestionQueueMessage {
+  const { body, projectId, receivedAt, requestId, timestamp } = params
+  const eventId = body.id ?? generateEventId(receivedAt)
+
+  return ingestionQueueMessageSchema.parse({
+    version: 1,
+    projectId,
+    customerId: body.customerId,
+    requestId,
+    receivedAt,
+    idempotencyKey: body.idempotencyKey,
+    id: eventId,
+    slug: body.eventSlug,
+    timestamp,
+    properties: body.properties,
+  })
 }
 
 export type IngestEventsRequest = z.infer<typeof rawEventSchema>

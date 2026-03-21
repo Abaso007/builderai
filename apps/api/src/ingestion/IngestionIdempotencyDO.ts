@@ -13,6 +13,7 @@ type BeginInput = {
 type CompleteInput = {
   idempotencyKey: string
   now: number
+  result?: string
 }
 
 type AbortInput = {
@@ -20,6 +21,7 @@ type AbortInput = {
 }
 
 type BeginResult = {
+  completedResult?: string
   decision: "busy" | "duplicate" | "process"
   retryAfterSeconds?: number
 }
@@ -27,6 +29,7 @@ type BeginResult = {
 type IdempotencyRow = {
   expires_at: number
   lease_until: number
+  result: string | null
   status: IdempotencyStatus
 }
 
@@ -43,7 +46,8 @@ export class IngestionIdempotencyDO extends DurableObject {
           idempotency_key TEXT PRIMARY KEY,
           status TEXT NOT NULL,
           lease_until INTEGER NOT NULL,
-          expires_at INTEGER NOT NULL
+          expires_at INTEGER NOT NULL,
+          result TEXT
         )
       `)
       this.ctx.storage.sql.exec(`
@@ -64,8 +68,8 @@ export class IngestionIdempotencyDO extends DurableObject {
     if (!existing) {
       this.ctx.storage.sql.exec(
         `
-          INSERT INTO ${TABLE_NAME} (idempotency_key, status, lease_until, expires_at)
-          VALUES (?, 'processing', ?, ?)
+          INSERT INTO ${TABLE_NAME} (idempotency_key, status, lease_until, expires_at, result)
+          VALUES (?, 'processing', ?, ?, NULL)
         `,
         input.idempotencyKey,
         leaseUntil,
@@ -76,7 +80,10 @@ export class IngestionIdempotencyDO extends DurableObject {
     }
 
     if (existing.status === "completed" && existing.expires_at > input.now) {
-      return { decision: "duplicate" }
+      return {
+        decision: "duplicate",
+        completedResult: existing.result ?? undefined,
+      }
     }
 
     if (existing.status === "processing" && existing.lease_until > input.now) {
@@ -90,7 +97,7 @@ export class IngestionIdempotencyDO extends DurableObject {
     this.ctx.storage.sql.exec(
       `
         UPDATE ${TABLE_NAME}
-        SET status = 'processing', lease_until = ?, expires_at = ?
+        SET status = 'processing', lease_until = ?, expires_at = ?, result = NULL
         WHERE idempotency_key = ?
       `,
       leaseUntil,
@@ -112,15 +119,17 @@ export class IngestionIdempotencyDO extends DurableObject {
 
     this.ctx.storage.sql.exec(
       `
-        INSERT INTO ${TABLE_NAME} (idempotency_key, status, lease_until, expires_at)
-        VALUES (?, 'completed', 0, ?)
+        INSERT INTO ${TABLE_NAME} (idempotency_key, status, lease_until, expires_at, result)
+        VALUES (?, 'completed', 0, ?, ?)
         ON CONFLICT(idempotency_key) DO UPDATE
         SET status = 'completed',
             lease_until = 0,
-            expires_at = excluded.expires_at
+            expires_at = excluded.expires_at,
+            result = excluded.result
       `,
       input.idempotencyKey,
-      expiresAt
+      expiresAt,
+      input.result ?? null
     )
 
     await this.scheduleAlarm(expiresAt)
@@ -169,7 +178,7 @@ export class IngestionIdempotencyDO extends DurableObject {
       this.ctx.storage.sql
         .exec<IdempotencyRow>(
           `
-            SELECT status, lease_until, expires_at
+            SELECT status, lease_until, expires_at, result
             FROM ${TABLE_NAME}
             WHERE idempotency_key = ?
           `,

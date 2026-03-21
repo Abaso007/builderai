@@ -3,6 +3,7 @@ import { entitlements, grants } from "@unprice/db/schema"
 import { type UsageMode, hashStringSHA256, newId } from "@unprice/db/utils"
 import {
   type FeatureType,
+  type OverageStrategy,
   calculateCycleWindow,
   type entitlementGrantsSnapshotSchema,
 } from "@unprice/db/validators"
@@ -25,6 +26,36 @@ interface SubjectGrantQuery {
   subjectId: string
   subjectType: "customer" | "project" | "plan" | "plan_version"
 }
+
+export type IngestionResolvedState = {
+  activeGrantIds: string[]
+  customerId: string
+  featureSlug: string
+  limit: number | null
+  meterConfig: NonNullable<Entitlement["meterConfig"]>
+  overageStrategy: OverageStrategy
+  projectId: string
+  resetConfig: Entitlement["resetConfig"]
+  streamEndAt: number | null
+  streamId: string
+  streamStartAt: number
+}
+
+export type ResolvedFeatureStateAtTimestamp =
+  | {
+      kind: "feature_inactive"
+    }
+  | {
+      kind: "feature_missing"
+    }
+  | {
+      entitlement: Omit<Entitlement, "id">
+      kind: "non_usage"
+    }
+  | {
+      kind: "usage"
+      state: IngestionResolvedState
+    }
 
 export class GrantsManager {
   private readonly db: Database
@@ -50,6 +81,7 @@ export class GrantsManager {
     return trimmed && trimmed.length > 0 ? trimmed : "units"
   }
 
+  // craete a stable signarute to find if stacked grants are fungible
   private getGrantResetSignature(grant: z.infer<typeof grantSchemaExtended>) {
     if (grant.featurePlanVersion.resetConfig) {
       return {
@@ -86,6 +118,7 @@ export class GrantsManager {
         ? ((config.usageMode as UsageMode | null | undefined) ?? null)
         : null
 
+    // stable signature to avoid recomputations
     const meterConfig =
       featurePlanVersion.featureType === "usage" && featurePlanVersion.meterConfig
         ? {
@@ -183,6 +216,7 @@ export class GrantsManager {
     return differences
   }
 
+  // In order to process stacked grants, we need to validate if their configurations are mergeable.
   private assertFungibleGrantSet(params: {
     grants: z.infer<typeof grantSchemaExtended>[]
     featureSlug: string
@@ -379,6 +413,10 @@ export class GrantsManager {
     })
   }
 
+  // Get the grants for the customer. Every customer can have different grants coming from different subjects like:
+  // - plan
+  // - plan version
+  // - project
   public async getGrantsForCustomer(
     params:
       | {
@@ -427,7 +465,8 @@ export class GrantsManager {
                 // Otherwise use now to find the active phase
                 return and(lte(phase.startAt, now), or(isNull(phase.endAt), gt(phase.endAt, now)))
               },
-              limit: 1,
+              orderBy: (phase, { desc }) => desc(phase.startAt),
+              ...(startAt === undefined ? { limit: 1 } : {}),
               with: {
                 planVersion: {
                   with: {
@@ -454,8 +493,21 @@ export class GrantsManager {
 
     const subscription = customerSubscription?.subscriptions[0] ?? null
     const currentPhase = subscription?.phases[0] ?? null
-    const planId = currentPhase?.planVersion?.plan?.id ?? null
-    const planVersionId = currentPhase?.planVersion?.id ?? null
+    const planIds = new Set<string>()
+    const planVersionIds = new Set<string>()
+
+    for (const phase of subscription?.phases ?? []) {
+      const planId = phase.planVersion?.plan?.id
+      const planVersionId = phase.planVersion?.id
+
+      if (planId) {
+        planIds.add(planId)
+      }
+
+      if (planVersionId) {
+        planVersionIds.add(planVersionId)
+      }
+    }
 
     // Build list of subjects to query grants for
     const subjects: SubjectGrantQuery[] = [
@@ -463,11 +515,11 @@ export class GrantsManager {
       { subjectId: projectId, subjectType: "project" },
     ]
 
-    if (planId) {
+    for (const planId of planIds) {
       subjects.push({ subjectId: planId, subjectType: "plan" })
     }
 
-    if (planVersionId) {
+    for (const planVersionId of planVersionIds) {
       subjects.push({ subjectId: planVersionId, subjectType: "plan_version" })
     }
 
@@ -526,6 +578,213 @@ export class GrantsManager {
         })
       )
     }
+  }
+
+  /**
+   * Resolve the event-time metering state directly from grants.
+   *
+   * This is the ingestion-facing alternative to trusting the materialized
+   * `entitlements` table. The important distinction is:
+   *
+   * - Grants answer "what is true at this event timestamp?"
+   * - The stream answers "which counter should accumulate this event?"
+   *
+   * For each feature with active usage grants at `timestamp` we:
+   *
+   * 1. Keep only grants active at the event time.
+   * 2. Enforce fungibility so stacked grants agree on meter/reset shape.
+   * 3. Reuse `computeEntitlementState()` to derive the effective limit/config
+   *    for that moment in time.
+   * 4. Build a stable `streamId` from customer + project + feature + the
+   *    fungibility signature.
+   * 5. Expand from the active grants to the full continuous coverage interval
+   *    of that same stream so the reset anchor stays stable across mid-cycle
+   *    grant changes.
+   *
+   * Example:
+   *
+   * - grant A: [Mar 1, Mar 10) limit 100
+   * - grant B: [Mar 10, Mar 20) limit 150
+   *
+   * On Mar 15 the active limit is 150, but the stream still started on Mar 1.
+   * That lets ingestion keep using the same monthly counter instead of
+   * accidentally creating a new counter on Mar 10.
+   */
+  public async resolveIngestionStatesFromGrants(params: {
+    customerId: string
+    grants: z.infer<typeof grantSchemaExtended>[]
+    projectId: string
+    timestamp: number
+  }): Promise<Result<IngestionResolvedState[], UnPriceGrantError>> {
+    const { customerId, grants, projectId, timestamp } = params
+    const activeUsageGrants = grants.filter(
+      (grant) =>
+        this.isGrantActiveAt(grant, timestamp) &&
+        grant.featurePlanVersion.featureType === "usage" &&
+        Boolean(grant.featurePlanVersion.meterConfig)
+    )
+
+    if (activeUsageGrants.length === 0) {
+      return Ok([])
+    }
+
+    const grantsByFeature = new Map<string, z.infer<typeof grantSchemaExtended>[]>()
+
+    for (const grant of activeUsageGrants) {
+      const featureSlug = grant.featurePlanVersion.feature.slug
+      const existing = grantsByFeature.get(featureSlug) ?? []
+      grantsByFeature.set(featureSlug, [...existing, grant])
+    }
+
+    const resolvedStates: IngestionResolvedState[] = []
+
+    for (const [featureSlug, featureGrants] of grantsByFeature.entries()) {
+      const { err: fungibilityErr, val: fungibleGrantSet } = this.assertFungibleGrantSet({
+        grants: featureGrants,
+        featureSlug,
+        customerId,
+      })
+
+      if (fungibilityErr) {
+        return Err(fungibilityErr)
+      }
+
+      const computedStateResult = await this.computeEntitlementState({
+        customerId,
+        projectId,
+        grants: featureGrants,
+      })
+
+      if (computedStateResult.err) {
+        return Err(computedStateResult.err)
+      }
+
+      const computedState = computedStateResult.val
+
+      if (!computedState.meterConfig) {
+        continue
+      }
+
+      const serializedSignature = this.serializeGrantFungibilitySignature(
+        fungibleGrantSet.signature
+      )
+      const sameStreamGrants = grants.filter((grant) => {
+        if (grant.featurePlanVersion.feature.slug !== featureSlug) {
+          return false
+        }
+
+        return (
+          this.serializeGrantFungibilitySignature(this.getGrantFungibilitySignature(grant)) ===
+          serializedSignature
+        )
+      })
+      // We intentionally derive stream coverage from all grants with the same
+      // stream signature, not only the grants active at `timestamp`.
+      // This keeps the stream anchor stable across temporary stacked grants or
+      // back-to-back renewals that should continue accumulating in one period.
+      const coverage = this.findContinuousCoverageBounds({
+        grants: sameStreamGrants,
+        timestamp,
+      }) ?? {
+        end: computedState.expiresAt,
+        start: computedState.effectiveAt,
+      }
+      const streamId = `stream_${await hashStringSHA256(
+        JSON.stringify({
+          customerId,
+          featureSlug,
+          projectId,
+          signature: fungibleGrantSet.signature,
+        })
+      )}`
+
+      resolvedStates.push({
+        activeGrantIds: fungibleGrantSet.orderedGrants.map((grant) => grant.id),
+        customerId,
+        featureSlug,
+        limit: computedState.limit,
+        meterConfig: computedState.meterConfig,
+        overageStrategy: computedState.metadata?.overageStrategy ?? "none",
+        projectId,
+        resetConfig: computedState.resetConfig,
+        streamEndAt: coverage.end,
+        streamId,
+        streamStartAt: coverage.start,
+      })
+    }
+
+    return Ok(resolvedStates)
+  }
+
+  public async resolveFeatureStateAtTimestamp(params: {
+    customerId: string
+    featureSlug: string
+    grants: z.infer<typeof grantSchemaExtended>[]
+    projectId: string
+    timestamp: number
+  }): Promise<Result<ResolvedFeatureStateAtTimestamp, UnPriceGrantError>> {
+    const { customerId, featureSlug, grants, projectId, timestamp } = params
+    const featureGrants = grants.filter((grant) => grant.featurePlanVersion.feature.slug === featureSlug)
+
+    if (featureGrants.length === 0) {
+      return Ok({
+        kind: "feature_missing",
+      })
+    }
+
+    const activeFeatureGrants = featureGrants.filter((grant) => this.isGrantActiveAt(grant, timestamp))
+
+    if (activeFeatureGrants.length === 0) {
+      return Ok({
+        kind: "feature_inactive",
+      })
+    }
+
+    const computedStateResult = await this.computeEntitlementState({
+      customerId,
+      projectId,
+      grants: activeFeatureGrants,
+    })
+
+    if (computedStateResult.err) {
+      return Err(computedStateResult.err)
+    }
+
+    if (
+      computedStateResult.val.featureType !== "usage" ||
+      computedStateResult.val.meterConfig === null
+    ) {
+      return Ok({
+        kind: "non_usage",
+        entitlement: computedStateResult.val,
+      })
+    }
+
+    const resolvedStatesResult = await this.resolveIngestionStatesFromGrants({
+      customerId,
+      grants: featureGrants,
+      projectId,
+      timestamp,
+    })
+
+    if (resolvedStatesResult.err) {
+      return Err(resolvedStatesResult.err)
+    }
+
+    const matchedState = resolvedStatesResult.val.find((state) => state.featureSlug === featureSlug)
+
+    if (!matchedState) {
+      return Err(
+        new UnPriceGrantError({
+          message: `Unable to resolve usage stream for feature "${featureSlug}"`,
+        })
+      )
+    }
+
+    return Ok({
+      kind: "usage",
+      state: matchedState,
+    })
   }
 
   /**
@@ -1030,7 +1289,6 @@ export class GrantsManager {
       resetConfig: computedState.resetConfig,
       mergingPolicy: computedState.mergingPolicy,
       grants: computedState.grants,
-      version: computedState.version,
       metadata: computedState.metadata,
     }
 
@@ -1049,7 +1307,6 @@ export class GrantsManager {
 
         const hasSameWindow =
           currentEntitlement &&
-          currentEntitlement.version === computedState.version &&
           currentEntitlement.effectiveAt === computedState.effectiveAt &&
           currentEntitlement.expiresAt === computedState.expiresAt
 
@@ -1057,8 +1314,6 @@ export class GrantsManager {
           return tx
             .update(entitlements)
             .set({
-              computedAt: now,
-              nextRevalidateAt: now + this.revalidateInterval,
               updatedAtM: now,
             })
             .where(
@@ -1093,8 +1348,6 @@ export class GrantsManager {
             isCurrent: true,
             effectiveAt: computedState.effectiveAt,
             expiresAt: computedState.expiresAt,
-            nextRevalidateAt: now + this.revalidateInterval,
-            computedAt: now,
             updatedAtM: now,
           })
           .returning()
@@ -1122,6 +1375,86 @@ export class GrantsManager {
     }
 
     return Ok(newEntitlement)
+  }
+
+  private isGrantActiveAt(grant: z.infer<typeof grantSchemaExtended>, timestamp: number): boolean {
+    return (
+      grant.effectiveAt <= timestamp && (grant.expiresAt === null || timestamp < grant.expiresAt)
+    )
+  }
+
+  /**
+   * Find the continuous interval of a logical stream that contains `timestamp`.
+   *
+   * "Continuous" here means overlapping or touching grant intervals after we
+   * have already limited the input to grants with the same feature + same
+   * fungibility signature.
+   *
+   * This is used for reset-period anchoring, not for deciding which grants are
+   * active. Active grants are filtered separately by `isGrantActiveAt()`.
+   *
+   * Example:
+   *
+   * - g1: [Mar 1, Mar 15)
+   * - g2: [Mar 15, Mar 31)
+   *
+   * These should behave like one continuous stream for period-key
+   * computation, so this helper returns [Mar 1, Mar 31) for any timestamp in
+   * that merged interval.
+   */
+  private findContinuousCoverageBounds(params: {
+    grants: z.infer<typeof grantSchemaExtended>[]
+    timestamp: number
+  }): {
+    end: number | null
+    start: number
+  } | null {
+    if (params.grants.length === 0) {
+      return null
+    }
+
+    const intervals = params.grants
+      .map((grant) => ({
+        end: grant.expiresAt,
+        start: grant.effectiveAt,
+      }))
+      .sort(
+        (left, right) =>
+          left.start - right.start ||
+          this.normalizeCoverageEnd(left.end) - this.normalizeCoverageEnd(right.end)
+      )
+    const merged: Array<{ end: number | null; start: number }> = []
+
+    for (const interval of intervals) {
+      const previous = merged.at(-1)
+
+      if (!previous) {
+        merged.push({ ...interval })
+        continue
+      }
+
+      if (interval.start <= this.normalizeCoverageEnd(previous.end)) {
+        previous.end =
+          previous.end === null || interval.end === null
+            ? null
+            : Math.max(previous.end, interval.end)
+        continue
+      }
+
+      merged.push({ ...interval })
+    }
+
+    return (
+      merged.find(
+        (interval) =>
+          interval.start <= params.timestamp &&
+          (interval.end === null || params.timestamp < interval.end)
+      ) ?? null
+    )
+  }
+
+  private normalizeCoverageEnd(end: number | null): number {
+    return end ?? Number.POSITIVE_INFINITY
   }
 
   /**

@@ -7,6 +7,7 @@ import {
   type AnalyticsEventAction,
   analyticsEventSchema,
   auditLogSchemaV1,
+  entitlementMeterFactSchemaV1,
   featureUsageSchemaV1,
   featureVerificationSchemaV1,
   pageEventSchema,
@@ -110,6 +111,14 @@ export class Analytics {
         entitlement_id: true,
       }),
       // we need to wait for the ingestion to be done before returning
+      wait: true,
+    })
+  }
+
+  public get ingestEntitlementMeterFacts() {
+    return this.writeClient.buildIngestEndpoint({
+      datasource: "unprice_entitlement_meter_facts",
+      event: entitlementMeterFactSchemaV1,
       wait: true,
     })
   }

@@ -11,7 +11,6 @@ export { DurableObjectProject } from "~/project/do"
 export { EntitlementWindowDO } from "~/ingestion/EntitlementWindowDO"
 export { IngestionIdempotencyDO } from "~/ingestion/IngestionIdempotencyDO"
 
-import { registerReportUsageV1 } from "~/routes/customer/reportUsageV1"
 import { registerCreatePaymentMethodV1 } from "./routes/customer/createPaymentMethodV1"
 import { registerGetEntitlementsV1 } from "./routes/customer/getEntitlementsV1"
 import { registerGetPaymentMethodsV1 } from "./routes/customer/getPaymentMethodsV1"
@@ -19,6 +18,7 @@ import { registerGetSubscriptionV1 } from "./routes/customer/getSubscriptionV1"
 import { registerGetUsageV1 } from "./routes/customer/getUsageV1"
 import { registerSignUpV1 } from "./routes/customer/signUpV1"
 import { registerVerifyV1 } from "./routes/customer/verifyV1"
+import { registerIngestEventsSyncV1 } from "./routes/events/ingestEventsSyncV1"
 import { registerIngestEventsV1 } from "./routes/events/ingestEventsV1"
 import { registerGetLakehouseFilePlanV1 } from "./routes/lakehouse/getLakehouseFilePlanV1"
 import { registerStripeSetupV1 } from "./routes/paymentProvider/stripeSetupV1"
@@ -123,8 +123,8 @@ app.use(
 )
 
 // Customer routes
-registerReportUsageV1(app)
 registerIngestEventsV1(app)
+registerIngestEventsSyncV1(app)
 registerGetEntitlementsV1(app)
 registerVerifyV1(app)
 registerGetSubscriptionV1(app)

@@ -154,6 +154,24 @@ export const featureMetadataSchemaV1 = z.object({
   tags: z.string(),
 })
 
+export const entitlementMeterFactSchemaV1 = z.object({
+  id: z.string(),
+  event_id: z.string(),
+  idempotency_key: z.string(),
+  project_id: z.string(),
+  customer_id: z.string(),
+  entitlement_id: z.string(),
+  feature_slug: z.string(),
+  period_key: z.string(),
+  event_slug: z.string(),
+  aggregation_method: z.string(),
+  meter_id: z.string(),
+  timestamp: z.number().describe("timestamp of the ingested event"),
+  created_at: z.number().describe("timestamp of when the fact row was created"),
+  delta: z.number(),
+  value_after: z.number(),
+})
+
 export const auditLogSchemaV1 = z.object({
   workspace_id: z.string(),
   audit_log_id: z.string(),
@@ -328,6 +346,7 @@ export type GetUsageResponse = z.infer<typeof getUsageResponseSchema>
 export type AnalyticsFeatureMetadata = z.infer<typeof featureMetadataSchemaV1>
 export type AnalyticsVerification = z.infer<typeof featureVerificationSchemaV1>
 export type AnalyticsUsage = z.infer<typeof featureUsageSchemaV1>
+export type AnalyticsEntitlementMeterFact = z.infer<typeof entitlementMeterFactSchemaV1>
 
 // Plan conversion response schemas
 export const planConversionResponseSchema = z.object({

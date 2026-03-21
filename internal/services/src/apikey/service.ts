@@ -45,6 +45,22 @@ export class ApiKeysService {
     this.hashCache = opts.hashCache
   }
 
+  // in memory cache with size and TTL limits
+  // kid of hard to reach the limit as cloudflare can hit others isolates
+  // but just in case we limit it to 1000 entries
+  private updateCache(key: string, result: string) {
+    // enforce max size - remove oldest entry if at limit
+    if (this.hashCache.size >= 1000) {
+      // remove first (oldest) entry
+      const firstKey = this.hashCache.keys().next().value
+      if (firstKey) {
+        this.hashCache.delete(firstKey)
+      }
+    }
+
+    this.hashCache.set(key, result)
+  }
+
   private async hash(key: string): Promise<string> {
     const cached = this.hashCache.get(key)
     if (cached) {
@@ -53,7 +69,7 @@ export class ApiKeysService {
     const hash = await hashStringSHA256(key)
     // we don't want to use swr here as it doesn't make sense to do a network call to the cache if there is miss
     // only improve a little bit of latency when hitting the same isolate in cloudflare
-    this.hashCache.set(key, hash)
+    this.updateCache(key, hash)
     return hash
   }
 

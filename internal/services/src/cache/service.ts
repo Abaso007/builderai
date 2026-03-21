@@ -83,11 +83,6 @@ export class CacheService {
         this.context,
         defaultOpts
       ),
-      customerEntitlement: new Namespace<CacheNamespaces["customerEntitlement"]>(this.context, {
-        ...defaultOpts,
-        fresh: 1000 * 60 * 60 * 24, // 24 hours
-        stale: 1000 * 60 * 60 * 1, // 1 hour
-      }),
       customerRelevantEntitlements: new Namespace<CacheNamespaces["customerRelevantEntitlements"]>(
         this.context,
         defaultOpts
@@ -96,16 +91,6 @@ export class CacheService {
         ...defaultOpts,
         fresh: 1000 * 60 * 1, // Consider them "fresh" for 1 minute
         stale: 1000 * 60 * 60, // Use old data for 1 hour while fetching new data in background
-      }),
-      customerEntitlements: new Namespace<CacheNamespaces["customerEntitlements"]>(this.context, {
-        ...defaultOpts,
-        fresh: 1000 * 60 * 60 * 24, // 24 hours
-        stale: 1000 * 60 * 60 * 1, // 1 hour
-      }),
-      negativeEntitlements: new Namespace<CacheNamespaces["negativeEntitlements"]>(this.context, {
-        ...defaultOpts,
-        fresh: 1000 * 60, // 1 minute
-        stale: 1000 * 60, // 1 minute
       }),
       customerSubscription: new Namespace<CacheNamespaces["customerSubscription"]>(this.context, {
         ...defaultOpts,
@@ -190,14 +175,11 @@ export class CacheService {
         fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
         stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
       }),
-      getEntitlementsFeature: new Namespace<CacheNamespaces["getEntitlementsFeature"]>(
-        this.context,
-        {
-          ...defaultOpts,
-          fresh: 1000 * 60 * 60 * 24, // 24 hours
-          stale: 1000 * 60 * 60, // 1 hour
-        }
-      ),
+      getRelevantEntitlementsPerFeature: new Namespace<
+        CacheNamespaces["getRelevantEntitlementsPerFeature"]
+      >(this.context, {
+        ...defaultOpts,
+      }),
     })
 
     this.isInitialized = true

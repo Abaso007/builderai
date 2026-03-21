@@ -1,81 +1,113 @@
 import { createRoute } from "@hono/zod-openapi"
-import { metadataSchema, verificationResultSchema } from "@unprice/db/validators"
+import { meterConfigSchema, overageStrategySchema } from "@unprice/db/validators"
+import {
+  EventTimestampTooFarInFutureError,
+  EventTimestampTooOldError,
+  validateEventTimestamp,
+} from "@unprice/services/entitlements"
 import { endTime } from "hono/timing"
 import { startTime } from "hono/timing"
-import * as HttpStatusCodes from "~/util/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
 import { keyAuth, resolveContextProjectId } from "~/auth/key"
+import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import { reportUsageEvents } from "~/util/reportUsageEvents"
+import { FEATURE_VERIFICATION_STATUSES } from "~/ingestion/interface"
+import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["customer"]
+
+const verifyFeatureStatusSchema = z.object({
+  allowed: z.boolean().openapi({
+    description: "Whether the feature is currently usable for the requested customer and timestamp",
+    example: true,
+  }),
+  status: z.enum(FEATURE_VERIFICATION_STATUSES).openapi({
+    description: "The current verification status for the requested feature",
+    example: "usage",
+  }),
+  featureSlug: z.string().openapi({
+    description: "The feature slug that was verified",
+    example: "tokens",
+  }),
+  meterConfig: meterConfigSchema.optional().openapi({
+    description: "The resolved meter configuration for usage-based features",
+  }),
+  usage: z.number().optional().openapi({
+    description: "Current usage in the active meter window",
+    example: 42,
+  }),
+  limit: z.number().nullable().optional().openapi({
+    description: "Configured limit for the active meter window",
+    example: 100,
+  }),
+  isLimitReached: z.boolean().optional().openapi({
+    description: "Whether the current usage has reached the current limit",
+    example: false,
+  }),
+  overageStrategy: overageStrategySchema.optional().openapi({
+    description: "How the feature behaves once the limit is reached",
+    example: "none",
+  }),
+  message: z.string().optional().openapi({
+    description: "Optional detail about the verification result",
+    example: "Unable to resolve the current meter window for this feature",
+  }),
+})
 
 export const route = createRoute({
   path: "/v1/customer/verify",
   operationId: "customers.verify",
-  summary: "verify feature",
-  description: "Verify if a customer can use a feature",
+  summary: "get current feature status",
+  description:
+    "Resolve the current state of a feature for a customer and, for usage features, return the live meter method, limit, and usage.",
   method: "post",
   tags,
   request: {
     body: jsonContentRequired(
-      z
-        .object({
-          customerId: z
-            .string()
-            .openapi({
-              description: "The unprice customer ID",
-              example: "cus_1H7KQFLr7RepUyQBKdnvY",
-            })
-            .optional(),
-          externalId: z
-            .string()
-            .openapi({
-              description: "The external customer ID provided at sign up",
-              example: "user_123",
-            })
-            .optional(),
-          featureSlug: z.string().openapi({
-            description: "The feature slug",
-            example: "tokens",
-          }),
-          action: z
-            .string()
-            .openapi({
-              description:
-                "The action being performed (e.g., 'read', 'write', 'delete'). Normalized to lowercase with spaces as hyphens.",
-              example: "read",
-            })
-            .optional()
-            .transform((v) =>
-              v == null || v === "" ? undefined : v.trim().toLowerCase().replace(/\s+/g, "-")
-            ),
-          metadata: metadataSchema.optional(),
-          // TODO: turn this into a verify + consume request - better delete it and create a new endpoint to avoid confusion
-          usage: z
-            .number()
-            .openapi({
-              description: "The usage to check feature access for, if not provided, it will be 0",
-              example: 100,
-            })
-            .optional(),
-        })
-        .superRefine((data, ctx) => {
-          if (!data.customerId && !data.externalId) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              message: "Either customerId or externalId is required",
-              path: ["customerId", "externalId"],
-            })
-          }
+      z.object({
+        customerId: z.string().openapi({
+          description: "The unprice customer ID",
+          example: "cus_1H7KQFLr7RepUyQBKdnvY",
         }),
+        // externalId: z
+        //   .string()
+        //   .openapi({
+        //     description: "The external customer ID provided at sign up",
+        //     example: "user_123",
+        //   })
+        //   .optional(),
+        featureSlug: z.string().openapi({
+          description: "The feature slug",
+          example: "tokens",
+        }),
+        timestamp: z
+          .number()
+          .openapi({
+            description:
+              "Optional timestamp to inspect a recent point-in-time state. Defaults to the request start time.",
+            example: Date.UTC(2026, 2, 21, 12, 0, 0),
+          })
+          .optional(),
+      }),
+      // .superRefine((data, ctx) => {
+      //   if (!data.customerId && !data.externalId) {
+      //     ctx.addIssue({
+      //       code: z.ZodIssueCode.custom,
+      //       message: "Either customerId or externalId is required",
+      //       path: ["customerId", "externalId"],
+      //     })
+      //   }
+      // }),
       "Body of the request"
     ),
   },
   responses: {
-    [HttpStatusCodes.OK]: jsonContent(verificationResultSchema, "The result of the verify check"),
+    [HttpStatusCodes.OK]: jsonContent(
+      verifyFeatureStatusSchema,
+      "The current feature verification status"
+    ),
     ...openApiErrorResponses,
   },
 })
@@ -89,71 +121,41 @@ export type VerifyResponse = z.infer<
 
 export const registerVerifyV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId, externalId, featureSlug, metadata, usage, action } = c.req.valid("json")
-    const { usagelimiter, customer } = c.get("services")
-    const stats = c.get("stats")
-    const requestId = c.get("requestId")
-    const performanceStart = c.get("performanceStart")
+    const body = c.req.valid("json")
+    const { customerId, featureSlug } = body
+    const { ingestion } = c.get("services")
     const requestStartedAt = c.get("requestStartedAt")
+    const timestamp = body.timestamp ?? requestStartedAt
 
-    // validate the request
     const key = await keyAuth(c)
-    const projectId = customerId
-      ? await resolveContextProjectId(c, key.projectId, customerId)
-      : key.projectId
+    const projectId = await resolveContextProjectId(c, key.projectId, customerId)
 
-    let resolvedCustomerId: string
-
-    if (customerId) {
-      resolvedCustomerId = customerId
-    } else {
-      // if there is a external id, resolve the customer id from
-      const { err: resolveCustomerErr, val: customerContext } = await customer.resolveCustomerId({
-        projectId,
-        externalId,
-      })
-
-      if (resolveCustomerErr) {
-        throw resolveCustomerErr
+    try {
+      validateEventTimestamp(timestamp, requestStartedAt)
+    } catch (error) {
+      if (
+        error instanceof EventTimestampTooFarInFutureError ||
+        error instanceof EventTimestampTooOldError
+      ) {
+        throw new UnpriceApiError({
+          code: "BAD_REQUEST",
+          message: error.message,
+        })
       }
 
-      resolvedCustomerId = customerContext.customerId
+      throw error
     }
 
-    // bouncer is explicitly ignored here because we don't want to hurt latency on the verification path
-    // also it makes sense to let customer verify the feature so their service continue working
-    // event if that means some overage usage
-
-    // start a new timer
     startTime(c, "verify")
 
-    // validate usage from db
-    const { err, val: result } = await usagelimiter.verify({
-      customerId: resolvedCustomerId,
+    const result = await ingestion.verifyFeatureStatus({
+      customerId,
       featureSlug,
       projectId,
-      requestId,
-      performanceStart,
-      usage,
-      // timestamp of the record (stabilized at request start)
-      timestamp: requestStartedAt,
-      // first-class analytics fields
-      country: stats.country,
-      region: stats.colo,
-      action: action,
-      keyId: key.id,
-      metadata: metadata ?? null,
+      timestamp,
     })
 
-    // end the timer
     endTime(c, "verify")
-
-    // send analytics event for the unprice customer
-    c.executionCtx.waitUntil(reportUsageEvents(c, {}, "verify"))
-
-    if (err) {
-      throw err
-    }
 
     return c.json(result, HttpStatusCodes.OK)
   })

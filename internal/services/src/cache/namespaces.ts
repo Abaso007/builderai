@@ -15,7 +15,6 @@ import type {
   CustomerPaymentMethod,
   Entitlement,
   Feature,
-  MinimalEntitlement,
   PlanVersionApi,
   Project,
   ReportUsageResult,
@@ -52,15 +51,12 @@ export type CacheNamespaces = {
   customerSubscription: SubscriptionCache | null
   customer: CustomerCache | null
   customerByExternalId: CustomerCache | null
-  customerEntitlement: Entitlement | null
   customerRelevantEntitlements: Entitlement[]
   accessControlList: {
     customerUsageLimitReached: boolean | null
     customerDisabled: boolean | null
     subscriptionStatus: SubscriptionStatus | null
   } | null
-  customerEntitlements: MinimalEntitlement[]
-  negativeEntitlements: boolean
   customerPaymentMethods: CustomerPaymentMethod[] | null
   projectFeatures: ProjectFeatureCache | null
   workspaceGuard: WorkspaceGuardCache | null
@@ -77,7 +73,7 @@ export type CacheNamespaces = {
   getVerifications: Verifications | null
   getVerificationRegions: VerificationRegions | null
   getCurrentUsage: CurrentUsage | null
-  getEntitlementsFeature: Entitlement[]
+  getRelevantEntitlementsPerFeature: Entitlement[]
 }
 
 export type CacheNamespace = keyof CacheNamespaces
