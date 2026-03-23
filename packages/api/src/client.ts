@@ -60,6 +60,9 @@ export type UnpriceOptions = {
   headers?: Record<string, string>
 }
 
+type LegacyPostRequest = Record<string, unknown>
+type LegacyPostResponse = Record<string, unknown>
+
 type ApiRequest = {
   path: string[]
 } & (
@@ -210,21 +213,6 @@ export class Unprice {
 
   public get customers() {
     return {
-      reportUsage: async (
-        req: paths["/v1/customer/reportUsage"]["post"]["requestBody"]["content"]["application/json"]
-      ): Promise<
-        Result<
-          | paths["/v1/customer/reportUsage"]["post"]["responses"]["200"]["content"]["application/json"]
-          | paths["/v1/customer/reportUsage"]["post"]["responses"]["429"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "customer", "reportUsage"],
-          method: "POST",
-          body: req,
-        })
-      },
-
       getEntitlements: async (
         req: paths["/v1/customer/getEntitlements"]["post"]["requestBody"]["content"]["application/json"]
       ): Promise<
@@ -338,6 +326,38 @@ export class Unprice {
     }
   }
 
+  public get events() {
+    return {
+      ingest: async (
+        req: paths["/v1/events/ingest"]["post"]["requestBody"]["content"]["application/json"]
+      ): Promise<
+        Result<
+          paths["/v1/events/ingest"]["post"]["responses"]["202"]["content"]["application/json"]
+        >
+      > => {
+        return await this.fetch({
+          path: ["v1", "events", "ingest"],
+          method: "POST",
+          body: req,
+        })
+      },
+
+      ingestSync: async (
+        req: paths["/v1/events/ingest/sync"]["post"]["requestBody"]["content"]["application/json"]
+      ): Promise<
+        Result<
+          paths["/v1/events/ingest/sync"]["post"]["responses"]["200"]["content"]["application/json"]
+        >
+      > => {
+        return await this.fetch({
+          path: ["v1", "events", "ingest", "sync"],
+          method: "POST",
+          body: req,
+        })
+      },
+    }
+  }
+
   public get projects() {
     return {
       getFeatures: async (): Promise<
@@ -417,13 +437,8 @@ export class Unprice {
         })
       },
 
-      getRealtimeUsage: async (
-        req: paths["/v1/analytics/realtime"]["post"]["requestBody"]["content"]["application/json"]
-      ): Promise<
-        Result<
-          paths["/v1/analytics/realtime"]["post"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
+      // NOTE: Temporary loose typing while OpenAPI path mapping is being migrated.
+      getRealtimeUsage: async (req: LegacyPostRequest): Promise<Result<LegacyPostResponse>> => {
         return await this.fetch({
           path: ["v1", "analytics", "realtime"],
           method: "POST",
@@ -431,13 +446,8 @@ export class Unprice {
         })
       },
 
-      getVerifications: async (
-        req: paths["/v1/analytics/verifications"]["post"]["requestBody"]["content"]["application/json"]
-      ): Promise<
-        Result<
-          paths["/v1/analytics/verifications"]["post"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
+      // NOTE: Temporary loose typing while OpenAPI path mapping is being migrated.
+      getVerifications: async (req: LegacyPostRequest): Promise<Result<LegacyPostResponse>> => {
         return await this.fetch({
           path: ["v1", "analytics", "verifications"],
           method: "POST",

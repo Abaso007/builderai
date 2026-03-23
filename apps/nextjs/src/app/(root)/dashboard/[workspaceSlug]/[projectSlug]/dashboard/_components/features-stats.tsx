@@ -200,7 +200,7 @@ export function FeaturesStats() {
   } = useSuspenseQuery(
     trpc.analytics.getUsage.queryOptions(
       {
-        interval_days: intervalFilter.intervalDays,
+        range: intervalFilter.name,
       },
       {
         ...ANALYTICS_CONFIG_REALTIME,
@@ -228,14 +228,14 @@ export function FeaturesStats() {
   })
 
   useQueryInvalidation({
-    paramKey: intervalFilter.intervalDays,
+    paramKey: intervalFilter.name,
     dataUpdatedAt: usageUpdatedAt,
     isFetching: isUsageFetching,
     getQueryKey: (param) => [
       ["analytics", "getUsage"],
       {
         input: {
-          interval_days: param,
+          range: param,
         },
         type: "query",
       },

@@ -33,13 +33,16 @@ export const reportUsageFeature = async ({
   }
 
   try {
-    const { result, error } = await unprice.customers.reportUsage({
+    const { result, error } = await unprice.events.ingestSync({
       customerId,
       featureSlug,
-      usage,
-      idempotenceKey: uuid(),
-      metadata,
-      action,
+      eventSlug: featureSlug,
+      idempotencyKey: uuid(),
+      properties: {
+        usage,
+        ...(action ? { action } : {}),
+        ...(metadata ? { metadata } : {}),
+      },
     })
 
     if (error) {
