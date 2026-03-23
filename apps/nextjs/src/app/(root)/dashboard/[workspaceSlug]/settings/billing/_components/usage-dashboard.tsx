@@ -1,6 +1,6 @@
-import type { RouterOutputs } from "@unprice/trpc/routes"
 import { APP_DOMAIN } from "@unprice/config"
 import { nFormatter } from "@unprice/db/utils"
+import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import { BarChart3 } from "lucide-react"
@@ -53,26 +53,28 @@ export function UsageDashboard({ usageRows, customerId, workspaceSlug }: UsageDa
         <div className="grid gap-4 md:grid-cols-3">
           <div className="rounded-lg border border-border bg-card p-4">
             <p className="text-muted-foreground text-sm">Features with usage</p>
-            <p className="mt-1 font-semibold text-foreground text-2xl">{featureCount}</p>
+            <p className="mt-1 font-semibold text-2xl text-foreground">{featureCount}</p>
           </div>
 
           <div className="rounded-lg border border-border bg-card p-4">
             <p className="text-muted-foreground text-sm">Total latest usage</p>
-            <p className="mt-1 font-semibold text-foreground text-2xl">
+            <p className="mt-1 font-semibold text-2xl text-foreground">
               {formatUsage(totalLatestUsage)}
             </p>
           </div>
 
           <div className="rounded-lg border border-border bg-card p-4">
             <p className="text-muted-foreground text-sm">Data window</p>
-            <p className="mt-1 font-semibold text-foreground text-2xl">30 days</p>
+            <p className="mt-1 font-semibold text-2xl text-foreground">30 days</p>
           </div>
         </div>
 
         <div className="overflow-hidden rounded-lg border border-border">
           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center bg-muted/40 px-4 py-2.5">
             <p className="text-muted-foreground text-xs uppercase tracking-wide">Feature</p>
-            <p className="text-muted-foreground text-right text-xs uppercase tracking-wide">Usage</p>
+            <p className="text-right text-muted-foreground text-xs uppercase tracking-wide">
+              Usage
+            </p>
           </div>
 
           <div className="divide-y divide-border">

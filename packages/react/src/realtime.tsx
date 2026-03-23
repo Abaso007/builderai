@@ -1260,7 +1260,7 @@ export function UnpriceEntitlementsRealtimeProvider({
     },
     onClose: (event) => {
       setSocketStatus("closed")
-      const reason = event.reason?.toLowerCase()
+      const reason = typeof event.reason === "string" ? event.reason.toLowerCase() : ""
       if (
         reason.includes("expired") ||
         reason.includes("unauthorized") ||

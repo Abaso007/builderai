@@ -502,18 +502,18 @@ function RealtimePanelContent(
     return Math.min(100, Math.max(0, (metrics.allowedCount / metrics.verificationCount) * 100))
   }, [metrics?.verificationCount, metrics?.allowedCount])
 
-  const { rows: entitlementRows } = useUnpriceUsage({ scope: "entitlements" })
+  const { rows: usageRows } = useUnpriceUsage({ scope: "all" })
   const currentPlanSlug = subscription?.planSlug ?? null
   const currentCycleStartAt = subscription?.cycleStartAt ?? null
   const currentCycleEndAt = subscription?.cycleEndAt ?? null
   const cycleTimezone = subscription?.timezone ?? null
   const currentPhaseBillingPeriod = subscription?.billingInterval ?? null
 
-  const maxVisibleEntitlementUsage = useMemo(() => {
-    return entitlementRows.reduce((maxUsage, entitlement) => {
-      return Math.max(maxUsage, entitlement.usage ?? 0)
+  const maxVisibleUsage = useMemo(() => {
+    return usageRows.reduce((maxUsage, usageRow) => {
+      return Math.max(maxUsage, usageRow.usage ?? 0)
     }, 0)
-  }, [entitlementRows])
+  }, [usageRows])
 
   const formatDateForTimezone = (value: number, timeZone?: string | null) => {
     const date = new Date(value)
@@ -937,45 +937,47 @@ function RealtimePanelContent(
       <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
         <Card className="border-muted/60 lg:flex lg:w-[32%] lg:flex-none lg:flex-col">
           <CardHeader>
-            <CardTitle className="text-base">Entitlements</CardTitle>
-            <CardDescription>Usage in the current billing cycle</CardDescription>
+            <CardTitle className="text-base">Feature Usage State</CardTitle>
+            <CardDescription>
+              Live feature state and usage in the current billing cycle
+            </CardDescription>
           </CardHeader>
           <CardContent className="lg:flex-1">
             <ScrollArea
               className="h-[455px] lg:h-full [&_[data-radix-scroll-area-scrollbar]]:hidden"
               hideScrollBar
             >
-              {entitlementRows.length === 0 ? (
+              {usageRows.length === 0 ? (
                 <EmptyPlaceholder className="h-[240px] w-auto border border-dashed">
                   <EmptyPlaceholder.Icon>
                     <BarChart2 className="h-8 w-8 opacity-30" />
                   </EmptyPlaceholder.Icon>
-                  <EmptyPlaceholder.Title>No active entitlements</EmptyPlaceholder.Title>
+                  <EmptyPlaceholder.Title>No feature usage state yet</EmptyPlaceholder.Title>
                   <EmptyPlaceholder.Description>
-                    Customer has no active entitlements.
+                    Usage and feature state will appear here once realtime snapshots arrive.
                   </EmptyPlaceholder.Description>
                 </EmptyPlaceholder>
               ) : (
                 <div className="space-y-4">
-                  {entitlementRows.map((entitlement, index) => {
-                    const featureType = entitlement.featureType
+                  {usageRows.map((usageRow, index) => {
+                    const featureType = usageRow.featureType
                     const isFlatFeature = featureType === "flat"
                     const limitValue =
-                      typeof entitlement.limit === "number" &&
-                      Number.isFinite(entitlement.limit) &&
-                      entitlement.limit >= 0
-                        ? entitlement.limit
+                      typeof usageRow.limit === "number" &&
+                      Number.isFinite(usageRow.limit) &&
+                      usageRow.limit >= 0
+                        ? usageRow.limit
                         : null
                     const hasLimit = limitValue !== null
-                    const usageValue = entitlement.usage ?? 0
-                    const effectiveLimitType = entitlement.limitType
+                    const usageValue = usageRow.usage ?? 0
+                    const effectiveLimitType = usageRow.limitType
                     const allowsOverage = effectiveLimitType !== "hard"
 
                     let usageReference = 1
                     if (limitValue !== null) {
                       usageReference = limitValue
-                    } else if (maxVisibleEntitlementUsage > 0) {
-                      usageReference = maxVisibleEntitlementUsage
+                    } else if (maxVisibleUsage > 0) {
+                      usageReference = maxVisibleUsage
                     }
 
                     const rawUsagePercent = isFlatFeature
@@ -1014,10 +1016,10 @@ function RealtimePanelContent(
                     const usageSummaryText = isFlatFeature ? "Flat feature" : `${usageStatusText}`
 
                     return (
-                      <div key={entitlement.featureSlug} className="space-y-1.5">
+                      <div key={usageRow.featureSlug} className="space-y-1.5">
                         <div className="flex items-center justify-between text-sm">
                           <div className="flex min-w-0 items-center gap-1.5">
-                            <span className="truncate font-medium">{entitlement.featureSlug}</span>
+                            <span className="truncate font-medium">{usageRow.featureSlug}</span>
                           </div>
                           <span className="text-muted-foreground text-xs">{usageSummaryText}</span>
                         </div>
