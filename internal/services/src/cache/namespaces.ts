@@ -5,8 +5,6 @@ import type {
   PageOverview,
   Stats,
   Usage,
-  VerificationRegions,
-  Verifications,
 } from "@unprice/analytics"
 import type {
   ApiKeyExtended,
@@ -70,8 +68,6 @@ export type CacheNamespaces = {
   getPlansStats: Stats | null
   getOverviewStats: Stats | null
   getUsage: Usage | null
-  getVerifications: Verifications | null
-  getVerificationRegions: VerificationRegions | null
   getCurrentUsage: CurrentUsage | null
   getRelevantEntitlementsPerFeature: Entitlement[]
 }

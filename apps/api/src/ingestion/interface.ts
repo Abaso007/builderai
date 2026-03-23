@@ -1,10 +1,10 @@
-import { type LakehouseEventForSource, getLakehouseSourceCurrentVersion } from "@unprice/lakehouse"
 import type {
   AggregationMethod,
   FeatureType,
   MeterConfig,
   OverageStrategy,
 } from "@unprice/db/validators"
+import { type LakehouseEventForSource, getLakehouseSourceCurrentVersion } from "@unprice/lakehouse"
 import type { IngestionQueueConsumerMessage, IngestionQueueMessage } from "./message"
 
 export const EVENTS_SCHEMA_VERSION = getLakehouseSourceCurrentVersion("events")

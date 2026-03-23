@@ -1,10 +1,9 @@
 import { getSession } from "@unprice/auth/server-rsc"
 import { Alert, AlertDescription, AlertTitle } from "@unprice/ui/alert"
 import { AlertCircle } from "lucide-react"
-import { Fragment } from "react"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
-import { unprice } from "#utils/unprice"
+import { api } from "~/trpc/server"
 import { UsageDashboard } from "./_components/usage-dashboard"
 
 export default async function BillingPage({ params }: { params: { workspaceSlug: string } }) {
@@ -45,9 +44,7 @@ export default async function BillingPage({ params }: { params: { workspaceSlug:
         />
       }
     >
-      <Fragment>
-        <UsageCard customerId={customerId} workspaceSlug={workspaceSlug} />
-      </Fragment>
+      <UsageCard customerId={customerId} workspaceSlug={workspaceSlug} />
     </DashboardShell>
   )
 }
@@ -56,25 +53,55 @@ async function UsageCard({
   customerId,
   workspaceSlug,
 }: { customerId: string; workspaceSlug: string }) {
-  const { result: usageData, error } = await unprice.customers.getUsage({ customerId })
-
-  if (error) {
+  if (!customerId) {
     return (
       <Alert variant="info">
-        <AlertCircle className="h-4 w-4" />
-        <AlertTitle>Error fetching data</AlertTitle>
-        <AlertDescription>{error?.message}</AlertDescription>
+        <AlertTitle>No Customer Context</AlertTitle>
+        <AlertDescription>This workspace has no billing customer configured yet.</AlertDescription>
       </Alert>
     )
   }
 
-  if (!usageData)
+  try {
+    const usageData = await api.analytics.getUsage({
+      customerId: customerId,
+      range: "30d",
+    })
+
+    if (usageData.error) {
+      return (
+        <Alert variant="info">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Error fetching usage data</AlertTitle>
+          <AlertDescription>{usageData.error}</AlertDescription>
+        </Alert>
+      )
+    }
+
+    if (!usageData.usage || usageData.usage.length === 0) {
+      return (
+        <Alert variant="info">
+          <AlertTitle>No Usage Data</AlertTitle>
+          <AlertDescription>No usage was reported in the last 30 days.</AlertDescription>
+        </Alert>
+      )
+    }
+
+    return (
+      <UsageDashboard
+        usageRows={usageData.usage}
+        customerId={customerId}
+        workspaceSlug={workspaceSlug}
+      />
+    )
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unexpected error while loading usage"
     return (
       <Alert variant="info">
-        <AlertTitle>No Usage Data</AlertTitle>
-        <AlertDescription>You don't have any usage data for this subscription.</AlertDescription>
+        <AlertCircle className="h-4 w-4" />
+        <AlertTitle>Error fetching usage data</AlertTitle>
+        <AlertDescription>{message}</AlertDescription>
       </Alert>
     )
-
-  return <UsageDashboard config={usageData} customerId={customerId} workspaceSlug={workspaceSlug} />
+  }
 }

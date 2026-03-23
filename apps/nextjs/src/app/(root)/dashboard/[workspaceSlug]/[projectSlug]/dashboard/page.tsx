@@ -46,22 +46,6 @@ export default async function DashboardOverview(props: {
         ...ANALYTICS_CONFIG_REALTIME,
       }
     ),
-    trpc.analytics.getVerifications.queryOptions(
-      {
-        interval_days: interval.intervalDays,
-      },
-      {
-        ...ANALYTICS_CONFIG_REALTIME,
-      }
-    ),
-    trpc.analytics.getVerificationRegions.queryOptions(
-      {
-        interval_days: interval.intervalDays,
-      },
-      {
-        ...ANALYTICS_CONFIG_REALTIME,
-      }
-    ),
   ])
 
   return (

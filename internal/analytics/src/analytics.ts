@@ -233,11 +233,27 @@ export class Analytics {
   public get getFeaturesUsagePeriod() {
     return this.readClient.buildPipe({
       pipe: "v1_get_feature_usage_period",
-      parameters: z.object({
-        project_id: z.string(),
-        customer_id: z.string().optional(),
-        period_key: z.string(),
-      }),
+      parameters: z
+        .object({
+          project_id: z.string(),
+          customer_id: z.string().optional(),
+          period_key: z.string().optional(),
+          interval_days: z.number().optional(),
+          start: z.number().optional(),
+          end: z.number().optional(),
+          feature_slugs: z.array(z.string()).optional(),
+        })
+        .superRefine((params, ctx) => {
+          const hasStart = typeof params.start !== "undefined"
+          const hasEnd = typeof params.end !== "undefined"
+
+          if (hasStart !== hasEnd) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "start and end must be provided together",
+            })
+          }
+        }),
       data: z.object({
         project_id: z.string(),
         customer_id: z.string().optional(),
@@ -289,9 +305,6 @@ export class Analytics {
         project_id: z.string(),
         customer_id: z.string(),
         feature_slug: z.string(),
-        sum: z.number(),
-        max: z.number(),
-        count: z.number(),
         latest: z.number(),
       }),
       opts: {
@@ -322,15 +335,6 @@ export class Analytics {
   }): Promise<
     Result<{ featureSlug: string; usage: number }[], FetchError | UnPriceAnalyticsError>
   > {
-    const AGGREGATION_CONFIG: Record<
-      "sum" | "count" | "max" | "latest",
-      { behavior: "sum" | "max" | "latest" }
-    > = {
-      sum: { behavior: "sum" },
-      count: { behavior: "sum" },
-      max: { behavior: "max" },
-      latest: { behavior: "latest" },
-    }
     const featuresUsage = features.filter((feature) => feature.featureType === "usage")
 
     const featureSlugsArray = featuresUsage.map((feature) => feature.featureSlug)
@@ -387,38 +391,9 @@ export class Analytics {
         continue
       }
 
-      // get the aggregation config for the feature
-      const config =
-        AGGREGATION_CONFIG[feature.aggregationMethod as keyof typeof AGGREGATION_CONFIG]
-
-      if (!config) {
-        this.logger.error("Invalid aggregation method", {
-          aggregationMethod: feature.aggregationMethod,
-          featureSlug: feature.featureSlug,
-          customerId,
-          projectId,
-        })
-
-        continue
-      }
-
-      let usage = 0
-
-      if (config.behavior === "sum") {
-        if (feature.aggregationMethod === "count") {
-          usage = totalPeriodUsage.count ?? 0
-        } else {
-          usage = totalPeriodUsage.sum ?? 0
-        }
-      } else if (config.behavior === "max") {
-        usage = totalPeriodUsage.max ?? 0
-      } else if (config.behavior === "latest") {
-        usage = totalPeriodUsage.latest ?? 0
-      }
-
       result.push({
         featureSlug: feature.featureSlug,
-        usage: usage,
+        usage: totalPeriodUsage.latest ?? 0,
       })
     }
 

@@ -24,7 +24,6 @@ import { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
 import type { Metrics } from "../metrics"
 import { toErrorContext } from "../utils/log-context"
-import { unprice } from "../utils/unprice"
 import { UnPriceSubscriptionError } from "./errors"
 import { SubscriptionMachine } from "./machine"
 import { SubscriptionLock } from "./subscriptionLock"
@@ -707,7 +706,6 @@ export class SubscriptionService {
     const activePhase = subscriptionWithPhases.phases.find((p) => {
       return p.startAt <= now && (p.endAt ?? Number.POSITIVE_INFINITY) >= now
     })
-    const isFirstPhase = subscriptionWithPhases.phases.length === 0
 
     if (activePhase?.planVersionId === planVersionId) {
       return Err(
@@ -978,17 +976,6 @@ export class SubscriptionService {
             updates: { subscriptionStatus: status },
           })
         )
-
-        // reset entitlements if the phase is not the first one and the phase is active
-        if (!isFirstPhase && isActivePhase) {
-          // TODO: change this when implementing webhooks service + qstash
-          this.waitUntil(
-            unprice.customers.resetEntitlements({
-              customerId: subscriptionWithPhases.customerId,
-              projectId,
-            })
-          )
-        }
 
         const syncPhaseGrantsResult = await this.syncPhaseGrants({
           customerId: subscriptionWithPhases.customerId,

@@ -9,7 +9,7 @@ SQL >
         project_id,
         customer_id,
         feature_slug,
-        argMax(value_after, timestamp) AS value,
+        argMax(value_after, timestamp) AS value
     FROM
         unprice_entitlement_meter_facts
     WHERE
@@ -17,6 +17,6 @@ SQL >
         customer_id = {{ String(customer_id) }} AND
         period_key = {{ String(period_key) }}
     GROUP BY
-        project_id, customer_id
+        project_id, customer_id, feature_slug
 
 TYPE endpoint

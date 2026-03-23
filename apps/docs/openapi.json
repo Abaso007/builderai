@@ -5890,20 +5890,11 @@
                           "featureSlug": {
                             "type": "string"
                           },
-                          "count": {
-                            "type": "number"
-                          },
-                          "sum": {
-                            "type": "number"
-                          },
-                          "max": {
-                            "type": "number"
-                          },
-                          "latest": {
+                          "valueAfter": {
                             "type": "number"
                           }
                         },
-                        "required": ["projectId", "featureSlug", "count", "sum", "max", "latest"]
+                        "required": ["projectId", "featureSlug", "valueAfter"]
                       }
                     }
                   },

@@ -1,12 +1,12 @@
 NODE features_usage_daily_mv_node
 SQL >
     SELECT
-        toStartOfDay(timestamp) AS date,
+        toStartOfDay(date) AS date,
         project_id,
         customer_id,
         period_key,
         feature_slug,
-        argMaxMergeState(value) AS value,
+        argMaxMergeState(value) AS value
     FROM unprice_feature_usage_hourly_mv
     GROUP BY
         date,

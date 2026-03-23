@@ -490,7 +490,6 @@ describe("IngestionService", () => {
         aggregationMethod: "sum",
         aggregationField: "amount",
       },
-      method: "sum",
       overageStrategy: "none",
       periodKey: `onetime:${timestamp}`,
       status: "usage",

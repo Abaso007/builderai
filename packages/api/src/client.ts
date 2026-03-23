@@ -280,20 +280,6 @@ export class Unprice {
         })
       },
 
-      getUsage: async (
-        req: paths["/v1/customer/getUsage"]["post"]["requestBody"]["content"]["application/json"]
-      ): Promise<
-        Result<
-          paths["/v1/customer/getUsage"]["post"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "customer", "getUsage"],
-          method: "POST",
-          body: req,
-        })
-      },
-
       getPaymentMethods: async (
         req: paths["/v1/customer/getPaymentMethods"]["post"]["requestBody"]["content"]["application/json"]
       ): Promise<
@@ -331,20 +317,6 @@ export class Unprice {
       > => {
         return await this.fetch({
           path: ["v1", "customer", "signUp"],
-          method: "POST",
-          body: req,
-        })
-      },
-
-      resetEntitlements: async (
-        req: paths["/v1/customer/resetEntitlements"]["post"]["requestBody"]["content"]["application/json"]
-      ): Promise<
-        Result<
-          paths["/v1/customer/resetEntitlements"]["post"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "customer", "resetEntitlements"],
           method: "POST",
           body: req,
         })

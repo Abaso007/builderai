@@ -19,14 +19,6 @@ vi.mock("../../env", () => ({
   },
 }))
 
-vi.mock("../utils/unprice", () => ({
-  unprice: {
-    customers: {
-      resetEntitlements: vi.fn().mockResolvedValue(Ok(undefined)),
-    },
-  },
-}))
-
 let idCounter = 0
 
 vi.mock("@unprice/db/utils", async (importOriginal) => {

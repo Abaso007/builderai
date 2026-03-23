@@ -6,7 +6,7 @@ SQL >
         customer_id,
         period_key,
         feature_slug,
-        argMaxMergeState(value) AS value,
+        argMaxMergeState(value) AS value
     FROM unprice_feature_usage_daily_mv
     GROUP BY
         date,

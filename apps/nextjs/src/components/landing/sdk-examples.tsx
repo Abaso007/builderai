@@ -126,7 +126,11 @@ const unprice = new Unprice({
 const {
   result,
   error,
-} = await unprice.customers.getUsage("cus_1GTzSGrapiBW1QwCL3Fcn")
+} = await unprice.analytics.getUsage({
+  project_id: "project_1GTzSGrapiBW1QwCL3Fcn",
+  customer_id: "cus_1GTzSGrapiBW1QwCL3Fcn",
+  range: "30d",
+})
 
 if (error) {
   console.error(error.message)
@@ -196,8 +200,8 @@ const { result, error } = await unprice.plans.listPlanVersions({
       '", {\n  method: "GET",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n})',
     getUsage:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/customer/cus_1GTzSGrapiBW1QwCL3Fcn/getUsage" +
-      '", {\n  method: "GET",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n})',
+      "${baseUrl}/v1/analytics/usage" +
+      '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    project_id: "project_1GTzSGrapiBW1QwCL3Fcn",\n    customer_id: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    range: "30d",\n  }),\n})',
     getPaymentMethods:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
       "${baseUrl}/v1/customer/getPaymentMethods" +

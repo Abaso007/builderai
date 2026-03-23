@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import {
-  deriveMeterKey,
   EventTimestampTooFarInFutureError,
   EventTimestampTooOldError,
   type Fact,
@@ -10,6 +9,7 @@ import {
   type StorageAdapter,
   type SyncStorageAdapter,
   computePeriodKey,
+  deriveMeterKey,
   validateEventTimestamp,
 } from "./domain"
 import { AsyncMeterAggregationEngine } from "./engine"
@@ -220,11 +220,7 @@ describe("AsyncMeterAggregationEngine", () => {
       eventSlug: "purchase",
       aggregationMethod: "count",
     }
-    const engine = new AsyncMeterAggregationEngine(
-      [meterConfig],
-      storage,
-      Date.now()
-    )
+    const engine = new AsyncMeterAggregationEngine([meterConfig], storage, Date.now())
 
     const facts = await engine.applyEvent({
       id: "evt_count_empty_payload",
@@ -251,11 +247,7 @@ describe("AsyncMeterAggregationEngine", () => {
       aggregationMethod: "latest",
       aggregationField: "amount",
     }
-    const engine = new AsyncMeterAggregationEngine(
-      [meterConfig],
-      storage,
-      Date.now()
-    )
+    const engine = new AsyncMeterAggregationEngine([meterConfig], storage, Date.now())
 
     const facts = await engine.applyEvent({
       id: "evt_numeric_string_amount",
@@ -313,11 +305,7 @@ describe("AsyncMeterAggregationEngine", () => {
       aggregationMethod: "latest",
       aggregationField: "amount",
     }
-    const engine = new AsyncMeterAggregationEngine(
-      [meterConfig],
-      storage,
-      Date.now()
-    )
+    const engine = new AsyncMeterAggregationEngine([meterConfig], storage, Date.now())
 
     const now = Date.now()
 

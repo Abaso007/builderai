@@ -409,9 +409,6 @@ function createEntitlement(overrides: Partial<Entitlement> = {}): Entitlement {
     limit: 100,
     effectiveAt: Date.UTC(2026, 0, 1),
     expiresAt: null,
-    computedAt: Date.UTC(2026, 0, 1),
-    nextRevalidateAt: Date.UTC(2026, 0, 2),
-    version: "v1",
     grants: [],
     metadata: {
       realtime: false,

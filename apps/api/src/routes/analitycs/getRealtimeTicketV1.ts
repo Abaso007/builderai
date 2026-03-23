@@ -1,5 +1,4 @@
 import { createRoute } from "@hono/zod-openapi"
-import * as HttpStatusCodes from "~/util/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
 import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
@@ -7,6 +6,7 @@ import { createRealtimeTicket } from "~/auth/ticket"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["analytics"]
 

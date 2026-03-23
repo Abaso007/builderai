@@ -11,12 +11,8 @@ import { getPlansConversion } from "./getPlansConversion"
 import { getPlansStats } from "./getPlansStats"
 import { getRealtimeTicket } from "./getRealtimeTicket"
 import { getUsage } from "./getUsage"
-import { getVerificationRegions } from "./getVerificationRegions"
-import { getVerifications } from "./getVerifications"
 
 export const analyticsRouter = createTRPCRouter({
-  getVerifications: getVerifications,
-  getVerificationRegions: getVerificationRegions,
   getUsage: getUsage,
   getBrowserVisits: getBrowserVisits,
   getCountryVisits: getCountryVisits,

@@ -31,12 +31,8 @@ console.log(result);
     {
       "projectId": "project_1234567890",
       "customerId": "cus_1234567890",
-      "entitlementId": "ent_1234567890",
       "featureSlug": "feature_1",
-      "count": 100,
-      "sum": 1000,
-      "max": 50,
-      "latest": 30
+      "valueAfter": 30
     }
   ]
 }
@@ -71,26 +67,10 @@ console.log(result);
     The ID of the customer
 </ResponseField>
 
-<ResponseField name="usage[].entitlementId" type="string">
-    The ID of the entitlement
-</ResponseField>
-
 <ResponseField name="usage[].featureSlug" type="string" required>
     The slug of the feature
 </ResponseField>
 
-<ResponseField name="usage[].count" type="number" required>
-    The number of usage events
-</ResponseField>
-
-<ResponseField name="usage[].sum" type="number" required>
-    The sum of all usage values
-</ResponseField>
-
-<ResponseField name="usage[].max" type="number" required>
-    The maximum usage value
-</ResponseField>
-
-<ResponseField name="usage[].latest" type="number" required>
-    The last usage value during the period
+<ResponseField name="usage[].valueAfter" type="number" required>
+    The latest value reported for the feature in the selected range
 </ResponseField>

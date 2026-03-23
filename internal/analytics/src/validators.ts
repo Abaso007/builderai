@@ -212,10 +212,7 @@ export const getUsageResponseSchema = z.object({
   project_id: z.string(),
   customer_id: z.string().optional(),
   feature_slug: z.string(),
-  count: z.number(),
-  sum: z.number(),
-  max: z.number(),
-  latest: z.number(),
+  value_after: z.number(),
 })
 
 export const schemaPageHit = z.object({

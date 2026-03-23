@@ -1,6 +1,6 @@
-import * as HttpStatusCodes from "~/util/http-status-codes"
 import { jsonContent } from "stoker/openapi/helpers"
 import { z } from "zod"
+import * as HttpStatusCodes from "~/util/http-status-codes"
 import { errorSchemaFactory } from "./http"
 
 export const openApiErrorResponses = {

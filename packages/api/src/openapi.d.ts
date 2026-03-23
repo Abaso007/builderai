@@ -4,4658 +4,3931 @@
  */
 
 export interface paths {
-  "/v1/customer/reportUsage": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * report usage
-     * @description Report usage for a customer
-     */
-    post: operations["customers.reportUsage"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/customer/getEntitlements": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * get minimal entitlements
-     * @description Get minimal entitlements for a customer
-     */
-    post: operations["customers.getEntitlements"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/customer/verify": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * verify feature
-     * @description Verify if a customer can use a feature
-     */
-    post: operations["customers.verify"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/customer/getSubscription": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * get subscription
-     * @description Get subscription with the active phase for a customer
-     */
-    post: operations["customers.getSubscription"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/customer/getUsage": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * get usage
-     * @description Get usage for a customer
-     */
-    post: operations["customers.getUsage"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/customer/getPaymentMethods": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * get payment methods
-     * @description Get payment methods for a customer
-     */
-    post: operations["customers.getPaymentMethods"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/customer/signUp": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * sign up
-     * @description Sign up a customer for a project
-     */
-    post: operations["customers.signUp"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/customer/createPaymentMethod": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * create payment method
-     * @description Create a payment method for a customer
-     */
-    post: operations["customers.createPaymentMethod"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/customer/resetEntitlements": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * reset entitlements
-     * @description Reset entitlements for a customer
-     */
-    post: operations["customers.resetEntitlements"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/customer/resetUsage": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * reset usage
-     * @description Reset usage counters for a customer
-     */
-    post: operations["customers.resetUsage"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/customer/updateACL": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * update ACL
-     * @description Update the ACL for a customer
-     */
-    post: operations["customers.updateACL"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/project/getFeatures": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /**
-     * get features
-     * @description Get features for a project
-     */
-    get: operations["projects.getFeatures"]
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/plans/getPlanVersion/{planVersionId}": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /**
-     * get plan version
-     * @description Get a plan version by id
-     */
-    get: operations["plans.getPlanVersion"]
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/plans/listPlanVersions": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * list all plan versions
-     * @description List all plan versions for a project
-     */
-    post: operations["plans.listPlanVersions"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/paymentProvider/stripe/signUp/{sessionId}/{projectId}": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /**
-     * stripe sign up
-     * @description This endpoint is called by stripe after the customer has signed up. No webhook is needed.
-     */
-    get: {
-      parameters: {
-        query?: never
-        header?: never
-        path: {
-          projectId: string
-          sessionId: string
-        }
-        cookie?: never
-      }
-      requestBody?: never
-      responses: {
-        /** @description Redirect */
-        302: {
-          headers: {
-            /** @description URL to redirect to */
-            Location?: string
-            [name: string]: unknown
-          }
-          content?: never
-        }
-        /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-        400: {
-          headers: {
-            [name: string]: unknown
-          }
-          content: {
-            "application/json": components["schemas"]["ErrBadRequest"]
-          }
-        }
-        /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-        401: {
-          headers: {
-            [name: string]: unknown
-          }
-          content: {
-            "application/json": components["schemas"]["ErrUnauthorized"]
-          }
-        }
-        /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-        403: {
-          headers: {
-            [name: string]: unknown
-          }
-          content: {
-            "application/json": components["schemas"]["ErrForbidden"]
-          }
-        }
-        /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-        404: {
-          headers: {
-            [name: string]: unknown
-          }
-          content: {
-            "application/json": components["schemas"]["ErrNotFound"]
-          }
-        }
-        /** @description This response is sent when a request conflicts with the current state of the server. */
-        409: {
-          headers: {
-            [name: string]: unknown
-          }
-          content: {
-            "application/json": components["schemas"]["ErrConflict"]
-          }
-        }
-        /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-        412: {
-          headers: {
-            [name: string]: unknown
-          }
-          content: {
-            "application/json": components["schemas"]["ErrPreconditionFailed"]
-          }
-        }
-        /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-        429: {
-          headers: {
-            [name: string]: unknown
-          }
-          content: {
-            "application/json": components["schemas"]["ErrTooManyRequests"]
-          }
-        }
-        /** @description The server has encountered a situation it does not know how to handle. */
-        500: {
-          headers: {
-            [name: string]: unknown
-          }
-          content: {
-            "application/json": components["schemas"]["ErrInternalServerError"]
-          }
-        }
-      }
-    }
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/paymentProvider/stripe/setup/{sessionId}/{projectId}": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /**
-     * stripe setup
-     * @description This endpoint is called by stripe after the customer setup a payment method. No webhook is needed.
-     */
-    get: {
-      parameters: {
-        query?: never
-        header?: never
-        path: {
-          projectId: string
-          sessionId: string
-        }
-        cookie?: never
-      }
-      requestBody?: never
-      responses: {
-        /** @description Redirect */
-        302: {
-          headers: {
-            /** @description URL to redirect to */
-            Location?: string
-            [name: string]: unknown
-          }
-          content?: never
-        }
-        /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-        400: {
-          headers: {
-            [name: string]: unknown
-          }
-          content: {
-            "application/json": components["schemas"]["ErrBadRequest"]
-          }
-        }
-        /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-        401: {
-          headers: {
-            [name: string]: unknown
-          }
-          content: {
-            "application/json": components["schemas"]["ErrUnauthorized"]
-          }
-        }
-        /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-        403: {
-          headers: {
-            [name: string]: unknown
-          }
-          content: {
-            "application/json": components["schemas"]["ErrForbidden"]
-          }
-        }
-        /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-        404: {
-          headers: {
-            [name: string]: unknown
-          }
-          content: {
-            "application/json": components["schemas"]["ErrNotFound"]
-          }
-        }
-        /** @description This response is sent when a request conflicts with the current state of the server. */
-        409: {
-          headers: {
-            [name: string]: unknown
-          }
-          content: {
-            "application/json": components["schemas"]["ErrConflict"]
-          }
-        }
-        /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-        412: {
-          headers: {
-            [name: string]: unknown
-          }
-          content: {
-            "application/json": components["schemas"]["ErrPreconditionFailed"]
-          }
-        }
-        /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-        429: {
-          headers: {
-            [name: string]: unknown
-          }
-          content: {
-            "application/json": components["schemas"]["ErrTooManyRequests"]
-          }
-        }
-        /** @description The server has encountered a situation it does not know how to handle. */
-        500: {
-          headers: {
-            [name: string]: unknown
-          }
-          content: {
-            "application/json": components["schemas"]["ErrInternalServerError"]
-          }
-        }
-      }
-    }
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/analytics/usage": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * get usage
-     * @description Get usage for a customer in a given range
-     */
-    post: operations["analytics.getUsage"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/analytics/verifications": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * get verifications
-     * @description Get verifications for a customer in a given range
-     */
-    post: operations["analytics.getVerifications"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/analytics/realtime": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * get real-time usage metrics
-     * @description Get real-time usage metrics from the Durable Object buffer. Returns unflushed usage and verification records (typically seconds to minutes old). Use this to avoid Tinybird query limits for real-time dashboards.
-     */
-    post: operations["analytics.getRealtimeUsage"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/analytics/realtime/ticket": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * issue realtime websocket ticket
-     * @description Issue a short-lived ticket for customer realtime websocket access. The ticket is scoped to user, project, and customer.
-     */
-    post: operations["analytics.getRealtimeTicket"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/lakehouse/file-plan": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * get scoped lakehouse file plan
-     * @description Return temporary R2 credentials and matching lakehouse parquet files in one response.
-     */
-    post: operations["lakehouse.getFilePlan"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
+    "/v1/events/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * ingest raw event
+         * @description Ingest a raw events. All ingested events are reported and a notification will be triggered when the limit is hit.
+         */
+        post: operations["events.ingest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/events/ingest/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * ingest raw event synchronously for a feature
+         * @description Validate and synchronously ingest a raw event for one feature slug. This is useful when you want to enforce exact limits from a ingestion.
+         */
+        post: operations["events.ingestSync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/customer/getEntitlements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * get minimal entitlements
+         * @description Get minimal entitlements for a customer
+         */
+        post: operations["customers.getEntitlements"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/customer/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * get current feature status
+         * @description Resolve the current state of a feature for a customer and, for usage features, return the live meter method, limit, and usage.
+         */
+        post: operations["customers.verify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/customer/getSubscription": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * get subscription
+         * @description Get subscription with the active phase for a customer
+         */
+        post: operations["customers.getSubscription"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/customer/getPaymentMethods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * get payment methods
+         * @description Get payment methods for a customer
+         */
+        post: operations["customers.getPaymentMethods"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/customer/signUp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * sign up
+         * @description Sign up a customer for a project
+         */
+        post: operations["customers.signUp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/customer/createPaymentMethod": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * create payment method
+         * @description Create a payment method for a customer
+         */
+        post: operations["customers.createPaymentMethod"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/customer/updateACL": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * update ACL
+         * @description Update the ACL for a customer
+         */
+        post: operations["customers.updateACL"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/project/getFeatures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * get features
+         * @description Get features for a project
+         */
+        get: operations["projects.getFeatures"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plans/getPlanVersion/{planVersionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * get plan version
+         * @description Get a plan version by id
+         */
+        get: operations["plans.getPlanVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/plans/listPlanVersions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * list all plan versions
+         * @description List all plan versions for a project
+         */
+        post: operations["plans.listPlanVersions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/paymentProvider/stripe/signUp/{sessionId}/{projectId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * stripe sign up
+         * @description This endpoint is called by stripe after the customer has signed up. No webhook is needed.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    sessionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Redirect */
+                302: {
+                    headers: {
+                        /** @description URL to redirect to */
+                        Location?: string;
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrBadRequest"];
+                    };
+                };
+                /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrUnauthorized"];
+                    };
+                };
+                /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrForbidden"];
+                    };
+                };
+                /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrNotFound"];
+                    };
+                };
+                /** @description This response is sent when a request conflicts with the current state of the server. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrConflict"];
+                    };
+                };
+                /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+                412: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrPreconditionFailed"];
+                    };
+                };
+                /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrTooManyRequests"];
+                    };
+                };
+                /** @description The server has encountered a situation it does not know how to handle. */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrInternalServerError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/paymentProvider/stripe/setup/{sessionId}/{projectId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * stripe setup
+         * @description This endpoint is called by stripe after the customer setup a payment method. No webhook is needed.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    sessionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Redirect */
+                302: {
+                    headers: {
+                        /** @description URL to redirect to */
+                        Location?: string;
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrBadRequest"];
+                    };
+                };
+                /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrUnauthorized"];
+                    };
+                };
+                /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrForbidden"];
+                    };
+                };
+                /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrNotFound"];
+                    };
+                };
+                /** @description This response is sent when a request conflicts with the current state of the server. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrConflict"];
+                    };
+                };
+                /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+                412: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrPreconditionFailed"];
+                    };
+                };
+                /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrTooManyRequests"];
+                    };
+                };
+                /** @description The server has encountered a situation it does not know how to handle. */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrInternalServerError"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/analytics/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * get usage
+         * @description Get usage for a customer in a given range
+         */
+        post: operations["analytics.getUsage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/analytics/realtime/ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * issue realtime websocket ticket
+         * @description Issue a short-lived ticket for customer realtime websocket access. The ticket is scoped to user, project, and customer.
+         */
+        post: operations["analytics.getRealtimeTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/lakehouse/file-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * get scoped lakehouse file plan
+         * @description Return temporary R2 credentials and matching lakehouse parquet files in one response.
+         */
+        post: operations["lakehouse.getFilePlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
-export type webhooks = Record<string, never>
+export type webhooks = Record<string, never>;
 export interface components {
-  schemas: {
-    ErrBadRequest: {
-      error: {
-        /**
-         * @description A machine readable error code.
-         * @example BAD_REQUEST
-         * @enum {string}
-         */
-        code: "BAD_REQUEST"
-        /**
-         * @description A link to our documentation with more details about this error code
-         * @example https://docs.unprice.dev/api-reference/errors/code/BAD_REQUEST
-         */
-        docs: string
-        /** @description A human readable explanation of what went wrong */
-        message: string
-        /**
-         * @description Please always include the requestId in your error report
-         * @example req_1234
-         */
-        requestId: string
-      }
-    }
-    ErrUnauthorized: {
-      error: {
-        /**
-         * @description A machine readable error code.
-         * @example UNAUTHORIZED
-         * @enum {string}
-         */
-        code: "UNAUTHORIZED"
-        /**
-         * @description A link to our documentation with more details about this error code
-         * @example https://docs.unprice.dev/api-reference/errors/code/UNAUTHORIZED
-         */
-        docs: string
-        /** @description A human readable explanation of what went wrong */
-        message: string
-        /**
-         * @description Please always include the requestId in your error report
-         * @example req_1234
-         */
-        requestId: string
-      }
-    }
-    ErrForbidden: {
-      error: {
-        /**
-         * @description A machine readable error code.
-         * @example FORBIDDEN
-         * @enum {string}
-         */
-        code: "FORBIDDEN"
-        /**
-         * @description A link to our documentation with more details about this error code
-         * @example https://docs.unprice.dev/api-reference/errors/code/FORBIDDEN
-         */
-        docs: string
-        /** @description A human readable explanation of what went wrong */
-        message: string
-        /**
-         * @description Please always include the requestId in your error report
-         * @example req_1234
-         */
-        requestId: string
-      }
-    }
-    ErrNotFound: {
-      error: {
-        /**
-         * @description A machine readable error code.
-         * @example NOT_FOUND
-         * @enum {string}
-         */
-        code: "NOT_FOUND"
-        /**
-         * @description A link to our documentation with more details about this error code
-         * @example https://docs.unprice.dev/api-reference/errors/code/NOT_FOUND
-         */
-        docs: string
-        /** @description A human readable explanation of what went wrong */
-        message: string
-        /**
-         * @description Please always include the requestId in your error report
-         * @example req_1234
-         */
-        requestId: string
-      }
-    }
-    ErrConflict: {
-      error: {
-        /**
-         * @description A machine readable error code.
-         * @example CONFLICT
-         * @enum {string}
-         */
-        code: "CONFLICT"
-        /**
-         * @description A link to our documentation with more details about this error code
-         * @example https://docs.unprice.dev/api-reference/errors/code/CONFLICT
-         */
-        docs: string
-        /** @description A human readable explanation of what went wrong */
-        message: string
-        /**
-         * @description Please always include the requestId in your error report
-         * @example req_1234
-         */
-        requestId: string
-      }
-    }
-    ErrPreconditionFailed: {
-      error: {
-        /**
-         * @description A machine readable error code.
-         * @example PRECONDITION_FAILED
-         * @enum {string}
-         */
-        code: "PRECONDITION_FAILED"
-        /**
-         * @description A link to our documentation with more details about this error code
-         * @example https://docs.unprice.dev/api-reference/errors/code/PRECONDITION_FAILED
-         */
-        docs: string
-        /** @description A human readable explanation of what went wrong */
-        message: string
-        /**
-         * @description Please always include the requestId in your error report
-         * @example req_1234
-         */
-        requestId: string
-      }
-    }
-    ErrInternalServerError: {
-      error: {
-        /**
-         * @description A machine readable error code.
-         * @example INTERNAL_SERVER_ERROR
-         * @enum {string}
-         */
-        code: "INTERNAL_SERVER_ERROR"
-        /**
-         * @description A link to our documentation with more details about this error code
-         * @example https://docs.unprice.dev/api-reference/errors/code/INTERNAL_SERVER_ERROR
-         */
-        docs: string
-        /** @description A human readable explanation of what went wrong */
-        message: string
-        /**
-         * @description Please always include the requestId in your error report
-         * @example req_1234
-         */
-        requestId: string
-      }
-    }
-    ErrTooManyRequests: {
-      error: {
-        /**
-         * @description A machine readable error code.
-         * @example TOO_MANY_REQUESTS
-         * @enum {string}
-         */
-        code: "TOO_MANY_REQUESTS"
-        /**
-         * @description A link to our documentation with more details about this error code
-         * @example https://docs.unprice.dev/api-reference/errors/code/TOO_MANY_REQUESTS
-         */
-        docs: string
-        /** @description A human readable explanation of what went wrong */
-        message: string
-        /**
-         * @description Please always include the requestId in your error report
-         * @example req_1234
-         */
-        requestId: string
-      }
-    }
-  }
-  responses: never
-  parameters: never
-  requestBodies: never
-  headers: never
-  pathItems: never
+    schemas: {
+        ErrBadRequest: {
+            error: {
+                /**
+                 * @description A machine readable error code.
+                 * @example BAD_REQUEST
+                 * @enum {string}
+                 */
+                code: "BAD_REQUEST";
+                /**
+                 * @description A link to our documentation with more details about this error code
+                 * @example https://docs.unprice.dev/api-reference/errors/code/BAD_REQUEST
+                 */
+                docs: string;
+                /** @description A human readable explanation of what went wrong */
+                message: string;
+                /**
+                 * @description Please always include the requestId in your error report
+                 * @example req_1234
+                 */
+                requestId: string;
+            };
+        };
+        ErrUnauthorized: {
+            error: {
+                /**
+                 * @description A machine readable error code.
+                 * @example UNAUTHORIZED
+                 * @enum {string}
+                 */
+                code: "UNAUTHORIZED";
+                /**
+                 * @description A link to our documentation with more details about this error code
+                 * @example https://docs.unprice.dev/api-reference/errors/code/UNAUTHORIZED
+                 */
+                docs: string;
+                /** @description A human readable explanation of what went wrong */
+                message: string;
+                /**
+                 * @description Please always include the requestId in your error report
+                 * @example req_1234
+                 */
+                requestId: string;
+            };
+        };
+        ErrForbidden: {
+            error: {
+                /**
+                 * @description A machine readable error code.
+                 * @example FORBIDDEN
+                 * @enum {string}
+                 */
+                code: "FORBIDDEN";
+                /**
+                 * @description A link to our documentation with more details about this error code
+                 * @example https://docs.unprice.dev/api-reference/errors/code/FORBIDDEN
+                 */
+                docs: string;
+                /** @description A human readable explanation of what went wrong */
+                message: string;
+                /**
+                 * @description Please always include the requestId in your error report
+                 * @example req_1234
+                 */
+                requestId: string;
+            };
+        };
+        ErrNotFound: {
+            error: {
+                /**
+                 * @description A machine readable error code.
+                 * @example NOT_FOUND
+                 * @enum {string}
+                 */
+                code: "NOT_FOUND";
+                /**
+                 * @description A link to our documentation with more details about this error code
+                 * @example https://docs.unprice.dev/api-reference/errors/code/NOT_FOUND
+                 */
+                docs: string;
+                /** @description A human readable explanation of what went wrong */
+                message: string;
+                /**
+                 * @description Please always include the requestId in your error report
+                 * @example req_1234
+                 */
+                requestId: string;
+            };
+        };
+        ErrConflict: {
+            error: {
+                /**
+                 * @description A machine readable error code.
+                 * @example CONFLICT
+                 * @enum {string}
+                 */
+                code: "CONFLICT";
+                /**
+                 * @description A link to our documentation with more details about this error code
+                 * @example https://docs.unprice.dev/api-reference/errors/code/CONFLICT
+                 */
+                docs: string;
+                /** @description A human readable explanation of what went wrong */
+                message: string;
+                /**
+                 * @description Please always include the requestId in your error report
+                 * @example req_1234
+                 */
+                requestId: string;
+            };
+        };
+        ErrPreconditionFailed: {
+            error: {
+                /**
+                 * @description A machine readable error code.
+                 * @example PRECONDITION_FAILED
+                 * @enum {string}
+                 */
+                code: "PRECONDITION_FAILED";
+                /**
+                 * @description A link to our documentation with more details about this error code
+                 * @example https://docs.unprice.dev/api-reference/errors/code/PRECONDITION_FAILED
+                 */
+                docs: string;
+                /** @description A human readable explanation of what went wrong */
+                message: string;
+                /**
+                 * @description Please always include the requestId in your error report
+                 * @example req_1234
+                 */
+                requestId: string;
+            };
+        };
+        ErrTooManyRequests: {
+            error: {
+                /**
+                 * @description A machine readable error code.
+                 * @example TOO_MANY_REQUESTS
+                 * @enum {string}
+                 */
+                code: "TOO_MANY_REQUESTS";
+                /**
+                 * @description A link to our documentation with more details about this error code
+                 * @example https://docs.unprice.dev/api-reference/errors/code/TOO_MANY_REQUESTS
+                 */
+                docs: string;
+                /** @description A human readable explanation of what went wrong */
+                message: string;
+                /**
+                 * @description Please always include the requestId in your error report
+                 * @example req_1234
+                 */
+                requestId: string;
+            };
+        };
+        ErrInternalServerError: {
+            error: {
+                /**
+                 * @description A machine readable error code.
+                 * @example INTERNAL_SERVER_ERROR
+                 * @enum {string}
+                 */
+                code: "INTERNAL_SERVER_ERROR";
+                /**
+                 * @description A link to our documentation with more details about this error code
+                 * @example https://docs.unprice.dev/api-reference/errors/code/INTERNAL_SERVER_ERROR
+                 */
+                docs: string;
+                /** @description A human readable explanation of what went wrong */
+                message: string;
+                /**
+                 * @description Please always include the requestId in your error report
+                 * @example req_1234
+                 */
+                requestId: string;
+            };
+        };
+    };
+    responses: never;
+    parameters: never;
+    requestBodies: never;
+    headers: never;
+    pathItems: never;
 }
-export type $defs = Record<string, never>
+export type $defs = Record<string, never>;
 export interface operations {
-  "customers.reportUsage": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description The usage to report */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The unprice customer ID
-           * @example cus_1H7KQFLr7RepUyQBKdnvY
-           */
-          customerId?: string
-          /**
-           * @description The external customer ID provided at sign up
-           * @example user_123
-           */
-          externalId?: string
-          /**
-           * @description The feature slug
-           * @example tokens
-           */
-          featureSlug: string
-          /**
-           * @description The usage
-           * @example 30
-           */
-          usage: number
-          /**
-           * Format: uuid
-           * @description The idempotence key
-           * @example 123e4567-e89b-12d3-a456-426614174000
-           */
-          idempotenceKey: string
-          /**
-           * @description The action being performed (e.g., 'create', 'update', 'delete', 'send-email', 'flush'). Normalized to lowercase with spaces as hyphens.
-           * @example create
-           */
-          action?: string
-          metadata?: {
-            [key: string]: (string | number | boolean) | undefined
-          }
-        }
-      }
-    }
-    responses: {
-      /** @description The result of the report usage */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            allowed: boolean
-            message?: string
-            limit?: number
-            usage?: number
-            cost?: number
-            notifiedOverLimit?: boolean
-            remaining?: number
-            /** @enum {string} */
-            deniedReason?:
-              | "INVALID_USAGE"
-              | "ERROR_SYNCING_ENTITLEMENTS_LAST_USAGE"
-              | "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE"
-              | "ENTITLEMENT_OUTSIDE_OF_CURRENT_BILLING_WINDOW"
-              | "ERROR_RESETTING_DO"
-              | "RATE_LIMITED"
-              | "ENTITLEMENT_NOT_FOUND"
-              | "LIMIT_EXCEEDED"
-              | "ENTITLEMENT_EXPIRED"
-              | "ENTITLEMENT_NOT_ACTIVE"
-              | "DO_NOT_INITIALIZED"
-              | "INCORRECT_USAGE_REPORTING"
-              | "ERROR_INSERTING_USAGE_DO"
-              | "ERROR_INSERTING_VERIFICATION_DO"
-              | "PROJECT_DISABLED"
-              | "CUSTOMER_DISABLED"
-              | "SUBSCRIPTION_DISABLED"
-              | "FETCH_ERROR"
-              | "SUBSCRIPTION_ERROR"
-              | "ENTITLEMENT_ERROR"
-              | "SUBSCRIPTION_EXPIRED"
-              | "NO_DEFAULT_PLAN_FOUND"
-              | "SUBSCRIPTION_NOT_ACTIVE"
-              | "PHASE_NOT_CREATED"
-              | "FEATURE_NOT_FOUND_IN_SUBSCRIPTION"
-              | "CUSTOMER_NOT_FOUND"
-              | "CUSTOMER_EXTERNAL_ID_CONFLICT"
-              | "CUSTOMER_ENTITLEMENTS_NOT_FOUND"
-              | "FEATURE_TYPE_NOT_SUPPORTED"
-              | "PROJECT_DISABLED"
-              | "CUSTOMER_DISABLED"
-              | "PLAN_VERSION_NOT_PUBLISHED"
-              | "PLAN_VERSION_NOT_ACTIVE"
-              | "PAYMENT_PROVIDER_CONFIG_NOT_FOUND"
-              | "ENTITLEMENT_EXPIRED"
-              | "ENTITLEMENT_NOT_ACTIVE"
-              | "CUSTOMER_SESSION_NOT_CREATED"
-              | "CUSTOMER_SESSION_NOT_FOUND"
-              | "PLAN_VERSION_NOT_FOUND"
-              | "PAYMENT_PROVIDER_ERROR"
-              | "SUBSCRIPTION_NOT_CREATED"
-              | "CUSTOMER_NOT_CREATED"
-              | "SUBSCRIPTION_NOT_CANCELED"
-              | "CUSTOMER_PHASE_NOT_FOUND"
-              | "CURRENCY_MISMATCH"
-              | "BILLING_INTERVAL_MISMATCH"
-              | "ENTITLEMENT_NOT_FOUND"
-              | "SUBSCRIPTION_NOT_FOUND"
-              | "INVALID_ENTITLEMENT_TYPE"
-              | "NO_ACTIVE_PHASE_FOUND"
-            degraded?: boolean
-            degradedReason?: string
-            cacheHit?: boolean
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The limit has been exceeded */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            allowed: boolean
-            message?: string
-            limit?: number
-            usage?: number
-            cost?: number
-            notifiedOverLimit?: boolean
-            remaining?: number
-            /** @enum {string} */
-            deniedReason?:
-              | "INVALID_USAGE"
-              | "ERROR_SYNCING_ENTITLEMENTS_LAST_USAGE"
-              | "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE"
-              | "ENTITLEMENT_OUTSIDE_OF_CURRENT_BILLING_WINDOW"
-              | "ERROR_RESETTING_DO"
-              | "RATE_LIMITED"
-              | "ENTITLEMENT_NOT_FOUND"
-              | "LIMIT_EXCEEDED"
-              | "ENTITLEMENT_EXPIRED"
-              | "ENTITLEMENT_NOT_ACTIVE"
-              | "DO_NOT_INITIALIZED"
-              | "INCORRECT_USAGE_REPORTING"
-              | "ERROR_INSERTING_USAGE_DO"
-              | "ERROR_INSERTING_VERIFICATION_DO"
-              | "PROJECT_DISABLED"
-              | "CUSTOMER_DISABLED"
-              | "SUBSCRIPTION_DISABLED"
-              | "FETCH_ERROR"
-              | "SUBSCRIPTION_ERROR"
-              | "ENTITLEMENT_ERROR"
-              | "SUBSCRIPTION_EXPIRED"
-              | "NO_DEFAULT_PLAN_FOUND"
-              | "SUBSCRIPTION_NOT_ACTIVE"
-              | "PHASE_NOT_CREATED"
-              | "FEATURE_NOT_FOUND_IN_SUBSCRIPTION"
-              | "CUSTOMER_NOT_FOUND"
-              | "CUSTOMER_EXTERNAL_ID_CONFLICT"
-              | "CUSTOMER_ENTITLEMENTS_NOT_FOUND"
-              | "FEATURE_TYPE_NOT_SUPPORTED"
-              | "PROJECT_DISABLED"
-              | "CUSTOMER_DISABLED"
-              | "PLAN_VERSION_NOT_PUBLISHED"
-              | "PLAN_VERSION_NOT_ACTIVE"
-              | "PAYMENT_PROVIDER_CONFIG_NOT_FOUND"
-              | "ENTITLEMENT_EXPIRED"
-              | "ENTITLEMENT_NOT_ACTIVE"
-              | "CUSTOMER_SESSION_NOT_CREATED"
-              | "CUSTOMER_SESSION_NOT_FOUND"
-              | "PLAN_VERSION_NOT_FOUND"
-              | "PAYMENT_PROVIDER_ERROR"
-              | "SUBSCRIPTION_NOT_CREATED"
-              | "CUSTOMER_NOT_CREATED"
-              | "SUBSCRIPTION_NOT_CANCELED"
-              | "CUSTOMER_PHASE_NOT_FOUND"
-              | "CURRENCY_MISMATCH"
-              | "BILLING_INTERVAL_MISMATCH"
-              | "ENTITLEMENT_NOT_FOUND"
-              | "SUBSCRIPTION_NOT_FOUND"
-              | "INVALID_ENTITLEMENT_TYPE"
-              | "NO_ACTIVE_PHASE_FOUND"
-            degraded?: boolean
-            degradedReason?: string
-            cacheHit?: boolean
-          }
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "customers.getEntitlements": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Body of the request */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The customer ID
-           * @example cus_1H7KQFLr7RepUyQBKdnvY
-           */
-          customerId: string
-          /**
-           * @description The project ID
-           * @example prj_1H7KQFLr7RepUyQBKdnvY
-           */
-          projectId?: string
-        }
-      }
-    }
-    responses: {
-      /** @description The result of the get minimal entitlements */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            id: string
-            featureSlug: string
-            effectiveAt: number
-            expiresAt: number | null
-          }[]
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "customers.verify": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Body of the request */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The unprice customer ID
-           * @example cus_1H7KQFLr7RepUyQBKdnvY
-           */
-          customerId?: string
-          /**
-           * @description The external customer ID provided at sign up
-           * @example user_123
-           */
-          externalId?: string
-          /**
-           * @description The feature slug
-           * @example tokens
-           */
-          featureSlug: string
-          /**
-           * @description The action being performed (e.g., 'read', 'write', 'delete'). Normalized to lowercase with spaces as hyphens.
-           * @example read
-           */
-          action?: string
-          metadata?: {
-            [key: string]: (string | number | boolean) | undefined
-          }
-          /**
-           * @description The usage to check feature access for, if not provided, it will be 0
-           * @example 100
-           */
-          usage?: number
-        }
-      }
-    }
-    responses: {
-      /** @description The result of the verify check */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            allowed: boolean
-            message?: string
-            /** @enum {string} */
-            deniedReason?:
-              | "INVALID_USAGE"
-              | "ERROR_SYNCING_ENTITLEMENTS_LAST_USAGE"
-              | "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE"
-              | "ENTITLEMENT_OUTSIDE_OF_CURRENT_BILLING_WINDOW"
-              | "ERROR_RESETTING_DO"
-              | "RATE_LIMITED"
-              | "ENTITLEMENT_NOT_FOUND"
-              | "LIMIT_EXCEEDED"
-              | "ENTITLEMENT_EXPIRED"
-              | "ENTITLEMENT_NOT_ACTIVE"
-              | "DO_NOT_INITIALIZED"
-              | "INCORRECT_USAGE_REPORTING"
-              | "ERROR_INSERTING_USAGE_DO"
-              | "ERROR_INSERTING_VERIFICATION_DO"
-              | "PROJECT_DISABLED"
-              | "CUSTOMER_DISABLED"
-              | "SUBSCRIPTION_DISABLED"
-              | "FETCH_ERROR"
-              | "SUBSCRIPTION_ERROR"
-              | "ENTITLEMENT_ERROR"
-              | "SUBSCRIPTION_EXPIRED"
-              | "NO_DEFAULT_PLAN_FOUND"
-              | "SUBSCRIPTION_NOT_ACTIVE"
-              | "PHASE_NOT_CREATED"
-              | "FEATURE_NOT_FOUND_IN_SUBSCRIPTION"
-              | "CUSTOMER_NOT_FOUND"
-              | "CUSTOMER_EXTERNAL_ID_CONFLICT"
-              | "CUSTOMER_ENTITLEMENTS_NOT_FOUND"
-              | "FEATURE_TYPE_NOT_SUPPORTED"
-              | "PROJECT_DISABLED"
-              | "CUSTOMER_DISABLED"
-              | "PLAN_VERSION_NOT_PUBLISHED"
-              | "PLAN_VERSION_NOT_ACTIVE"
-              | "PAYMENT_PROVIDER_CONFIG_NOT_FOUND"
-              | "ENTITLEMENT_EXPIRED"
-              | "ENTITLEMENT_NOT_ACTIVE"
-              | "CUSTOMER_SESSION_NOT_CREATED"
-              | "CUSTOMER_SESSION_NOT_FOUND"
-              | "PLAN_VERSION_NOT_FOUND"
-              | "PAYMENT_PROVIDER_ERROR"
-              | "SUBSCRIPTION_NOT_CREATED"
-              | "CUSTOMER_NOT_CREATED"
-              | "SUBSCRIPTION_NOT_CANCELED"
-              | "CUSTOMER_PHASE_NOT_FOUND"
-              | "CURRENCY_MISMATCH"
-              | "BILLING_INTERVAL_MISMATCH"
-              | "ENTITLEMENT_NOT_FOUND"
-              | "SUBSCRIPTION_NOT_FOUND"
-              | "INVALID_ENTITLEMENT_TYPE"
-              | "NO_ACTIVE_PHASE_FOUND"
-            /** @enum {string} */
-            featureType?: "flat" | "tier" | "package" | "usage"
-            cacheHit?: boolean
-            remaining?: number
-            limit?: number
-            usage?: number
-            cost?: number
-            latency?: number
-            degraded?: boolean
-            degradedReason?: string
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "customers.getSubscription": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Body of the request */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The customer ID
-           * @example cus_1H7KQFLr7RepUyQBKdnvY
-           */
-          customerId: string
-          /**
-           * @description The project ID
-           * @example prj_1H7KQFLr7RepUyQBKdnvY
-           */
-          projectId?: string
-        }
-      }
-    }
-    responses: {
-      /** @description The result of the get subscription */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            id: string
-            projectId: string
-            createdAtM: number
-            updatedAtM: number
-            customerId: string
-            /** @enum {string} */
-            status: "active" | "trialing" | "canceled" | "expired" | "past_due"
-            active: boolean
-            planSlug: string
-            currentCycleStartAt: number
-            currentCycleEndAt: number
-            renewAt: number | null
-            endAt: number | null
-            timezone: string
-            metadata: {
-              /**
-               * @description Reason for the subscription status
-               * @enum {string}
-               */
-              reason?:
-                | "payment_failed"
-                | "invoice_voided"
-                | "payment_pending"
-                | "payment_method_not_found"
-                | "policy_violation"
-                | "pending_cancellation"
-                | "invoice_failed"
-                | "invoice_pending"
-                | "payment_received"
-                | "pending_change"
-                | "pending_expiration"
-                | "trial_ended"
-                | "user_requested"
-                | "admin_requested"
-                | "ending"
-                | "renewed"
-                | "cancelled"
-                | "auto_renew_disabled"
-                | "customer_signout"
-                | "generate_billing_periods_failed"
-              /** @description Note about status in the subscription */
-              note?: string
-              /** @description Important dates for the subscription */
-              dates?: {
-                /** @description Date of the last change */
-                lastChangeAt?: number
-                /** @description Date of the cancellation */
-                cancelAt?: number
-              }
-            } | null
-            project: {
-              enabled: boolean
-            }
-            customer: {
-              active: boolean
-            }
-            activePhase?: {
-              id: string
-              projectId: string
-              createdAtM?: number
-              updatedAtM?: number
-              subscriptionId: string
-              planVersionId: string
-              paymentMethodId: string | null
-              /** @default 0 */
-              trialUnits: number | null
-              billingAnchor: number
-              trialEndsAt: number | null
-              startAt: number
-              endAt: number | null
-              metadata?: {
-                /** @description Note about the subscription phase */
-                note?: string
-                /**
-                 * @description Reason for the subscription phase
-                 * @enum {string}
-                 */
-                reason?:
-                  | "payment_failed"
-                  | "invoice_voided"
-                  | "payment_pending"
-                  | "payment_method_not_found"
-                  | "policy_violation"
-                  | "pending_cancellation"
-                  | "invoice_failed"
-                  | "invoice_pending"
-                  | "payment_received"
-                  | "pending_change"
-                  | "pending_expiration"
-                  | "trial_ended"
-                  | "user_requested"
-                  | "admin_requested"
-                  | "ending"
-                  | "renewed"
-                  | "cancelled"
-                  | "auto_renew_disabled"
-                  | "customer_signout"
-                  | "generate_billing_periods_failed"
-              } | null
-              items?: {
-                id: string
-                projectId: string
-                createdAtM: number
-                updatedAtM: number
-                units: number | null
-                featurePlanVersionId: string
-                subscriptionPhaseId: string
-                subscriptionId: string
-              }[]
-              /** @description Schema for reading/selecting plan version data from the database */
-              planVersion: {
-                id: string
-                projectId: string
-                createdAtM: number
-                updatedAtM: number
-                planId: string
-                description: string
-                latest: boolean | null
-                title: string
-                /** @description Array of tags for categorizing and filtering plan versions. Examples: ['popular', 'recommended', 'enterprise', 'startup'] */
-                tags: string[] | null
-                active: boolean | null
-                /** @enum {string|null} */
-                status: "draft" | "published"
-                publishedAt: number | null
-                publishedBy: string | null
-                archived: boolean | null
-                archivedAt: number | null
-                archivedBy: string | null
-                /** @enum {string} */
-                paymentProvider: "stripe" | "square" | "sandbox"
-                /** @enum {string} */
-                dueBehaviour: "cancel" | "downgrade"
-                /**
-                 * @description ISO 4217 currency code for this plan version. Examples: 'USD', 'EUR'. Each plan version is tied to a single currency
-                 * @enum {string}
-                 */
-                currency: "USD" | "EUR"
-                /** @description The billing configuration for the plan version */
-                billingConfig: {
-                  name: string
-                  /** @enum {string} */
-                  billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
-                  billingIntervalCount: number
-                  billingAnchor: number | "dayOfCreation"
-                  /** @enum {string} */
-                  planType: "recurring" | "onetime"
-                }
-                /** @enum {string} */
-                whenToBill: "pay_in_advance" | "pay_in_arrear"
-                gracePeriod: number
-                /** @enum {string} */
-                collectionMethod: "charge_automatically" | "send_invoice"
-                trialUnits: number
-                autoRenew: boolean
-                /** @description Plan version metadata containing external integration identifiers */
-                metadata: {
-                  /** @description External identifier for integrating with third-party systems (e.g., Stripe price ID). Useful for syncing plan versions with external billing providers */
-                  externalId?: string
-                } | null
-                paymentMethodRequired: boolean
-                version: number
-              }
-            }
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "customers.getUsage": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Body of the request */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The customer ID
-           * @example cus_1H7KQFLr7RepUyQBKdnvY
-           */
-          customerId: string
-          /**
-           * @description The project ID
-           * @example prj_1H7KQFLr7RepUyQBKdnvY
-           */
-          projectId?: string
-        }
-      }
-    }
-    responses: {
-      /** @description The result of the get usage */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            planName: string
-            planDescription?: string
-            billingPeriod: string
-            billingPeriodLabel: string
-            currency: string
-            renewalDate?: string
-            daysRemaining?: number
-            groups: {
-              id: string
-              name: string
-              featureCount: number
-              features: (
-                | {
-                    id: string
-                    name: string
-                    description?: string
-                    /** @enum {string} */
-                    type: "flat"
-                    typeLabel: string
-                    currency: string
-                    price: string
-                    enabled: boolean
-                    billing: {
-                      billingFrequencyLabel: string
-                      resetFrequencyLabel: string
-                    }
-                  }
-                | {
-                    id: string
-                    name: string
-                    description?: string
-                    /** @enum {string} */
-                    type: "tiered"
-                    typeLabel: string
-                    currency: string
-                    price: string
-                    billing: {
-                      billingFrequencyLabel: string
-                      resetFrequencyLabel: string
-                    }
-                    tieredDisplay: {
-                      currentUsage: number
-                      billableUsage: number
-                      unit: string
-                      freeAmount: number
-                      tiers: {
-                        min: number
-                        max: number | null
-                        pricePerUnit: number
-                        label?: string
-                        isActive: boolean
-                      }[]
-                      currentTierLabel?: string
-                    }
-                  }
-                | {
-                    id: string
-                    name: string
-                    description?: string
-                    /** @enum {string} */
-                    type: "usage"
-                    typeLabel: string
-                    currency: string
-                    price: string
-                    billing: {
-                      billingFrequencyLabel: string
-                      resetFrequencyLabel: string
-                    }
-                    usageBar: {
-                      current: number
-                      included: number
-                      limit?: number
-                      /** @enum {string} */
-                      limitType: "hard" | "soft" | "none"
-                      unit: string
-                      notifyThreshold?: number
-                      /** @enum {string} */
-                      overageStrategy?: "none" | "last-call" | "always"
-                    }
-                  }
-                | {
-                    id: string
-                    name: string
-                    description?: string
-                    /** @enum {string} */
-                    type: "package"
-                    typeLabel: string
-                    currency: string
-                    price: string
-                    billing: {
-                      billingFrequencyLabel: string
-                      resetFrequencyLabel: string
-                    }
-                  }
-              )[]
-            }[]
-            priceSummary: {
-              totalPrice: string
-              flatTotal: string
-              tieredTotal: string
-              packageTotal: string
-              usageTotal: string
-            }
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "customers.getPaymentMethods": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Body of the request */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The customer ID
-           * @example cus_1H7KQFLr7RepUyQBKdnvY
-           */
-          customerId: string
-          /**
-           * @description The payment provider
-           * @example stripe
-           * @enum {string}
-           */
-          provider: "stripe" | "square" | "sandbox"
-        }
-      }
-    }
-    responses: {
-      /** @description The result of the get payment methods */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            id: string
-            name: string | null
-            last4?: string
-            expMonth?: number
-            expYear?: number
-            brand?: string
-          }[]
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "customers.signUp": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Body of the request */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The name of the customer
-           * @example John Doe
-           */
-          name: string
-          /**
-           * @description The timezone of the customer, if passed null the system will use the project timezone
-           * @example UTC
-           */
-          timezone?: string
-          /**
-           * @description The default currency of the customer, if passed null the system will use the project currency
-           * @example USD
-           * @enum {string}
-           */
-          defaultCurrency?: "USD" | "EUR"
-          /**
-           * Format: email
-           * @description The email of the customer
-           * @example test@example.com
-           */
-          email: string
-          /**
-           * @description The billing interval of the customer to be used for the subscription. If plan version is provided, the billing interval will be the same as the plan version. If plan slug is provided, the billing interval will be the default billing interval of the plan.
-           * @example month
-           * @enum {string}
-           */
-          billingInterval?: "month" | "year" | "week" | "day" | "minute" | "onetime"
-          /**
-           * @description If the plan id is not provided, you can pass a plan slug and the system will intelligently pick the lastest plan for that slug and sign up the customer for it
-           * @example PRO
-           */
-          planSlug?: string
-          /**
-           * @description The session id of the customer. This is used to track conversion from pricing pages
-           * @example sess_1234567890
-           */
-          sessionId?: string
-          /**
-           * @description The plan version the customer is signing up for
-           * @example pv_1234567890
-           */
-          planVersionId?: string
-          /**
-           * @description The configuration of the subscription items. This is required if your features are quantity based when the customer needs to set them. Pass as empty if you want the system to automatically set the units from the plan defaults.
-           * @example [
-           *       {
-           *         "featurePlanId": "feature_plan_123",
-           *         "featureSlug": "feature_slug_123",
-           *         "isUsage": true,
-           *         "units": 100
-           *       }
-           *     ]
-           */
-          config?: {
-            /**
-             * @description The feature plan id of the item
-             * @example feature_plan_123
-             */
-            featurePlanId: string
-            /**
-             * @description The feature slug of the item
-             * @example feature_slug_123
-             */
-            featureSlug: string
-            /**
-             * @description if the item is a usage item
-             * @example true
-             */
-            isUsage?: boolean
-            /**
-             * @description units of the feature the user is subscribed to
-             * @example 100
-             */
-            units?: number
-            /**
-             * @description minimum units of the feature the user is subscribed to
-             * @example 100
-             */
-            min?: number | null
-            /**
-             * @description limit of the feature the user is subscribed to
-             * @example 100
-             */
-            limit?: number | null
-          }[]
-          /**
-           * @description The external id you want to associate with the customer. Could be the id of the user in your database
-           * @example 1234567890
-           */
-          externalId?: string
-          /**
-           * Format: uri
-           * @description The success url if the customer signs up. This is the url after the signup process, normally your dashboard
-           * @example https://example.com/dashboard
-           */
-          successUrl: string
-          /**
-           * Format: uri
-           * @description The cancel url if the customer cancels the signup. This is the url after the signup process, normally your login page
-           * @example https://example.com/login
-           */
-          cancelUrl: string
-          /**
-           * @description The metadata of the customer, very important to pass geolocation data if you want to segment later on
-           * @example {
-           *       "country": "US",
-           *       "region": "CA",
-           *       "city": "San Francisco"
-           *     }
-           */
-          metadata?: {
-            stripeSubscriptionId?: string
-            stripeDefaultPaymentMethodId?: string
-            country?: string
-            region?: string
-            city?: string
-          }
-        }
-      }
-    }
-    responses: {
-      /** @description The result of the customer sign up */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            /**
-             * @description Whether the signup was successful
-             * @example true
-             */
-            success: boolean
-            /**
-             * Format: uri
-             * @description The url to redirect the customer to, either to the success or cancel url
-             * @example https://example.com/dashboard
-             */
-            url: string
-            /**
-             * @description The unprice customer id generated by the system for this customer
-             * @example cus_1234567890
-             */
-            customerId: string
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "customers.createPaymentMethod": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Body of the request */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The payment provider code to use
-           * @example stripe
-           * @enum {string}
-           */
-          paymentProvider: "stripe" | "square" | "sandbox"
-          /**
-           * @description The unprice customer id generated by the system for this customer
-           * @example cus_1234567890
-           */
-          customerId: string
-          /**
-           * Format: uri
-           * @description The success url if the customer signs up
-           * @example https://example.com/dashboard
-           */
-          successUrl: string
-          /**
-           * Format: uri
-           * @description The cancel url if the customer cancels the signup
-           * @example https://example.com/login
-           */
-          cancelUrl: string
-        }
-      }
-    }
-    responses: {
-      /** @description The result of the customer create payment method */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            /**
-             * @description Whether the signup was successful
-             * @example true
-             */
-            success: boolean
-            /**
-             * Format: uri
-             * @description The url to redirect the customer to, either to the success or cancel url
-             * @example https://example.com/dashboard
-             */
-            url: string
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "customers.resetEntitlements": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description The customer ID */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The customer ID
-           * @example cus_1H7KQFLr7RepUyQBKdnvY
-           */
-          customerId: string
-          /**
-           * @description The project ID
-           * @example proj_1H7KQFLr7RepUyQBKdnvY
-           */
-          projectId: string
-        }
-      }
-    }
-    responses: {
-      /** @description The result of the reset entitlements */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            success: boolean
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "customers.resetUsage": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description The customer ID */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The customer ID
-           * @example cus_1H7KQFLr7RepUyQBKdnvY
-           */
-          customerId: string
-          /**
-           * @description The project ID
-           * @example proj_1H7KQFLr7RepUyQBKdnvY
-           */
-          projectId: string
-        }
-      }
-    }
-    responses: {
-      /** @description The result of the reset usage */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            success: boolean
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "customers.updateACL": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description The updates to the ACL */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The customer ID
-           * @example cus_1H7KQFLr7RepUyQBKdnvY
-           */
-          customerId: string
-          updates: {
-            customerUsageLimitReached?: boolean
-            customerDisabled?: boolean
-            /** @enum {string} */
-            subscriptionStatus?: "active" | "trialing" | "canceled" | "expired" | "past_due"
-          }
-        }
-      }
-    }
-    responses: {
-      /** @description The result of the update ACL */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": Record<string, never>
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "projects.getFeatures": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description The result of the get features */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            features: {
-              id: string
-              projectId: string
-              slug: string
-              code: number
-              unitOfMeasure: string
-              title: string
-              description: string | null
-            }[]
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "plans.getPlanVersion": {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        planVersionId: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description The result of the get plan version */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            /** @description Complete API response schema for a plan version including plan details, all features with display text, and calculated pricing */
-            planVersion: {
-              id: string
-              projectId: string
-              createdAtM: number
-              updatedAtM: number
-              planId: string
-              description: string
-              latest: boolean | null
-              title: string
-              /** @description Array of tags for categorizing and filtering plan versions. Examples: ['popular', 'recommended', 'enterprise', 'startup'] */
-              tags: string[] | null
-              active: boolean | null
-              /** @enum {string|null} */
-              status: "draft" | "published"
-              publishedAt: number | null
-              publishedBy: string | null
-              archived: boolean | null
-              archivedAt: number | null
-              archivedBy: string | null
-              /** @enum {string} */
-              paymentProvider: "stripe" | "square" | "sandbox"
-              /** @enum {string} */
-              dueBehaviour: "cancel" | "downgrade"
-              /**
-               * @description ISO 4217 currency code for this plan version. Examples: 'USD', 'EUR'. Each plan version is tied to a single currency
-               * @enum {string}
-               */
-              currency: "USD" | "EUR"
-              /** @description The billing configuration for the plan version */
-              billingConfig: {
-                name: string
-                /** @enum {string} */
-                billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
-                billingIntervalCount: number
-                billingAnchor: number | "dayOfCreation"
-                /** @enum {string} */
-                planType: "recurring" | "onetime"
-              }
-              /** @enum {string} */
-              whenToBill: "pay_in_advance" | "pay_in_arrear"
-              gracePeriod: number
-              /** @enum {string} */
-              collectionMethod: "charge_automatically" | "send_invoice"
-              trialUnits: number
-              autoRenew: boolean
-              /** @description Plan version metadata containing external integration identifiers */
-              metadata: {
-                /** @description External identifier for integrating with third-party systems (e.g., Stripe price ID). Useful for syncing plan versions with external billing providers */
-                externalId?: string
-              } | null
-              paymentMethodRequired: boolean
-              version: number
-              /** @description The plan information */
-              plan: {
-                id: string
-                projectId: string
-                createdAtM: number
-                updatedAtM: number
-                slug: string
-                /** @description Title of the plan */
-                title: string
-                active: boolean | null
-                description: string
-                /** @description Plan metadata containing external integration identifiers and custom data */
-                metadata: {
-                  /** @description External identifier for integrating with third-party systems (e.g., Stripe product ID, HubSpot deal ID). Useful for syncing plans across platforms */
-                  externalId?: string
-                } | null
-                defaultPlan: boolean | null
-                enterprisePlan: boolean | null
-              }
-              /** @description Array of features with their pricing configurations and display text for customer-facing UIs */
-              planFeatures: {
-                id: string
-                projectId: string
-                createdAtM: number
-                updatedAtM: number
-                planVersionId: string
-                /** @enum {string} */
-                type: "feature" | "addon"
-                featureId: string
-                /**
-                 * @description The pricing model type: 'flat' (fixed price), 'tier' (volume-based tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)
-                 * @enum {string}
-                 */
-                featureType: "flat" | "tier" | "package" | "usage"
-                /** @description Unit of measurement captured for this plan version feature. Used for display and billing context without relying on mutable feature definitions */
-                unitOfMeasure: string
-                /** @description Pricing configuration for this feature. Structure depends on featureType */
-                config:
-                  | {
-                      /** @description Not used for flat pricing. Will be removed during validation */
-                      tiers?: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /** @description The fixed price for this feature. This is the single price charged regardless of usage */
-                      price: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description Not used for flat pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      usageMode?: "tier" | "package" | "unit"
-                      /**
-                       * @description Not used for flat pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      tierMode?: "volume" | "graduated"
-                      /** @description Not used for flat pricing. Will be removed during validation */
-                      units?: number
-                    }
-                  | {
-                      /** @description Base price for the feature. Not typically used in tier pricing mode */
-                      price?: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description How tier pricing is calculated: 'volume' (all units priced at the tier they fall into) or 'graduated' (each unit priced at its respective tier)
-                       * @enum {string}
-                       */
-                      tierMode: "volume" | "graduated"
-                      /** @description Array of pricing tiers defining price brackets. Tiers must be consecutive (no gaps or overlaps). The last tier's lastUnit should be null for unlimited */
-                      tiers: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /**
-                       * @description Usage calculation mode. Not typically used in tier-type features
-                       * @enum {string}
-                       */
-                      usageMode?: "tier" | "package" | "unit"
-                      /** @description Number of units included. Not typically used in tier-type features */
-                      units?: number
-                    }
-                  | {
-                      /** @description Price per unit when usageMode is 'unit' or 'package'. Required for unit/package modes, not used for tier mode */
-                      price?: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (volume-based tiers), or 'package' (bundle of units)
-                       * @enum {string}
-                       */
-                      usageMode: "tier" | "package" | "unit"
-                      /**
-                       * @description Tier calculation method when usageMode is 'tier': 'volume' or 'graduated'. Only applicable when usageMode is 'tier'
-                       * @enum {string}
-                       */
-                      tierMode?: "volume" | "graduated"
-                      /** @description Pricing tiers for tier-based usage. Required when usageMode is 'tier'. Must be consecutive with no gaps */
-                      tiers?: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /** @description Number of units in a package when usageMode is 'package'. Required for package mode. Example: 100 API calls per package */
-                      units?: number
-                    }
-                  | {
-                      /** @description Not used for package pricing. Will be removed during validation */
-                      tiers?: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /** @description The price per package. Example: $10 per package of 100 API calls */
-                      price: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description Not used for package pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      usageMode?: "tier" | "package" | "unit"
-                      /**
-                       * @description Not used for package pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      tierMode?: "volume" | "graduated"
-                      /** @description Number of units included in each package. Required. Example: 100 means each package includes 100 units */
-                      units: number
-                    }
-                /** @description Billing cycle configuration including interval (month/year), billing anchor date, and plan type (recurring/onetime) */
-                billingConfig: {
-                  name: string
-                  /** @enum {string} */
-                  billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
-                  billingIntervalCount: number
-                  billingAnchor: number | "dayOfCreation"
-                  /** @enum {string} */
-                  planType: "recurring" | "onetime"
-                }
-                /** @description Configuration for resetting usage counters. Defines when and how usage limits reset (e.g., monthly, yearly) */
-                resetConfig?: {
-                  name: string
-                  /** @enum {string} */
-                  resetInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
-                  resetIntervalCount: number
-                  resetAnchor: number | "dayOfCreation"
-                  /** @enum {string} */
-                  planType: "recurring" | "onetime"
-                } | null
-                /** @description Additional feature settings including real-time tracking, notifications, and visibility options */
-                metadata: {
-                  /**
-                   * @description Whether usage should be tracked and verified in real-time. When true, usage checks happen synchronously. Default: false
-                   * @default false
-                   */
-                  realtime: boolean
-                  /**
-                   * @description Percentage threshold (0-100) at which to notify the customer about approaching usage limits. Default: 95 (notify at 95% usage)
-                   * @default 95
-                   */
-                  notifyUsageThreshold: number
-                  /**
-                   * @description How to handle usage that exceeds the feature limit. Options: 'none' (deny access), 'charge' (bill for overage), 'allow' (permit without extra charge)
-                   * @default none
-                   * @enum {string}
-                   */
-                  overageStrategy: "none" | "last-call" | "always"
-                  /**
-                   * @description Whether to completely block the customer when they exceed their limit. When true, access is denied until the next billing period. Default: false
-                   * @default false
-                   */
-                  blockCustomer: boolean
-                  /**
-                   * @description Whether to hide this feature from customer-facing displays like pricing pages. Useful for internal or technical features. Default: false
-                   * @default false
-                   */
-                  hidden: boolean
-                } | null
-                order: number
-                /**
-                 * @description Default quantity of this feature included when a customer subscribes. Example: 5 for '5 team members included'. Default: 1
-                 * @default 1
-                 */
-                defaultQuantity: number | null
-                /** @description Maximum allowed usage for this feature per billing period. Null or undefined means unlimited. Example: 10000 for 10,000 API calls/month */
-                limit?: number | null
-                /** @description The text you can use to show the clients */
-                displayFeatureText: string
-                /** @description The feature information */
-                feature: {
-                  id: string
-                  projectId: string
-                  createdAtM: number
-                  updatedAtM: number
-                  slug: string
-                  code: number
-                  unitOfMeasure: string
-                  title: string
-                  description: string | null
-                }
-              }[]
-              /** @description Flat price of the plan */
-              flatPrice: string
-            }
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "plans.listPlanVersions": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Body of the request */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description Whether to include published plan versions
-           * @example true
-           */
-          onlyPublished?: boolean
-          /**
-           * @description Whether to include enterprise plan versions
-           * @example false
-           */
-          onlyEnterprisePlan?: boolean
-          /**
-           * @description Whether to include the latest plan version
-           * @example true
-           */
-          onlyLatest?: boolean
-          /**
-           * @description Filter by plan version IDs
-           * @example [
-           *       "pv_123"
-           *     ]
-           */
-          planVersionIds?: string[]
-          /**
-           * @description The billing interval to filter the plan versions
-           * @example month
-           * @enum {string}
-           */
-          billingInterval?: "month" | "year" | "week" | "day" | "minute" | "onetime"
-          /**
-           * @description The currency to filter the plan versions
-           * @example USD
-           * @enum {string}
-           */
-          currency?: "USD" | "EUR"
-        }
-      }
-    }
-    responses: {
-      /** @description The result of the list plan versions */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            planVersions: {
-              id: string
-              projectId: string
-              createdAtM: number
-              updatedAtM: number
-              planId: string
-              description: string
-              latest: boolean | null
-              title: string
-              /** @description Array of tags for categorizing and filtering plan versions. Examples: ['popular', 'recommended', 'enterprise', 'startup'] */
-              tags: string[] | null
-              active: boolean | null
-              /** @enum {string|null} */
-              status: "draft" | "published"
-              publishedAt: number | null
-              publishedBy: string | null
-              archived: boolean | null
-              archivedAt: number | null
-              archivedBy: string | null
-              /** @enum {string} */
-              paymentProvider: "stripe" | "square" | "sandbox"
-              /** @enum {string} */
-              dueBehaviour: "cancel" | "downgrade"
-              /**
-               * @description ISO 4217 currency code for this plan version. Examples: 'USD', 'EUR'. Each plan version is tied to a single currency
-               * @enum {string}
-               */
-              currency: "USD" | "EUR"
-              /** @description The billing configuration for the plan version */
-              billingConfig: {
-                name: string
-                /** @enum {string} */
-                billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
-                billingIntervalCount: number
-                billingAnchor: number | "dayOfCreation"
-                /** @enum {string} */
-                planType: "recurring" | "onetime"
-              }
-              /** @enum {string} */
-              whenToBill: "pay_in_advance" | "pay_in_arrear"
-              gracePeriod: number
-              /** @enum {string} */
-              collectionMethod: "charge_automatically" | "send_invoice"
-              trialUnits: number
-              autoRenew: boolean
-              /** @description Plan version metadata containing external integration identifiers */
-              metadata: {
-                /** @description External identifier for integrating with third-party systems (e.g., Stripe price ID). Useful for syncing plan versions with external billing providers */
-                externalId?: string
-              } | null
-              paymentMethodRequired: boolean
-              version: number
-              /** @description The plan information */
-              plan: {
-                id: string
-                projectId: string
-                createdAtM: number
-                updatedAtM: number
-                slug: string
-                /** @description Title of the plan */
-                title: string
-                active: boolean | null
-                description: string
-                /** @description Plan metadata containing external integration identifiers and custom data */
-                metadata: {
-                  /** @description External identifier for integrating with third-party systems (e.g., Stripe product ID, HubSpot deal ID). Useful for syncing plans across platforms */
-                  externalId?: string
-                } | null
-                defaultPlan: boolean | null
-                enterprisePlan: boolean | null
-              }
-              /** @description Array of features with their pricing configurations and display text for customer-facing UIs */
-              planFeatures: {
-                id: string
-                projectId: string
-                createdAtM: number
-                updatedAtM: number
-                planVersionId: string
-                /** @enum {string} */
-                type: "feature" | "addon"
-                featureId: string
-                /**
-                 * @description The pricing model type: 'flat' (fixed price), 'tier' (volume-based tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)
-                 * @enum {string}
-                 */
-                featureType: "flat" | "tier" | "package" | "usage"
-                /** @description Unit of measurement captured for this plan version feature. Used for display and billing context without relying on mutable feature definitions */
-                unitOfMeasure: string
-                /** @description Pricing configuration for this feature. Structure depends on featureType */
-                config:
-                  | {
-                      /** @description Not used for flat pricing. Will be removed during validation */
-                      tiers?: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /** @description The fixed price for this feature. This is the single price charged regardless of usage */
-                      price: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description Not used for flat pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      usageMode?: "tier" | "package" | "unit"
-                      /**
-                       * @description Not used for flat pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      tierMode?: "volume" | "graduated"
-                      /** @description Not used for flat pricing. Will be removed during validation */
-                      units?: number
-                    }
-                  | {
-                      /** @description Base price for the feature. Not typically used in tier pricing mode */
-                      price?: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description How tier pricing is calculated: 'volume' (all units priced at the tier they fall into) or 'graduated' (each unit priced at its respective tier)
-                       * @enum {string}
-                       */
-                      tierMode: "volume" | "graduated"
-                      /** @description Array of pricing tiers defining price brackets. Tiers must be consecutive (no gaps or overlaps). The last tier's lastUnit should be null for unlimited */
-                      tiers: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /**
-                       * @description Usage calculation mode. Not typically used in tier-type features
-                       * @enum {string}
-                       */
-                      usageMode?: "tier" | "package" | "unit"
-                      /** @description Number of units included. Not typically used in tier-type features */
-                      units?: number
-                    }
-                  | {
-                      /** @description Price per unit when usageMode is 'unit' or 'package'. Required for unit/package modes, not used for tier mode */
-                      price?: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (volume-based tiers), or 'package' (bundle of units)
-                       * @enum {string}
-                       */
-                      usageMode: "tier" | "package" | "unit"
-                      /**
-                       * @description Tier calculation method when usageMode is 'tier': 'volume' or 'graduated'. Only applicable when usageMode is 'tier'
-                       * @enum {string}
-                       */
-                      tierMode?: "volume" | "graduated"
-                      /** @description Pricing tiers for tier-based usage. Required when usageMode is 'tier'. Must be consecutive with no gaps */
-                      tiers?: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /** @description Number of units in a package when usageMode is 'package'. Required for package mode. Example: 100 API calls per package */
-                      units?: number
-                    }
-                  | {
-                      /** @description Not used for package pricing. Will be removed during validation */
-                      tiers?: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /** @description The price per package. Example: $10 per package of 100 API calls */
-                      price: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description Not used for package pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      usageMode?: "tier" | "package" | "unit"
-                      /**
-                       * @description Not used for package pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      tierMode?: "volume" | "graduated"
-                      /** @description Number of units included in each package. Required. Example: 100 means each package includes 100 units */
-                      units: number
-                    }
-                /** @description Billing cycle configuration including interval (month/year), billing anchor date, and plan type (recurring/onetime) */
-                billingConfig: {
-                  name: string
-                  /** @enum {string} */
-                  billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
-                  billingIntervalCount: number
-                  billingAnchor: number | "dayOfCreation"
-                  /** @enum {string} */
-                  planType: "recurring" | "onetime"
-                }
-                /** @description Configuration for resetting usage counters. Defines when and how usage limits reset (e.g., monthly, yearly) */
-                resetConfig?: {
-                  name: string
-                  /** @enum {string} */
-                  resetInterval: "month" | "year" | "week" | "day" | "minute" | "onetime"
-                  resetIntervalCount: number
-                  resetAnchor: number | "dayOfCreation"
-                  /** @enum {string} */
-                  planType: "recurring" | "onetime"
-                } | null
-                /** @description Additional feature settings including real-time tracking, notifications, and visibility options */
-                metadata: {
-                  /**
-                   * @description Whether usage should be tracked and verified in real-time. When true, usage checks happen synchronously. Default: false
-                   * @default false
-                   */
-                  realtime: boolean
-                  /**
-                   * @description Percentage threshold (0-100) at which to notify the customer about approaching usage limits. Default: 95 (notify at 95% usage)
-                   * @default 95
-                   */
-                  notifyUsageThreshold: number
-                  /**
-                   * @description How to handle usage that exceeds the feature limit. Options: 'none' (deny access), 'charge' (bill for overage), 'allow' (permit without extra charge)
-                   * @default none
-                   * @enum {string}
-                   */
-                  overageStrategy: "none" | "last-call" | "always"
-                  /**
-                   * @description Whether to completely block the customer when they exceed their limit. When true, access is denied until the next billing period. Default: false
-                   * @default false
-                   */
-                  blockCustomer: boolean
-                  /**
-                   * @description Whether to hide this feature from customer-facing displays like pricing pages. Useful for internal or technical features. Default: false
-                   * @default false
-                   */
-                  hidden: boolean
-                } | null
-                order: number
-                /**
-                 * @description Default quantity of this feature included when a customer subscribes. Example: 5 for '5 team members included'. Default: 1
-                 * @default 1
-                 */
-                defaultQuantity: number | null
-                /** @description Maximum allowed usage for this feature per billing period. Null or undefined means unlimited. Example: 10000 for 10,000 API calls/month */
-                limit?: number | null
-                /** @description The text you can use to show the clients */
-                displayFeatureText: string
-                /** @description The feature information */
-                feature: {
-                  id: string
-                  projectId: string
-                  createdAtM: number
-                  updatedAtM: number
-                  slug: string
-                  code: number
-                  unitOfMeasure: string
-                  title: string
-                  description: string | null
-                }
-              }[]
-              /** @description Flat price of the plan */
-              flatPrice: string
-            }[]
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "analytics.getUsage": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Body of the request for the get usage */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The customer ID if you want to get the usage for a specific customer
-           * @example cus_1H7KQFLr7RepUyQBKdnvY
-           */
-          customer_id?: string
-          /**
-           * @description The project ID (optional, only available for main projects)
-           * @example project_1H7KQFLr7RepUyQBKdnvY
-           */
-          project_id: string
-          /**
-           * @description The range of the usage, last hour, day, week or month
-           * @example 24h
-           * @enum {string}
-           */
-          range: "24h" | "7d" | "30d" | "90d"
-        }
-      }
-    }
-    responses: {
-      /** @description The result of the get usage */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            usage: {
-              project_id: string
-              customer_id?: string
-              feature_slug: string
-              count: number
-              sum: number
-              max: number
-              latest: number
-            }[]
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "analytics.getVerifications": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Body of the request for the get verifications */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The customer ID if you want to get the verifications for a specific customer
-           * @example cus_1H7KQFLr7RepUyQBKdnvY
-           */
-          customer_id?: string
-          /**
-           * @description The project ID (optional, if not provided, the project ID will be the one of the key)
-           * @example project_1H7KQFLr7RepUyQBKdnvY
-           */
-          project_id: string
-          /**
-           * @description The range of the verifications, last hour, day, week or month
-           * @example 24h
-           * @enum {string}
-           */
-          range: "24h" | "7d" | "30d" | "90d"
-        }
-      }
-    }
-    responses: {
-      /** @description The result of the get verifications */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            verifications: {
-              project_id: string
-              customer_id?: string
-              feature_slug: string
-              count: number
-              p50_latency: number
-              p95_latency: number
-              p99_latency: number
-            }[]
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "analytics.getRealtimeUsage": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Body of the request for real-time usage metrics */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The customer ID to get real-time metrics for
-           * @example cus_1H7KQFLr7RepUyQBKdnvY
-           */
-          customer_id: string
-          /**
-           * @description The project ID (optional, only available for main projects)
-           * @example project_1H7KQFLr7RepUyQBKdnvY
-           */
-          project_id: string
-          /**
-           * @description Time history window in seconds (5m, 60m, 1d, 7d)
-           * @example 3600
-           */
-          window_seconds?: 300 | 3600 | 86400 | 604800
-        }
-      }
-    }
-    responses: {
-      /** @description Real-time usage metrics from the Durable Object buffer */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            metrics: {
-              usageCount: number
-              verificationCount: number
-              totalUsage: number
-              allowedCount: number
-              deniedCount: number
-              limitExceededCount: number
-              bucketSizeSeconds: number
-              featureStats: {
-                featureSlug: string
-                usageCount: number
-                verificationCount: number
-                totalUsage: number
-              }[]
-              usageSeries: {
-                bucketStart: number
-                usageCount: number
-                totalUsage: number
-              }[]
-              verificationSeries: {
-                bucketStart: number
-                verificationCount: number
-                allowedCount: number
-                deniedCount: number
-                limitExceededCount: number
-              }[]
-              oldestTimestamp: number | null
-              newestTimestamp: number | null
-            }
-            /**
-             * @description Indicates data comes from unflushed DO buffer, not Tinybird
-             * @enum {string}
-             */
-            source: "durable_object"
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "analytics.getRealtimeTicket": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Realtime ticket request payload */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The customer ID to scope realtime access
-           * @example cus_1H7KQFLr7RepUyQBKdnvY
-           */
-          customerId: string
-          /**
-           * @description The project ID to scope realtime access
-           * @example project_1H7KQFLr7RepUyQBKdnvY
-           */
-          projectId?: string
-        }
-      }
-    }
-    responses: {
-      /** @description Realtime websocket ticket */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            ticket: string
-            expiresAt: number
-            projectId: string
-            customerId: string
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "lakehouse.getFilePlan": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Lakehouse file plan request payload */
-    requestBody: {
-      content: {
-        "application/json": {
-          projectId?: string
-          customerId?: string
-          tables?: ("usage" | "verification" | "metadata" | "entitlement_snapshot")[]
-          /**
-           * @default 30d
-           * @enum {string}
-           */
-          interval: "1d" | "7d" | "30d" | "90d"
-          /**
-           * @default non_prod
-           * @enum {string}
-           */
-          targetEnv: "non_prod" | "prod"
-        }
-      }
-    }
-    responses: {
-      /** @description Lakehouse file plan */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            projectIds: string[]
-            customerIds: string[]
-            /** @enum {string} */
-            interval: "1d" | "7d" | "30d" | "90d"
-            intervalDays: number
-            /** @enum {string} */
-            targetEnv: "non_prod" | "prod"
-            window: {
-              start: string
-              end: string
-            }
-            tableFiles: {
-              [key: string]: string[] | undefined
-            }
-            urls: string[]
-            errors: {
-              table: string
-              error: string
-            }[]
-            credentials: {
-              bucket: string
-              r2Endpoint: string
-              accessKeyId: string
-              secretAccessKey: string
-              sessionToken: string
-              expiration: string | number
-              ttlSeconds: number
-              prefixes: string[]
-            } | null
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
+    "events.ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The raw event ingestion payload */
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Optional event id. If omitted, the API will generate an internal event id for processing.
+                     * @example evt_123
+                     */
+                    id?: string;
+                    /**
+                     * @description Logical idempotency key for deduplicating raw events
+                     * @example idem_123
+                     */
+                    idempotencyKey: string;
+                    /**
+                     * @description The event slug
+                     * @example tokens_used
+                     */
+                    eventSlug: string;
+                    /**
+                     * @description The unprice customer id
+                     * @example cus_123
+                     */
+                    customerId: string;
+                    /**
+                     * @description Event timestamp in epoch milliseconds, if not provided will use the time of the request
+                     * @example 1741454800000
+                     */
+                    timestamp?: number;
+                    /**
+                     * @description Arbitrary event properties
+                     * @example {
+                     *       "amount": 1
+                     *     }
+                     */
+                    properties: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description The raw event was accepted for asynchronous processing */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * @description The raw event was accepted for asynchronous processing
+                         * @example true
+                         * @enum {boolean}
+                         */
+                        accepted: true;
+                    };
+                };
+            };
+            /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrBadRequest"];
+                };
+            };
+            /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrUnauthorized"];
+                };
+            };
+            /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrForbidden"];
+                };
+            };
+            /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrNotFound"];
+                };
+            };
+            /** @description This response is sent when a request conflicts with the current state of the server. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrConflict"];
+                };
+            };
+            /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrPreconditionFailed"];
+                };
+            };
+            /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrTooManyRequests"];
+                };
+            };
+            /** @description The server has encountered a situation it does not know how to handle. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrInternalServerError"];
+                };
+            };
+        };
+    };
+    "events.ingestSync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The synchronous raw event ingestion payload */
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Optional event id. If omitted, the API will generate an internal event id for processing.
+                     * @example evt_123
+                     */
+                    id?: string;
+                    /**
+                     * @description Logical idempotency key for deduplicating raw events
+                     * @example idem_123
+                     */
+                    idempotencyKey: string;
+                    /**
+                     * @description The event slug
+                     * @example tokens_used
+                     */
+                    eventSlug: string;
+                    /**
+                     * @description The unprice customer id
+                     * @example cus_123
+                     */
+                    customerId: string;
+                    /**
+                     * @description Event timestamp in epoch milliseconds, if not provided will use the time of the request
+                     * @example 1741454800000
+                     */
+                    timestamp?: number;
+                    /**
+                     * @description Arbitrary event properties
+                     * @example {
+                     *       "amount": 1
+                     *     }
+                     */
+                    properties: {
+                        [key: string]: unknown;
+                    };
+                    /**
+                     * @description The feature slug to verify and ingest synchronously
+                     * @example tokens
+                     */
+                    featureSlug: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The synchronous ingestion result for the targeted feature */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * @description Whether the event was accepted and synchronously ingested for the feature
+                         * @example true
+                         */
+                        allowed: boolean;
+                        /**
+                         * @description Synchronous ingestion lifecycle state for the targeted feature
+                         * @example processed
+                         * @enum {string}
+                         */
+                        state: "processed" | "rejected";
+                        /**
+                         * @description Business rejection reason when the event could not be ingested
+                         * @example LIMIT_EXCEEDED
+                         * @enum {string}
+                         */
+                        rejectionReason?: "CUSTOMER_NOT_FOUND" | "INVALID_ENTITLEMENT_CONFIGURATION" | "INVALID_AGGREGATION_PROPERTIES" | "LIMIT_EXCEEDED" | "NO_MATCHING_ENTITLEMENT" | "UNROUTABLE_EVENT";
+                        /**
+                         * @description Optional details about the synchronous ingestion result
+                         * @example Limit exceeded for meter meter_123
+                         */
+                        message?: string;
+                    };
+                };
+            };
+            /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrBadRequest"];
+                };
+            };
+            /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrUnauthorized"];
+                };
+            };
+            /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrForbidden"];
+                };
+            };
+            /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrNotFound"];
+                };
+            };
+            /** @description This response is sent when a request conflicts with the current state of the server. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrConflict"];
+                };
+            };
+            /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrPreconditionFailed"];
+                };
+            };
+            /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrTooManyRequests"];
+                };
+            };
+            /** @description The server has encountered a situation it does not know how to handle. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrInternalServerError"];
+                };
+            };
+        };
+    };
+    "customers.getEntitlements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Body of the request */
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description The customer ID
+                     * @example cus_1H7KQFLr7RepUyQBKdnvY
+                     */
+                    customerId: string;
+                    /**
+                     * @description The project ID
+                     * @example prj_1H7KQFLr7RepUyQBKdnvY
+                     */
+                    projectId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The result of the get minimal entitlements */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        featureSlug: string;
+                        effectiveAt: number;
+                        expiresAt: number | null;
+                    }[];
+                };
+            };
+            /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrBadRequest"];
+                };
+            };
+            /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrUnauthorized"];
+                };
+            };
+            /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrForbidden"];
+                };
+            };
+            /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrNotFound"];
+                };
+            };
+            /** @description This response is sent when a request conflicts with the current state of the server. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrConflict"];
+                };
+            };
+            /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrPreconditionFailed"];
+                };
+            };
+            /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrTooManyRequests"];
+                };
+            };
+            /** @description The server has encountered a situation it does not know how to handle. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrInternalServerError"];
+                };
+            };
+        };
+    };
+    "customers.verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Body of the request */
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description The unprice customer ID
+                     * @example cus_1H7KQFLr7RepUyQBKdnvY
+                     */
+                    customerId: string;
+                    /**
+                     * @description The feature slug
+                     * @example tokens
+                     */
+                    featureSlug: string;
+                    /**
+                     * @description Optional timestamp to inspect a recent point-in-time state. Defaults to the request start time.
+                     * @example 1774094400000
+                     */
+                    timestamp?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The current feature verification status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * @description Whether the feature is currently usable for the requested customer and timestamp
+                         * @example true
+                         */
+                        allowed: boolean;
+                        /**
+                         * @description The current verification status for the requested feature
+                         * @example usage
+                         * @enum {string}
+                         */
+                        status: "customer_not_found" | "feature_inactive" | "feature_missing" | "invalid_entitlement_configuration" | "non_usage" | "usage";
+                        /**
+                         * @description The feature slug that was verified
+                         * @example tokens
+                         */
+                        featureSlug: string;
+                        /** @description The resolved meter configuration for usage-based features */
+                        meterConfig?: {
+                            eventId: string;
+                            eventSlug: string;
+                            /**
+                             * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                             * @enum {string}
+                             */
+                            aggregationMethod: "sum" | "count" | "max" | "latest";
+                            aggregationField?: string;
+                            filters?: {
+                                [key: string]: string | undefined;
+                            };
+                            groupBy?: string[];
+                            /** @enum {string} */
+                            windowSize?: "MINUTE" | "HOUR" | "DAY";
+                        };
+                        /**
+                         * @description Current usage in the active meter window
+                         * @example 42
+                         */
+                        usage?: number;
+                        /**
+                         * @description Configured limit for the active meter window
+                         * @example 100
+                         */
+                        limit?: number | null;
+                        /**
+                         * @description Whether the current usage has reached the current limit
+                         * @example false
+                         */
+                        isLimitReached?: boolean;
+                        /**
+                         * @description How the feature behaves once the limit is reached
+                         * @example none
+                         * @enum {string}
+                         */
+                        overageStrategy?: "none" | "last-call" | "always";
+                        /**
+                         * @description Optional detail about the verification result
+                         * @example Unable to resolve the current meter window for this feature
+                         */
+                        message?: string;
+                    };
+                };
+            };
+            /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrBadRequest"];
+                };
+            };
+            /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrUnauthorized"];
+                };
+            };
+            /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrForbidden"];
+                };
+            };
+            /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrNotFound"];
+                };
+            };
+            /** @description This response is sent when a request conflicts with the current state of the server. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrConflict"];
+                };
+            };
+            /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrPreconditionFailed"];
+                };
+            };
+            /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrTooManyRequests"];
+                };
+            };
+            /** @description The server has encountered a situation it does not know how to handle. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrInternalServerError"];
+                };
+            };
+        };
+    };
+    "customers.getSubscription": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Body of the request */
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description The customer ID
+                     * @example cus_1H7KQFLr7RepUyQBKdnvY
+                     */
+                    customerId: string;
+                    /**
+                     * @description The project ID
+                     * @example prj_1H7KQFLr7RepUyQBKdnvY
+                     */
+                    projectId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The result of the get subscription */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        projectId: string;
+                        createdAtM: number;
+                        updatedAtM: number;
+                        customerId: string;
+                        /** @enum {string} */
+                        status: "active" | "trialing" | "canceled" | "expired" | "past_due";
+                        active: boolean;
+                        planSlug: string;
+                        currentCycleStartAt: number;
+                        currentCycleEndAt: number;
+                        renewAt: number | null;
+                        endAt: number | null;
+                        timezone: string;
+                        metadata: {
+                            /**
+                             * @description Reason for the subscription status
+                             * @enum {string}
+                             */
+                            reason?: "payment_failed" | "invoice_voided" | "payment_pending" | "payment_method_not_found" | "policy_violation" | "pending_cancellation" | "invoice_failed" | "invoice_pending" | "payment_received" | "pending_change" | "pending_expiration" | "trial_ended" | "user_requested" | "admin_requested" | "ending" | "renewed" | "cancelled" | "auto_renew_disabled" | "customer_signout" | "generate_billing_periods_failed";
+                            /** @description Note about status in the subscription */
+                            note?: string;
+                            /** @description Important dates for the subscription */
+                            dates?: {
+                                /** @description Date of the last change */
+                                lastChangeAt?: number;
+                                /** @description Date of the cancellation */
+                                cancelAt?: number;
+                            };
+                        } | null;
+                        project: {
+                            enabled: boolean;
+                        };
+                        customer: {
+                            active: boolean;
+                        };
+                        activePhase?: {
+                            id: string;
+                            projectId: string;
+                            createdAtM?: number;
+                            updatedAtM?: number;
+                            subscriptionId: string;
+                            planVersionId: string;
+                            paymentMethodId: string | null;
+                            /** @default 0 */
+                            trialUnits: number | null;
+                            billingAnchor: number;
+                            trialEndsAt: number | null;
+                            startAt: number;
+                            endAt: number | null;
+                            metadata?: {
+                                /** @description Note about the subscription phase */
+                                note?: string;
+                                /**
+                                 * @description Reason for the subscription phase
+                                 * @enum {string}
+                                 */
+                                reason?: "payment_failed" | "invoice_voided" | "payment_pending" | "payment_method_not_found" | "policy_violation" | "pending_cancellation" | "invoice_failed" | "invoice_pending" | "payment_received" | "pending_change" | "pending_expiration" | "trial_ended" | "user_requested" | "admin_requested" | "ending" | "renewed" | "cancelled" | "auto_renew_disabled" | "customer_signout" | "generate_billing_periods_failed";
+                            } | null;
+                            items?: {
+                                id: string;
+                                projectId: string;
+                                createdAtM: number;
+                                updatedAtM: number;
+                                units: number | null;
+                                featurePlanVersionId: string;
+                                subscriptionPhaseId: string;
+                                subscriptionId: string;
+                            }[];
+                            /** @description Schema for reading/selecting plan version data from the database */
+                            planVersion: {
+                                id: string;
+                                projectId: string;
+                                createdAtM: number;
+                                updatedAtM: number;
+                                planId: string;
+                                description: string;
+                                latest: boolean | null;
+                                title: string;
+                                /** @description Array of tags for categorizing and filtering plan versions. Examples: ['popular', 'recommended', 'enterprise', 'startup'] */
+                                tags: string[] | null;
+                                active: boolean | null;
+                                /** @enum {string|null} */
+                                status: "draft" | "published";
+                                publishedAt: number | null;
+                                publishedBy: string | null;
+                                archived: boolean | null;
+                                archivedAt: number | null;
+                                archivedBy: string | null;
+                                /** @enum {string} */
+                                paymentProvider: "stripe" | "square" | "sandbox";
+                                /** @enum {string} */
+                                dueBehaviour: "cancel" | "downgrade";
+                                /**
+                                 * @description ISO 4217 currency code for this plan version. Examples: 'USD', 'EUR'. Each plan version is tied to a single currency
+                                 * @enum {string}
+                                 */
+                                currency: "USD" | "EUR";
+                                /** @description The billing configuration for the plan version */
+                                billingConfig: {
+                                    name: string;
+                                    /** @enum {string} */
+                                    billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime";
+                                    billingIntervalCount: number;
+                                    billingAnchor: number | "dayOfCreation";
+                                    /** @enum {string} */
+                                    planType: "recurring" | "onetime";
+                                };
+                                /** @enum {string} */
+                                whenToBill: "pay_in_advance" | "pay_in_arrear";
+                                gracePeriod: number;
+                                /** @enum {string} */
+                                collectionMethod: "charge_automatically" | "send_invoice";
+                                trialUnits: number;
+                                autoRenew: boolean;
+                                /** @description Plan version metadata containing external integration identifiers */
+                                metadata: {
+                                    /** @description External identifier for integrating with third-party systems (e.g., Stripe price ID). Useful for syncing plan versions with external billing providers */
+                                    externalId?: string;
+                                } | null;
+                                paymentMethodRequired: boolean;
+                                version: number;
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrBadRequest"];
+                };
+            };
+            /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrUnauthorized"];
+                };
+            };
+            /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrForbidden"];
+                };
+            };
+            /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrNotFound"];
+                };
+            };
+            /** @description This response is sent when a request conflicts with the current state of the server. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrConflict"];
+                };
+            };
+            /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrPreconditionFailed"];
+                };
+            };
+            /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrTooManyRequests"];
+                };
+            };
+            /** @description The server has encountered a situation it does not know how to handle. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrInternalServerError"];
+                };
+            };
+        };
+    };
+    "customers.getPaymentMethods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Body of the request */
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description The customer ID
+                     * @example cus_1H7KQFLr7RepUyQBKdnvY
+                     */
+                    customerId: string;
+                    /**
+                     * @description The payment provider
+                     * @example stripe
+                     * @enum {string}
+                     */
+                    provider: "stripe" | "square" | "sandbox";
+                };
+            };
+        };
+        responses: {
+            /** @description The result of the get payment methods */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        name: string | null;
+                        last4?: string;
+                        expMonth?: number;
+                        expYear?: number;
+                        brand?: string;
+                    }[];
+                };
+            };
+            /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrBadRequest"];
+                };
+            };
+            /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrUnauthorized"];
+                };
+            };
+            /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrForbidden"];
+                };
+            };
+            /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrNotFound"];
+                };
+            };
+            /** @description This response is sent when a request conflicts with the current state of the server. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrConflict"];
+                };
+            };
+            /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrPreconditionFailed"];
+                };
+            };
+            /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrTooManyRequests"];
+                };
+            };
+            /** @description The server has encountered a situation it does not know how to handle. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrInternalServerError"];
+                };
+            };
+        };
+    };
+    "customers.signUp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Body of the request */
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description The name of the customer
+                     * @example John Doe
+                     */
+                    name: string;
+                    /**
+                     * @description The timezone of the customer, if passed null the system will use the project timezone
+                     * @example UTC
+                     */
+                    timezone?: string;
+                    /**
+                     * @description The default currency of the customer, if passed null the system will use the project currency
+                     * @example USD
+                     * @enum {string}
+                     */
+                    defaultCurrency?: "USD" | "EUR";
+                    /**
+                     * Format: email
+                     * @description The email of the customer
+                     * @example test@example.com
+                     */
+                    email: string;
+                    /**
+                     * @description The billing interval of the customer to be used for the subscription. If plan version is provided, the billing interval will be the same as the plan version. If plan slug is provided, the billing interval will be the default billing interval of the plan.
+                     * @example month
+                     * @enum {string}
+                     */
+                    billingInterval?: "month" | "year" | "week" | "day" | "minute" | "onetime";
+                    /**
+                     * @description If the plan id is not provided, you can pass a plan slug and the system will intelligently pick the lastest plan for that slug and sign up the customer for it
+                     * @example PRO
+                     */
+                    planSlug?: string;
+                    /**
+                     * @description The session id of the customer. This is used to track conversion from pricing pages
+                     * @example sess_1234567890
+                     */
+                    sessionId?: string;
+                    /**
+                     * @description The plan version the customer is signing up for
+                     * @example pv_1234567890
+                     */
+                    planVersionId?: string;
+                    /**
+                     * @description The configuration of the subscription items. This is required if your features are quantity based when the customer needs to set them. Pass as empty if you want the system to automatically set the units from the plan defaults.
+                     * @example [
+                     *       {
+                     *         "featurePlanId": "feature_plan_123",
+                     *         "featureSlug": "feature_slug_123",
+                     *         "isUsage": true,
+                     *         "units": 100
+                     *       }
+                     *     ]
+                     */
+                    config?: {
+                        /**
+                         * @description The feature plan id of the item
+                         * @example feature_plan_123
+                         */
+                        featurePlanId: string;
+                        /**
+                         * @description The feature slug of the item
+                         * @example feature_slug_123
+                         */
+                        featureSlug: string;
+                        /**
+                         * @description if the item is a usage item
+                         * @example true
+                         */
+                        isUsage?: boolean;
+                        /**
+                         * @description units of the feature the user is subscribed to
+                         * @example 100
+                         */
+                        units?: number;
+                        /**
+                         * @description minimum units of the feature the user is subscribed to
+                         * @example 100
+                         */
+                        min?: number | null;
+                        /**
+                         * @description limit of the feature the user is subscribed to
+                         * @example 100
+                         */
+                        limit?: number | null;
+                    }[];
+                    /**
+                     * @description The external id you want to associate with the customer. Could be the id of the user in your database
+                     * @example 1234567890
+                     */
+                    externalId?: string;
+                    /**
+                     * Format: uri
+                     * @description The success url if the customer signs up. This is the url after the signup process, normally your dashboard
+                     * @example https://example.com/dashboard
+                     */
+                    successUrl: string;
+                    /**
+                     * Format: uri
+                     * @description The cancel url if the customer cancels the signup. This is the url after the signup process, normally your login page
+                     * @example https://example.com/login
+                     */
+                    cancelUrl: string;
+                    /**
+                     * @description The metadata of the customer, very important to pass geolocation data if you want to segment later on
+                     * @example {
+                     *       "country": "US",
+                     *       "region": "CA",
+                     *       "city": "San Francisco"
+                     *     }
+                     */
+                    metadata?: {
+                        stripeSubscriptionId?: string;
+                        stripeDefaultPaymentMethodId?: string;
+                        country?: string;
+                        region?: string;
+                        city?: string;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description The result of the customer sign up */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * @description Whether the signup was successful
+                         * @example true
+                         */
+                        success: boolean;
+                        /**
+                         * Format: uri
+                         * @description The url to redirect the customer to, either to the success or cancel url
+                         * @example https://example.com/dashboard
+                         */
+                        url: string;
+                        /**
+                         * @description The unprice customer id generated by the system for this customer
+                         * @example cus_1234567890
+                         */
+                        customerId: string;
+                    };
+                };
+            };
+            /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrBadRequest"];
+                };
+            };
+            /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrUnauthorized"];
+                };
+            };
+            /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrForbidden"];
+                };
+            };
+            /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrNotFound"];
+                };
+            };
+            /** @description This response is sent when a request conflicts with the current state of the server. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrConflict"];
+                };
+            };
+            /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrPreconditionFailed"];
+                };
+            };
+            /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrTooManyRequests"];
+                };
+            };
+            /** @description The server has encountered a situation it does not know how to handle. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrInternalServerError"];
+                };
+            };
+        };
+    };
+    "customers.createPaymentMethod": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Body of the request */
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description The payment provider code to use
+                     * @example stripe
+                     * @enum {string}
+                     */
+                    paymentProvider: "stripe" | "square" | "sandbox";
+                    /**
+                     * @description The unprice customer id generated by the system for this customer
+                     * @example cus_1234567890
+                     */
+                    customerId: string;
+                    /**
+                     * Format: uri
+                     * @description The success url if the customer signs up
+                     * @example https://example.com/dashboard
+                     */
+                    successUrl: string;
+                    /**
+                     * Format: uri
+                     * @description The cancel url if the customer cancels the signup
+                     * @example https://example.com/login
+                     */
+                    cancelUrl: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The result of the customer create payment method */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * @description Whether the signup was successful
+                         * @example true
+                         */
+                        success: boolean;
+                        /**
+                         * Format: uri
+                         * @description The url to redirect the customer to, either to the success or cancel url
+                         * @example https://example.com/dashboard
+                         */
+                        url: string;
+                    };
+                };
+            };
+            /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrBadRequest"];
+                };
+            };
+            /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrUnauthorized"];
+                };
+            };
+            /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrForbidden"];
+                };
+            };
+            /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrNotFound"];
+                };
+            };
+            /** @description This response is sent when a request conflicts with the current state of the server. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrConflict"];
+                };
+            };
+            /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrPreconditionFailed"];
+                };
+            };
+            /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrTooManyRequests"];
+                };
+            };
+            /** @description The server has encountered a situation it does not know how to handle. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrInternalServerError"];
+                };
+            };
+        };
+    };
+    "customers.updateACL": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The updates to the ACL */
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description The customer ID
+                     * @example cus_1H7KQFLr7RepUyQBKdnvY
+                     */
+                    customerId: string;
+                    updates: {
+                        customerUsageLimitReached?: boolean;
+                        customerDisabled?: boolean;
+                        /** @enum {string} */
+                        subscriptionStatus?: "active" | "trialing" | "canceled" | "expired" | "past_due";
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description The result of the update ACL */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrBadRequest"];
+                };
+            };
+            /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrUnauthorized"];
+                };
+            };
+            /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrForbidden"];
+                };
+            };
+            /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrNotFound"];
+                };
+            };
+            /** @description This response is sent when a request conflicts with the current state of the server. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrConflict"];
+                };
+            };
+            /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrPreconditionFailed"];
+                };
+            };
+            /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrTooManyRequests"];
+                };
+            };
+            /** @description The server has encountered a situation it does not know how to handle. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrInternalServerError"];
+                };
+            };
+        };
+    };
+    "projects.getFeatures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The result of the get features */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        features: {
+                            id: string;
+                            projectId: string;
+                            slug: string;
+                            code: number;
+                            unitOfMeasure: string;
+                            title: string;
+                            description: string | null;
+                            /** @description Default meter template for usage-style features. When present, new plan version feature snapshots can copy this event-native measurement configuration */
+                            meterConfig?: {
+                                eventId: string;
+                                eventSlug: string;
+                                /**
+                                 * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                                 * @enum {string}
+                                 */
+                                aggregationMethod: "sum" | "count" | "max" | "latest";
+                                aggregationField?: string;
+                                filters?: {
+                                    [key: string]: string | undefined;
+                                };
+                                groupBy?: string[];
+                                /** @enum {string} */
+                                windowSize?: "MINUTE" | "HOUR" | "DAY";
+                            } | null;
+                        }[];
+                    };
+                };
+            };
+            /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrBadRequest"];
+                };
+            };
+            /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrUnauthorized"];
+                };
+            };
+            /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrForbidden"];
+                };
+            };
+            /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrNotFound"];
+                };
+            };
+            /** @description This response is sent when a request conflicts with the current state of the server. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrConflict"];
+                };
+            };
+            /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrPreconditionFailed"];
+                };
+            };
+            /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrTooManyRequests"];
+                };
+            };
+            /** @description The server has encountered a situation it does not know how to handle. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrInternalServerError"];
+                };
+            };
+        };
+    };
+    "plans.getPlanVersion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                planVersionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The result of the get plan version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Complete API response schema for a plan version including plan details, all features with display text, and calculated pricing */
+                        planVersion: {
+                            id: string;
+                            projectId: string;
+                            createdAtM: number;
+                            updatedAtM: number;
+                            planId: string;
+                            description: string;
+                            latest: boolean | null;
+                            title: string;
+                            /** @description Array of tags for categorizing and filtering plan versions. Examples: ['popular', 'recommended', 'enterprise', 'startup'] */
+                            tags: string[] | null;
+                            active: boolean | null;
+                            /** @enum {string|null} */
+                            status: "draft" | "published";
+                            publishedAt: number | null;
+                            publishedBy: string | null;
+                            archived: boolean | null;
+                            archivedAt: number | null;
+                            archivedBy: string | null;
+                            /** @enum {string} */
+                            paymentProvider: "stripe" | "square" | "sandbox";
+                            /** @enum {string} */
+                            dueBehaviour: "cancel" | "downgrade";
+                            /**
+                             * @description ISO 4217 currency code for this plan version. Examples: 'USD', 'EUR'. Each plan version is tied to a single currency
+                             * @enum {string}
+                             */
+                            currency: "USD" | "EUR";
+                            /** @description The billing configuration for the plan version */
+                            billingConfig: {
+                                name: string;
+                                /** @enum {string} */
+                                billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime";
+                                billingIntervalCount: number;
+                                billingAnchor: number | "dayOfCreation";
+                                /** @enum {string} */
+                                planType: "recurring" | "onetime";
+                            };
+                            /** @enum {string} */
+                            whenToBill: "pay_in_advance" | "pay_in_arrear";
+                            gracePeriod: number;
+                            /** @enum {string} */
+                            collectionMethod: "charge_automatically" | "send_invoice";
+                            trialUnits: number;
+                            autoRenew: boolean;
+                            /** @description Plan version metadata containing external integration identifiers */
+                            metadata: {
+                                /** @description External identifier for integrating with third-party systems (e.g., Stripe price ID). Useful for syncing plan versions with external billing providers */
+                                externalId?: string;
+                            } | null;
+                            paymentMethodRequired: boolean;
+                            version: number;
+                            /** @description The plan information */
+                            plan: {
+                                id: string;
+                                projectId: string;
+                                createdAtM: number;
+                                updatedAtM: number;
+                                slug: string;
+                                /** @description Title of the plan */
+                                title: string;
+                                active: boolean | null;
+                                description: string;
+                                /** @description Plan metadata containing external integration identifiers and custom data */
+                                metadata: {
+                                    /** @description External identifier for integrating with third-party systems (e.g., Stripe product ID, HubSpot deal ID). Useful for syncing plans across platforms */
+                                    externalId?: string;
+                                } | null;
+                                defaultPlan: boolean | null;
+                                enterprisePlan: boolean | null;
+                            };
+                            /** @description Array of features with their pricing configurations and display text for customer-facing UIs */
+                            planFeatures: {
+                                id: string;
+                                projectId: string;
+                                createdAtM: number;
+                                updatedAtM: number;
+                                planVersionId: string;
+                                /** @enum {string} */
+                                type: "feature" | "addon";
+                                featureId: string;
+                                /**
+                                 * @description The pricing model type: 'flat' (fixed price), 'tier' (volume-based tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)
+                                 * @enum {string}
+                                 */
+                                featureType: "flat" | "tier" | "package" | "usage";
+                                /** @description Unit of measurement captured for this plan version feature. Used for display and billing context without relying on mutable feature definitions */
+                                unitOfMeasure: string;
+                                /** @description Pricing configuration for this feature. Structure depends on featureType */
+                                config: {
+                                    /** @description Not used for flat pricing. Will be removed during validation */
+                                    tiers?: {
+                                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
+                                        unitPrice: {
+                                            /** @description The internal Dinero.js representation of the price for precise calculations */
+                                            dinero: {
+                                                /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                                amount: number;
+                                                /** @description Currency configuration following ISO 4217 standards */
+                                                currency: {
+                                                    /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                    code: string;
+                                                    /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                    base: number | number[];
+                                                    /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                    exponent: number;
+                                                };
+                                                /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                                scale: number;
+                                            };
+                                            /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                            displayAmount: string;
+                                        };
+                                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
+                                        flatPrice: {
+                                            /** @description The internal Dinero.js representation of the price for precise calculations */
+                                            dinero: {
+                                                /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                                amount: number;
+                                                /** @description Currency configuration following ISO 4217 standards */
+                                                currency: {
+                                                    /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                    code: string;
+                                                    /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                    base: number | number[];
+                                                    /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                    exponent: number;
+                                                };
+                                                /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                                scale: number;
+                                            };
+                                            /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                            displayAmount: string;
+                                        };
+                                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
+                                        firstUnit: number;
+                                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
+                                        lastUnit: number | null;
+                                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
+                                        label?: string;
+                                    }[];
+                                    /** @description The fixed price for this feature. This is the single price charged regardless of usage */
+                                    price: {
+                                        /** @description The internal Dinero.js representation of the price for precise calculations */
+                                        dinero: {
+                                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                            amount: number;
+                                            /** @description Currency configuration following ISO 4217 standards */
+                                            currency: {
+                                                /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                code: string;
+                                                /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                base: number | number[];
+                                                /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                exponent: number;
+                                            };
+                                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                            scale: number;
+                                        };
+                                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                        displayAmount: string;
+                                    };
+                                    /**
+                                     * @description Not used for flat pricing. Will be removed during validation
+                                     * @enum {string}
+                                     */
+                                    usageMode?: "tier" | "package" | "unit";
+                                    /**
+                                     * @description Not used for flat pricing. Will be removed during validation
+                                     * @enum {string}
+                                     */
+                                    tierMode?: "volume" | "graduated";
+                                    /** @description Not used for flat pricing. Will be removed during validation */
+                                    units?: number;
+                                } | {
+                                    /** @description Base price for the feature. Not typically used in tier pricing mode */
+                                    price?: {
+                                        /** @description The internal Dinero.js representation of the price for precise calculations */
+                                        dinero: {
+                                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                            amount: number;
+                                            /** @description Currency configuration following ISO 4217 standards */
+                                            currency: {
+                                                /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                code: string;
+                                                /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                base: number | number[];
+                                                /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                exponent: number;
+                                            };
+                                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                            scale: number;
+                                        };
+                                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                        displayAmount: string;
+                                    };
+                                    /**
+                                     * @description How tier pricing is calculated: 'volume' (all units priced at the tier they fall into) or 'graduated' (each unit priced at its respective tier)
+                                     * @enum {string}
+                                     */
+                                    tierMode: "volume" | "graduated";
+                                    /** @description Array of pricing tiers defining price brackets. Tiers must be consecutive (no gaps or overlaps). The last tier's lastUnit should be null for unlimited */
+                                    tiers: {
+                                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
+                                        unitPrice: {
+                                            /** @description The internal Dinero.js representation of the price for precise calculations */
+                                            dinero: {
+                                                /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                                amount: number;
+                                                /** @description Currency configuration following ISO 4217 standards */
+                                                currency: {
+                                                    /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                    code: string;
+                                                    /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                    base: number | number[];
+                                                    /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                    exponent: number;
+                                                };
+                                                /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                                scale: number;
+                                            };
+                                            /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                            displayAmount: string;
+                                        };
+                                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
+                                        flatPrice: {
+                                            /** @description The internal Dinero.js representation of the price for precise calculations */
+                                            dinero: {
+                                                /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                                amount: number;
+                                                /** @description Currency configuration following ISO 4217 standards */
+                                                currency: {
+                                                    /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                    code: string;
+                                                    /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                    base: number | number[];
+                                                    /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                    exponent: number;
+                                                };
+                                                /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                                scale: number;
+                                            };
+                                            /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                            displayAmount: string;
+                                        };
+                                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
+                                        firstUnit: number;
+                                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
+                                        lastUnit: number | null;
+                                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
+                                        label?: string;
+                                    }[];
+                                    /**
+                                     * @description Usage calculation mode. Not typically used in tier-type features
+                                     * @enum {string}
+                                     */
+                                    usageMode?: "tier" | "package" | "unit";
+                                    /** @description Number of units included. Not typically used in tier-type features */
+                                    units?: number;
+                                } | {
+                                    /** @description Price per unit when usageMode is 'unit' or 'package'. Required for unit/package modes, not used for tier mode */
+                                    price?: {
+                                        /** @description The internal Dinero.js representation of the price for precise calculations */
+                                        dinero: {
+                                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                            amount: number;
+                                            /** @description Currency configuration following ISO 4217 standards */
+                                            currency: {
+                                                /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                code: string;
+                                                /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                base: number | number[];
+                                                /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                exponent: number;
+                                            };
+                                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                            scale: number;
+                                        };
+                                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                        displayAmount: string;
+                                    };
+                                    /**
+                                     * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (volume-based tiers), or 'package' (bundle of units)
+                                     * @enum {string}
+                                     */
+                                    usageMode: "tier" | "package" | "unit";
+                                    /**
+                                     * @description Tier calculation method when usageMode is 'tier': 'volume' or 'graduated'. Only applicable when usageMode is 'tier'
+                                     * @enum {string}
+                                     */
+                                    tierMode?: "volume" | "graduated";
+                                    /** @description Pricing tiers for tier-based usage. Required when usageMode is 'tier'. Must be consecutive with no gaps */
+                                    tiers?: {
+                                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
+                                        unitPrice: {
+                                            /** @description The internal Dinero.js representation of the price for precise calculations */
+                                            dinero: {
+                                                /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                                amount: number;
+                                                /** @description Currency configuration following ISO 4217 standards */
+                                                currency: {
+                                                    /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                    code: string;
+                                                    /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                    base: number | number[];
+                                                    /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                    exponent: number;
+                                                };
+                                                /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                                scale: number;
+                                            };
+                                            /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                            displayAmount: string;
+                                        };
+                                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
+                                        flatPrice: {
+                                            /** @description The internal Dinero.js representation of the price for precise calculations */
+                                            dinero: {
+                                                /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                                amount: number;
+                                                /** @description Currency configuration following ISO 4217 standards */
+                                                currency: {
+                                                    /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                    code: string;
+                                                    /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                    base: number | number[];
+                                                    /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                    exponent: number;
+                                                };
+                                                /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                                scale: number;
+                                            };
+                                            /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                            displayAmount: string;
+                                        };
+                                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
+                                        firstUnit: number;
+                                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
+                                        lastUnit: number | null;
+                                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
+                                        label?: string;
+                                    }[];
+                                    /** @description Number of units in a package when usageMode is 'package'. Required for package mode. Example: 100 API calls per package */
+                                    units?: number;
+                                } | {
+                                    /** @description Not used for package pricing. Will be removed during validation */
+                                    tiers?: {
+                                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
+                                        unitPrice: {
+                                            /** @description The internal Dinero.js representation of the price for precise calculations */
+                                            dinero: {
+                                                /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                                amount: number;
+                                                /** @description Currency configuration following ISO 4217 standards */
+                                                currency: {
+                                                    /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                    code: string;
+                                                    /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                    base: number | number[];
+                                                    /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                    exponent: number;
+                                                };
+                                                /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                                scale: number;
+                                            };
+                                            /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                            displayAmount: string;
+                                        };
+                                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
+                                        flatPrice: {
+                                            /** @description The internal Dinero.js representation of the price for precise calculations */
+                                            dinero: {
+                                                /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                                amount: number;
+                                                /** @description Currency configuration following ISO 4217 standards */
+                                                currency: {
+                                                    /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                    code: string;
+                                                    /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                    base: number | number[];
+                                                    /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                    exponent: number;
+                                                };
+                                                /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                                scale: number;
+                                            };
+                                            /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                            displayAmount: string;
+                                        };
+                                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
+                                        firstUnit: number;
+                                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
+                                        lastUnit: number | null;
+                                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
+                                        label?: string;
+                                    }[];
+                                    /** @description The price per package. Example: $10 per package of 100 API calls */
+                                    price: {
+                                        /** @description The internal Dinero.js representation of the price for precise calculations */
+                                        dinero: {
+                                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                            amount: number;
+                                            /** @description Currency configuration following ISO 4217 standards */
+                                            currency: {
+                                                /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                code: string;
+                                                /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                base: number | number[];
+                                                /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                exponent: number;
+                                            };
+                                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                            scale: number;
+                                        };
+                                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                        displayAmount: string;
+                                    };
+                                    /**
+                                     * @description Not used for package pricing. Will be removed during validation
+                                     * @enum {string}
+                                     */
+                                    usageMode?: "tier" | "package" | "unit";
+                                    /**
+                                     * @description Not used for package pricing. Will be removed during validation
+                                     * @enum {string}
+                                     */
+                                    tierMode?: "volume" | "graduated";
+                                    /** @description Number of units included in each package. Required. Example: 100 means each package includes 100 units */
+                                    units: number;
+                                };
+                                /** @description Billing cycle configuration including interval (month/year), billing anchor date, and plan type (recurring/onetime) */
+                                billingConfig: {
+                                    name: string;
+                                    /** @enum {string} */
+                                    billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime";
+                                    billingIntervalCount: number;
+                                    billingAnchor: number | "dayOfCreation";
+                                    /** @enum {string} */
+                                    planType: "recurring" | "onetime";
+                                };
+                                /** @description Configuration for resetting usage counters. Defines when and how usage limits reset (e.g., monthly, yearly) */
+                                resetConfig?: {
+                                    name: string;
+                                    /** @enum {string} */
+                                    resetInterval: "month" | "year" | "week" | "day" | "minute" | "onetime";
+                                    resetIntervalCount: number;
+                                    resetAnchor: number | "dayOfCreation";
+                                    /** @enum {string} */
+                                    planType: "recurring" | "onetime";
+                                } | null;
+                                /** @description Additional feature settings including real-time tracking, notifications, and visibility options */
+                                metadata: {
+                                    /**
+                                     * @description Whether usage should be tracked and verified in real-time. When true, usage checks happen synchronously. Default: false
+                                     * @default false
+                                     */
+                                    realtime: boolean;
+                                    /**
+                                     * @description Percentage threshold (0-100) at which to notify the customer about approaching usage limits. Default: 95 (notify at 95% usage)
+                                     * @default 95
+                                     */
+                                    notifyUsageThreshold: number;
+                                    /**
+                                     * @description How to handle usage that exceeds the feature limit. Options: 'none' (strict deny), 'last-call' (allow one final call while tokens remain), 'always' (allow and record overage)
+                                     * @default none
+                                     * @enum {string}
+                                     */
+                                    overageStrategy: "none" | "last-call" | "always";
+                                    /**
+                                     * @description Whether to completely block the customer when they exceed their limit. When true, access is denied until the next billing period. Default: false
+                                     * @default false
+                                     */
+                                    blockCustomer: boolean;
+                                    /**
+                                     * @description Whether to hide this feature from customer-facing displays like pricing pages. Useful for internal or technical features. Default: false
+                                     * @default false
+                                     */
+                                    hidden: boolean;
+                                } | null;
+                                order: number;
+                                /**
+                                 * @description Default quantity of this feature included when a customer subscribes. Example: 5 for '5 team members included'. Default: 1
+                                 * @default 1
+                                 */
+                                defaultQuantity: number | null;
+                                /** @description Maximum allowed usage for this feature per billing period. Null or undefined means unlimited. Example: 10000 for 10,000 API calls/month */
+                                limit?: number | null;
+                                /** @description Snapshotted event-native meter configuration for this plan version feature. When present, it is the authoritative source for how usage should be measured */
+                                meterConfig?: {
+                                    eventId: string;
+                                    eventSlug: string;
+                                    /**
+                                     * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                                     * @enum {string}
+                                     */
+                                    aggregationMethod: "sum" | "count" | "max" | "latest";
+                                    aggregationField?: string;
+                                    filters?: {
+                                        [key: string]: string | undefined;
+                                    };
+                                    groupBy?: string[];
+                                    /** @enum {string} */
+                                    windowSize?: "MINUTE" | "HOUR" | "DAY";
+                                } | null;
+                                /** @description The text you can use to show the clients */
+                                displayFeatureText: string;
+                                /** @description The feature information */
+                                feature: {
+                                    id: string;
+                                    projectId: string;
+                                    createdAtM: number;
+                                    updatedAtM: number;
+                                    slug: string;
+                                    code: number;
+                                    unitOfMeasure: string;
+                                    title: string;
+                                    description: string | null;
+                                    /** @description Default meter template for usage-style features. When present, new plan version feature snapshots can copy this event-native measurement configuration */
+                                    meterConfig?: {
+                                        eventId: string;
+                                        eventSlug: string;
+                                        /**
+                                         * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                                         * @enum {string}
+                                         */
+                                        aggregationMethod: "sum" | "count" | "max" | "latest";
+                                        aggregationField?: string;
+                                        filters?: {
+                                            [key: string]: string | undefined;
+                                        };
+                                        groupBy?: string[];
+                                        /** @enum {string} */
+                                        windowSize?: "MINUTE" | "HOUR" | "DAY";
+                                    } | null;
+                                };
+                            }[];
+                            /** @description Flat price of the plan */
+                            flatPrice: string;
+                        };
+                    };
+                };
+            };
+            /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrBadRequest"];
+                };
+            };
+            /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrUnauthorized"];
+                };
+            };
+            /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrForbidden"];
+                };
+            };
+            /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrNotFound"];
+                };
+            };
+            /** @description This response is sent when a request conflicts with the current state of the server. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrConflict"];
+                };
+            };
+            /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrPreconditionFailed"];
+                };
+            };
+            /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrTooManyRequests"];
+                };
+            };
+            /** @description The server has encountered a situation it does not know how to handle. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrInternalServerError"];
+                };
+            };
+        };
+    };
+    "plans.listPlanVersions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Body of the request */
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Whether to include published plan versions
+                     * @example true
+                     */
+                    onlyPublished?: boolean;
+                    /**
+                     * @description Whether to include enterprise plan versions
+                     * @example false
+                     */
+                    onlyEnterprisePlan?: boolean;
+                    /**
+                     * @description Whether to include the latest plan version
+                     * @example true
+                     */
+                    onlyLatest?: boolean;
+                    /**
+                     * @description Filter by plan version IDs
+                     * @example [
+                     *       "pv_123"
+                     *     ]
+                     */
+                    planVersionIds?: string[];
+                    /**
+                     * @description The billing interval to filter the plan versions
+                     * @example month
+                     * @enum {string}
+                     */
+                    billingInterval?: "month" | "year" | "week" | "day" | "minute" | "onetime";
+                    /**
+                     * @description The currency to filter the plan versions
+                     * @example USD
+                     * @enum {string}
+                     */
+                    currency?: "USD" | "EUR";
+                };
+            };
+        };
+        responses: {
+            /** @description The result of the list plan versions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        planVersions: {
+                            id: string;
+                            projectId: string;
+                            createdAtM: number;
+                            updatedAtM: number;
+                            planId: string;
+                            description: string;
+                            latest: boolean | null;
+                            title: string;
+                            /** @description Array of tags for categorizing and filtering plan versions. Examples: ['popular', 'recommended', 'enterprise', 'startup'] */
+                            tags: string[] | null;
+                            active: boolean | null;
+                            /** @enum {string|null} */
+                            status: "draft" | "published";
+                            publishedAt: number | null;
+                            publishedBy: string | null;
+                            archived: boolean | null;
+                            archivedAt: number | null;
+                            archivedBy: string | null;
+                            /** @enum {string} */
+                            paymentProvider: "stripe" | "square" | "sandbox";
+                            /** @enum {string} */
+                            dueBehaviour: "cancel" | "downgrade";
+                            /**
+                             * @description ISO 4217 currency code for this plan version. Examples: 'USD', 'EUR'. Each plan version is tied to a single currency
+                             * @enum {string}
+                             */
+                            currency: "USD" | "EUR";
+                            /** @description The billing configuration for the plan version */
+                            billingConfig: {
+                                name: string;
+                                /** @enum {string} */
+                                billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime";
+                                billingIntervalCount: number;
+                                billingAnchor: number | "dayOfCreation";
+                                /** @enum {string} */
+                                planType: "recurring" | "onetime";
+                            };
+                            /** @enum {string} */
+                            whenToBill: "pay_in_advance" | "pay_in_arrear";
+                            gracePeriod: number;
+                            /** @enum {string} */
+                            collectionMethod: "charge_automatically" | "send_invoice";
+                            trialUnits: number;
+                            autoRenew: boolean;
+                            /** @description Plan version metadata containing external integration identifiers */
+                            metadata: {
+                                /** @description External identifier for integrating with third-party systems (e.g., Stripe price ID). Useful for syncing plan versions with external billing providers */
+                                externalId?: string;
+                            } | null;
+                            paymentMethodRequired: boolean;
+                            version: number;
+                            /** @description The plan information */
+                            plan: {
+                                id: string;
+                                projectId: string;
+                                createdAtM: number;
+                                updatedAtM: number;
+                                slug: string;
+                                /** @description Title of the plan */
+                                title: string;
+                                active: boolean | null;
+                                description: string;
+                                /** @description Plan metadata containing external integration identifiers and custom data */
+                                metadata: {
+                                    /** @description External identifier for integrating with third-party systems (e.g., Stripe product ID, HubSpot deal ID). Useful for syncing plans across platforms */
+                                    externalId?: string;
+                                } | null;
+                                defaultPlan: boolean | null;
+                                enterprisePlan: boolean | null;
+                            };
+                            /** @description Array of features with their pricing configurations and display text for customer-facing UIs */
+                            planFeatures: {
+                                id: string;
+                                projectId: string;
+                                createdAtM: number;
+                                updatedAtM: number;
+                                planVersionId: string;
+                                /** @enum {string} */
+                                type: "feature" | "addon";
+                                featureId: string;
+                                /**
+                                 * @description The pricing model type: 'flat' (fixed price), 'tier' (volume-based tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)
+                                 * @enum {string}
+                                 */
+                                featureType: "flat" | "tier" | "package" | "usage";
+                                /** @description Unit of measurement captured for this plan version feature. Used for display and billing context without relying on mutable feature definitions */
+                                unitOfMeasure: string;
+                                /** @description Pricing configuration for this feature. Structure depends on featureType */
+                                config: {
+                                    /** @description Not used for flat pricing. Will be removed during validation */
+                                    tiers?: {
+                                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
+                                        unitPrice: {
+                                            /** @description The internal Dinero.js representation of the price for precise calculations */
+                                            dinero: {
+                                                /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                                amount: number;
+                                                /** @description Currency configuration following ISO 4217 standards */
+                                                currency: {
+                                                    /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                    code: string;
+                                                    /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                    base: number | number[];
+                                                    /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                    exponent: number;
+                                                };
+                                                /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                                scale: number;
+                                            };
+                                            /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                            displayAmount: string;
+                                        };
+                                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
+                                        flatPrice: {
+                                            /** @description The internal Dinero.js representation of the price for precise calculations */
+                                            dinero: {
+                                                /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                                amount: number;
+                                                /** @description Currency configuration following ISO 4217 standards */
+                                                currency: {
+                                                    /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                    code: string;
+                                                    /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                    base: number | number[];
+                                                    /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                    exponent: number;
+                                                };
+                                                /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                                scale: number;
+                                            };
+                                            /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                            displayAmount: string;
+                                        };
+                                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
+                                        firstUnit: number;
+                                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
+                                        lastUnit: number | null;
+                                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
+                                        label?: string;
+                                    }[];
+                                    /** @description The fixed price for this feature. This is the single price charged regardless of usage */
+                                    price: {
+                                        /** @description The internal Dinero.js representation of the price for precise calculations */
+                                        dinero: {
+                                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                            amount: number;
+                                            /** @description Currency configuration following ISO 4217 standards */
+                                            currency: {
+                                                /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                code: string;
+                                                /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                base: number | number[];
+                                                /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                exponent: number;
+                                            };
+                                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                            scale: number;
+                                        };
+                                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                        displayAmount: string;
+                                    };
+                                    /**
+                                     * @description Not used for flat pricing. Will be removed during validation
+                                     * @enum {string}
+                                     */
+                                    usageMode?: "tier" | "package" | "unit";
+                                    /**
+                                     * @description Not used for flat pricing. Will be removed during validation
+                                     * @enum {string}
+                                     */
+                                    tierMode?: "volume" | "graduated";
+                                    /** @description Not used for flat pricing. Will be removed during validation */
+                                    units?: number;
+                                } | {
+                                    /** @description Base price for the feature. Not typically used in tier pricing mode */
+                                    price?: {
+                                        /** @description The internal Dinero.js representation of the price for precise calculations */
+                                        dinero: {
+                                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                            amount: number;
+                                            /** @description Currency configuration following ISO 4217 standards */
+                                            currency: {
+                                                /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                code: string;
+                                                /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                base: number | number[];
+                                                /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                exponent: number;
+                                            };
+                                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                            scale: number;
+                                        };
+                                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                        displayAmount: string;
+                                    };
+                                    /**
+                                     * @description How tier pricing is calculated: 'volume' (all units priced at the tier they fall into) or 'graduated' (each unit priced at its respective tier)
+                                     * @enum {string}
+                                     */
+                                    tierMode: "volume" | "graduated";
+                                    /** @description Array of pricing tiers defining price brackets. Tiers must be consecutive (no gaps or overlaps). The last tier's lastUnit should be null for unlimited */
+                                    tiers: {
+                                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
+                                        unitPrice: {
+                                            /** @description The internal Dinero.js representation of the price for precise calculations */
+                                            dinero: {
+                                                /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                                amount: number;
+                                                /** @description Currency configuration following ISO 4217 standards */
+                                                currency: {
+                                                    /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                    code: string;
+                                                    /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                    base: number | number[];
+                                                    /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                    exponent: number;
+                                                };
+                                                /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                                scale: number;
+                                            };
+                                            /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                            displayAmount: string;
+                                        };
+                                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
+                                        flatPrice: {
+                                            /** @description The internal Dinero.js representation of the price for precise calculations */
+                                            dinero: {
+                                                /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                                amount: number;
+                                                /** @description Currency configuration following ISO 4217 standards */
+                                                currency: {
+                                                    /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                    code: string;
+                                                    /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                    base: number | number[];
+                                                    /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                    exponent: number;
+                                                };
+                                                /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                                scale: number;
+                                            };
+                                            /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                            displayAmount: string;
+                                        };
+                                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
+                                        firstUnit: number;
+                                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
+                                        lastUnit: number | null;
+                                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
+                                        label?: string;
+                                    }[];
+                                    /**
+                                     * @description Usage calculation mode. Not typically used in tier-type features
+                                     * @enum {string}
+                                     */
+                                    usageMode?: "tier" | "package" | "unit";
+                                    /** @description Number of units included. Not typically used in tier-type features */
+                                    units?: number;
+                                } | {
+                                    /** @description Price per unit when usageMode is 'unit' or 'package'. Required for unit/package modes, not used for tier mode */
+                                    price?: {
+                                        /** @description The internal Dinero.js representation of the price for precise calculations */
+                                        dinero: {
+                                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                            amount: number;
+                                            /** @description Currency configuration following ISO 4217 standards */
+                                            currency: {
+                                                /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                code: string;
+                                                /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                base: number | number[];
+                                                /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                exponent: number;
+                                            };
+                                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                            scale: number;
+                                        };
+                                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                        displayAmount: string;
+                                    };
+                                    /**
+                                     * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (volume-based tiers), or 'package' (bundle of units)
+                                     * @enum {string}
+                                     */
+                                    usageMode: "tier" | "package" | "unit";
+                                    /**
+                                     * @description Tier calculation method when usageMode is 'tier': 'volume' or 'graduated'. Only applicable when usageMode is 'tier'
+                                     * @enum {string}
+                                     */
+                                    tierMode?: "volume" | "graduated";
+                                    /** @description Pricing tiers for tier-based usage. Required when usageMode is 'tier'. Must be consecutive with no gaps */
+                                    tiers?: {
+                                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
+                                        unitPrice: {
+                                            /** @description The internal Dinero.js representation of the price for precise calculations */
+                                            dinero: {
+                                                /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                                amount: number;
+                                                /** @description Currency configuration following ISO 4217 standards */
+                                                currency: {
+                                                    /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                    code: string;
+                                                    /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                    base: number | number[];
+                                                    /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                    exponent: number;
+                                                };
+                                                /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                                scale: number;
+                                            };
+                                            /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                            displayAmount: string;
+                                        };
+                                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
+                                        flatPrice: {
+                                            /** @description The internal Dinero.js representation of the price for precise calculations */
+                                            dinero: {
+                                                /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                                amount: number;
+                                                /** @description Currency configuration following ISO 4217 standards */
+                                                currency: {
+                                                    /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                    code: string;
+                                                    /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                    base: number | number[];
+                                                    /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                    exponent: number;
+                                                };
+                                                /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                                scale: number;
+                                            };
+                                            /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                            displayAmount: string;
+                                        };
+                                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
+                                        firstUnit: number;
+                                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
+                                        lastUnit: number | null;
+                                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
+                                        label?: string;
+                                    }[];
+                                    /** @description Number of units in a package when usageMode is 'package'. Required for package mode. Example: 100 API calls per package */
+                                    units?: number;
+                                } | {
+                                    /** @description Not used for package pricing. Will be removed during validation */
+                                    tiers?: {
+                                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
+                                        unitPrice: {
+                                            /** @description The internal Dinero.js representation of the price for precise calculations */
+                                            dinero: {
+                                                /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                                amount: number;
+                                                /** @description Currency configuration following ISO 4217 standards */
+                                                currency: {
+                                                    /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                    code: string;
+                                                    /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                    base: number | number[];
+                                                    /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                    exponent: number;
+                                                };
+                                                /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                                scale: number;
+                                            };
+                                            /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                            displayAmount: string;
+                                        };
+                                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
+                                        flatPrice: {
+                                            /** @description The internal Dinero.js representation of the price for precise calculations */
+                                            dinero: {
+                                                /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                                amount: number;
+                                                /** @description Currency configuration following ISO 4217 standards */
+                                                currency: {
+                                                    /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                    code: string;
+                                                    /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                    base: number | number[];
+                                                    /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                    exponent: number;
+                                                };
+                                                /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                                scale: number;
+                                            };
+                                            /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                            displayAmount: string;
+                                        };
+                                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
+                                        firstUnit: number;
+                                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
+                                        lastUnit: number | null;
+                                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
+                                        label?: string;
+                                    }[];
+                                    /** @description The price per package. Example: $10 per package of 100 API calls */
+                                    price: {
+                                        /** @description The internal Dinero.js representation of the price for precise calculations */
+                                        dinero: {
+                                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
+                                            amount: number;
+                                            /** @description Currency configuration following ISO 4217 standards */
+                                            currency: {
+                                                /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
+                                                code: string;
+                                                /** @description The base of the currency system. Usually 10 for decimal currencies */
+                                                base: number | number[];
+                                                /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
+                                                exponent: number;
+                                            };
+                                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
+                                            scale: number;
+                                        };
+                                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
+                                        displayAmount: string;
+                                    };
+                                    /**
+                                     * @description Not used for package pricing. Will be removed during validation
+                                     * @enum {string}
+                                     */
+                                    usageMode?: "tier" | "package" | "unit";
+                                    /**
+                                     * @description Not used for package pricing. Will be removed during validation
+                                     * @enum {string}
+                                     */
+                                    tierMode?: "volume" | "graduated";
+                                    /** @description Number of units included in each package. Required. Example: 100 means each package includes 100 units */
+                                    units: number;
+                                };
+                                /** @description Billing cycle configuration including interval (month/year), billing anchor date, and plan type (recurring/onetime) */
+                                billingConfig: {
+                                    name: string;
+                                    /** @enum {string} */
+                                    billingInterval: "month" | "year" | "week" | "day" | "minute" | "onetime";
+                                    billingIntervalCount: number;
+                                    billingAnchor: number | "dayOfCreation";
+                                    /** @enum {string} */
+                                    planType: "recurring" | "onetime";
+                                };
+                                /** @description Configuration for resetting usage counters. Defines when and how usage limits reset (e.g., monthly, yearly) */
+                                resetConfig?: {
+                                    name: string;
+                                    /** @enum {string} */
+                                    resetInterval: "month" | "year" | "week" | "day" | "minute" | "onetime";
+                                    resetIntervalCount: number;
+                                    resetAnchor: number | "dayOfCreation";
+                                    /** @enum {string} */
+                                    planType: "recurring" | "onetime";
+                                } | null;
+                                /** @description Additional feature settings including real-time tracking, notifications, and visibility options */
+                                metadata: {
+                                    /**
+                                     * @description Whether usage should be tracked and verified in real-time. When true, usage checks happen synchronously. Default: false
+                                     * @default false
+                                     */
+                                    realtime: boolean;
+                                    /**
+                                     * @description Percentage threshold (0-100) at which to notify the customer about approaching usage limits. Default: 95 (notify at 95% usage)
+                                     * @default 95
+                                     */
+                                    notifyUsageThreshold: number;
+                                    /**
+                                     * @description How to handle usage that exceeds the feature limit. Options: 'none' (strict deny), 'last-call' (allow one final call while tokens remain), 'always' (allow and record overage)
+                                     * @default none
+                                     * @enum {string}
+                                     */
+                                    overageStrategy: "none" | "last-call" | "always";
+                                    /**
+                                     * @description Whether to completely block the customer when they exceed their limit. When true, access is denied until the next billing period. Default: false
+                                     * @default false
+                                     */
+                                    blockCustomer: boolean;
+                                    /**
+                                     * @description Whether to hide this feature from customer-facing displays like pricing pages. Useful for internal or technical features. Default: false
+                                     * @default false
+                                     */
+                                    hidden: boolean;
+                                } | null;
+                                order: number;
+                                /**
+                                 * @description Default quantity of this feature included when a customer subscribes. Example: 5 for '5 team members included'. Default: 1
+                                 * @default 1
+                                 */
+                                defaultQuantity: number | null;
+                                /** @description Maximum allowed usage for this feature per billing period. Null or undefined means unlimited. Example: 10000 for 10,000 API calls/month */
+                                limit?: number | null;
+                                /** @description Snapshotted event-native meter configuration for this plan version feature. When present, it is the authoritative source for how usage should be measured */
+                                meterConfig?: {
+                                    eventId: string;
+                                    eventSlug: string;
+                                    /**
+                                     * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                                     * @enum {string}
+                                     */
+                                    aggregationMethod: "sum" | "count" | "max" | "latest";
+                                    aggregationField?: string;
+                                    filters?: {
+                                        [key: string]: string | undefined;
+                                    };
+                                    groupBy?: string[];
+                                    /** @enum {string} */
+                                    windowSize?: "MINUTE" | "HOUR" | "DAY";
+                                } | null;
+                                /** @description The text you can use to show the clients */
+                                displayFeatureText: string;
+                                /** @description The feature information */
+                                feature: {
+                                    id: string;
+                                    projectId: string;
+                                    createdAtM: number;
+                                    updatedAtM: number;
+                                    slug: string;
+                                    code: number;
+                                    unitOfMeasure: string;
+                                    title: string;
+                                    description: string | null;
+                                    /** @description Default meter template for usage-style features. When present, new plan version feature snapshots can copy this event-native measurement configuration */
+                                    meterConfig?: {
+                                        eventId: string;
+                                        eventSlug: string;
+                                        /**
+                                         * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                                         * @enum {string}
+                                         */
+                                        aggregationMethod: "sum" | "count" | "max" | "latest";
+                                        aggregationField?: string;
+                                        filters?: {
+                                            [key: string]: string | undefined;
+                                        };
+                                        groupBy?: string[];
+                                        /** @enum {string} */
+                                        windowSize?: "MINUTE" | "HOUR" | "DAY";
+                                    } | null;
+                                };
+                            }[];
+                            /** @description Flat price of the plan */
+                            flatPrice: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrBadRequest"];
+                };
+            };
+            /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrUnauthorized"];
+                };
+            };
+            /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrForbidden"];
+                };
+            };
+            /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrNotFound"];
+                };
+            };
+            /** @description This response is sent when a request conflicts with the current state of the server. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrConflict"];
+                };
+            };
+            /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrPreconditionFailed"];
+                };
+            };
+            /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrTooManyRequests"];
+                };
+            };
+            /** @description The server has encountered a situation it does not know how to handle. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrInternalServerError"];
+                };
+            };
+        };
+    };
+    "analytics.getUsage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Body of the request for the get usage */
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description The customer ID if you want to get the usage for a specific customer
+                     * @example cus_1H7KQFLr7RepUyQBKdnvY
+                     */
+                    customer_id?: string;
+                    /**
+                     * @description The project ID (optional, only available for main projects)
+                     * @example project_1H7KQFLr7RepUyQBKdnvY
+                     */
+                    project_id?: string;
+                    /**
+                     * @description The range of the usage, last hour, day, week or month
+                     * @example 24h
+                     * @enum {string}
+                     */
+                    range: "24h" | "7d" | "30d" | "90d";
+                };
+            };
+        };
+        responses: {
+            /** @description The result of the get usage */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        usage: {
+                            project_id: string;
+                            customer_id?: string;
+                            feature_slug: string;
+                            value_after: number;
+                        }[];
+                    };
+                };
+            };
+            /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrBadRequest"];
+                };
+            };
+            /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrUnauthorized"];
+                };
+            };
+            /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrForbidden"];
+                };
+            };
+            /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrNotFound"];
+                };
+            };
+            /** @description This response is sent when a request conflicts with the current state of the server. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrConflict"];
+                };
+            };
+            /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrPreconditionFailed"];
+                };
+            };
+            /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrTooManyRequests"];
+                };
+            };
+            /** @description The server has encountered a situation it does not know how to handle. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrInternalServerError"];
+                };
+            };
+        };
+    };
+    "analytics.getRealtimeTicket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Realtime ticket request payload */
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description The customer ID to scope realtime access
+                     * @example cus_1H7KQFLr7RepUyQBKdnvY
+                     */
+                    customerId: string;
+                    /**
+                     * @description The project ID to scope realtime access
+                     * @example project_1H7KQFLr7RepUyQBKdnvY
+                     */
+                    projectId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Realtime websocket ticket */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        ticket: string;
+                        expiresAt: number;
+                        projectId: string;
+                        customerId: string;
+                    };
+                };
+            };
+            /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrBadRequest"];
+                };
+            };
+            /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrUnauthorized"];
+                };
+            };
+            /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrForbidden"];
+                };
+            };
+            /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrNotFound"];
+                };
+            };
+            /** @description This response is sent when a request conflicts with the current state of the server. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrConflict"];
+                };
+            };
+            /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrPreconditionFailed"];
+                };
+            };
+            /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrTooManyRequests"];
+                };
+            };
+            /** @description The server has encountered a situation it does not know how to handle. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrInternalServerError"];
+                };
+            };
+        };
+    };
+    "lakehouse.getFilePlan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Lakehouse file plan request payload */
+        requestBody: {
+            content: {
+                "application/json": {
+                    projectId?: string;
+                    customerId?: string;
+                    tables?: ("usage" | "verification" | "metadata" | "entitlement_snapshot")[];
+                    /**
+                     * @default 30d
+                     * @enum {string}
+                     */
+                    interval: "1d" | "7d" | "30d" | "90d";
+                    /**
+                     * @default non_prod
+                     * @enum {string}
+                     */
+                    targetEnv: "non_prod" | "prod";
+                };
+            };
+        };
+        responses: {
+            /** @description Lakehouse file plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        projectIds: string[];
+                        customerIds: string[];
+                        /** @enum {string} */
+                        interval: "1d" | "7d" | "30d" | "90d";
+                        intervalDays: number;
+                        /** @enum {string} */
+                        targetEnv: "non_prod" | "prod";
+                        window: {
+                            start: string;
+                            end: string;
+                        };
+                        tableFiles: {
+                            [key: string]: string[] | undefined;
+                        };
+                        urls: string[];
+                        errors: {
+                            table: string;
+                            error: string;
+                        }[];
+                        credentials: {
+                            bucket: string;
+                            r2Endpoint: string;
+                            accessKeyId: string;
+                            secretAccessKey: string;
+                            sessionToken: string;
+                            expiration: string | number;
+                            ttlSeconds: number;
+                            prefixes: string[];
+                        } | null;
+                    };
+                };
+            };
+            /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrBadRequest"];
+                };
+            };
+            /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrUnauthorized"];
+                };
+            };
+            /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrForbidden"];
+                };
+            };
+            /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrNotFound"];
+                };
+            };
+            /** @description This response is sent when a request conflicts with the current state of the server. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrConflict"];
+                };
+            };
+            /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrPreconditionFailed"];
+                };
+            };
+            /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrTooManyRequests"];
+                };
+            };
+            /** @description The server has encountered a situation it does not know how to handle. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrInternalServerError"];
+                };
+            };
+        };
+    };
 }

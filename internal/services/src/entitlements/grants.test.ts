@@ -22,19 +22,46 @@ describe("GrantsManager", () => {
   // Base grant object for reuse
   const baseGrant = {
     id: "grant_base",
+    createdAtM: now - 20_000,
+    updatedAtM: now - 10_000,
     projectId,
+    name: "grant_base",
     subjectType: "customer" as const,
     subjectId: customerId,
     type: "subscription" as const,
     featurePlanVersionId: "fpv_1",
     effectiveAt: now - 10000,
     expiresAt: now + 10000,
+    limit: 100,
+    units: 1,
+    overageStrategy: "none" as const,
+    metadata: null,
     deleted: false,
+    deletedAt: null,
     autoRenew: true,
     priority: 10,
     featurePlanVersion: {
+      id: "fpv_1",
+      createdAtM: now - 20_000,
+      updatedAtM: now - 10_000,
+      projectId,
+      planVersionId: "pv_1",
+      type: "feature" as const,
+      featureId: "feat_1",
+      order: 1,
+      defaultQuantity: 1,
+      limit: 100,
       feature: {
+        id: "feat_1",
+        createdAtM: now - 20_000,
+        updatedAtM: now - 10_000,
+        projectId,
         slug: featureSlug,
+        code: 1,
+        unitOfMeasure: "units",
+        title: "Merge Test Feature",
+        description: null,
+        meterConfig: null,
       },
       featureType: "usage" as const,
       unitOfMeasure: "units",
@@ -45,12 +72,25 @@ describe("GrantsManager", () => {
         aggregationField: "value",
       },
       config: {
-        usageMode: "sum",
+        usageMode: "unit" as const,
+        price: {
+          dinero: {
+            amount: 0,
+            currency: {
+              code: "USD",
+              base: 10,
+              exponent: 2,
+            },
+            scale: 2,
+          },
+          displayAmount: "0.00",
+        },
       },
       billingConfig: {
         name: "billing",
         billingInterval: "month" as const,
         billingIntervalCount: 1,
+        billingAnchor: 1,
         planType: "recurring" as const,
       },
       resetConfig: {
@@ -61,7 +101,11 @@ describe("GrantsManager", () => {
         resetAnchor: 1,
       },
       metadata: {
+        realtime: false,
+        notifyUsageThreshold: 95,
         overageStrategy: "none" as const,
+        blockCustomer: false,
+        hidden: false,
       },
     },
     anchor: 1,
@@ -237,8 +281,6 @@ describe("GrantsManager", () => {
             ...firstEntitlement,
             id: "ent_existing",
             isCurrent: true,
-            computedAt: refreshTime,
-            nextRevalidateAt: refreshTime + 300_000,
             updatedAtM: refreshTime,
           },
         ])
@@ -255,8 +297,6 @@ describe("GrantsManager", () => {
         expect(secondResult.err).toBeUndefined()
         expect(txInsertValuesMock).toHaveBeenCalledTimes(1)
         expect(txUpdateSetMock).toHaveBeenLastCalledWith({
-          computedAt: refreshTime,
-          nextRevalidateAt: refreshTime + 300_000,
           updatedAtM: refreshTime,
         })
         expect(secondResult.val?.[0]).toEqual(

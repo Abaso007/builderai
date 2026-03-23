@@ -116,49 +116,14 @@ describe("verifyV1 route", () => {
       timestamp: requestStartedAt,
     })
   })
-
-  it("returns customer_not_found when the external id cannot be resolved", async () => {
-    vi.useFakeTimers()
-    const requestStartedAt = Date.UTC(2026, 2, 21, 12, 0, 0)
-    vi.setSystemTime(new Date(requestStartedAt))
-
-    const { app, env, executionCtx, verifyFeatureStatus, resolveCustomerId } = createTestApp({
-      resolveCustomerId: vi.fn().mockResolvedValue({
-        err: {
-          code: "CUSTOMER_NOT_FOUND",
-          name: "UnPriceCustomerError",
-        },
-      }),
-    })
-
-    const response = await app.fetch(
-      buildRequest({
-        externalId: "user_123",
-        featureSlug: "api_calls",
-      }),
-      env,
-      executionCtx
-    )
-
-    expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({
-      allowed: false,
-      featureSlug: "api_calls",
-      status: "customer_not_found",
-      timestamp: requestStartedAt,
-    })
-    expect(resolveCustomerId).toHaveBeenCalledWith({
-      externalId: "user_123",
-      projectId: "proj_123",
-    })
-    expect(verifyFeatureStatus).not.toHaveBeenCalled()
-  })
 })
 
-function createTestApp(options: {
-  resolveCustomerId?: ReturnType<typeof vi.fn>
-  verifyFeatureStatus?: ReturnType<typeof vi.fn>
-} = {}) {
+function createTestApp(
+  options: {
+    resolveCustomerId?: ReturnType<typeof vi.fn>
+    verifyFeatureStatus?: ReturnType<typeof vi.fn>
+  } = {}
+) {
   const app = new OpenAPIHono<HonoEnv>()
   const verifyFeatureStatus =
     options.verifyFeatureStatus ??

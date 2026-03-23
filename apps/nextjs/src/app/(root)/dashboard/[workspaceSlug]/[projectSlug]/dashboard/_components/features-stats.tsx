@@ -194,49 +194,11 @@ export function FeaturesStats() {
   )
 
   const {
-    data: verifications,
-    dataUpdatedAt: verificationsUpdatedAt,
-    isFetching: isVerificationsFetching,
-  } = useSuspenseQuery(
-    trpc.analytics.getVerifications.queryOptions(
-      {
-        interval_days: intervalFilter.intervalDays,
-      },
-      {
-        ...ANALYTICS_CONFIG_REALTIME,
-        placeholderData: (previousData) => previousData,
-        staleTime: isNearRealtime ? 60 * 1000 : 5 * 60 * 1000,
-        refetchInterval: isNearRealtime ? 120 * 1000 : (false as const),
-        refetchOnWindowFocus: false,
-      }
-    )
-  )
-
-  const {
     data: usage,
     dataUpdatedAt: usageUpdatedAt,
     isFetching: isUsageFetching,
   } = useSuspenseQuery(
     trpc.analytics.getUsage.queryOptions(
-      {
-        interval_days: intervalFilter.intervalDays,
-      },
-      {
-        ...ANALYTICS_CONFIG_REALTIME,
-        placeholderData: (previousData) => previousData,
-        staleTime: isNearRealtime ? 60 * 1000 : 5 * 60 * 1000,
-        refetchInterval: isNearRealtime ? 120 * 1000 : (false as const),
-        refetchOnWindowFocus: false,
-      }
-    )
-  )
-
-  const {
-    data: verificationRegions,
-    dataUpdatedAt: regionsUpdatedAt,
-    isFetching: isRegionsFetching,
-  } = useSuspenseQuery(
-    trpc.analytics.getVerificationRegions.queryOptions(
       {
         interval_days: intervalFilter.intervalDays,
       },
@@ -267,21 +229,6 @@ export function FeaturesStats() {
 
   useQueryInvalidation({
     paramKey: intervalFilter.intervalDays,
-    dataUpdatedAt: verificationsUpdatedAt,
-    isFetching: isVerificationsFetching,
-    getQueryKey: (param) => [
-      ["analytics", "getVerifications"],
-      {
-        input: {
-          interval_days: param,
-        },
-        type: "query",
-      },
-    ],
-  })
-
-  useQueryInvalidation({
-    paramKey: intervalFilter.intervalDays,
     dataUpdatedAt: usageUpdatedAt,
     isFetching: isUsageFetching,
     getQueryKey: (param) => [
@@ -295,41 +242,20 @@ export function FeaturesStats() {
     ],
   })
 
-  useQueryInvalidation({
-    paramKey: intervalFilter.intervalDays,
-    dataUpdatedAt: regionsUpdatedAt,
-    isFetching: isRegionsFetching,
-    getQueryKey: (param) => [
-      ["analytics", "getVerificationRegions"],
-      {
-        input: {
-          interval_days: param,
-        },
-        type: "query",
-      },
-    ],
-  })
-
   const trendRows = featuresOverview.data ?? []
-  const verificationRows = verifications.verifications ?? []
   const usageRows = usage.usage ?? []
-  const regionRows = verificationRegions.verifications ?? []
 
   const totals = React.useMemo(() => {
-    const totalVerifications = verificationRows.reduce((sum, row) => sum + row.count, 0)
-    const totalUsageReported = usageRows.reduce((sum, row) => sum + row.sum, 0)
-    const peakLatency = Math.max(
-      0,
-      ...verificationRows.map((row) => row.p99_latency),
-      ...trendRows.map((row) => row.latency)
-    )
+    const totalVerifications = trendRows.reduce((sum, row) => sum + row.verifications, 0)
+    const totalUsageReported = usageRows.reduce((sum, row) => sum + row.value_after, 0)
+    const peakLatency = Math.max(0, ...trendRows.map((row) => row.latency))
 
     return {
       totalVerifications,
       totalUsageReported,
       peakLatency,
     }
-  }, [verificationRows, usageRows, trendRows])
+  }, [usageRows, trendRows])
 
   const featureMatrixRows = React.useMemo(() => {
     const normalizeFeatureSlug = (value: string) => value.trim().toLowerCase()
@@ -339,7 +265,7 @@ export function FeaturesStats() {
       {
         featureSlug: string
         verificationCount: number
-        usageCount: number
+        usageValue: number
       }
     >()
 
@@ -353,96 +279,43 @@ export function FeaturesStats() {
       const existing = byFeature.get(key)
 
       if (existing) {
-        existing.usageCount += row.count
+        existing.usageValue += row.value_after
         continue
       }
 
       byFeature.set(key, {
         featureSlug,
         verificationCount: 0,
-        usageCount: row.count,
+        usageValue: row.value_after,
       })
-    }
-
-    for (const row of verificationRows) {
-      const featureSlug = row.feature_slug.trim()
-      if (!featureSlug) {
-        continue
-      }
-
-      const key = normalizeFeatureSlug(featureSlug)
-      const existing = byFeature.get(key)
-
-      if (!existing) {
-        byFeature.set(key, {
-          featureSlug,
-          verificationCount: row.count,
-          usageCount: 0,
-        })
-        continue
-      }
-
-      existing.verificationCount += row.count
     }
 
     return Array.from(byFeature.values()).sort(
       (a, b) =>
-        b.verificationCount + b.usageCount - (a.verificationCount + a.usageCount) ||
+        b.verificationCount + b.usageValue - (a.verificationCount + a.usageValue) ||
         b.verificationCount - a.verificationCount
     )
-  }, [usageRows, verificationRows])
+  }, [usageRows])
 
   const visibleFeatureActivityTotal = React.useMemo(() => {
-    return featureMatrixRows.reduce((sum, row) => sum + row.verificationCount + row.usageCount, 0)
+    return featureMatrixRows.reduce((sum, row) => sum + row.verificationCount + row.usageValue, 0)
   }, [featureMatrixRows])
 
-  const topRegionRows = React.useMemo(() => {
-    const byRegion = new Map<
-      string,
-      {
-        region: string
-        checks: number
-        p99Latency: number
-      }
-    >()
-
-    for (const row of regionRows) {
-      if (!row.region) {
-        continue
-      }
-
-      const code = row.region.toUpperCase()
-      const existing = byRegion.get(code)
-
-      if (!existing) {
-        byRegion.set(code, {
-          region: code,
-          checks: row.count,
-          p99Latency: row.p99_latency,
-        })
-        continue
-      }
-
-      existing.checks += row.count
-      existing.p99Latency = Math.max(existing.p99Latency, row.p99_latency)
-    }
-
-    return Array.from(byRegion.values())
-      .sort((a, b) => b.p99Latency - a.p99Latency || b.checks - a.checks)
-      .slice(0, 8)
-      .map((row) => ({
-        ...row,
-        regionLabel: formatRegion(row.region),
-      }))
-  }, [regionRows])
+  const topRegionRows = React.useMemo<
+    Array<{
+      region: string
+      checks: number
+      p99Latency: number
+      regionLabel: string
+    }>
+  >(() => [], [])
 
   const hasTrendData = trendRows.some(
     (row) => row.verifications > 0 || row.usage > 0 || row.latency > 0
   )
 
   const isEmpty = !hasTrendData && featureMatrixRows.length === 0 && topRegionRows.length === 0
-  const isRefreshing =
-    isOverviewFetching || isVerificationsFetching || isUsageFetching || isRegionsFetching
+  const isRefreshing = isOverviewFetching || isUsageFetching
 
   const formatXAxis = React.useCallback(
     (value: string) => {
@@ -512,8 +385,8 @@ export function FeaturesStats() {
               <CardContent className="px-4 py-3">
                 <div className="mb-2 flex items-center justify-between">
                   <div className="inline-flex items-center gap-1.5">
-                    <p className="text-muted-foreground text-xs">Usage reported</p>
-                    <InfoTooltip content="Sum of usage units reported through usage events across all features." />
+                    <p className="text-muted-foreground text-xs">Latest usage total</p>
+                    <InfoTooltip content="Sum of the latest reported usage value for each feature in the selected interval." />
                   </div>
                   <LineChartIcon className="h-4 w-4 text-muted-foreground" />
                 </div>
@@ -710,7 +583,7 @@ export function FeaturesStats() {
                 >
                   <div className="space-y-4">
                     {featureMatrixRows.map((row, index) => {
-                      const featureActivity = row.verificationCount + row.usageCount
+                      const featureActivity = row.verificationCount + row.usageValue
                       const activityShare =
                         visibleFeatureActivityTotal > 0
                           ? (featureActivity / visibleFeatureActivityTotal) * 100
@@ -721,7 +594,7 @@ export function FeaturesStats() {
                           <div className="flex min-w-0 items-center justify-between gap-2 text-sm">
                             <span className="min-w-0 truncate font-medium">{row.featureSlug}</span>
                             <span className="shrink-0 text-[11px] text-muted-foreground sm:text-xs">
-                              {nFormatter(featureActivity)} events
+                              {nFormatter(featureActivity)} activity
                               <span className="hidden sm:inline">
                                 {" "}
                                 · {activityShare.toFixed(1)}%
@@ -739,7 +612,7 @@ export function FeaturesStats() {
                           </div>
                           <div className="flex items-center justify-between text-[11px] text-muted-foreground sm:text-xs">
                             <span>verif. {nFormatter(row.verificationCount)}</span>
-                            <span>usage {nFormatter(row.usageCount)}</span>
+                            <span>usage {nFormatter(row.usageValue)}</span>
                           </div>
                         </div>
                       )

@@ -1,30 +1,18 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { PlanVersion } from "@unprice/db/validators"
-import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
-import { CustomerService } from "../customers/service"
-import { MemoryEntitlementStorageProvider } from "../entitlements/memory-provider"
-import { EntitlementService } from "../entitlements/service"
 import type { Metrics } from "../metrics"
 import { SubscriptionService } from "../subscriptions/service"
-import { createClock, createMockEntitlementState } from "../test-utils"
+import { createClock } from "../test-utils"
 
 vi.mock("../env", () => ({
   env: {
     ENCRYPTION_KEY: "test_encryption_key",
     NODE_ENV: "test",
-  },
-}))
-
-vi.mock("../utils/unprice", () => ({
-  unprice: {
-    customers: {
-      resetEntitlements: vi.fn().mockResolvedValue(Ok(undefined)),
-    },
   },
 }))
 
@@ -43,10 +31,8 @@ vi.mock("@unprice/db/utils", async (importOriginal) => {
   }
 })
 
-describe("Golden Scenario - Customer Journey", () => {
-  let customerService: CustomerService
+describe("Workflow - Billing and Subscriptions", () => {
   let subscriptionService: SubscriptionService
-  let entitlementService: EntitlementService
   let _billingService: BillingService
 
   let mockDb: Database
@@ -54,7 +40,6 @@ describe("Golden Scenario - Customer Journey", () => {
   let mockCache: Cache
   let mockLogger: Logger
   let mockMetrics: Metrics
-  let mockStorage: MemoryEntitlementStorageProvider
 
   const initialNow = new Date("2024-01-01T00:00:00Z").getTime()
   const clock = createClock(initialNow)
@@ -284,11 +269,6 @@ describe("Golden Scenario - Customer Journey", () => {
       })),
     } as unknown as Database
 
-    mockStorage = new MemoryEntitlementStorageProvider({
-      logger: mockLogger,
-      analytics: mockAnalytics,
-    })
-    await mockStorage.initialize()
     const serviceDeps = {
       db: mockDb,
       logger: mockLogger,
@@ -299,105 +279,205 @@ describe("Golden Scenario - Customer Journey", () => {
       metrics: mockMetrics,
     }
 
-    customerService = new CustomerService(serviceDeps)
-    customerService.validatePaymentMethod = vi
-      .fn()
-      .mockResolvedValue(Ok({ paymentMethodId: null, requiredPaymentMethod: false }))
-
     _billingService = new BillingService(serviceDeps)
-    entitlementService = new EntitlementService({ ...serviceDeps, storage: mockStorage })
     subscriptionService = new SubscriptionService(serviceDeps)
   })
 
-  it("should handle a full month lifecycle: signup -> usage -> cycle reset", async () => {
-    // 1. Sign up & Subscription
-    vi.spyOn(mockDb.query.versions, "findFirst").mockResolvedValue(
-      mockPlanVersion as unknown as PlanVersion
+  const captureInsertValues = () => {
+    const allInsertValues: unknown[] = []
+
+    const insertSpy = vi.spyOn(mockDb, "insert").mockImplementation(
+      () =>
+        ({
+          values: vi.fn().mockImplementation((values) => {
+            allInsertValues.push(values)
+            return {
+              returning: vi.fn().mockResolvedValue(Array.isArray(values) ? values : [values]),
+              onConflictDoNothing: vi.fn().mockImplementation(() => ({
+                returning: vi.fn().mockResolvedValue(Array.isArray(values) ? values : [values]),
+              })),
+              onConflictDoUpdate: vi.fn().mockImplementation((params) => ({
+                returning: vi.fn().mockResolvedValue([{ ...values, ...params.set }]),
+              })),
+            }
+          }),
+          // biome-ignore lint/suspicious/noExplicitAny: test double shape
+        }) as any
     )
 
-    // Create Subscription
+    return {
+      allInsertValues,
+      insertSpy,
+    }
+  }
+
+  const findMidCycleCreditInsert = (allInsertValues: unknown[]) => {
+    return (
+      allInsertValues.find(
+        (value): value is Record<string, unknown> =>
+          !Array.isArray(value) &&
+          typeof value === "object" &&
+          value !== null &&
+          (value as { reason?: unknown }).reason === "mid_cycle_change"
+      ) ||
+      allInsertValues
+        .flatMap((value) => (Array.isArray(value) ? value : [value]))
+        .find(
+          (value): value is Record<string, unknown> =>
+            typeof value === "object" &&
+            value !== null &&
+            (value as { reason?: unknown }).reason === "mid_cycle_change"
+        )
+    )
+  }
+
+  const runProrationScenario = async ({
+    invoiceStatus = "paid",
+    featureType = "flat",
+    existingCredit,
+    dryRun = false,
+  }: {
+    invoiceStatus?: string
+    featureType?: "flat" | "usage"
+    existingCredit?: unknown
+    dryRun?: boolean
+  } = {}) => {
+    const prepaidPlanVersion: PlanVersion = {
+      ...mockPlanVersion,
+      id: "pv_prepaid",
+      plan: { id: "p_prepaid", slug: "prepaid" },
+      whenToBill: "pay_in_advance",
+      paymentProvider: "sandbox",
+      collectionMethod: "charge_automatically",
+      currency: "usd",
+      billingConfig: {
+        ...mockPlanVersion.billingConfig,
+        billingInterval: "month",
+        billingIntervalCount: 1,
+        planType: "recurring",
+      },
+      planFeatures: [],
+    } as unknown as PlanVersion
+
+    vi.spyOn(mockDb.query.versions, "findFirst").mockResolvedValue(prepaidPlanVersion)
+
     const subResult = await subscriptionService.createSubscription({
       input: { customerId, timezone: "UTC" },
       projectId,
     })
     expect(subResult.err).toBeUndefined()
+    const subscriptionId = subResult.val!.id
 
-    // 2. Report initial usage (Day 5)
-    clock.advanceBy(5 * 24 * 60 * 60 * 1000)
+    const cycleStart = initialNow
+    const cycleEnd = initialNow + 30 * 24 * 60 * 60 * 1000
 
-    const mockEntitlement = createMockEntitlementState(
-      {
-        customerId,
-        projectId,
-        featureSlug,
-        limit: 1000,
-        effectiveAt: initialNow,
-        expiresAt: initialNow + 365 * 24 * 60 * 60 * 1000,
-        resetConfig: {
-          name: "standard",
-          resetInterval: "month",
-          resetIntervalCount: 1,
-          planType: "recurring",
-          resetAnchor: 1,
+    const invoiceItem = {
+      id: "ii_1",
+      invoiceId: "inv_1",
+      billingPeriodId: "bp_1",
+      amountTotal: 10000,
+      prorationFactor: 1,
+      subscriptionItem: {
+        featurePlanVersion: {
+          featureType,
+          unitOfMeasure: "units",
+          billingConfig: prepaidPlanVersion.billingConfig,
         },
-        meter: {
-          usage: "0",
-          lastReconciledId: "rec_initial",
-          snapshotUsage: "0",
-          lastCycleStart: initialNow,
-          lastUpdated: initialNow,
+        subscriptionPhase: {
+          planVersion: prepaidPlanVersion,
         },
-        grants: [
-          {
-            id: "grant_1",
-            type: "subscription",
-            priority: 10,
-            limit: 1000,
-            effectiveAt: initialNow,
-            expiresAt: initialNow + 365 * 24 * 60 * 60 * 1000,
-            featurePlanVersionId: "fpv_idem_1",
-          },
-        ],
       },
-      initialNow
+      invoice: {
+        status: invoiceStatus,
+      },
+    }
+
+    const invoicedPeriod = {
+      id: "bp_1",
+      subscriptionPhaseId: "phase_1",
+      status: "invoiced",
+      cycleStartAt: cycleStart,
+      cycleEndAt: cycleEnd,
+      whenToBill: "pay_in_advance",
+      invoiceAt: cycleStart,
+    }
+
+    clock.advanceBy(15 * 24 * 60 * 60 * 1000)
+    const downgradeTime = clock.now()
+
+    // biome-ignore lint/suspicious/noExplicitAny: test setup
+    vi.spyOn(mockDb.query.billingPeriods, "findMany").mockResolvedValue([invoicedPeriod] as any)
+    // biome-ignore lint/suspicious/noExplicitAny: test setup
+    vi.spyOn(mockDb.query.invoiceItems, "findFirst").mockResolvedValue(invoiceItem as any)
+    // biome-ignore lint/suspicious/noExplicitAny: test setup
+    vi.spyOn(mockDb.query.creditGrants, "findFirst").mockResolvedValue(existingCredit as any)
+
+    const { allInsertValues, insertSpy } = captureInsertValues()
+    const updateSetCalls: Array<Record<string, unknown>> = []
+    const updateSpy = vi.spyOn(mockDb, "update").mockImplementation(
+      () =>
+        ({
+          set: vi.fn().mockImplementation((set) => {
+            if (set && typeof set === "object") {
+              updateSetCalls.push(set as Record<string, unknown>)
+            }
+            return {
+              where: vi.fn().mockResolvedValue([]),
+            }
+          }),
+          // biome-ignore lint/suspicious/noExplicitAny: test double shape
+        }) as any
     )
 
-    vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue(mockEntitlement)
+    vi.spyOn(mockDb.query.subscriptionPhases, "findMany").mockImplementation(
+      // biome-ignore lint/suspicious/noExplicitAny: Mock implementation needs to accept Drizzle query options
+      (_options?: any): any => {
+        return Promise.resolve([
+          {
+            id: "phase_1",
+            projectId,
+            subscriptionId,
+            planVersionId: prepaidPlanVersion.id,
+            startAt: cycleStart,
+            endAt: downgradeTime,
+            billingAnchor: 1,
+            items: [
+              {
+                id: "si_1",
+                featurePlanVersion: {
+                  featureType,
+                  unitOfMeasure: "units",
+                  billingConfig: prepaidPlanVersion.billingConfig,
+                },
+              },
+            ],
+            subscription: { customerId },
+            metadata: {
+              reason: "payment_failed",
+              note: "Payment failed",
+            },
+            planVersion: prepaidPlanVersion,
+          },
+        ])
+      }
+    )
 
-    const report1 = await entitlementService.reportUsage({
-      customerId,
+    const billingResult = await _billingService.generateBillingPeriods({
+      subscriptionId,
       projectId,
-      featureSlug,
-      usage: 100,
-      timestamp: clock.now(),
-      requestId: "req_1",
-      idempotenceKey: "idem_1",
-      metadata: null,
-    })
-    expect(report1.allowed).toBe(true)
-    expect(report1.usage).toBe(100)
-
-    // 3. Move to next month (Day 32) and verify reset
-    // We expect the UsageMeter to detect the cycle change during reportUsage
-    clock.advanceBy(27 * 24 * 60 * 60 * 1000) // Total 32 days
-
-    const report2 = await entitlementService.reportUsage({
-      customerId,
-      projectId,
-      featureSlug,
-      usage: 50,
-      timestamp: clock.now(),
-      requestId: "req_2",
-      idempotenceKey: "idem_2",
-      metadata: null,
+      now: downgradeTime,
+      dryRun,
     })
 
-    expect(report2.allowed).toBe(true)
-    expect(report2.usage).toBe(50) // Should have reset to 0 before adding 50
-
-    const stored = await mockStorage.get({ customerId, projectId, featureSlug })
-    expect(stored.val?.meter.usage).toBe("50")
-  })
+    return {
+      billingResult,
+      allInsertValues,
+      updateSetCalls,
+      downgradeTime,
+      insertSpy,
+      updateSpy,
+    }
+  }
 
   it("materializes billing periods without resolving or storing grantId", async () => {
     const allInsertValues: unknown[] = []
@@ -525,382 +605,149 @@ describe("Golden Scenario - Customer Journey", () => {
     })
   })
 
-  it("should handle phase changes: upgrade -> downgrade with entitlement resets", async () => {
-    // 1. Sign up & Subscription
-    vi.spyOn(mockDb.query.versions, "findFirst").mockResolvedValue(
-      mockPlanVersion as unknown as PlanVersion
-    )
-
-    // Create Subscription
-    const subResult = await subscriptionService.createSubscription({
-      input: { customerId, timezone: "UTC" },
-      projectId,
-    })
-    expect(subResult.err).toBeUndefined()
-    const subscriptionId = subResult.val!.id
-
-    // 2. Report initial usage (Day 5)
-    clock.advanceBy(5 * 24 * 60 * 60 * 1000)
-
-    const mockEntitlement = createMockEntitlementState(
-      {
-        customerId,
-        projectId,
-        featureSlug,
-        limit: 1000,
-        effectiveAt: initialNow,
-        expiresAt: initialNow + 365 * 24 * 60 * 60 * 1000,
-        resetConfig: {
-          name: "standard",
-          resetInterval: "month",
-          resetIntervalCount: 1,
-          planType: "recurring",
-          resetAnchor: 1,
-        },
-        meter: {
-          usage: "0",
-          lastReconciledId: "rec_initial",
-          snapshotUsage: "0",
-          lastCycleStart: initialNow,
-          lastUpdated: initialNow,
-        },
-        grants: [
-          {
-            id: "grant_1",
-            type: "subscription",
-            priority: 10,
-            limit: 1000,
-            effectiveAt: initialNow,
-            expiresAt: initialNow + 365 * 24 * 60 * 60 * 1000,
-            featurePlanVersionId: "fpv_idem_1",
-          },
-        ],
-      },
-      initialNow
-    )
-
-    vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue(mockEntitlement)
-
-    // Report usage to establish a non-zero state before upgrade
-    await entitlementService.reportUsage({
-      customerId,
-      projectId,
-      featureSlug,
-      usage: 100,
-      timestamp: clock.now(),
-      requestId: "req_pre_upgrade",
-      idempotenceKey: "idem_pre_upgrade",
-      metadata: null,
-    })
-
-    const storedBefore = await mockStorage.get({ customerId, projectId, featureSlug })
-    expect(storedBefore.val?.meter.usage).toBe("100")
-
-    // 3. Upgrade Plan (Day 10)
-    clock.advanceBy(5 * 24 * 60 * 60 * 1000) // Day 10
-
-    // Simulate plan upgrade logic
-    const upgradeResult = await subscriptionService.createPhase({
-      input: {
-        subscriptionId,
-        planVersionId: "pv_premium",
-        startAt: clock.now(),
-        config: [
-          {
-            featurePlanId: "pf_premium_1",
-            units: 5000,
-            featureSlug: featureSlug,
-          },
-        ],
-        customerId,
-        paymentMethodRequired: false,
-      },
-      projectId,
-      now: clock.now(),
-    })
-
-    expect(upgradeResult.err).toBeUndefined()
-
-    // Manually simulate the side effect of resetEntitlements (clearing storage)
-    // because our mock of resetEntitlements doesn't do it.
-    await mockStorage.delete({ customerId, projectId, featureSlug })
-
-    // Simulate re-fetching entitlement after upgrade (which would happen on next usage report)
-    // We update the mock DB to return the NEW grant structure (Premium)
-    const premiumGrant = {
-      id: "grant_premium",
-      type: "subscription" as const,
-      priority: 20, // Higher priority
-      limit: 5000,
-      effectiveAt: clock.now(),
-      expiresAt: initialNow + 365 * 24 * 60 * 60 * 1000,
-      featurePlanVersionId: "fpv_idem_1",
-    }
-
-    const premiumEntitlement = createMockEntitlementState(
-      {
-        ...mockEntitlement,
-        limit: 5000,
-        grants: [premiumGrant],
-        meter: { ...mockEntitlement.meter, usage: "0" }, // New grant start usually implies fresh meter if configured
-      },
-      clock.now()
-    )
-
-    vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue(premiumEntitlement)
-
-    // Verify usage report against NEW entitlement
-    const reportUpgrade = await entitlementService.reportUsage({
-      customerId,
-      projectId,
-      featureSlug,
-      usage: 50, // New usage
-      timestamp: clock.now(),
-      requestId: "req_post_upgrade",
-      idempotenceKey: "idem_post_upgrade",
-      metadata: null,
-    })
-
-    expect(reportUpgrade.allowed).toBe(true)
-    expect(reportUpgrade.limit).toBe(5000) // Verified new limit
-
-    // 4. Downgrade Plan (Day 20)
-    clock.advanceBy(10 * 24 * 60 * 60 * 1000) // Day 20
-
-    const downgradeResult = await subscriptionService.createPhase({
-      input: {
-        subscriptionId,
-        planVersionId: "pv_123", // Back to base
-        startAt: clock.now(),
-        config: [],
-        customerId,
-        paymentMethodRequired: false,
-      },
-      projectId,
-      now: clock.now(),
-    })
-
-    expect(downgradeResult.err).toBeUndefined()
-
-    // Manually simulate the side effect of resetEntitlements (clearing storage)
-    await mockStorage.delete({ customerId, projectId, featureSlug })
-
-    // Simulate fetching entitlement after downgrade
-    // Back to standard grant
-    const standardGrant = {
-      id: "grant_standard_back",
-      type: "subscription" as const,
-      priority: 10,
-      limit: 1000,
-      effectiveAt: clock.now(),
-      expiresAt: initialNow + 365 * 24 * 60 * 60 * 1000,
-      featurePlanVersionId: "fpv_idem_1",
-    }
-
-    const downgradedEntitlement = createMockEntitlementState(
-      {
-        ...mockEntitlement,
-        limit: 1000,
-        grants: [standardGrant],
-        meter: { ...mockEntitlement.meter, usage: "0" }, // Reset usage for new phase
-      },
-      clock.now()
-    )
-
-    vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue(downgradedEntitlement)
-
-    // 5. Verify usage reset after downgrade
-    // Reporting 10 units. Should start from 0 + 10 = 10.
-    const reportDowngrade = await entitlementService.reportUsage({
-      customerId,
-      projectId,
-      featureSlug,
-      usage: 10,
-      timestamp: clock.now(),
-      requestId: "req_post_downgrade",
-      idempotenceKey: "idem_post_downgrade",
-      metadata: null,
-    })
-
-    expect(reportDowngrade.allowed).toBe(true)
-    expect(reportDowngrade.usage).toBe(10) // Confirms usage reset
-    expect(reportDowngrade.limit).toBe(1000) // Confirms limit reset to base
-  })
-
-  it("should handle proration for prepaid plan downgrade", async () => {
-    // 1. Setup: Prepaid Plan
-    const prepaidPlanVersion: PlanVersion = {
-      ...mockPlanVersion,
-      id: "pv_prepaid",
-      plan: { id: "p_prepaid", slug: "prepaid" },
-      // Important: Bill in advance
-      whenToBill: "pay_in_advance",
-      billingConfig: {
-        ...mockPlanVersion.billingConfig,
-        billingInterval: "month",
-        billingIntervalCount: 1,
-        planType: "recurring",
-      },
-      planFeatures: [], // Flat fee, no usage features for simplicity
-    } as unknown as PlanVersion
-
-    vi.spyOn(mockDb.query.versions, "findFirst").mockResolvedValue(prepaidPlanVersion)
-
-    // Create Subscription
-    const subResult = await subscriptionService.createSubscription({
-      input: { customerId, timezone: "UTC" },
-      projectId,
-    })
-    expect(subResult.err).toBeUndefined()
-    const subscriptionId = subResult.val!.id
-
-    // Simulate initial invoice generation (Day 0)
-    // We assume the system would generate an invoice for the full month
-    // We mock the database state as if that happened
-
-    const cycleStart = initialNow
-    const cycleEnd = initialNow + 30 * 24 * 60 * 60 * 1000 // 30 days
-
-    // Mock existing paid invoice items for proration logic
-    const paidInvoiceItem = {
-      id: "ii_1",
-      invoiceId: "inv_1",
-      billingPeriodId: "bp_1",
-      amountTotal: 10000, // $100.00
-      prorationFactor: 1,
-      subscriptionItem: {
-        featurePlanVersion: {
-          featureType: "flat", // Proration only for flat/tier/package
-          unitOfMeasure: "units",
-          billingConfig: prepaidPlanVersion.billingConfig,
-        },
-        // Required for deep property access in billing service
-        subscriptionPhase: {
-          planVersion: prepaidPlanVersion,
-        },
-      },
-      invoice: {
-        status: "paid",
-      },
-    }
-
-    const invoicedPeriod = {
-      id: "bp_1",
-      subscriptionPhaseId: "phase_1", // The current phase
-      status: "invoiced",
-      cycleStartAt: cycleStart,
-      cycleEndAt: cycleEnd,
-      whenToBill: "pay_in_advance", // Required by internal logic
-      invoiceAt: cycleStart, // Required field
-    }
-
-    // 2. Time Travel: Mid-month (Day 15)
-    clock.advanceBy(15 * 24 * 60 * 60 * 1000)
-    const downgradeTime = clock.now()
-
-    // Mock DB queries for proration check
-    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-    vi.spyOn(mockDb.query.billingPeriods, "findMany").mockResolvedValue([invoicedPeriod] as any)
-    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-    vi.spyOn(mockDb.query.invoiceItems, "findFirst").mockResolvedValue(paidInvoiceItem as any)
-    vi.spyOn(mockDb.query.creditGrants, "findFirst").mockResolvedValue(undefined) // No credit yet
-
-    const insertSpy = vi.spyOn(mockDb, "insert")
-    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-    const allInsertValues: any[] = []
-
-    // We intercept the `values` call on the insert builder to verify arguments
-    insertSpy.mockImplementation(
-      () =>
-        ({
-          values: vi.fn().mockImplementation((values) => {
-            allInsertValues.push(values) // Capture all inserted values
-            return {
-              returning: vi.fn().mockResolvedValue([Array.isArray(values) ? values[0] : values]),
-              onConflictDoNothing: vi.fn().mockImplementation(() => ({
-                returning: vi.fn().mockResolvedValue([Array.isArray(values) ? values[0] : values]),
-              })),
-              onConflictDoUpdate: vi.fn().mockImplementation((params) => ({
-                returning: vi.fn().mockResolvedValue([{ ...values, ...params.set }]),
-              })),
-            }
-          }),
-          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-        }) as any
-    )
-
-    // 3. Downgrade / Cancel (Shorten the phase)
-    // We simulate a phase change where the current phase ends NOW
-    // In `BillingService._generateBillingPeriods`, it detects `phase.endAt` < `billingPeriod.cycleEndAt`
-
-    // We need to mock `subscriptionPhases.findMany` to return the phase that is ENDING
-    // mock the query with parameters (including with for eager loading)
-    vi.spyOn(mockDb.query.subscriptionPhases, "findMany").mockImplementation(
-      // biome-ignore lint/suspicious/noExplicitAny: Mock implementation needs to accept Drizzle query options
-      (_options?: any): any => {
-        return Promise.resolve([
-          {
-            id: "phase_1",
-            projectId,
-            subscriptionId,
-            planVersionId: prepaidPlanVersion.id,
-            startAt: cycleStart,
-            endAt: downgradeTime, // The phase effectively ends now due to change
-            billingAnchor: 1,
-            items: [
-              {
-                id: "si_1",
-                featurePlanVersion: {
-                  featureType: "flat",
-                  unitOfMeasure: "units",
-                  billingConfig: prepaidPlanVersion.billingConfig,
-                },
-              },
-            ],
-            subscription: { customerId },
-            metadata: {
-              reason: "payment_failed",
-              note: "Payment failed",
-            },
-            planVersion: prepaidPlanVersion, // Also needed here for some access patterns
-          },
-        ])
-      }
-    )
-
-    // 4. Run Billing Generation
-    const billingResult = await _billingService.generateBillingPeriods({
-      subscriptionId,
-      projectId,
-      now: downgradeTime,
-      dryRun: false, // We want to test the side effects (credit creation) logic flow
-    })
-
+  it("creates proration credit for prepaid downgrade when eligible", async () => {
+    const { billingResult, allInsertValues } = await runProrationScenario()
     expect(billingResult.err).toBeUndefined()
 
-    // 5. Verify Credit Grant Creation
-    expect(insertSpy).toHaveBeenCalled()
-
-    // Find the credit grant insert among all inserts
-    const creditGrantInsert =
-      allInsertValues.find((val) => !Array.isArray(val) && val.reason === "mid_cycle_change") ||
-      allInsertValues.flat().find((val) => val.reason === "mid_cycle_change")
-
+    const creditGrantInsert = findMidCycleCreditInsert(allInsertValues)
     expect(creditGrantInsert).toBeDefined()
     expect(creditGrantInsert).toMatchObject({
       reason: "mid_cycle_change",
       projectId,
       customerId,
-      // Total was 10000 cents. Used 50%. Refund roughly 5000 cents.
       totalAmount: expect.any(Number),
     })
 
-    // Verify amount is positive and roughly half
-    const refundAmount = creditGrantInsert.totalAmount
+    const refundAmount = creditGrantInsert!.totalAmount as number
     expect(refundAmount).toBeGreaterThan(0)
     expect(refundAmount).toBeLessThan(10000)
-    // Month has 31 days. 15 days used. ~16 days remaining.
-    // 10000 * (16/31) ~= 5161.
-    expect(refundAmount).toBeCloseTo(5161, -2) // Allow small rounding diffs
+    expect(refundAmount).toBeCloseTo(5161, -2)
+  })
+
+  it("does not create duplicate mid-cycle credit when one already exists", async () => {
+    const { billingResult, allInsertValues } = await runProrationScenario({
+      existingCredit: { id: "credit_existing" },
+    })
+
+    expect(billingResult.err).toBeUndefined()
+    expect(findMidCycleCreditInsert(allInsertValues)).toBeUndefined()
+  })
+
+  it.each([
+    {
+      name: "invoice is not paid",
+      invoiceStatus: "open",
+      featureType: "flat" as const,
+    },
+    {
+      name: "feature type is usage",
+      invoiceStatus: "paid",
+      featureType: "usage" as const,
+    },
+  ])("does not create mid-cycle credit when $name", async ({ invoiceStatus, featureType }) => {
+    const { billingResult, allInsertValues } = await runProrationScenario({
+      invoiceStatus,
+      featureType,
+    })
+
+    expect(billingResult.err).toBeUndefined()
+    expect(findMidCycleCreditInsert(allInsertValues)).toBeUndefined()
+  })
+
+  it("caps shortened invoiced periods to the phase end date", async () => {
+    const { billingResult, updateSetCalls, downgradeTime } = await runProrationScenario()
+    expect(billingResult.err).toBeUndefined()
+    expect(updateSetCalls).toContainEqual(expect.objectContaining({ cycleEndAt: downgradeTime }))
+  })
+
+  it.each([
+    { whenToBill: "pay_in_advance", expectedField: "cycleStartAt" as const },
+    { whenToBill: "pay_in_arrear", expectedField: "cycleEndAt" as const },
+  ])(
+    "maps invoiceAt correctly when whenToBill=$whenToBill",
+    async ({ whenToBill, expectedField }) => {
+      const planVersion = {
+        ...mockPlanVersion,
+        id: `pv_${whenToBill}`,
+        whenToBill,
+        paymentProvider: "sandbox",
+        collectionMethod: "charge_automatically",
+        currency: "usd",
+      } as unknown as PlanVersion
+
+      vi.spyOn(mockDb.query.versions, "findFirst").mockResolvedValue(planVersion)
+
+      const subResult = await subscriptionService.createSubscription({
+        input: { customerId, timezone: "UTC" },
+        projectId,
+      })
+      expect(subResult.err).toBeUndefined()
+      const subscriptionId = subResult.val!.id
+
+      vi.spyOn(mockDb.query.subscriptionPhases, "findMany").mockResolvedValue([
+        {
+          id: "phase_when_to_bill",
+          projectId,
+          subscriptionId,
+          planVersionId: planVersion.id,
+          startAt: initialNow,
+          endAt: null,
+          billingAnchor: 1,
+          items: [
+            {
+              id: "item_when_to_bill",
+              featurePlanVersion: {
+                featureType: "flat",
+                unitOfMeasure: "units",
+                billingConfig: {
+                  name: "standard",
+                  billingInterval: "month",
+                  billingIntervalCount: 1,
+                  planType: "recurring",
+                },
+              },
+            },
+          ],
+          subscription: { customerId },
+          planVersion,
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: test setup
+      ] as any)
+
+      const { allInsertValues } = captureInsertValues()
+      const now = initialNow + 2 * 24 * 60 * 60 * 1000
+      const billingResult = await _billingService.generateBillingPeriods({
+        subscriptionId,
+        projectId,
+        now,
+        dryRun: false,
+      })
+
+      expect(billingResult.err).toBeUndefined()
+
+      const billingPeriodInsert = allInsertValues
+        .flatMap((value) => (Array.isArray(value) ? value : [value]))
+        .find(
+          (value): value is Record<string, unknown> =>
+            typeof value === "object" &&
+            value !== null &&
+            String((value as { id?: unknown }).id ?? "").startsWith("billing_period_")
+        )
+
+      expect(billingPeriodInsert).toBeDefined()
+      expect(billingPeriodInsert?.whenToBill).toBe(whenToBill)
+      expect(billingPeriodInsert?.invoiceAt).toBe(billingPeriodInsert?.[expectedField])
+      expect(typeof billingPeriodInsert?.statementKey).toBe("string")
+    }
+  )
+
+  it("does not write billing periods or credits in dryRun mode", async () => {
+    const { billingResult, insertSpy, updateSpy } = await runProrationScenario({
+      dryRun: true,
+    })
+
+    expect(billingResult.err).toBeUndefined()
+    expect(insertSpy).not.toHaveBeenCalled()
+    expect(updateSpy).not.toHaveBeenCalled()
   })
 })

@@ -99,7 +99,7 @@ export function UsageChart() {
 
   const chartData = usage.usage.map((v) => ({
     feature: v.feature_slug,
-    usage: v.sum,
+    usage: v.value_after,
   }))
 
   const maxHeight = 400

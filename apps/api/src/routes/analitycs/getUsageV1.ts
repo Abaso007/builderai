@@ -30,10 +30,13 @@ export const route = createRoute({
           description: "The customer ID if you want to get the usage for a specific customer",
           example: "cus_1H7KQFLr7RepUyQBKdnvY",
         }),
-        project_id: z.string().openapi({
-          description: "The project ID (optional, only available for main projects)",
-          example: "project_1H7KQFLr7RepUyQBKdnvY",
-        }),
+        project_id: z
+          .string()
+          .openapi({
+            description: "The project ID (optional, only available for main projects)",
+            example: "project_1H7KQFLr7RepUyQBKdnvY",
+          })
+          .optional(),
         range: analyticsIntervalSchema.openapi({
           description: "The range of the usage, last hour, day, week or month",
           example: "24h",
