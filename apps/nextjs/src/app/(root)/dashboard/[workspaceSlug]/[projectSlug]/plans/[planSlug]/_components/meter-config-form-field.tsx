@@ -147,6 +147,7 @@ function EventFormDialog({
     control: form.control,
     name: "availableProperties",
   })
+  const immutablePropertyCount = mode === "edit" ? (event?.availableProperties?.length ?? 0) : 0
 
   useEffect(() => {
     if (!open) {
@@ -159,18 +160,19 @@ function EventFormDialog({
   const isPending = createEvent.isPending || updateEvent.isPending
 
   const onSubmit = async (data: EventFormValues) => {
-    const payload = {
-      name: data.name,
-      slug: data.slug,
-      availableProperties: toAvailableProperties(data.availableProperties),
-    }
+    const availableProperties = toAvailableProperties(data.availableProperties)
 
     const result =
       mode === "create"
-        ? await createEvent.mutateAsync(payload)
+        ? await createEvent.mutateAsync({
+            name: data.name,
+            slug: data.slug,
+            availableProperties,
+          })
         : await updateEvent.mutateAsync({
             id: event!.id,
-            ...payload,
+            name: data.name,
+            availableProperties,
           })
 
     await queryClient.invalidateQueries({
@@ -228,13 +230,13 @@ function EventFormDialog({
                 render={({ field }) => (
                   <FormItem className="space-y-2">
                     <FormLabel>SDK Slug</FormLabel>
-                    <FormDescription>Stable event key sent by your SDK.</FormDescription>
+                    <FormDescription>Slugs are immutable after creation.</FormDescription>
                     <FormControl>
                       <Input
                         {...field}
                         className="font-mono"
                         placeholder="ai_completion"
-                        disabled={isDisabled || isPending}
+                        disabled={isDisabled || isPending || mode === "edit"}
                       />
                     </FormControl>
                     <FormMessage />
@@ -250,6 +252,7 @@ function EventFormDialog({
                   <p className="text-muted-foreground text-xs">
                     Add payload fields you may aggregate later, like `value`, `input_tokens`, or
                     `active_seats`.
+                    {mode === "edit" ? " Existing properties cannot be removed." : ""}
                   </p>
                 </div>
                 <Button
@@ -267,38 +270,46 @@ function EventFormDialog({
 
               {fields.length ? (
                 <div className="space-y-2">
-                  {fields.map((field, index) => (
-                    <div key={field.id} className="flex items-start gap-2">
-                      <FormField
-                        control={form.control}
-                        name={`availableProperties.${index}.value`}
-                        render={({ field }) => (
-                          <FormItem className="flex-1 space-y-1">
-                            <FormControl>
-                              <Input
-                                {...field}
-                                className="font-mono"
-                                placeholder="input_tokens"
-                                disabled={isDisabled || isPending}
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="mt-0.5 shrink-0"
-                        disabled={isDisabled || isPending}
-                        onClick={() => remove(index)}
-                      >
-                        <XCircle className="size-4" />
-                        <span className="sr-only">Remove property</span>
-                      </Button>
-                    </div>
-                  ))}
+                  {fields.map((field, index) => {
+                    const isImmutableProperty = mode === "edit" && index < immutablePropertyCount
+
+                    return (
+                      <div key={field.id} className="flex items-start gap-2">
+                        <FormField
+                          control={form.control}
+                          name={`availableProperties.${index}.value`}
+                          render={({ field }) => (
+                            <FormItem className="flex-1 space-y-1">
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  className="font-mono"
+                                  placeholder="input_tokens"
+                                  disabled={isDisabled || isPending || isImmutableProperty}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="mt-0.5 shrink-0"
+                          disabled={isDisabled || isPending || isImmutableProperty}
+                          onClick={() => remove(index)}
+                        >
+                          <XCircle className="size-4" />
+                          <span className="sr-only">
+                            {isImmutableProperty
+                              ? "Existing properties cannot be removed"
+                              : "Remove property"}
+                          </span>
+                        </Button>
+                      </div>
+                    )
+                  })}
                 </div>
               ) : (
                 <div className="rounded-md border border-dashed px-3 py-4 text-center text-muted-foreground text-xs">

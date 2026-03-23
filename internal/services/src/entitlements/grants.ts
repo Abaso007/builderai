@@ -81,7 +81,11 @@ export class GrantsManager {
     return trimmed && trimmed.length > 0 ? trimmed : "units"
   }
 
-  // craete a stable signarute to find if stacked grants are fungible
+  /**
+   * craete a stable signarute to find if stacked grants are fungible
+   * @param grant
+   * @returns
+   */
   private getGrantResetSignature(grant: z.infer<typeof grantSchemaExtended>) {
     if (grant.featurePlanVersion.resetConfig) {
       return {
@@ -106,6 +110,13 @@ export class GrantsManager {
     return null
   }
 
+  /**
+   * Every grant id tight to a feature plan version. The signature is calculated with the config
+   * normalizing all its fields to a stable contract, this only applies for usage based features
+   *
+   * @param grant
+   * @returns
+   */
   private getGrantFungibilitySignature(grant: z.infer<typeof grantSchemaExtended>) {
     const { featurePlanVersion } = grant
     const config = featurePlanVersion.config
@@ -181,6 +192,12 @@ export class GrantsManager {
     return JSON.stringify(value)
   }
 
+  /**
+   * Compare 2 signatures and defines its differences
+   * @param expected
+   * @param actual
+   * @returns
+   */
   private getGrantFungibilityDifferences(
     expected: ReturnType<GrantsManager["getGrantFungibilitySignature"]>,
     actual: ReturnType<GrantsManager["getGrantFungibilitySignature"]>
@@ -216,7 +233,12 @@ export class GrantsManager {
     return differences
   }
 
-  // In order to process stacked grants, we need to validate if their configurations are mergeable.
+  /**
+   * In order to process stacked grants, we need to validate if their configurations are mergeable.
+   * Basically they are mergable if the
+   * @param params
+   * @returns
+   */
   private assertFungibleGrantSet(params: {
     grants: z.infer<typeof grantSchemaExtended>[]
     featureSlug: string
@@ -235,6 +257,7 @@ export class GrantsManager {
       return Err(new UnPriceGrantError({ message: "No grants provided" }))
     }
 
+    // compare the bast priotiry grant with the rest by its signatures.
     const baselineSignature = this.getGrantFungibilitySignature(baselineGrant)
     const nonFungibleGrants = orderedGrants
       .slice(1)
@@ -247,6 +270,7 @@ export class GrantsManager {
       }))
       .filter(({ differences }) => differences.length > 0)
 
+    // Do not accept grants that are not fungible.
     if (nonFungibleGrants.length > 0) {
       const nonFungibleGrantSummary = nonFungibleGrants
         .map(({ grant, differences }) => `${grant.id} (${differences.join(", ")})`)
@@ -417,6 +441,7 @@ export class GrantsManager {
   // - plan
   // - plan version
   // - project
+  // TODO: this is doing a lot, we could decrease complexity
   public async getGrantsForCustomer(
     params:
       | {
@@ -448,6 +473,7 @@ export class GrantsManager {
 
     // get all grants for a project and customer
     // get the customer's subscription to find planId
+    // TODO: this is called multiple times per every entitlement call, we should take a look and improve performance.
     const customerSubscription = await this.db.query.customers.findFirst({
       with: {
         subscriptions: {
@@ -493,21 +519,6 @@ export class GrantsManager {
 
     const subscription = customerSubscription?.subscriptions[0] ?? null
     const currentPhase = subscription?.phases[0] ?? null
-    const planIds = new Set<string>()
-    const planVersionIds = new Set<string>()
-
-    for (const phase of subscription?.phases ?? []) {
-      const planId = phase.planVersion?.plan?.id
-      const planVersionId = phase.planVersion?.id
-
-      if (planId) {
-        planIds.add(planId)
-      }
-
-      if (planVersionId) {
-        planVersionIds.add(planVersionId)
-      }
-    }
 
     // Build list of subjects to query grants for
     const subjects: SubjectGrantQuery[] = [
@@ -515,12 +526,10 @@ export class GrantsManager {
       { subjectId: projectId, subjectType: "project" },
     ]
 
-    for (const planId of planIds) {
-      subjects.push({ subjectId: planId, subjectType: "plan" })
-    }
-
-    for (const planVersionId of planVersionIds) {
-      subjects.push({ subjectId: planVersionId, subjectType: "plan_version" })
+    // if there is an active phase add the plan and the plan version as subjects
+    if (currentPhase) {
+      subjects.push({ subjectId: currentPhase.planVersionId, subjectType: "plan_version" })
+      subjects.push({ subjectId: currentPhase.planVersion.planId, subjectType: "plan" })
     }
 
     // Query all active grants for all subjects in the period of the current cycle
@@ -608,7 +617,8 @@ export class GrantsManager {
    *
    * On Mar 15 the active limit is 150, but the stream still started on Mar 1.
    * That lets ingestion keep using the same monthly counter instead of
-   * accidentally creating a new counter on Mar 10.
+   * accidentally creating a new counter on Mar 10. This mean we can add new grants mid cycle if needed without
+   * affecting the current counters
    */
   public async resolveIngestionStatesFromGrants(params: {
     customerId: string
@@ -689,6 +699,8 @@ export class GrantsManager {
         end: computedState.expiresAt,
         start: computedState.effectiveAt,
       }
+
+      // This is very important as is the key that allow us to rotate the DO
       const streamId = `stream_${await hashStringSHA256(
         JSON.stringify({
           customerId,
@@ -698,6 +710,7 @@ export class GrantsManager {
         })
       )}`
 
+      // stream is the list of grants that are fungible. They are fungible because they share meter config, reset config and feature.
       resolvedStates.push({
         activeGrantIds: fungibleGrantSet.orderedGrants.map((grant) => grant.id),
         customerId,
@@ -724,7 +737,9 @@ export class GrantsManager {
     timestamp: number
   }): Promise<Result<ResolvedFeatureStateAtTimestamp, UnPriceGrantError>> {
     const { customerId, featureSlug, grants, projectId, timestamp } = params
-    const featureGrants = grants.filter((grant) => grant.featurePlanVersion.feature.slug === featureSlug)
+    const featureGrants = grants.filter(
+      (grant) => grant.featurePlanVersion.feature.slug === featureSlug
+    )
 
     if (featureGrants.length === 0) {
       return Ok({
@@ -732,7 +747,9 @@ export class GrantsManager {
       })
     }
 
-    const activeFeatureGrants = featureGrants.filter((grant) => this.isGrantActiveAt(grant, timestamp))
+    const activeFeatureGrants = featureGrants.filter((grant) =>
+      this.isGrantActiveAt(grant, timestamp)
+    )
 
     if (activeFeatureGrants.length === 0) {
       return Ok({
@@ -1129,7 +1146,6 @@ export class GrantsManager {
     // If merged.grants is empty (shouldn't happen if grants.length > 0), fall back to bestPriorityGrant
     // But since we filter grants in mergeGrants, we need to find the corresponding full grant object
     // for the winning grant ID to get full configuration (resetConfig etc).
-
     const winningGrantSnapshot = merged.grants[0] ?? grantsSnapshot[0]!
     const winningGrant = ordered.find((g) => g.id === winningGrantSnapshot.id) ?? bestPriorityGrant
 
@@ -1200,18 +1216,6 @@ export class GrantsManager {
       )
     }
 
-    // Compute version hash + current cycle boundaries
-    const version = await hashStringSHA256(
-      JSON.stringify({
-        grants: merged.grants,
-        featureType: bestPriorityGrant.featurePlanVersion.featureType,
-        unitOfMeasure: winningUnitOfMeasure,
-        resetConfig: isUsageFeature ? localResetConfig : null,
-        meterConfig,
-        mergingPolicy: merged.mergingPolicy,
-      })
-    )
-
     return Ok({
       limit: merged.limit,
       mergingPolicy: merged.mergingPolicy,
@@ -1226,9 +1230,6 @@ export class GrantsManager {
       customerId,
       projectId,
       isCurrent: true,
-      version,
-      nextRevalidateAt: Date.now() + this.revalidateInterval,
-      computedAt: Date.now(),
       createdAtM: Date.now(),
       updatedAtM: Date.now(),
       metadata: winningGrantMetadata,
@@ -1460,6 +1461,8 @@ export class GrantsManager {
   /**
    * Merges grants according to the specified feature type and its implicit merging policy.
    * Returns the calculated limit, overage setting, the winning grants, and the effective date range.
+   * @param params
+   * @returns
    */
   public mergeGrants(params: {
     grants: z.infer<typeof entitlementGrantsSnapshotSchema>[]

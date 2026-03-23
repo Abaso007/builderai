@@ -1,4 +1,4 @@
-import type { Entitlement } from "@unprice/db/validators"
+import { type Entitlement, calculateCycleWindow } from "@unprice/db/validators"
 import {
   type IngestionResolvedState,
   type RawEvent,
@@ -176,6 +176,53 @@ export function computeResolvedStatePeriodKey(
   })
 }
 
+export function computeResolvedStatePeriodEndAt(
+  state: Pick<IngestionResolvedState, "resetConfig" | "streamEndAt" | "streamStartAt">,
+  timestamp: number
+): number | null {
+  if (timestamp < state.streamStartAt) {
+    return null
+  }
+
+  if (typeof state.streamEndAt === "number" && timestamp >= state.streamEndAt) {
+    return null
+  }
+
+  if (!state.resetConfig) {
+    const cycle = calculateCycleWindow({
+      now: timestamp,
+      effectiveStartDate: state.streamStartAt,
+      effectiveEndDate: state.streamEndAt,
+      trialEndsAt: null,
+      config: {
+        name: "ingestion",
+        interval: "onetime",
+        intervalCount: 1,
+        anchor: "dayOfCreation",
+        planType: "onetime",
+      },
+    })
+
+    return cycle?.end ?? null
+  }
+
+  const cycle = calculateCycleWindow({
+    now: timestamp,
+    effectiveStartDate: state.streamStartAt,
+    effectiveEndDate: state.streamEndAt,
+    trialEndsAt: null,
+    config: {
+      name: state.resetConfig.name,
+      interval: state.resetConfig.resetInterval,
+      intervalCount: state.resetConfig.resetIntervalCount,
+      anchor: state.resetConfig.resetAnchor,
+      planType: state.resetConfig.planType,
+    },
+  })
+
+  return cycle?.end ?? null
+}
+
 export function filterMatchingEntitlements(params: {
   entitlements: Entitlement[]
   event: RawEvent
@@ -219,7 +266,7 @@ export function filterEntitlementsWithValidAggregationPayload(params: {
 
     const value = params.event.properties[aggregationField]
 
-    return typeof value === "number" && Number.isFinite(value)
+    return parseFiniteAggregationValue(value) !== null
   })
 }
 
@@ -254,8 +301,28 @@ export function filterResolvedStatesWithValidAggregationPayload(params: {
 
     const value = params.event.properties[aggregationField]
 
-    return typeof value === "number" && Number.isFinite(value)
+    return parseFiniteAggregationValue(value) !== null
   })
+}
+
+function parseFiniteAggregationValue(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null
+  }
+
+  if (typeof value !== "string") {
+    return null
+  }
+
+  const trimmedValue = value.trim()
+
+  if (trimmedValue.length === 0) {
+    return null
+  }
+
+  const parsedValue = Number(trimmedValue)
+
+  return Number.isFinite(parsedValue) ? parsedValue : null
 }
 
 export function sortQueuedMessages(

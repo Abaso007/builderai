@@ -4,17 +4,15 @@ SQL >
         toStartOfMonth(date) AS date,
         project_id,
         customer_id,
+        period_key,
         feature_slug,
-        countMergeState(count) AS count,
-        sumMergeState(sum) AS sum,
-        maxMergeState(max) AS max,
-        argMaxMergeState(latest) AS latest,
-        argMaxMergeState(last_id) AS last_id
+        argMaxMergeState(value) AS value,
     FROM unprice_feature_usage_daily_mv
     GROUP BY
         date,
         project_id,
         customer_id,
+        period_key,
         feature_slug
 
 TYPE MATERIALIZED

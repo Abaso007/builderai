@@ -4,18 +4,15 @@ SQL >
         toStartOfHour(fromUnixTimestamp64Milli(timestamp, 'UTC')) AS date,
         project_id,
         customer_id,
+        period_key,
         feature_slug,
-        countState() AS count,
-        sumState(usage) AS sum,
-        maxState(usage) AS max,
-        argMaxState(usage, timestamp) AS latest,
-        argMaxState(id, timestamp) AS last_id
-    FROM unprice_feature_usage_records
-    WHERE deleted = 0
+        argMaxState(value_after, timestamp) AS value,
+    FROM unprice_entitlement_meter_facts
     GROUP BY
         date,
         project_id,
         customer_id,
+        period_key,
         feature_slug
 
 TYPE MATERIALIZED

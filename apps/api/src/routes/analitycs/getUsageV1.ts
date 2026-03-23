@@ -5,15 +5,14 @@ import {
   prepareInterval,
 } from "@unprice/analytics"
 import { endTime, startTime } from "hono/timing"
-import * as HttpStatusCodes from "~/util/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
+import * as HttpStatusCodes from "~/util/http-status-codes"
 
 import { z } from "zod"
 import { keyAuth } from "~/auth/key"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import { reportUsageEvents } from "~/util/reportUsageEvents"
 
 const tags = ["analytics"]
 
@@ -100,9 +99,6 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
     })
 
     const usage = data ?? []
-
-    // send analytics event for the unprice customer
-    c.executionCtx.waitUntil(reportUsageEvents(c, {}, "get-usage"))
 
     // end the timer
     endTime(c, "getUsage")

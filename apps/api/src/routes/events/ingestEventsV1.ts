@@ -9,6 +9,7 @@ import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { ulid } from "ulid"
 import { z } from "zod"
 import { keyAuth, resolveContextProjectId } from "~/auth/key"
+import type { Env } from "~/env"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
@@ -117,11 +118,18 @@ export const registerIngestEventsV1 = (app: App) =>
       throw error
     }
 
+    const isDevelopment = c.env.APP_ENV === "development" && c.env.NODE_ENV === "development"
+    // this improve dev ex
+    const idempotencyKey = isDevelopment ? body.idempotencyKey + Date.now() : body.idempotencyKey
+
     // 4. the event should be parsed to be sure we don't receive garbage, before sending it
     // to the queue
     // TODO: we could deduplicate this here in memory
     const message = buildIngestionQueueMessage({
-      body,
+      body: {
+        ...body,
+        idempotencyKey,
+      },
       projectId,
       receivedAt,
       requestId,
@@ -165,9 +173,7 @@ export function selectQueueShardIndex(customerId: string, shardCount = 2): numbe
 }
 
 export async function safeSendToQueue(params: {
-  env: {
-    FALLBACK_ANALYTICS: AnalyticsEngineDataset
-  }
+  env: Env
   logger: AppLogger
   queue: Queue<IngestionQueueMessage>
   message: IngestionQueueMessage

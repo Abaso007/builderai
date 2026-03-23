@@ -3,7 +3,7 @@ import type { AppLogger } from "@unprice/observability"
 import type { CustomerService } from "@unprice/services/customers"
 import type { GrantsManager } from "@unprice/services/entitlements"
 import { describe, expect, it, vi } from "vitest"
-import type { Env } from "~/env"
+import { IngestionQueueConsumer } from "./consumer"
 import type { IngestionQueueMessage } from "./message"
 import { IngestionService } from "./service"
 
@@ -43,13 +43,13 @@ type HarnessOptions = {
 
 describe("IngestionService", () => {
   it("drops malformed queue messages and acks them", async () => {
-    const { service, mocks } = createServiceHarness()
+    const { consumer, mocks } = createServiceHarness()
     const malformed = createRawBatchMessage({
       customerId: "cus_123",
       projectId: "proj_123",
     })
 
-    await service.consumeBatch({
+    await consumer.consumeBatch({
       messages: [malformed.message],
     } as unknown as MessageBatch<IngestionQueueMessage>)
 
@@ -67,7 +67,7 @@ describe("IngestionService", () => {
   })
 
   it("acks duplicate messages from the same batch before the expensive processing path", async () => {
-    const { service, mocks } = createServiceHarness()
+    const { consumer, mocks } = createServiceHarness()
     const first = createBatchMessage({
       id: "evt_first",
       idempotencyKey: "idem_shared",
@@ -77,7 +77,7 @@ describe("IngestionService", () => {
       idempotencyKey: "idem_shared",
     })
 
-    await service.consumeBatch({
+    await consumer.consumeBatch({
       messages: [first.message, duplicate.message],
     } as unknown as MessageBatch<IngestionQueueMessage>)
 
@@ -104,14 +104,14 @@ describe("IngestionService", () => {
   })
 
   it("publishes a rejected audit event without claiming idempotency when the customer is missing", async () => {
-    const { service, mocks } = createServiceHarness({
+    const { consumer, mocks } = createServiceHarness({
       customer: null,
     })
     const message = createBatchMessage({
       id: "evt_missing_customer",
     })
 
-    await service.consumeBatch({
+    await consumer.consumeBatch({
       messages: [message.message],
     } as unknown as MessageBatch<IngestionQueueMessage>)
 
@@ -133,7 +133,7 @@ describe("IngestionService", () => {
   })
 
   it("acks duplicate idempotency claims without publishing audit events", async () => {
-    const { service, mocks } = createServiceHarness({
+    const { consumer, mocks } = createServiceHarness({
       beginResult: {
         decision: "duplicate",
       },
@@ -142,7 +142,7 @@ describe("IngestionService", () => {
       id: "evt_duplicate_claim",
     })
 
-    await service.consumeBatch({
+    await consumer.consumeBatch({
       messages: [message.message],
     } as unknown as MessageBatch<IngestionQueueMessage>)
 
@@ -155,7 +155,7 @@ describe("IngestionService", () => {
   })
 
   it("retries busy idempotency claims with the provided delay", async () => {
-    const { service, mocks } = createServiceHarness({
+    const { consumer, mocks } = createServiceHarness({
       beginResult: {
         decision: "busy",
         retryAfterSeconds: 12,
@@ -165,7 +165,7 @@ describe("IngestionService", () => {
       id: "evt_busy_claim",
     })
 
-    await service.consumeBatch({
+    await consumer.consumeBatch({
       messages: [message.message],
     } as unknown as MessageBatch<IngestionQueueMessage>)
 
@@ -181,7 +181,7 @@ describe("IngestionService", () => {
 
   it("routes processable events through a stable stream identity", async () => {
     const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
-    const { service, mocks } = createServiceHarness({
+    const { consumer, mocks } = createServiceHarness({
       grants: [createUsageGrant()],
       resolvedStates: [createResolvedState(timestamp)],
     })
@@ -194,14 +194,18 @@ describe("IngestionService", () => {
       },
     })
 
-    await service.consumeBatch({
+    await consumer.consumeBatch({
       messages: [message.message],
     } as unknown as MessageBatch<IngestionQueueMessage>)
 
     expect(mocks.getGrantsForCustomer).toHaveBeenCalledTimes(1)
     expect(mocks.resolveIngestionStatesFromGrants).toHaveBeenCalledTimes(1)
     expect(mocks.getEntitlementWindowStub).toHaveBeenCalledTimes(1)
-    expect(mocks.getEntitlementWindowStub.mock.calls[0]?.[0]).toContain("stream_123")
+    expect(mocks.getEntitlementWindowStub.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        streamId: "stream_123",
+      })
+    )
     expect(mocks.apply).toHaveBeenCalledWith(
       expect.objectContaining({
         streamId: "stream_123",
@@ -219,7 +223,7 @@ describe("IngestionService", () => {
 
   it("aborts claimed idempotency and retries when processing fails after the claim", async () => {
     const send = vi.fn().mockRejectedValue(new Error("send failed"))
-    const { service, mocks } = createServiceHarness({
+    const { consumer, mocks } = createServiceHarness({
       grants: [createUsageGrant()],
       resolvedStates: [createResolvedState()],
       send,
@@ -228,7 +232,7 @@ describe("IngestionService", () => {
       id: "evt_processing_failure",
     })
 
-    await service.consumeBatch({
+    await consumer.consumeBatch({
       messages: [message.message],
     } as unknown as MessageBatch<IngestionQueueMessage>)
 
@@ -244,7 +248,7 @@ describe("IngestionService", () => {
 
   it("rejects invalid aggregation payloads without calling the entitlement DO", async () => {
     const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
-    const { service, mocks } = createServiceHarness({
+    const { consumer, mocks } = createServiceHarness({
       grants: [createUsageGrant()],
       resolvedStates: [createResolvedState(timestamp)],
     })
@@ -254,7 +258,7 @@ describe("IngestionService", () => {
       properties: {},
     })
 
-    await service.consumeBatch({
+    await consumer.consumeBatch({
       messages: [message.message],
     } as unknown as MessageBatch<IngestionQueueMessage>)
 
@@ -268,6 +272,37 @@ describe("IngestionService", () => {
         id: "evt_invalid_aggregation",
         rejection_reason: "INVALID_AGGREGATION_PROPERTIES",
         state: "rejected",
+      }),
+    ])
+  })
+
+  it("accepts parseable numeric-string aggregation payloads and processes the event", async () => {
+    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+    const { consumer, mocks } = createServiceHarness({
+      grants: [createUsageGrant()],
+      resolvedStates: [createResolvedState(timestamp)],
+    })
+    const message = createBatchMessage({
+      id: "evt_valid_numeric_string_aggregation",
+      timestamp,
+      properties: {
+        amount: "4.5",
+      },
+    })
+
+    await consumer.consumeBatch({
+      messages: [message.message],
+    } as unknown as MessageBatch<IngestionQueueMessage>)
+
+    expect(mocks.resolveIngestionStatesFromGrants).toHaveBeenCalledTimes(1)
+    expect(mocks.apply).toHaveBeenCalledTimes(1)
+    expect(mocks.complete).toHaveBeenCalledTimes(1)
+    expect(message.ack).toHaveBeenCalledTimes(1)
+    expect(message.retry).not.toHaveBeenCalled()
+    expect(mocks.send).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: "evt_valid_numeric_string_aggregation",
+        state: "processed",
       }),
     ])
   })
@@ -315,6 +350,45 @@ describe("IngestionService", () => {
     expect(mocks.send).toHaveBeenCalledWith([
       expect.objectContaining({
         id: "evt_sync_feature",
+        state: "processed",
+      }),
+    ])
+  })
+
+  it("ingests a single feature synchronously with parseable numeric-string payloads", async () => {
+    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+    const { service, mocks } = createServiceHarness({
+      grants: [createUsageGrant()],
+      resolvedFeatureState: createUsageFeatureState(createResolvedState(timestamp)),
+    })
+    const message = createBatchMessage({
+      id: "evt_sync_feature_numeric_string",
+      timestamp,
+      properties: {
+        amount: "5.75",
+      },
+    }).message.body
+
+    const result = await service.ingestFeatureSync({
+      featureSlug: "api_calls",
+      message,
+    })
+
+    expect(result).toEqual({
+      allowed: true,
+      message: undefined,
+      rejectionReason: undefined,
+      state: "processed",
+    })
+    expect(mocks.apply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        enforceLimit: true,
+        featureSlug: "api_calls",
+      })
+    )
+    expect(mocks.send).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: "evt_sync_feature_numeric_string",
         state: "processed",
       }),
     ])
@@ -428,7 +502,12 @@ describe("IngestionService", () => {
     })
     expect(mocks.getEnforcementState).toHaveBeenCalledWith({
       limit: 100,
-      meterId: "meter_123",
+      meterConfig: {
+        eventId: "meter_123",
+        eventSlug: "tokens_used",
+        aggregationMethod: "sum",
+        aggregationField: "amount",
+      },
       overageStrategy: "none",
     })
     expect(mocks.begin).not.toHaveBeenCalled()
@@ -477,12 +556,14 @@ function createServiceHarness(options: HarnessOptions = {}) {
       grants: options.grants ?? [],
     } as never)
   )
-  const resolveIngestionStatesFromGrants = vi.fn().mockResolvedValue(
-    Ok((options.resolvedStates ?? []) as never)
-  )
-  const resolveFeatureStateAtTimestamp = vi.fn().mockResolvedValue(
-    Ok((options.resolvedFeatureState ?? createUsageFeatureState(createResolvedState())) as never)
-  )
+  const resolveIngestionStatesFromGrants = vi
+    .fn()
+    .mockResolvedValue(Ok((options.resolvedStates ?? []) as never))
+  const resolveFeatureStateAtTimestamp = vi
+    .fn()
+    .mockResolvedValue(
+      Ok((options.resolvedFeatureState ?? createUsageFeatureState(createResolvedState())) as never)
+    )
   const begin = vi.fn().mockResolvedValue(options.beginResult ?? { decision: "process" as const })
   const complete = vi.fn().mockResolvedValue(undefined)
   const abort = vi.fn().mockResolvedValue(undefined)
@@ -510,35 +591,33 @@ function createServiceHarness(options: HarnessOptions = {}) {
     customerService: {
       getCustomer,
     } as unknown as Pick<CustomerService, "getCustomer">,
+    entitlementWindowClient: {
+      getEntitlementWindowStub,
+    },
     grantsManager: {
       getGrantsForCustomer,
       resolveFeatureStateAtTimestamp,
       resolveIngestionStatesFromGrants,
     } as unknown as Pick<
       GrantsManager,
-      | "getGrantsForCustomer"
-      | "resolveFeatureStateAtTimestamp"
-      | "resolveIngestionStatesFromGrants"
+      "getGrantsForCustomer" | "resolveFeatureStateAtTimestamp" | "resolveIngestionStatesFromGrants"
     >,
-    env: {
-      APP_ENV: "development",
-      PIPELINE_EVENTS: {
-        send,
-      },
-      entitlementwindow: {
-        getByName: getEntitlementWindowStub,
-      },
-      ingestionidempotency: {
-        getByName: getIdempotencyStub,
-      },
-    } as unknown as Pick<
-      Env,
-      "APP_ENV" | "PIPELINE_EVENTS" | "entitlementwindow" | "ingestionidempotency"
-    >,
+    idempotencyClient: {
+      getIdempotencyStub,
+    },
     logger,
+    pipelineEvents: {
+      send,
+    },
+  })
+
+  const consumer = new IngestionQueueConsumer({
+    logger,
+    processor: service,
   })
 
   return {
+    consumer,
     service,
     mocks: {
       abort,

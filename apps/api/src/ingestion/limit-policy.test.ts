@@ -5,7 +5,7 @@ import { findLimitExceededFact } from "./limit-policy"
 function createFact(partial: Partial<Fact>): Fact {
   return {
     eventId: partial.eventId ?? "evt_1",
-    meterId: partial.meterId ?? "meter_1",
+    meterKey: partial.meterKey ?? "meter_1",
     delta: partial.delta ?? 1,
     valueAfter: partial.valueAfter ?? 1,
   }
@@ -20,7 +20,7 @@ describe("findLimitExceededFact", () => {
   })
 
   it("denies strict none strategy when positive delta pushes value above limit", () => {
-    const facts = [createFact({ delta: 10, valueAfter: 110, meterId: "meter_strict" })]
+    const facts = [createFact({ delta: 10, valueAfter: 110, meterKey: "meter_strict" })]
 
     expect(findLimitExceededFact({ facts, limit: 100, overageStrategy: "none" })).toEqual(facts[0])
   })

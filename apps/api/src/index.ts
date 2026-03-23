@@ -15,7 +15,6 @@ import { registerCreatePaymentMethodV1 } from "./routes/customer/createPaymentMe
 import { registerGetEntitlementsV1 } from "./routes/customer/getEntitlementsV1"
 import { registerGetPaymentMethodsV1 } from "./routes/customer/getPaymentMethodsV1"
 import { registerGetSubscriptionV1 } from "./routes/customer/getSubscriptionV1"
-import { registerGetUsageV1 } from "./routes/customer/getUsageV1"
 import { registerSignUpV1 } from "./routes/customer/signUpV1"
 import { registerVerifyV1 } from "./routes/customer/verifyV1"
 import { registerIngestEventsSyncV1 } from "./routes/events/ingestEventsSyncV1"
@@ -36,7 +35,6 @@ import { obs } from "~/middleware/obs"
 import { apiEvlog } from "~/observability"
 import { registerGetRealtimeTicketV1 } from "./routes/analitycs/getRealtimeTicketV1"
 import { registerGetAnalyticsUsageV1 } from "./routes/analitycs/getUsageV1"
-import { registerGetAnalyticsVerificationsV1 } from "./routes/analitycs/getVerificationsV1"
 import { registerUpdateACLV1 } from "./routes/customer/updateACLV1"
 
 const app = newApp()
@@ -128,7 +126,6 @@ registerIngestEventsSyncV1(app)
 registerGetEntitlementsV1(app)
 registerVerifyV1(app)
 registerGetSubscriptionV1(app)
-registerGetUsageV1(app)
 registerGetPaymentMethodsV1(app)
 registerSignUpV1(app)
 registerCreatePaymentMethodV1(app)
@@ -146,7 +143,6 @@ registerStripeSetupV1(app)
 
 // Analytics routes
 registerGetAnalyticsUsageV1(app)
-registerGetAnalyticsVerificationsV1(app)
 registerGetRealtimeTicketV1(app)
 
 // Lakehouse routes

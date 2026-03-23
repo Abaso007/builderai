@@ -14,6 +14,7 @@ import { ApiProjectService } from "~/project"
 
 import { EntitlementService, GrantsManager } from "@unprice/services/entitlements"
 import { SubscriptionService } from "@unprice/services/subscriptions"
+import { CloudflareEntitlementWindowClient, CloudflareIdempotencyClient } from "~/ingestion/clients"
 import { IngestionService } from "~/ingestion/service"
 
 /**
@@ -216,12 +217,14 @@ export function init(): MiddlewareHandler<HonoEnv> {
 
     const ingestion = new IngestionService({
       customerService: customer,
+      entitlementWindowClient: new CloudflareEntitlementWindowClient(c.env),
       grantsManager: new GrantsManager({
         db,
         logger,
       }),
-      env: c.env,
+      idempotencyClient: new CloudflareIdempotencyClient(c.env),
       logger,
+      pipelineEvents: c.env.PIPELINE_EVENTS,
     })
 
     c.set("services", {

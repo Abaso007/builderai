@@ -1,45 +1,51 @@
-import { CloudflareStore } from "@unkey/cache/stores"
-import { Analytics } from "@unprice/analytics"
-import { createConnection } from "@unprice/db"
 import { parseLakehouseEvent } from "@unprice/lakehouse"
 import { type AppLogger, createStandaloneRequestLogger } from "@unprice/observability"
-import { CacheService } from "@unprice/services/cache"
-import { CustomerService } from "@unprice/services/customers"
+import type { CustomerService } from "@unprice/services/customers"
 import {
-  GrantsManager,
+  type GrantsManager,
   type IngestionResolvedState,
   MAX_EVENT_AGE_MS,
 } from "@unprice/services/entitlements"
-import { NoopMetrics } from "@unprice/services/metrics"
 import type { Env } from "~/env"
-import { buildIngestionIdempotencyShardName } from "./idempotency"
 import {
-  type CustomerQueueGroup,
+  CloudflareEntitlementWindowClient,
+  CloudflareIdempotencyClient,
+  type EntitlementWindowClient,
+  type IdempotencyClient,
+  type IngestionIdempotencyStub,
+} from "./clients"
+import { IngestionQueueConsumer } from "./consumer"
+import {
   EVENTS_SCHEMA_VERSION,
   type FeatureVerificationResult,
+  type IngestionMessageProcessingResult,
   type IngestionOutcome,
   type IngestionRejectionReason,
   type IngestionSyncResult,
 } from "./interface"
 import {
-  type IngestionQueueConsumerMessage,
   type IngestionQueueMessage,
-  buildIngestionWindowName,
+  computeResolvedStatePeriodEndAt,
   computeResolvedStatePeriodKey,
   filterMatchingResolvedStates,
   filterResolvedStatesWithValidAggregationPayload,
-  ingestionQueueMessageSchema,
-  partitionDuplicateQueuedMessages,
-  sortQueuedMessages,
 } from "./message"
+import { createQueueServices } from "./queue"
 
 type IngestionCandidateGrants = Parameters<
   GrantsManager["resolveIngestionStatesFromGrants"]
 >[0]["grants"]
 
+type IngestionContext = {
+  candidateGrants: IngestionCandidateGrants
+  customerId: string
+  message: IngestionQueueMessage
+  projectId: string
+}
+
 type PreparedCustomerMessageGroup = {
   candidateGrants: IngestionCandidateGrants
-  messages: IngestionQueueConsumerMessage[]
+  messages: IngestionQueueMessage[]
   rejectionReason?: IngestionRejectionReason
 }
 
@@ -49,18 +55,12 @@ type PreparedCustomerGrantContext = {
 }
 
 type ProcessMessageParams = {
-  candidateGrants: IngestionCandidateGrants
-  customerId: string
-  message: IngestionQueueConsumerMessage
-  projectId: string
+  context: IngestionContext
   rejectionReason?: IngestionRejectionReason
 }
 
 type HandleMessageParams = {
-  candidateGrants: IngestionCandidateGrants
-  customerId: string
-  message: IngestionQueueMessage
-  projectId: string
+  context: IngestionContext
   rejectionReason?: IngestionRejectionReason
 }
 
@@ -86,32 +86,40 @@ type MessageLogContext = {
   projectId: string
 }
 
-type IngestionIdempotencyStub = ReturnType<Env["ingestionidempotency"]["getByName"]>
-type EntitlementWindowStub = ReturnType<Env["entitlementwindow"]["getByName"]>
+type PipelineEventsQueue = Pick<Env["PIPELINE_EVENTS"], "send">
+
 type EntitlementWindowApplyResult = {
   allowed: boolean
   deniedReason?: "LIMIT_EXCEEDED"
   message?: string
 }
 
+type Result<T, E> = { err: E; val?: undefined } | { err?: undefined; val: T }
+
 export class IngestionService {
   private readonly customerService: CustomerService
   private readonly grantsManager: GrantsManager
-  private readonly env: Env
+  private readonly entitlementWindowClient: EntitlementWindowClient
+  private readonly idempotencyClient: IdempotencyClient
   private readonly logger: AppLogger
   private readonly now: () => number
+  private readonly pipelineEvents: PipelineEventsQueue
 
   constructor(opts: {
     customerService: CustomerService
+    entitlementWindowClient: EntitlementWindowClient
     grantsManager: GrantsManager
-    env: Env
+    idempotencyClient: IdempotencyClient
     logger: AppLogger
+    pipelineEvents: PipelineEventsQueue
     now?: () => number
   }) {
     this.customerService = opts.customerService
-    this.env = opts.env
+    this.entitlementWindowClient = opts.entitlementWindowClient
+    this.idempotencyClient = opts.idempotencyClient
     this.logger = opts.logger
     this.grantsManager = opts.grantsManager
+    this.pipelineEvents = opts.pipelineEvents
     this.now = opts.now ?? (() => Date.now())
   }
 
@@ -134,32 +142,6 @@ export class IngestionService {
   //     locationHint,
   //   })
   // }
-
-  public async consumeBatch(batch: MessageBatch<IngestionQueueMessage>): Promise<void> {
-    const validMessages = parseBatchMessages(batch, this.logger)
-
-    if (validMessages.length === 0) {
-      this.logger.debug("No messages to process")
-      return
-    }
-
-    // we deduplicate given the messages to avoid calling the DO multiple times
-    // if the events are the same
-    const { duplicates, unique } = partitionDuplicateQueuedMessages(validMessages)
-
-    // ack duplicates
-    ackDuplicateMessages(duplicates, this.logger)
-
-    if (unique.length === 0) {
-      this.logger.debug("no unique messages to process")
-      return
-    }
-
-    // group by customer so the DO is hit and we take advantage of the state in memory
-    for (const group of groupMessagesByCustomer(unique)) {
-      await this.processCustomerMessages(group)
-    }
-  }
 
   public async ingestFeatureSync(params: {
     featureSlug: string
@@ -198,7 +180,7 @@ export class IngestionService {
       })
     }
 
-    const resolvedState = await this.resolveSyncFeatureState({
+    const resolvedStatesResult = await this.resolveSyncFeatureState({
       candidateGrants: preparedContext.candidateGrants,
       customerId,
       featureSlug,
@@ -206,17 +188,23 @@ export class IngestionService {
       projectId,
     })
 
-    if (!("streamId" in resolvedState)) {
-      this.logRejectedMessage({
+    if (resolvedStatesResult.err) {
+      return this.rejectSyncMessage({
         customerId,
         message,
         projectId,
-        rejectionReason: resolvedState.rejectionReason,
+        rejectionReason: resolvedStatesResult.err,
       })
+    }
 
-      return this.toSyncResult({
-        allowed: false,
-        outcome: resolvedState,
+    const [resolvedState] = resolvedStatesResult.val
+
+    if (!resolvedState) {
+      return this.rejectSyncMessage({
+        customerId,
+        message,
+        projectId,
+        rejectionReason: "UNROUTABLE_EVENT",
       })
     }
 
@@ -358,16 +346,18 @@ export class IngestionService {
       }
     }
 
-    const enforcementState = await this.getEntitlementWindowStub({
-      customerId,
-      periodKey,
-      projectId,
-      streamId: state.streamId,
-    }).getEnforcementState({
-      limit: state.limit,
-      meterId: state.meterConfig.eventId,
-      overageStrategy: state.overageStrategy,
-    })
+    const enforcementState = await this.entitlementWindowClient
+      .getEntitlementWindowStub({
+        customerId,
+        periodKey,
+        projectId,
+        streamId: state.streamId,
+      })
+      .getEnforcementState({
+        limit: state.limit,
+        meterConfig: state.meterConfig,
+        overageStrategy: state.overageStrategy,
+      })
 
     return {
       allowed: !enforcementState.isLimitReached,
@@ -376,7 +366,6 @@ export class IngestionService {
       isLimitReached: enforcementState.isLimitReached,
       limit: enforcementState.limit,
       meterConfig: state.meterConfig,
-      method: state.meterConfig.aggregationMethod,
       overageStrategy: state.overageStrategy,
       periodKey,
       status: "usage",
@@ -388,14 +377,14 @@ export class IngestionService {
     }
   }
 
-  public async processCustomerMessages(params: {
+  public async processCustomerGroup(params: {
     customerId: string
-    messages: IngestionQueueConsumerMessage[]
+    messages: IngestionQueueMessage[]
     projectId: string
-  }): Promise<void> {
+  }): Promise<IngestionMessageProcessingResult[]> {
     const { customerId, projectId } = params
-    // important to processes them in the same other timestamp
-    const messages = [...params.messages].sort(sortQueuedMessages)
+    // important to process them in the same order by timestamp
+    const messages = [...params.messages].sort(sortIngestionMessages)
 
     try {
       const preparedGroup = await this.prepareCustomerMessageGroup({
@@ -405,6 +394,8 @@ export class IngestionService {
       })
 
       if (preparedGroup.rejectionReason === "CUSTOMER_NOT_FOUND") {
+        const results: IngestionMessageProcessingResult[] = []
+
         for (const message of preparedGroup.messages) {
           await this.rejectMessageWithoutIdempotency({
             customerId,
@@ -412,21 +403,32 @@ export class IngestionService {
             projectId,
             rejectionReason: preparedGroup.rejectionReason,
           })
+
+          results.push(this.ackMessage(message))
         }
-        return
+
+        return results
       }
 
       // once we are sure the customer exists and there are grants that can resolve the event,
       // then we can call the DO
+      const results: IngestionMessageProcessingResult[] = []
+
       for (const message of preparedGroup.messages) {
-        await this.processMessage({
-          candidateGrants: preparedGroup.candidateGrants,
-          customerId,
-          message,
-          projectId,
-          rejectionReason: preparedGroup.rejectionReason,
-        })
+        results.push(
+          await this.processMessage({
+            context: {
+              candidateGrants: preparedGroup.candidateGrants,
+              customerId,
+              message,
+              projectId,
+            },
+            rejectionReason: preparedGroup.rejectionReason,
+          })
+        )
       }
+
+      return results
     } catch (error) {
       this.logger.error("raw ingestion queue processing failed", {
         projectId,
@@ -434,28 +436,32 @@ export class IngestionService {
         error,
       })
 
-      // we retry every message again, if it fails 3 times we send to the DLQ
-      for (const message of messages) {
-        message.retry()
-      }
+      return messages.map((message) => this.retryMessage(message))
     }
   }
 
   /**
    * Process one queued event for the customer after the batch-level grant lookup.
    */
-  private async processMessage(params: ProcessMessageParams): Promise<void> {
-    const { candidateGrants, customerId, message, projectId, rejectionReason } = params
+  private async processMessage(
+    params: ProcessMessageParams
+  ): Promise<IngestionMessageProcessingResult> {
+    const { context, rejectionReason } = params
+    const { customerId, message, projectId } = context
     const now = this.now()
-    const idempotencyKey = message.body.idempotencyKey
+    const idempotencyKey = message.idempotencyKey
     const logContext: MessageLogContext = {
       projectId,
       customerId,
-      eventId: message.body.id,
+      eventId: message.id,
       idempotencyKey,
     }
 
-    const idempotencyStub = this.getIdempotencyStub(projectId, customerId, idempotencyKey)
+    const idempotencyStub = this.idempotencyClient.getIdempotencyStub({
+      projectId,
+      customerId,
+      idempotencyKey,
+    })
 
     let claimedIdempotency = false
 
@@ -466,30 +472,31 @@ export class IngestionService {
       })
 
       if (idempotency.decision === "duplicate") {
-        this.handleDuplicateDecision(message)
-        return
+        this.logger.debug("duplicated event", {
+          event: message,
+        })
+        return this.ackMessage(message)
       }
 
       if (idempotency.decision === "busy") {
-        this.handleBusyDecision(message, idempotency.retryAfterSeconds)
-        return
+        this.logger.debug("idempotency busy", {
+          event: message,
+        })
+        return this.retryMessage(message, idempotency.retryAfterSeconds)
       }
 
       claimedIdempotency = true
 
       // if all those validations are good then lets process the message
       const outcome = await this.handleMessage({
-        candidateGrants,
-        customerId,
-        message: message.body,
-        projectId,
+        context,
         rejectionReason,
       })
 
       if (outcome.state === "rejected") {
         this.logRejectedMessage({
           customerId,
-          message: message.body,
+          message,
           projectId,
           rejectionReason: outcome.rejectionReason,
         })
@@ -501,7 +508,7 @@ export class IngestionService {
         result: JSON.stringify(outcome),
       })
 
-      message.ack()
+      return this.ackMessage(message)
     } catch (error) {
       this.logger.error("raw ingestion message processing failed", {
         ...logContext,
@@ -512,12 +519,13 @@ export class IngestionService {
         await this.abortClaim(idempotencyStub, idempotencyKey, logContext)
       }
 
-      message.retry()
+      return this.retryMessage(message)
     }
   }
 
   private async handleMessage(params: HandleMessageParams): Promise<IngestionOutcome> {
-    const { candidateGrants, customerId, message, projectId, rejectionReason } = params
+    const { context, rejectionReason } = params
+    const { customerId, message, projectId } = context
 
     // we validate the rejection here because we need to check every idempotency key no matter what
     // double counting is the worse
@@ -525,21 +533,16 @@ export class IngestionService {
       return this.rejectMessage(message, rejectionReason)
     }
 
-    const processableStates = await this.resolveProcessableStates({
-      candidateGrants,
-      customerId,
-      message,
-      projectId,
-    })
+    const processableStatesResult = await this.resolveProcessableStates(context)
 
-    if (!Array.isArray(processableStates)) {
-      return processableStates
+    if (processableStatesResult.err) {
+      return this.rejectMessage(message, processableStatesResult.err)
     }
 
     await this.applyResolvedStates({
       customerId,
       message,
-      processableStates,
+      processableStates: processableStatesResult.val,
       projectId,
     })
 
@@ -554,7 +557,7 @@ export class IngestionService {
     featureSlug: string
     message: IngestionQueueMessage
     projectId: string
-  }): Promise<IngestionOutcome | IngestionResolvedState> {
+  }): Promise<Result<IngestionResolvedState[], IngestionRejectionReason>> {
     const { candidateGrants, customerId, featureSlug, message, projectId } = params
     const resolvedFeatureStateResult = await this.grantsManager.resolveFeatureStateAtTimestamp({
       customerId,
@@ -573,7 +576,9 @@ export class IngestionService {
         error: resolvedFeatureStateResult.err.message,
       })
 
-      return this.rejectMessage(message, "INVALID_ENTITLEMENT_CONFIGURATION")
+      return {
+        err: "INVALID_ENTITLEMENT_CONFIGURATION",
+      }
     }
 
     if (resolvedFeatureStateResult.val.kind !== "usage") {
@@ -583,36 +588,26 @@ export class IngestionService {
         state: resolvedFeatureStateResult.val.kind,
       })
 
-      return this.rejectMessage(message, "NO_MATCHING_ENTITLEMENT")
+      return {
+        err: "NO_MATCHING_ENTITLEMENT",
+      }
     }
 
-    const processableStates = await this.filterProcessableResolvedStates({
+    return this.filterProcessableResolvedStates({
       message,
       states: [resolvedFeatureStateResult.val.state],
     })
-
-    if (!Array.isArray(processableStates)) {
-      return processableStates
-    }
-
-    const [processableState] = processableStates
-
-    if (!processableState) {
-      return this.rejectMessage(message, "UNROUTABLE_EVENT")
-    }
-
-    return processableState
   }
 
   private async prepareCustomerMessageGroup(params: {
     customerId: string
-    messages: IngestionQueueConsumerMessage[]
+    messages: IngestionQueueMessage[]
     projectId: string
   }): Promise<PreparedCustomerMessageGroup> {
     const { customerId, messages, projectId } = params
 
-    const earliestMessage = messages[0]?.body
-    const latestMessage = messages.at(-1)?.body
+    const earliestMessage = messages[0]
+    const latestMessage = messages.at(-1)
 
     if (!earliestMessage || !latestMessage) {
       return {
@@ -676,46 +671,26 @@ export class IngestionService {
     }
   }
 
-  private getIdempotencyStub(
-    projectId: string,
-    customerId: string,
-    idempotencyKey: string
-  ): IngestionIdempotencyStub {
-    // the only reliable way to dedupe events here is using DO's
-    // since we can have pressure of this because the limits are 1k rps
-    // we shard this in 32 DOs more than enough, but we can increase later.
-    // we shard by idempotencyKey so the same keys landed in the same DO
-    return this.env.ingestionidempotency.getByName(
-      buildIngestionIdempotencyShardName({
-        appEnv: this.env.APP_ENV,
-        projectId,
-        customerId,
-        idempotencyKey,
-      })
-    )
+  private ackMessage(message: IngestionQueueMessage): IngestionMessageProcessingResult {
+    return {
+      message,
+      disposition: {
+        action: "ack",
+      },
+    }
   }
 
-  private handleDuplicateDecision(message: IngestionQueueConsumerMessage): void {
-    this.logger.debug("duplicated event", {
-      event: message.body,
-    })
-    message.ack()
-  }
-
-  private handleBusyDecision(
-    message: IngestionQueueConsumerMessage,
+  private retryMessage(
+    message: IngestionQueueMessage,
     retryAfterSeconds?: number
-  ): void {
-    this.logger.debug("idempotency busy", {
-      event: message.body,
-    })
-    message.retry(
-      retryAfterSeconds
-        ? {
-            delaySeconds: retryAfterSeconds,
-          }
-        : undefined
-    )
+  ): IngestionMessageProcessingResult {
+    return {
+      message,
+      disposition: {
+        action: "retry",
+        retryAfterSeconds,
+      },
+    }
   }
 
   private async abortClaim(
@@ -756,29 +731,24 @@ export class IngestionService {
 
   private async rejectMessageWithoutIdempotency(params: {
     customerId: string
-    message: IngestionQueueConsumerMessage
+    message: IngestionQueueMessage
     projectId: string
     rejectionReason: "CUSTOMER_NOT_FOUND"
   }): Promise<void> {
     const { customerId, message, projectId, rejectionReason } = params
-    const outcome = await this.rejectMessage(message.body, rejectionReason)
+    const outcome = await this.rejectMessage(message, rejectionReason)
     this.logRejectedMessage({
       customerId,
-      message: message.body,
+      message,
       projectId,
       rejectionReason: outcome.rejectionReason,
     })
-
-    message.ack()
   }
 
-  private async resolveProcessableStates(params: {
-    candidateGrants: IngestionCandidateGrants
-    customerId: string
-    message: IngestionQueueMessage
-    projectId: string
-  }): Promise<IngestionOutcome | IngestionResolvedState[]> {
-    const { candidateGrants, customerId, message, projectId } = params
+  private async resolveProcessableStates(
+    context: IngestionContext
+  ): Promise<Result<IngestionResolvedState[], IngestionRejectionReason>> {
+    const { candidateGrants, customerId, message, projectId } = context
     const resolvedStatesResult = await this.grantsManager.resolveIngestionStatesFromGrants({
       customerId,
       grants: candidateGrants,
@@ -794,7 +764,9 @@ export class IngestionService {
         error: resolvedStatesResult.err.message,
       })
 
-      return this.rejectMessage(message, "INVALID_ENTITLEMENT_CONFIGURATION")
+      return {
+        err: "INVALID_ENTITLEMENT_CONFIGURATION",
+      }
     }
 
     return this.filterProcessableResolvedStates({
@@ -806,7 +778,7 @@ export class IngestionService {
   private async filterProcessableResolvedStates(params: {
     message: IngestionQueueMessage
     states: IngestionResolvedState[]
-  }): Promise<IngestionOutcome | IngestionResolvedState[]> {
+  }): Promise<Result<IngestionResolvedState[], IngestionRejectionReason>> {
     const { message, states } = params
     const matchingStates = filterMatchingResolvedStates({
       states,
@@ -822,7 +794,9 @@ export class IngestionService {
         } satisfies IngestionOutcome,
       })
 
-      return this.rejectMessage(message, "UNROUTABLE_EVENT")
+      return {
+        err: "UNROUTABLE_EVENT",
+      }
     }
 
     // before going to the DO let's validate the event itself has the property the meter is using
@@ -841,10 +815,14 @@ export class IngestionService {
         } satisfies IngestionOutcome,
       })
 
-      return this.rejectMessage(message, "INVALID_AGGREGATION_PROPERTIES")
+      return {
+        err: "INVALID_AGGREGATION_PROPERTIES",
+      }
     }
 
-    return processableStates
+    return {
+      val: processableStates,
+    }
   }
 
   private async applyResolvedStates(params: ApplyResolvedStatesParams): Promise<void> {
@@ -874,7 +852,14 @@ export class IngestionService {
       return null
     }
 
-    const stub = this.getEntitlementWindowStub({
+    const periodEndAt = computeResolvedStatePeriodEndAt(state, message.timestamp)
+
+    if (periodEndAt === null) {
+      this.logger.debug("period end doesn't exist")
+      return null
+    }
+
+    const stub = this.entitlementWindowClient.getEntitlementWindowStub({
       customerId,
       periodKey,
       projectId,
@@ -899,24 +884,9 @@ export class IngestionService {
       limit: state.limit,
       overageStrategy: state.overageStrategy,
       enforceLimit,
+      now: message.receivedAt, // we avoid clock skews
+      periodEndAt,
     })
-  }
-
-  private getEntitlementWindowStub(params: {
-    customerId: string
-    periodKey: string
-    projectId: string
-    streamId: string
-  }): EntitlementWindowStub {
-    return this.env.entitlementwindow.getByName(
-      buildIngestionWindowName({
-        appEnv: this.env.APP_ENV,
-        customerId: params.customerId,
-        periodKey: params.periodKey,
-        projectId: params.projectId,
-        streamId: params.streamId,
-      })
-    )
   }
 
   private logRejectedMessage(params: {
@@ -995,54 +965,12 @@ export class IngestionService {
       properties: params.message.properties,
     })
 
-    await this.env.PIPELINE_EVENTS.send([pipelineEvent])
+    await this.pipelineEvents.send([pipelineEvent])
   }
 }
 
 function toEventDate(timestamp: number): string {
   return new Date(timestamp).toISOString().slice(0, 10)
-}
-
-function parseBatchMessages(
-  batch: MessageBatch<IngestionQueueMessage>,
-  logger: AppLogger
-): IngestionQueueConsumerMessage[] {
-  return batch.messages.flatMap((message) => {
-    const parsed = ingestionQueueMessageSchema.safeParse(message.body)
-
-    if (!parsed.success) {
-      // this shouldn't happen since the ingestion endpoint validates the payload
-      // just in case
-      logger.error("dropping malformed ingestion queue message", {
-        errors: parsed.error.issues,
-      })
-      message.ack()
-      return []
-    }
-
-    return [
-      {
-        ack: message.ack.bind(message),
-        body: parsed.data,
-        retry: message.retry.bind(message),
-      } satisfies IngestionQueueConsumerMessage,
-    ]
-  })
-}
-
-function ackDuplicateMessages(
-  duplicates: IngestionQueueConsumerMessage[],
-  logger: AppLogger
-): void {
-  for (const duplicate of duplicates) {
-    logger.debug("dropping duplicate ingestion queue message from same batch", {
-      projectId: duplicate.body.projectId,
-      customerId: duplicate.body.customerId,
-      eventId: duplicate.body.id,
-      idempotencyKey: duplicate.body.idempotencyKey,
-    })
-    duplicate.ack()
-  }
 }
 
 function hasUsageGrant(candidateGrants: IngestionCandidateGrants): boolean {
@@ -1084,12 +1012,19 @@ export async function consumeIngestionBatch(
 
   const service = new IngestionService({
     customerService: services.customerService,
+    entitlementWindowClient: new CloudflareEntitlementWindowClient(env),
     grantsManager: services.grantsManager,
-    env,
+    idempotencyClient: new CloudflareIdempotencyClient(env),
     logger,
+    pipelineEvents: env.PIPELINE_EVENTS,
   })
 
-  await service.consumeBatch(batch)
+  const consumer = new IngestionQueueConsumer({
+    logger,
+    processor: service,
+  })
+
+  await consumer.consumeBatch(batch)
 
   await logger.flush().catch((error: Error) => {
     logger.emit("error", "Failed to flush ingestion queue logger", {
@@ -1098,92 +1033,6 @@ export async function consumeIngestionBatch(
   })
 }
 
-function groupMessagesByCustomer(messages: IngestionQueueConsumerMessage[]): CustomerQueueGroup[] {
-  const groups = new Map<string, CustomerQueueGroup>()
-
-  for (const message of messages) {
-    const key = `${message.body.projectId}:${message.body.customerId}`
-    const existing = groups.get(key)
-
-    if (existing) {
-      existing.messages.push(message)
-      continue
-    }
-
-    groups.set(key, {
-      projectId: message.body.projectId,
-      customerId: message.body.customerId,
-      messages: [message],
-    })
-  }
-
-  return [...groups.values()].map((group) => ({
-    ...group,
-    messages: group.messages.sort(sortQueuedMessages),
-  }))
-}
-
-function createQueueServices(params: {
-  env: Env
-  executionCtx: ExecutionContext
-  logger: AppLogger
-}): {
-  customerService: CustomerService
-  grantsManager: GrantsManager
-} {
-  const db = createConnection({
-    env: params.env.APP_ENV,
-    primaryDatabaseUrl: params.env.DATABASE_URL,
-    read1DatabaseUrl: params.env.DATABASE_READ1_URL,
-    read2DatabaseUrl: params.env.DATABASE_READ2_URL,
-    logger: params.env.DRIZZLE_LOG.toString() === "true",
-    singleton: false,
-  })
-  const metrics = new NoopMetrics()
-  const waitUntil = (promise: Promise<unknown>) => params.executionCtx.waitUntil(promise)
-  const cacheService = new CacheService(
-    {
-      waitUntil,
-    },
-    metrics,
-    false
-  )
-  const cloudflareCacheStore =
-    params.env.CLOUDFLARE_ZONE_ID &&
-    params.env.CLOUDFLARE_API_TOKEN &&
-    params.env.CLOUDFLARE_CACHE_DOMAIN &&
-    params.env.CLOUDFLARE_ZONE_ID !== "" &&
-    params.env.CLOUDFLARE_API_TOKEN !== "" &&
-    params.env.CLOUDFLARE_CACHE_DOMAIN !== ""
-      ? new CloudflareStore({
-          cloudflareApiKey: params.env.CLOUDFLARE_API_TOKEN,
-          zoneId: params.env.CLOUDFLARE_ZONE_ID,
-          domain: params.env.CLOUDFLARE_CACHE_DOMAIN,
-          cacheBuster: "v2",
-        })
-      : undefined
-
-  cacheService.init(cloudflareCacheStore ? [cloudflareCacheStore] : [])
-  const cache = cacheService.getCache()
-  const analytics = new Analytics({
-    emit: true,
-    tinybirdToken: params.env.TINYBIRD_TOKEN,
-    tinybirdUrl: params.env.TINYBIRD_URL,
-    logger: params.logger,
-  })
-
-  return {
-    customerService: new CustomerService({
-      db,
-      logger: params.logger,
-      analytics,
-      waitUntil,
-      cache,
-      metrics,
-    }),
-    grantsManager: new GrantsManager({
-      db,
-      logger: params.logger,
-    }),
-  }
+function sortIngestionMessages(left: IngestionQueueMessage, right: IngestionQueueMessage): number {
+  return left.timestamp - right.timestamp || left.idempotencyKey.localeCompare(right.idempotencyKey)
 }

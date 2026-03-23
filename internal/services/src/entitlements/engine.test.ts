@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  deriveMeterKey,
   EventTimestampTooFarInFutureError,
   EventTimestampTooOldError,
   type Fact,
@@ -132,10 +133,33 @@ describe("computePeriodKey", () => {
   })
 })
 
+describe("deriveMeterKey", () => {
+  it("only includes defined meter config parts in the key", () => {
+    const meterConfig: MeterConfig = {
+      eventId: "meter_projects",
+      eventSlug: "project_event",
+      aggregationMethod: "sum",
+      aggregationField: "projects",
+    }
+
+    expect(deriveMeterKey(meterConfig)).toBe("slug=project_event|method=sum|field=projects")
+  })
+})
+
 describe("AsyncMeterAggregationEngine", () => {
   it("aggregates sum, count, max, and latest meters for matching events", async () => {
     const storage = new InMemoryStorageAdapter()
-    const engine = new AsyncMeterAggregationEngine(createMeterConfigs(), storage)
+    const meterConfigs = createMeterConfigs()
+    const meterSum = meterConfigs[0]
+    const meterCount = meterConfigs[1]
+    const meterMax = meterConfigs[2]
+    const meterLatest = meterConfigs[3]
+
+    if (!meterSum || !meterCount || !meterMax || !meterLatest) {
+      throw new Error("Missing default meter configs for test")
+    }
+
+    const engine = new AsyncMeterAggregationEngine(meterConfigs, storage, Date.now())
     const firstEvent = createPurchaseEvent({
       id: "evt_1",
       timestamp: Date.now() - 1_000,
@@ -148,17 +172,17 @@ describe("AsyncMeterAggregationEngine", () => {
     })
 
     expect(await engine.applyEvent(firstEvent)).toEqual<Fact[]>([
-      { eventId: "evt_1", meterId: "meter_sum", delta: 10, valueAfter: 10 },
-      { eventId: "evt_1", meterId: "meter_count", delta: 1, valueAfter: 1 },
-      { eventId: "evt_1", meterId: "meter_max", delta: 10, valueAfter: 10 },
-      { eventId: "evt_1", meterId: "meter_latest", delta: 10, valueAfter: 10 },
+      { eventId: "evt_1", meterKey: deriveMeterKey(meterSum), delta: 10, valueAfter: 10 },
+      { eventId: "evt_1", meterKey: deriveMeterKey(meterCount), delta: 1, valueAfter: 1 },
+      { eventId: "evt_1", meterKey: deriveMeterKey(meterMax), delta: 10, valueAfter: 10 },
+      { eventId: "evt_1", meterKey: deriveMeterKey(meterLatest), delta: 10, valueAfter: 10 },
     ])
 
     expect(await engine.applyEvent(secondEvent)).toEqual<Fact[]>([
-      { eventId: "evt_2", meterId: "meter_sum", delta: 4, valueAfter: 14 },
-      { eventId: "evt_2", meterId: "meter_count", delta: 1, valueAfter: 2 },
-      { eventId: "evt_2", meterId: "meter_max", delta: 0, valueAfter: 10 },
-      { eventId: "evt_2", meterId: "meter_latest", delta: -6, valueAfter: 4 },
+      { eventId: "evt_2", meterKey: deriveMeterKey(meterSum), delta: 4, valueAfter: 14 },
+      { eventId: "evt_2", meterKey: deriveMeterKey(meterCount), delta: 1, valueAfter: 2 },
+      { eventId: "evt_2", meterKey: deriveMeterKey(meterMax), delta: 0, valueAfter: 10 },
+      { eventId: "evt_2", meterKey: deriveMeterKey(meterLatest), delta: -6, valueAfter: 4 },
     ])
   })
 
@@ -173,7 +197,8 @@ describe("AsyncMeterAggregationEngine", () => {
           aggregationField: "amount",
         },
       ],
-      storage
+      storage,
+      Date.now()
     )
 
     await expect(
@@ -190,15 +215,15 @@ describe("AsyncMeterAggregationEngine", () => {
 
   it("counts events without requiring aggregationField or numeric payload values", async () => {
     const storage = new InMemoryStorageAdapter()
+    const meterConfig: MeterConfig = {
+      eventId: "meter_count",
+      eventSlug: "purchase",
+      aggregationMethod: "count",
+    }
     const engine = new AsyncMeterAggregationEngine(
-      [
-        {
-          eventId: "meter_count",
-          eventSlug: "purchase",
-          aggregationMethod: "count",
-        },
-      ],
-      storage
+      [meterConfig],
+      storage,
+      Date.now()
     )
 
     const facts = await engine.applyEvent({
@@ -209,11 +234,49 @@ describe("AsyncMeterAggregationEngine", () => {
     })
 
     expect(facts).toEqual([
-      { eventId: "evt_count_empty_payload", meterId: "meter_count", delta: 1, valueAfter: 1 },
+      {
+        eventId: "evt_count_empty_payload",
+        meterKey: deriveMeterKey(meterConfig),
+        delta: 1,
+        valueAfter: 1,
+      },
     ])
   })
 
-  it("throws when numeric aggregation field is not a finite number", async () => {
+  it("accepts parseable numeric strings for numeric aggregation fields", async () => {
+    const storage = new InMemoryStorageAdapter()
+    const meterConfig: MeterConfig = {
+      eventId: "meter_latest",
+      eventSlug: "purchase",
+      aggregationMethod: "latest",
+      aggregationField: "amount",
+    }
+    const engine = new AsyncMeterAggregationEngine(
+      [meterConfig],
+      storage,
+      Date.now()
+    )
+
+    const facts = await engine.applyEvent({
+      id: "evt_numeric_string_amount",
+      slug: "purchase",
+      timestamp: Date.now(),
+      properties: {
+        amount: "10.5",
+      },
+    })
+
+    expect(facts).toEqual([
+      {
+        eventId: "evt_numeric_string_amount",
+        meterKey: deriveMeterKey(meterConfig),
+        delta: 10.5,
+        valueAfter: 10.5,
+      },
+    ])
+  })
+
+  it("throws when numeric aggregation field is not a parseable finite number", async () => {
     const storage = new InMemoryStorageAdapter()
     const engine = new AsyncMeterAggregationEngine(
       [
@@ -224,7 +287,8 @@ describe("AsyncMeterAggregationEngine", () => {
           aggregationField: "amount",
         },
       ],
-      storage
+      storage,
+      Date.now()
     )
 
     await expect(
@@ -233,7 +297,7 @@ describe("AsyncMeterAggregationEngine", () => {
         slug: "purchase",
         timestamp: Date.now(),
         properties: {
-          amount: "10",
+          amount: "not_a_number",
         },
       })
     ).rejects.toThrow("requires a finite numeric value")
@@ -243,16 +307,16 @@ describe("AsyncMeterAggregationEngine", () => {
 
   it("does not let a stale LATEST event overwrite a newer value", async () => {
     const storage = new InMemoryStorageAdapter()
+    const meterConfig: MeterConfig = {
+      eventId: "meter_latest",
+      eventSlug: "purchase",
+      aggregationMethod: "latest",
+      aggregationField: "amount",
+    }
     const engine = new AsyncMeterAggregationEngine(
-      [
-        {
-          eventId: "meter_latest",
-          eventSlug: "purchase",
-          aggregationMethod: "latest",
-          aggregationField: "amount",
-        },
-      ],
-      storage
+      [meterConfig],
+      storage,
+      Date.now()
     )
 
     const now = Date.now()
@@ -274,13 +338,13 @@ describe("AsyncMeterAggregationEngine", () => {
     )
 
     expect(facts).toEqual([
-      { eventId: "evt_old", meterId: "meter_latest", delta: 0, valueAfter: 10 },
+      { eventId: "evt_old", meterKey: deriveMeterKey(meterConfig), delta: 0, valueAfter: 10 },
     ])
   })
 
   it("does not persist sync state when pre-persist validation throws", () => {
     const storage = new InMemoryStorageAdapter()
-    const engine = new AsyncMeterAggregationEngine(createMeterConfigs(), storage)
+    const engine = new AsyncMeterAggregationEngine(createMeterConfigs(), storage, Date.now())
 
     expect(() =>
       engine.applyEventSync(
@@ -299,7 +363,7 @@ describe("AsyncMeterAggregationEngine", () => {
 
   it("does not persist async state when pre-persist validation rejects", async () => {
     const storage = new InMemoryStorageAdapter()
-    const engine = new AsyncMeterAggregationEngine(createMeterConfigs(), storage)
+    const engine = new AsyncMeterAggregationEngine(createMeterConfigs(), storage, Date.now())
 
     await expect(
       engine.applyEvent(

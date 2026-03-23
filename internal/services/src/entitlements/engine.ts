@@ -1,5 +1,5 @@
 import type { Fact, MeterConfig, RawEvent, StorageAdapter, SyncStorageAdapter } from "./domain"
-import { validateEventTimestamp } from "./domain"
+import { deriveMeterKey, validateEventTimestamp } from "./domain"
 
 interface MeterStateSnapshot {
   value: number
@@ -24,12 +24,18 @@ const METER_STATE_UPDATED_AT_PREFIX = "meter-state-updated-at:"
 
 export class AsyncMeterAggregationEngine {
   constructor(
+    // we purposfully support an array of meters for being future proof
+    // later one feature can support multiple meters
     private readonly meterConfigs: MeterConfig[],
-    private readonly storage: StorageAdapter
-  ) {}
+    private readonly storage: StorageAdapter,
+    private readonly now: number
+  ) {
+    this.now = now
+  }
 
   async applyEvent(event: RawEvent, options?: ApplyEventOptions): Promise<Fact[]> {
-    validateEventTimestamp(event.timestamp, Date.now())
+    // validate now again with a global now to avoid clock skews
+    validateEventTimestamp(event.timestamp, this.now)
 
     const applicableMeters = this.meterConfigs.filter(
       (meterConfig) => meterConfig.eventSlug === event.slug
@@ -41,8 +47,9 @@ export class AsyncMeterAggregationEngine {
 
     const pendingUpdates = await Promise.all(
       applicableMeters.map(async (meterConfig) => {
-        const currentState = await this.readCurrentState(meterConfig.eventId)
-        return this.computePendingUpdate(meterConfig, event, currentState)
+        const meterKey = deriveMeterKey(meterConfig)
+        const currentState = await this.readCurrentState(meterKey)
+        return this.computePendingUpdate(meterConfig, meterKey, event, currentState)
       })
     )
 
@@ -54,7 +61,7 @@ export class AsyncMeterAggregationEngine {
 
     await Promise.all(
       pendingUpdates.map(async ({ fact, nextState }) => {
-        await this.writeCurrentState(fact.meterId, nextState)
+        await this.writeCurrentState(fact.meterKey, nextState)
       })
     )
 
@@ -73,8 +80,9 @@ export class AsyncMeterAggregationEngine {
     }
 
     const pendingUpdates = applicableMeters.map((meterConfig) => {
-      const currentState = this.readCurrentStateSync(meterConfig.eventId)
-      return this.computePendingUpdate(meterConfig, event, currentState)
+      const meterKey = deriveMeterKey(meterConfig)
+      const currentState = this.readCurrentStateSync(meterKey)
+      return this.computePendingUpdate(meterConfig, meterKey, event, currentState)
     })
 
     const facts = pendingUpdates.map(({ fact }) => fact)
@@ -84,40 +92,40 @@ export class AsyncMeterAggregationEngine {
     }
 
     for (const { fact, nextState } of pendingUpdates) {
-      this.writeCurrentStateSync(fact.meterId, nextState)
+      this.writeCurrentStateSync(fact.meterKey, nextState)
     }
 
     return facts
   }
 
-  private async readCurrentState(meterId: string): Promise<MeterStateSnapshot | null> {
+  private async readCurrentState(meterKey: string): Promise<MeterStateSnapshot | null> {
     const [value, updatedAt] = await Promise.all([
-      this.storage.get<number>(this.makeStateKey(meterId)),
-      this.storage.get<number>(this.makeUpdatedAtKey(meterId)),
+      this.storage.get<number>(this.makeStateKey(meterKey)),
+      this.storage.get<number>(this.makeUpdatedAtKey(meterKey)),
     ])
 
     return this.toMeterStateSnapshot(value, updatedAt)
   }
 
-  private readCurrentStateSync(meterId: string): MeterStateSnapshot | null {
+  private readCurrentStateSync(meterKey: string): MeterStateSnapshot | null {
     const syncStorage = this.getSyncStorage()
-    const value = syncStorage.getSync<number>(this.makeStateKey(meterId))
-    const updatedAt = syncStorage.getSync<number>(this.makeUpdatedAtKey(meterId))
+    const value = syncStorage.getSync<number>(this.makeStateKey(meterKey))
+    const updatedAt = syncStorage.getSync<number>(this.makeUpdatedAtKey(meterKey))
 
     return this.toMeterStateSnapshot(value, updatedAt)
   }
 
-  private async writeCurrentState(meterId: string, state: MeterStateSnapshot): Promise<void> {
+  private async writeCurrentState(meterKey: string, state: MeterStateSnapshot): Promise<void> {
     await Promise.all([
-      this.storage.put(this.makeStateKey(meterId), state.value),
-      this.storage.put(this.makeUpdatedAtKey(meterId), state.updatedAt),
+      this.storage.put(this.makeStateKey(meterKey), state.value),
+      this.storage.put(this.makeUpdatedAtKey(meterKey), state.updatedAt),
     ])
   }
 
-  private writeCurrentStateSync(meterId: string, state: MeterStateSnapshot): void {
+  private writeCurrentStateSync(meterKey: string, state: MeterStateSnapshot): void {
     const syncStorage = this.getSyncStorage()
-    syncStorage.putSync(this.makeStateKey(meterId), state.value)
-    syncStorage.putSync(this.makeUpdatedAtKey(meterId), state.updatedAt)
+    syncStorage.putSync(this.makeStateKey(meterKey), state.value)
+    syncStorage.putSync(this.makeUpdatedAtKey(meterKey), state.updatedAt)
   }
 
   private toMeterStateSnapshot(
@@ -150,6 +158,7 @@ export class AsyncMeterAggregationEngine {
 
   private computePendingUpdate(
     meterConfig: MeterConfig,
+    meterKey: string,
     event: RawEvent,
     currentState: MeterStateSnapshot | null
   ): PendingUpdate {
@@ -163,7 +172,7 @@ export class AsyncMeterAggregationEngine {
         return {
           fact: {
             eventId: event.id,
-            meterId: meterConfig.eventId,
+            meterKey,
             delta: 1,
             valueAfter: nextValue,
           },
@@ -182,7 +191,7 @@ export class AsyncMeterAggregationEngine {
         return {
           fact: {
             eventId: event.id,
-            meterId: meterConfig.eventId,
+            meterKey,
             delta: numericValue,
             valueAfter: nextValue,
           },
@@ -202,7 +211,7 @@ export class AsyncMeterAggregationEngine {
         return {
           fact: {
             eventId: event.id,
-            meterId: meterConfig.eventId,
+            meterKey,
             delta: nextValue - previousValue,
             valueAfter: nextValue,
           },
@@ -220,7 +229,7 @@ export class AsyncMeterAggregationEngine {
           return {
             fact: {
               eventId: event.id,
-              meterId: meterConfig.eventId,
+              meterKey,
               delta: 0,
               valueAfter: previousValue,
             },
@@ -234,7 +243,7 @@ export class AsyncMeterAggregationEngine {
         return {
           fact: {
             eventId: event.id,
-            meterId: meterConfig.eventId,
+            meterKey,
             delta: numericValue - previousValue,
             valueAfter: numericValue,
           },
@@ -259,24 +268,46 @@ export class AsyncMeterAggregationEngine {
 
     const rawValue = event.properties[field]
 
-    if (typeof rawValue !== "number" || !Number.isFinite(rawValue)) {
+    const numericValue = parseFiniteNumericValue(rawValue)
+
+    if (numericValue === null) {
       throw new Error(
         `Meter ${meterConfig.eventId} requires a finite numeric value at properties.${field}`
       )
     }
 
-    return rawValue
+    return numericValue
   }
 
   private assertUnsupportedAggregationMethod(_aggregationMethod: never): never {
     throw new Error("Unsupported aggregation method")
   }
 
-  private makeStateKey(meterId: string): string {
-    return `${METER_STATE_PREFIX}${meterId}`
+  private makeStateKey(meterKey: string): string {
+    return `${METER_STATE_PREFIX}${meterKey}`
   }
 
-  private makeUpdatedAtKey(meterId: string): string {
-    return `${METER_STATE_UPDATED_AT_PREFIX}${meterId}`
+  private makeUpdatedAtKey(meterKey: string): string {
+    return `${METER_STATE_UPDATED_AT_PREFIX}${meterKey}`
   }
+}
+
+function parseFiniteNumericValue(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null
+  }
+
+  if (typeof value !== "string") {
+    return null
+  }
+
+  const trimmedValue = value.trim()
+
+  if (trimmedValue.length === 0) {
+    return null
+  }
+
+  const parsedValue = Number(trimmedValue)
+
+  return Number.isFinite(parsedValue) ? parsedValue : null
 }

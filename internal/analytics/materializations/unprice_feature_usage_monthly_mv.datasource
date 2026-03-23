@@ -6,13 +6,10 @@ SCHEMA >
     `project_id` String,
     `customer_id` String,
     `feature_slug` LowCardinality(String),
-    `max` AggregateFunction(max, Decimal64(4)),
-    `count` AggregateFunction(count),
-    `sum` AggregateFunction(sum, Decimal64(4)),
-    `latest` AggregateFunction(argMax, Decimal64(4), Int64),
-    `last_id` AggregateFunction(argMax, String, Int64)
+    `period_key` String,
+    `value` AggregateFunction(argMax, Decimal64(4), Int64),
 
 ENGINE AggregatingMergeTree
-ENGINE_PARTITION_KEY toYear(date)
-ENGINE_SORTING_KEY (project_id, customer_id, feature_slug, date)
-ENGINE_TTL date + INTERVAL 5 YEAR
+ENGINE_PARTITION_KEY toYYYYMM(date)
+ENGINE_SORTING_KEY (project_id, customer_id, period_key, feature_slug, date)
+ENGINE_TTL date + INTERVAL 6 MONTH

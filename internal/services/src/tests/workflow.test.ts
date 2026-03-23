@@ -115,9 +115,6 @@ describe("Golden Scenario - Customer Journey", () => {
     mockAnalytics = {
       ingestFeaturesVerification: vi.fn().mockResolvedValue({ successful_rows: 1 }),
       ingestFeaturesUsage: vi.fn().mockResolvedValue({ successful_rows: 1 }),
-      getFeaturesUsageCursor: vi
-        .fn()
-        .mockResolvedValue(Ok({ usage: 0, lastRecordId: "rec_initial" })),
       getBillingUsage: vi.fn().mockResolvedValue({ data: [] }),
     } as unknown as Analytics
 

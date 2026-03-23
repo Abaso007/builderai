@@ -1,4 +1,3 @@
-import { PREDEFINED_LAKEHOUSE_QUERIES } from "@unprice/lakehouse"
 import { TABLE_CONFIG, type TableSource } from "./lakehouse-constants"
 import type { LakehouseFilePlan } from "./sqlrooms-store"
 
@@ -76,16 +75,7 @@ export function computeExpirationMs(rawExpiration: unknown, ttlSeconds: unknown)
   return null
 }
 
-export function selectInitialQuery(tables: string[]): string {
-  if (tables.includes("usage"))
-    return tables.includes("metadata")
-      ? PREDEFINED_LAKEHOUSE_QUERIES.allUsage.query
-      : PREDEFINED_LAKEHOUSE_QUERIES.usageByFeature.query
-  if (tables.includes("verifications"))
-    return PREDEFINED_LAKEHOUSE_QUERIES.verificationByFeature.query
-  if (tables.includes("metadata")) return PREDEFINED_LAKEHOUSE_QUERIES.metadataRaw.query
-  if (tables.includes("entitlement_snapshots"))
-    return PREDEFINED_LAKEHOUSE_QUERIES.entitlementSnapshotsRaw.query
+export function selectInitialQuery(_tables: string[]): string {
   return ""
 }
 

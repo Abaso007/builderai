@@ -16,7 +16,7 @@ export type MeterConfig = DbMeterConfig
 
 export interface Fact {
   eventId: string
-  meterId: string
+  meterKey: string
   delta: number
   valueAfter: number
 }
@@ -118,4 +118,39 @@ export function computePeriodKey(params: Parameters<typeof calculateCycleWindow>
   }
 
   return `${params.config.interval}:${cycle.start}`
+}
+
+export function deriveMeterKey(meterConfig: MeterConfig): string {
+  const aggregationField = meterConfig.aggregationField?.trim()
+  const sortedFilters = meterConfig.filters
+    ? Object.entries(meterConfig.filters).sort(([left], [right]) => left.localeCompare(right))
+    : []
+  const sortedGroupBy = meterConfig.groupBy ? [...meterConfig.groupBy].sort() : []
+
+  const keyParts = [
+    `slug=${encodeURIComponent(meterConfig.eventSlug)}`,
+    `method=${meterConfig.aggregationMethod}`,
+  ]
+
+  if (aggregationField) {
+    keyParts.push(`field=${encodeURIComponent(aggregationField)}`)
+  }
+
+  if (sortedFilters.length > 0) {
+    keyParts.push(
+      `filters=${sortedFilters
+        .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+        .join("&")}`
+    )
+  }
+
+  if (sortedGroupBy.length > 0) {
+    keyParts.push(`groupBy=${sortedGroupBy.map((value) => encodeURIComponent(value)).join(",")}`)
+  }
+
+  if (meterConfig.windowSize) {
+    keyParts.push(`window=${meterConfig.windowSize}`)
+  }
+
+  return keyParts.join("|")
 }

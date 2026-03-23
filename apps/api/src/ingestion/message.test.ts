@@ -1,5 +1,5 @@
 import type { Entitlement } from "@unprice/db/validators"
-import type { RawEvent } from "@unprice/services/entitlements"
+import type { IngestionResolvedState, RawEvent } from "@unprice/services/entitlements"
 import { describe, expect, it } from "vitest"
 import {
   type IngestionQueueConsumerMessage,
@@ -7,6 +7,7 @@ import {
   computeEntitlementPeriodKey,
   filterEntitlementsWithValidAggregationPayload,
   filterMatchingEntitlements,
+  filterResolvedStatesWithValidAggregationPayload,
   ingestionQueueMessageSchema,
   partitionDuplicateQueuedMessages,
   sortQueuedMessages,
@@ -177,19 +178,86 @@ describe("ingestion message helpers", () => {
         aggregationField: "label",
       },
     })
+    const parseableStringMeter = createEntitlement({
+      id: "ent_sum_string_valid",
+      meterConfig: {
+        eventId: "meter_sum_string_valid",
+        eventSlug: "api_keys",
+        aggregationMethod: "sum",
+        aggregationField: "amountText",
+      },
+    })
 
     expect(
       filterEntitlementsWithValidAggregationPayload({
-        entitlements: [countMeter, validSumMeter, missingFieldMeter, nonNumericMeter],
+        entitlements: [
+          countMeter,
+          validSumMeter,
+          missingFieldMeter,
+          nonNumericMeter,
+          parseableStringMeter,
+        ],
         event: {
           ...event,
           properties: {
             amount: 1,
+            amountText: "2.5",
             label: "one",
           },
         },
       }).map((entitlement) => entitlement.id)
-    ).toEqual(["ent_count", "ent_sum_valid"])
+    ).toEqual(["ent_count", "ent_sum_valid", "ent_sum_string_valid"])
+  })
+
+  it("accepts parseable numeric strings for resolved states and rejects non-numeric payloads", () => {
+    const countState = createResolvedState({
+      streamId: "stream_count",
+      meterConfig: {
+        eventId: "meter_count",
+        eventSlug: "tokens_used",
+        aggregationMethod: "count",
+      },
+    })
+    const validStringState = createResolvedState({
+      streamId: "stream_string_valid",
+      meterConfig: {
+        eventId: "meter_string_valid",
+        eventSlug: "tokens_used",
+        aggregationMethod: "sum",
+        aggregationField: "amount",
+      },
+    })
+    const validNumberState = createResolvedState({
+      streamId: "stream_number_valid",
+      meterConfig: {
+        eventId: "meter_number_valid",
+        eventSlug: "tokens_used",
+        aggregationMethod: "sum",
+        aggregationField: "tokens",
+      },
+    })
+    const invalidStringState = createResolvedState({
+      streamId: "stream_string_invalid",
+      meterConfig: {
+        eventId: "meter_string_invalid",
+        eventSlug: "tokens_used",
+        aggregationMethod: "sum",
+        aggregationField: "label",
+      },
+    })
+
+    expect(
+      filterResolvedStatesWithValidAggregationPayload({
+        states: [countState, validStringState, validNumberState, invalidStringState],
+        event: createRawEvent({
+          properties: {
+            amount: " 3.5 ",
+            tokens: 2,
+            label: "three",
+          },
+        }),
+      }).map((state) => state.streamId)
+    ).toEqual(["stream_count", "stream_string_valid", "stream_number_valid"])
   })
 
   it("sorts queued messages by timestamp and then idempotency key", () => {
@@ -363,6 +431,36 @@ function createEntitlement(overrides: Partial<Entitlement> = {}): Entitlement {
     metadata: overrides.metadata
       ? { ...defaults.metadata, ...overrides.metadata }
       : defaults.metadata,
+    resetConfig: overrides.resetConfig ?? defaults.resetConfig,
+  }
+}
+
+function createResolvedState(
+  overrides: Partial<IngestionResolvedState> = {}
+): IngestionResolvedState {
+  const defaults: IngestionResolvedState = {
+    activeGrantIds: ["grant_123"],
+    customerId: "cus_123",
+    featureSlug: "api_calls",
+    limit: 100,
+    meterConfig: {
+      eventId: "meter_123",
+      eventSlug: "tokens_used",
+      aggregationMethod: "sum",
+      aggregationField: "amount",
+    },
+    overageStrategy: "none",
+    projectId: "proj_123",
+    resetConfig: null,
+    streamEndAt: null,
+    streamId: "stream_123",
+    streamStartAt: Date.UTC(2026, 2, 18, 0, 0, 0),
+  }
+
+  return {
+    ...defaults,
+    ...overrides,
+    meterConfig: overrides.meterConfig ?? defaults.meterConfig,
     resetConfig: overrides.resetConfig ?? defaults.resetConfig,
   }
 }

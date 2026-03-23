@@ -17,8 +17,6 @@ export const QUICK_QUERY_KEYS: PredefinedLakehouseQueryKey[] = [
   "allUsage",
   "usageByFeature",
   "verificationByFeature",
-  "verificationWithMetadata",
-  "metadataRaw",
   "usageByTagKey",
 ]
 

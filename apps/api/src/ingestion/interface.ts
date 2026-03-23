@@ -5,7 +5,7 @@ import type {
   MeterConfig,
   OverageStrategy,
 } from "@unprice/db/validators"
-import type { IngestionQueueConsumerMessage } from "./message"
+import type { IngestionQueueConsumerMessage, IngestionQueueMessage } from "./message"
 
 export const EVENTS_SCHEMA_VERSION = getLakehouseSourceCurrentVersion("events")
 
@@ -32,6 +32,20 @@ export type IngestionSyncResult = {
   message?: string
   rejectionReason?: IngestionRejectionReason
   state: "processed" | "rejected"
+}
+
+export type IngestionMessageDisposition =
+  | {
+      action: "ack"
+    }
+  | {
+      action: "retry"
+      retryAfterSeconds?: number
+    }
+
+export type IngestionMessageProcessingResult = {
+  disposition: IngestionMessageDisposition
+  message: IngestionQueueMessage
 }
 
 export const FEATURE_VERIFICATION_STATUSES = [

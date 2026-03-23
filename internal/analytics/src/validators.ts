@@ -160,12 +160,11 @@ export const entitlementMeterFactSchemaV1 = z.object({
   idempotency_key: z.string(),
   project_id: z.string(),
   customer_id: z.string(),
-  entitlement_id: z.string(),
+  stream_id: z.string(),
   feature_slug: z.string(),
   period_key: z.string(),
   event_slug: z.string(),
   aggregation_method: z.string(),
-  meter_id: z.string(),
   timestamp: z.number().describe("timestamp of the ingested event"),
   created_at: z.number().describe("timestamp of when the fact row was created"),
   delta: z.number(),
@@ -382,9 +381,5 @@ export type FeaturesOverview = Awaited<ReturnType<Analytics["getFeaturesOverview
 export type FeaturesUsage = Awaited<ReturnType<Analytics["getFeaturesUsage"]>>["data"]
 export type PlansConversion = Awaited<ReturnType<Analytics["getPlansConversion"]>>["data"]
 export type Usage = Awaited<ReturnType<Analytics["getFeaturesUsagePeriod"]>>["data"]
-export type Verifications = Awaited<ReturnType<Analytics["getFeaturesVerifications"]>>["data"]
-export type VerificationRegions = Awaited<
-  ReturnType<Analytics["getFeaturesVerificationRegions"]>
->["data"]
 
 export type Stats = z.infer<typeof statsSchema>

@@ -9,10 +9,7 @@ SQL >
         project_id,
         {% if defined(customer_id) %} customer_id, {% end %}
         feature_slug,
-        countMerge(count) as count,
-        sumMerge(sum) as sum,
-        maxMerge(max) as max,
-        argMaxMerge(latest) as latest
+        argMaxMerge(value) as value
     FROM
     {% if defined(interval_days) %}
         {% if Int32(interval_days) > 180 %}

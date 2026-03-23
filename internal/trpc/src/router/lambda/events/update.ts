@@ -46,12 +46,18 @@ export const update = protectedProjectProcedure
       })
     }
 
+    const nextAvailableProperties = hasAvailableProperties
+      ? Array.from(
+          new Set([...(existingEvent.availableProperties ?? []), ...(availableProperties ?? [])])
+        )
+      : undefined
+
     const event = await opts.ctx.db
       .update(schema.events)
       .set({
         ...(name && { name }),
         ...(hasAvailableProperties && {
-          availableProperties: availableProperties?.length ? availableProperties : null,
+          availableProperties: nextAvailableProperties?.length ? nextAvailableProperties : null,
         }),
         updatedAtM: Date.now(),
       })
