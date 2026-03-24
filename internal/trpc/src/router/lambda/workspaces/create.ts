@@ -3,10 +3,7 @@ import { and, eq, sql } from "@unprice/db"
 import { members } from "@unprice/db/schema"
 import { workspaceInsertBase, workspaceSelectBase } from "@unprice/db/validators"
 import { z } from "zod"
-
-import { FEATURE_SLUGS } from "@unprice/config"
 import { protectedProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
 import { createWorkspace } from "#utils/shared"
 
 export const create = protectedProcedure
@@ -23,7 +20,6 @@ export const create = protectedProcedure
   )
   .mutation(async (opts) => {
     const userId = opts.ctx.userId
-    const featureSlug = FEATURE_SLUGS.ACCESS_PRO.SLUG
 
     let isPersonal = true
 
@@ -38,10 +34,8 @@ export const create = protectedProcedure
     if (countMembers > 0) {
       isPersonal = false
     }
-
-    // check if the customer has access to the feature when is not a personal workspace
     if (!isPersonal) {
-      const customer = await opts.ctx.db.query.customers.findFirst({
+      const _customer = await opts.ctx.db.query.customers.findFirst({
         with: {
           project: {
             with: {
@@ -51,21 +45,6 @@ export const create = protectedProcedure
         },
         where: (customer, { eq }) => eq(customer.id, opts.input.unPriceCustomerId),
       })
-
-      // check if the customer has access to the feature
-      const result = await featureGuard({
-        customerId: opts.input.unPriceCustomerId,
-        featureSlug,
-        isMain: customer?.project.workspace.isMain,
-        action: "create",
-      })
-
-      if (!result.success) {
-        throw new TRPCError({
-          code: "UNAUTHORIZED",
-          message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-        })
-      }
     }
 
     const newWorkspace = await createWorkspace({

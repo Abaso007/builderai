@@ -1,12 +1,9 @@
 import { TRPCError } from "@trpc/server"
-import { FEATURE_SLUGS } from "@unprice/config"
 import * as schema from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import { featureInsertBaseSchema, featureSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
-import { reportUsageFeature } from "#utils/shared"
 
 export const create = protectedProjectProcedure
   .input(featureInsertBaseSchema)
@@ -14,21 +11,6 @@ export const create = protectedProjectProcedure
   .mutation(async (opts) => {
     const { description, slug, title, unitOfMeasure, meterConfig } = opts.input
     const project = opts.ctx.project
-
-    // check if the customer has access to the feature
-    const result = await featureGuard({
-      customerId: project.workspace.unPriceCustomerId,
-      featureSlug: FEATURE_SLUGS.PLANS.SLUG,
-      isMain: project.workspace.isMain,
-      action: "create",
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
 
     const featureId = newId("feature")
     const featureData = await opts.ctx.db
@@ -51,20 +33,6 @@ export const create = protectedProjectProcedure
         message: "Error creating feature",
       })
     }
-
-    opts.ctx.waitUntil(
-      Promise.all([
-        result.featureType !== "flat" &&
-          reportUsageFeature({
-            customerId: project.workspace.unPriceCustomerId,
-            featureSlug: "plans",
-            usage: 1,
-            isMain: project.workspace.isMain,
-            action: "create",
-            metadata: { module: "feature" },
-          }),
-      ])
-    )
 
     return {
       feature: featureData,

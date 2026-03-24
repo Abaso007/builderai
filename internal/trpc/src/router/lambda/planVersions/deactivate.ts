@@ -5,7 +5,6 @@ import { planVersionSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 
 import { protectedProjectProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
 
 export const deactivate = protectedProjectProcedure
   .input(
@@ -19,24 +18,9 @@ export const deactivate = protectedProjectProcedure
   .mutation(async (opts) => {
     const { id } = opts.input
     const project = opts.ctx.project
-    const workspace = opts.ctx.project.workspace
+    const _workspace = opts.ctx.project.workspace
     // only owner and admin can deactivate a plan version
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
-
-    const result = await featureGuard({
-      customerId: workspace.unPriceCustomerId,
-      featureSlug: "plans",
-      isMain: workspace.isMain,
-      action: "deactivate",
-      metadata: { module: "planVersion" },
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
 
     const planVersionData = await opts.ctx.db.query.versions.findFirst({
       where: (version, { and, eq }) => and(eq(version.id, id), eq(version.projectId, project.id)),

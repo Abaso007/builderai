@@ -1,5 +1,3 @@
-import { TRPCError } from "@trpc/server"
-import { FEATURE_SLUGS } from "@unprice/config"
 import { and, eq } from "@unprice/db"
 import { domains } from "@unprice/db/schema"
 import {
@@ -11,7 +9,6 @@ import { Vercel } from "@unprice/vercel"
 import { z } from "zod"
 import { env } from "#env"
 import { protectedWorkspaceProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
 
 export const verify = protectedWorkspaceProcedure
   .input(z.object({ domain: z.string() }))
@@ -23,24 +20,7 @@ export const verify = protectedWorkspaceProcedure
   )
   .query(async (opts) => {
     let status: DomainVerificationStatusProps = "Valid Configuration"
-    const workspace = opts.ctx.workspace
-    const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.DOMAINS.SLUG
-
-    // check if the customer has access to the feature
-    const result = await featureGuard({
-      customerId,
-      featureSlug,
-      isMain: workspace.isMain,
-      action: "verify",
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
+    const _workspace = opts.ctx.workspace
 
     const vercel = new Vercel({
       accessToken: env.VERCEL_TOKEN,

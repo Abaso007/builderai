@@ -3,11 +3,8 @@ import { eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
 import { projectSelectBaseSchema, transferToPersonalProjectSchema } from "@unprice/db/validators"
 import { z } from "zod"
-
-import { FEATURE_SLUGS } from "@unprice/config"
 import { protectedWorkspaceProcedure } from "#trpc"
 import { projectWorkspaceGuard } from "#utils"
-import { featureGuard } from "#utils/feature-guard"
 
 export const transferToPersonal = protectedWorkspaceProcedure
   .input(transferToPersonalProjectSchema)
@@ -20,27 +17,10 @@ export const transferToPersonal = protectedWorkspaceProcedure
   .mutation(async (opts) => {
     const { slug: projectSlug } = opts.input
     const userId = opts.ctx.userId
-    const workspace = opts.ctx.workspace
-    const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.PROJECTS.SLUG
+    const _workspace = opts.ctx.workspace
 
     // only owner can transfer a project to personal
     opts.ctx.verifyRole(["OWNER"])
-
-    // check if the customer has access to the feature
-    const result = await featureGuard({
-      customerId,
-      featureSlug,
-      isMain: workspace.isMain,
-      action: "transferToPersonal",
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
 
     // get the project data
     const { project: projectData } = await projectWorkspaceGuard({

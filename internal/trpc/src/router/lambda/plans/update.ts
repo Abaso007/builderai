@@ -4,10 +4,7 @@ import { z } from "zod"
 import { and, eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
 import { planInsertBaseSchema, planSelectBaseSchema } from "@unprice/db/validators"
-
-import { FEATURE_SLUGS } from "@unprice/config"
 import { protectedProjectProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
 
 export const update = protectedProjectProcedure
   .input(planInsertBaseSchema.required({ id: true }))
@@ -19,26 +16,10 @@ export const update = protectedProjectProcedure
   .mutation(async (opts) => {
     const { id, description, active, title, defaultPlan, enterprisePlan } = opts.input
     const project = opts.ctx.project
-    const workspace = opts.ctx.project.workspace
-    const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.PLANS.SLUG
+    const _workspace = opts.ctx.project.workspace
 
     // only owner and admin can update a plan
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
-
-    const result = await featureGuard({
-      customerId,
-      featureSlug,
-      isMain: workspace.isMain,
-      action: "update",
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
 
     if (defaultPlan && enterprisePlan) {
       throw new TRPCError({

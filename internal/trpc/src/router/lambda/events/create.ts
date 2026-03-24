@@ -1,11 +1,9 @@
 import { TRPCError } from "@trpc/server"
-import { FEATURE_SLUGS } from "@unprice/config"
 import * as schema from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import { eventInsertBaseSchema, eventSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
 
 export const create = protectedProjectProcedure
   .input(eventInsertBaseSchema)
@@ -15,21 +13,6 @@ export const create = protectedProjectProcedure
     const project = opts.ctx.project
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
-
-    const result = await featureGuard({
-      customerId: project.workspace.unPriceCustomerId,
-      featureSlug: FEATURE_SLUGS.EVENTS.SLUG,
-      isMain: project.workspace.isMain,
-      action: "create",
-      metadata: { module: "event" },
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
 
     const event = await opts.ctx.db
       .insert(schema.events)

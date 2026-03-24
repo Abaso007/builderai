@@ -1,5 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import { FEATURE_SLUGS } from "@unprice/config"
 import { domains } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import { domainCreateBaseSchema, domainSelectBaseSchema } from "@unprice/db/validators"
@@ -7,8 +6,6 @@ import { Vercel } from "@unprice/vercel"
 import { z } from "zod"
 import { env } from "#env"
 import { protectedWorkspaceProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
-import { reportUsageFeature } from "#utils/shared"
 
 export const create = protectedWorkspaceProcedure
   .input(domainCreateBaseSchema.pick({ name: true }))
@@ -16,23 +13,8 @@ export const create = protectedWorkspaceProcedure
   .mutation(async (opts) => {
     const workspace = opts.ctx.workspace
     const domain = opts.input.name
-    const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.DOMAINS.SLUG
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
-
-    const result = await featureGuard({
-      customerId,
-      featureSlug,
-      isMain: workspace.isMain,
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
 
     const domainExist = await opts.ctx.db.query.domains.findFirst({
       where: (d, { eq }) => eq(d.name, domain),
@@ -86,19 +68,6 @@ export const create = protectedWorkspaceProcedure
         code: "INTERNAL_SERVER_ERROR",
         message: "Error adding domain",
       })
-    }
-
-    // avoid reporting usage for flat features
-    if (result.featureType !== "flat") {
-      opts.ctx.waitUntil(
-        reportUsageFeature({
-          customerId,
-          featureSlug,
-          usage: 1,
-          isMain: workspace.isMain,
-          action: "create",
-        })
-      )
     }
 
     return { domain: domainData }

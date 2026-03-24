@@ -4,11 +4,7 @@ import { z } from "zod"
 import { and, eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
 import { planVersionFeatureSelectBaseSchema } from "@unprice/db/validators"
-
-import { FEATURE_SLUGS } from "@unprice/config"
 import { protectedProjectProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
-import { reportUsageFeature } from "#utils/shared"
 
 export const remove = protectedProjectProcedure
   .input(
@@ -22,27 +18,10 @@ export const remove = protectedProjectProcedure
   .mutation(async (opts) => {
     const { id } = opts.input
     const project = opts.ctx.project
-    const workspace = project.workspace
-    const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.PLAN_VERSIONS.SLUG
+    const _workspace = project.workspace
 
     // only owner and admin can delete a feature
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
-
-    // check if the customer has access to the feature
-    const result = await featureGuard({
-      customerId,
-      featureSlug,
-      isMain: workspace.isMain,
-      action: "remove",
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
 
     const planVersionFeatureData = await opts.ctx.db.query.planVersionFeatures.findFirst({
       with: {
@@ -82,19 +61,6 @@ export const remove = protectedProjectProcedure
         code: "INTERNAL_SERVER_ERROR",
         message: "Error deleting feature",
       })
-    }
-
-    // avoid reporting usage for flat features
-    if (result.featureType !== "flat") {
-      opts.ctx.waitUntil(
-        reportUsageFeature({
-          customerId,
-          featureSlug,
-          usage: -1,
-          isMain: workspace.isMain,
-          action: "remove",
-        })
-      )
     }
 
     return {

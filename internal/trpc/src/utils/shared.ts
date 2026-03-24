@@ -7,27 +7,6 @@ import { CustomerService } from "@unprice/services/customers"
 import type { Context } from "#trpc"
 import { unprice } from "./unprice"
 
-// usage reporting is temporarily disabled across TRPC routes
-export const reportUsageFeature = async ({
-  customerId: _customerId,
-  featureSlug: _featureSlug,
-  usage: _usage,
-  isMain: _isMain,
-  metadata: _metadata,
-  action: _action,
-}: {
-  customerId: string
-  featureSlug: string
-  usage: number
-  isMain?: boolean
-  metadata?: Record<string, string | undefined>
-  action?: string
-}) => {
-  return {
-    success: true,
-  }
-}
-
 export const createWorkspace = async ({
   input,
   db,

@@ -1,10 +1,7 @@
 import { TRPCError } from "@trpc/server"
 import { projectSelectBaseSchema, workspaceSelectBase } from "@unprice/db/validators"
 import { z } from "zod"
-
-import { FEATURE_SLUGS } from "@unprice/config"
 import { protectedWorkspaceProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
 
 export const getById = protectedWorkspaceProcedure
   .input(z.object({ id: z.string() }))
@@ -17,23 +14,6 @@ export const getById = protectedWorkspaceProcedure
   )
   .query(async (opts) => {
     const workspace = opts.ctx.workspace
-    const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.PROJECTS.SLUG
-
-    // check if the customer has access to the feature
-    const result = await featureGuard({
-      customerId,
-      featureSlug,
-      isMain: workspace.isMain,
-      action: "getById",
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
 
     const projectData = await opts.ctx.db.query.projects.findFirst({
       with: {

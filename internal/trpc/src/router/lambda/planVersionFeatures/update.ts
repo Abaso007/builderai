@@ -7,10 +7,7 @@ import {
   planVersionFeatureDragDropSchema,
   planVersionFeatureUpdateBaseSchema,
 } from "@unprice/db/validators"
-
-import { FEATURE_SLUGS } from "@unprice/config"
 import { protectedProjectProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
 
 export const update = protectedProjectProcedure
   .input(planVersionFeatureUpdateBaseSchema)
@@ -43,26 +40,10 @@ export const update = protectedProjectProcedure
 
     const project = opts.ctx.project
 
-    const workspace = project.workspace
-    const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.PLAN_VERSIONS.SLUG
+    const _workspace = project.workspace
 
     // only owner and admin can update a feature
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
-
-    const result = await featureGuard({
-      customerId,
-      featureSlug,
-      isMain: workspace.isMain,
-      action: "update",
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
 
     const existingPlanVersionFeature = await opts.ctx.db.query.planVersionFeatures.findFirst({
       with: {

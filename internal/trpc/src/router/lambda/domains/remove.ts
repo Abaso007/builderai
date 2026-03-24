@@ -1,5 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import { FEATURE_SLUGS } from "@unprice/config"
 import { eq } from "@unprice/db"
 import { domains } from "@unprice/db/schema"
 import { domainSelectBaseSchema } from "@unprice/db/validators"
@@ -7,8 +6,6 @@ import { Vercel } from "@unprice/vercel"
 import { z } from "zod"
 import { env } from "#env"
 import { protectedWorkspaceProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
-import { reportUsageFeature } from "#utils/shared"
 
 export const remove = protectedWorkspaceProcedure
   .input(z.object({ id: z.string() }))
@@ -19,26 +16,9 @@ export const remove = protectedWorkspaceProcedure
   )
   .mutation(async (opts) => {
     const workspace = opts.ctx.workspace
-    const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.DOMAINS.SLUG
 
     // only owner can remove a domain
     opts.ctx.verifyRole(["OWNER"])
-
-    // check if the customer has access to the feature
-    const result = await featureGuard({
-      customerId,
-      featureSlug,
-      isMain: workspace.isMain,
-      action: "remove",
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
 
     const domain = await opts.ctx.db.query.domains.findFirst({
       where: (d, { eq, and }) => and(eq(d.id, opts.input.id), eq(d.workspaceId, workspace.id)),
@@ -75,19 +55,6 @@ export const remove = protectedWorkspaceProcedure
       .where(eq(domains.id, domain.id))
       .returning()
       .then((res) => res[0])
-
-    // avoid reporting usage for flat features
-    if (result.featureType !== "flat") {
-      opts.ctx.waitUntil(
-        reportUsageFeature({
-          customerId,
-          featureSlug,
-          usage: -1,
-          isMain: workspace.isMain,
-          action: "remove",
-        })
-      )
-    }
 
     return {
       domain: deletedDomain,

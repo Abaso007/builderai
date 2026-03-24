@@ -3,10 +3,7 @@ import { and, eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
 import { invitesSelectBase } from "@unprice/db/validators"
 import { z } from "zod"
-
-import { FEATURE_SLUGS } from "@unprice/config"
 import { protectedWorkspaceProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
 
 export const deleteInvite = protectedWorkspaceProcedure
   .input(
@@ -24,21 +21,6 @@ export const deleteInvite = protectedWorkspaceProcedure
     const workspace = opts.ctx.workspace
 
     opts.ctx.verifyRole(["OWNER"])
-
-    // check if the customer has access to the feature
-    const result = await featureGuard({
-      customerId: workspace.unPriceCustomerId,
-      featureSlug: FEATURE_SLUGS.ACCESS_PRO.SLUG,
-      isMain: workspace.isMain,
-      action: "deleteInvite",
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
 
     const deletedInvite = await opts.ctx.db
       .delete(schema.invites)

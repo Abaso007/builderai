@@ -3,10 +3,10 @@ import { Err, Ok } from "@unprice/error"
 import type { AppLogger } from "@unprice/observability"
 import type { CustomerService } from "@unprice/services/customers"
 import {
-  deriveMeterKey,
   type GrantsManager,
   type IngestionResolvedState,
   type ResolvedFeatureStateAtTimestamp,
+  deriveMeterKey,
 } from "@unprice/services/entitlements"
 import { vi } from "vitest"
 import { IngestionQueueConsumer } from "../consumer"
@@ -139,11 +139,9 @@ export function createServiceHarness(options: HarnessOptions = {}) {
       return Ok(createUsageFeatureState(matchingResolvedState) as never)
     }
 
-    return Ok(
-      {
-        kind: "feature_missing",
-      } as never
-    )
+    return Ok({
+      kind: "feature_missing",
+    } as never)
   })
 
   const begin = vi.fn().mockResolvedValue(options.beginResult ?? { decision: "process" as const })
@@ -357,7 +355,10 @@ function computeNextMeterValue(params: {
   }
 }
 
-function readAggregationNumericValue(meter: MeterConfig, properties: Record<string, unknown>): number {
+function readAggregationNumericValue(
+  meter: MeterConfig,
+  properties: Record<string, unknown>
+): number {
   const field = meter.aggregationField?.trim()
 
   if (!field) {
@@ -392,10 +393,7 @@ function buildMeterWindowKey(params: {
   return `${params.projectId}:${params.customerId}:${params.streamId}:${params.periodKey}`
 }
 
-function getOrCreateMeterWindow(
-  windows: Map<string, MeterWindow>,
-  key: string
-): MeterWindow {
+function getOrCreateMeterWindow(windows: Map<string, MeterWindow>, key: string): MeterWindow {
   const existing = windows.get(key)
   if (existing) {
     return existing
@@ -414,9 +412,11 @@ function normalizeLimit(limit?: number | null): number | null {
   return limit
 }
 
-export function createUsageGrant(params: {
-  featureSlug?: string
-} = {}) {
+export function createUsageGrant(
+  params: {
+    featureSlug?: string
+  } = {}
+) {
   return {
     featurePlanVersion: {
       feature: {
@@ -430,9 +430,11 @@ export function createUsageGrant(params: {
   }
 }
 
-export function createBooleanGrant(params: {
-  featureSlug?: string
-} = {}) {
+export function createBooleanGrant(
+  params: {
+    featureSlug?: string
+  } = {}
+) {
   return {
     featurePlanVersion: {
       feature: {
@@ -475,7 +477,9 @@ export function createResolvedState(
   }
 }
 
-export function createUsageFeatureState(state = createResolvedState()): ResolvedFeatureStateAtTimestamp {
+export function createUsageFeatureState(
+  state = createResolvedState()
+): ResolvedFeatureStateAtTimestamp {
   return {
     kind: "usage",
     state,

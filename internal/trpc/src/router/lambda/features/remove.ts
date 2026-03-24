@@ -1,12 +1,9 @@
 import { TRPCError } from "@trpc/server"
-import { FEATURE_SLUGS } from "@unprice/config"
 import { and, eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
 import { featureSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
-import { reportUsageFeature } from "#utils/shared"
 
 export const remove = protectedProjectProcedure
   .input(featureSelectBaseSchema.pick({ id: true }))
@@ -14,21 +11,6 @@ export const remove = protectedProjectProcedure
   .mutation(async (opts) => {
     const { id } = opts.input
     const project = opts.ctx.project
-
-    const result = await featureGuard({
-      customerId: project.workspace.unPriceCustomerId,
-      featureSlug: FEATURE_SLUGS.PLANS.SLUG,
-      isMain: project.workspace.isMain,
-      action: "remove",
-      metadata: { module: "feature" },
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
 
     const deletedFeature = await opts.ctx.db
       .delete(schema.features)
@@ -41,20 +23,6 @@ export const remove = protectedProjectProcedure
         code: "INTERNAL_SERVER_ERROR",
         message: "Error deleting feature",
       })
-    }
-
-    // avoid reporting usage for flat features
-    if (result.featureType !== "flat") {
-      opts.ctx.waitUntil(
-        reportUsageFeature({
-          customerId: project.workspace.unPriceCustomerId,
-          featureSlug: FEATURE_SLUGS.PLANS.SLUG,
-          usage: -1,
-          isMain: project.workspace.isMain,
-          action: "remove",
-          metadata: { module: "feature" },
-        })
-      )
     }
 
     return {
