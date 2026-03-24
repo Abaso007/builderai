@@ -4,6 +4,7 @@ import { z } from "zod"
 import { and, eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
 import {
+  getAnchor,
   planVersionFeatureDragDropSchema,
   planVersionFeatureUpdateBaseSchema,
 } from "@unprice/db/validators"
@@ -106,6 +107,17 @@ export const update = protectedProjectProcedure
         code: "BAD_REQUEST",
         message: "Usage features require meterConfig or a default feature meterConfig",
       })
+    }
+
+    if (resetConfig) {
+      try {
+        getAnchor(Date.now(), resetConfig.resetInterval, resetConfig.resetAnchor)
+      } catch (error) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Invalid reset configuration: ${error instanceof Error ? error.message : "invalid reset anchor"}`,
+        })
+      }
     }
 
     const planVersionFeatureUpdated = await opts.ctx.db

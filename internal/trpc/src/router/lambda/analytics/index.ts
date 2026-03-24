@@ -8,11 +8,13 @@ import { getPagesOverview } from "./getPagesOverview"
 import { getPlanClickBySessionId } from "./getPlanClickBySessionId"
 import { getPlansConversion } from "./getPlansConversion"
 import { getPlansStats } from "./getPlansStats"
+import { getProjectUsage } from "./getProjectUsage"
 import { getRealtimeTicket } from "./getRealtimeTicket"
 import { getUsage } from "./getUsage"
 
 export const analyticsRouter = createTRPCRouter({
   getUsage: getUsage,
+  getProjectUsage: getProjectUsage,
   getBrowserVisits: getBrowserVisits,
   getCountryVisits: getCountryVisits,
   getOverviewStats: getOverviewStats,

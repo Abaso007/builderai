@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createDrain, createStandaloneRequestLogger, emitWideEvent, initObservability } from "./index"
+import {
+  createDrain,
+  createStandaloneRequestLogger,
+  emitWideEvent,
+  initObservability,
+} from "./index"
 
 describe("@unprice/observability", () => {
   beforeEach(() => {

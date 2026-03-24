@@ -807,5 +807,45 @@ describe("GrantsManager", () => {
       expect(result.err).toBeDefined()
       expect(result.err?.message).toContain("Non-fungible grants")
     })
+
+    it("derives dayOfCreation reset anchors from grant effectiveAt for daily reset configs", async () => {
+      const effectiveAt = Date.UTC(2026, 2, 24, 15, 30, 0)
+      const timestamp = effectiveAt + 60_000
+
+      const result = await grantsManager.resolveIngestionStatesFromGrants({
+        customerId,
+        projectId,
+        timestamp,
+        grants: [
+          {
+            ...baseGrant,
+            id: "g_daily_day_of_creation",
+            anchor: 24, // subscription phase monthly anchor; should not leak into daily reset config
+            effectiveAt,
+            expiresAt: effectiveAt + 24 * 60 * 60 * 1_000,
+            featurePlanVersion: {
+              ...baseGrant.featurePlanVersion,
+              resetConfig: {
+                ...baseGrant.featurePlanVersion.resetConfig,
+                name: "daily",
+                resetInterval: "day",
+                resetIntervalCount: 1,
+                resetAnchor: "dayOfCreation",
+              },
+            },
+          },
+        ],
+      })
+
+      expect(result.err).toBeUndefined()
+      expect(result.val).toHaveLength(1)
+      expect(result.val?.[0]?.resetConfig).toEqual(
+        expect.objectContaining({
+          name: "daily",
+          resetInterval: "day",
+          resetAnchor: 15,
+        })
+      )
+    })
   })
 })

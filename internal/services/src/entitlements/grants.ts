@@ -6,6 +6,7 @@ import {
   type OverageStrategy,
   calculateCycleWindow,
   type entitlementGrantsSnapshotSchema,
+  getAnchor,
 } from "@unprice/db/validators"
 import type {
   Entitlement,
@@ -81,6 +82,21 @@ export class GrantsManager {
     return trimmed && trimmed.length > 0 ? trimmed : "units"
   }
 
+  private resolveResetAnchor(params: {
+    effectiveAt: number
+    resetConfig: NonNullable<
+      z.infer<typeof grantSchemaExtended>["featurePlanVersion"]["resetConfig"]
+    >
+  }): number {
+    const { effectiveAt, resetConfig } = params
+
+    if (resetConfig.resetAnchor === "dayOfCreation") {
+      return getAnchor(effectiveAt, resetConfig.resetInterval, "dayOfCreation")
+    }
+
+    return resetConfig.resetAnchor
+  }
+
   /**
    * craete a stable signarute to find if stacked grants are fungible
    * @param grant
@@ -93,7 +109,10 @@ export class GrantsManager {
         resetInterval: grant.featurePlanVersion.resetConfig.resetInterval,
         resetIntervalCount: grant.featurePlanVersion.resetConfig.resetIntervalCount,
         planType: grant.featurePlanVersion.resetConfig.planType,
-        resetAnchor: grant.anchor,
+        resetAnchor: this.resolveResetAnchor({
+          effectiveAt: grant.effectiveAt,
+          resetConfig: grant.featurePlanVersion.resetConfig,
+        }),
       }
     }
 
@@ -1186,7 +1205,10 @@ export class GrantsManager {
     const resetConfig = winningGrant.featurePlanVersion.resetConfig
       ? {
           ...winningGrant.featurePlanVersion.resetConfig,
-          resetAnchor: winningGrant.anchor,
+          resetAnchor: this.resolveResetAnchor({
+            effectiveAt: winningGrant.effectiveAt,
+            resetConfig: winningGrant.featurePlanVersion.resetConfig,
+          }),
         }
       : null
 

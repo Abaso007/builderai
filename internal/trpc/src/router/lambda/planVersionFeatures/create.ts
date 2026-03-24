@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server"
 import * as schema from "@unprice/db/schema"
 import * as utils from "@unprice/db/utils"
 import {
+  getAnchor,
   planVersionFeatureDragDropSchema,
   planVersionFeatureInsertBaseSchema,
 } from "@unprice/db/validators"
@@ -92,6 +93,17 @@ export const create = protectedProjectProcedure
     }
 
     const resetConfigCreate = billingConfigCreate.name === resetConfig?.name ? null : resetConfig
+
+    if (resetConfigCreate) {
+      try {
+        getAnchor(Date.now(), resetConfigCreate.resetInterval, resetConfigCreate.resetAnchor)
+      } catch (error) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Invalid reset configuration: ${error instanceof Error ? error.message : "invalid reset anchor"}`,
+        })
+      }
+    }
 
     const planVersionFeatureCreated = await opts.ctx.db
       .insert(schema.planVersionFeatures)

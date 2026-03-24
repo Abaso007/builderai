@@ -157,7 +157,8 @@ export const RESET_CONFIG: Record<
     description: "Reset daily at the specified reset anchor",
     resetInterval: "day",
     resetIntervalCount: 1,
-    resetAnchorOptions: ["dayOfCreation", ...Array.from({ length: 31 }, (_, i) => i + 1)],
+    // Daily anchors are UTC hours (0-23).
+    resetAnchorOptions: ["dayOfCreation", ...Array.from({ length: 24 }, (_, i) => i)],
     planType: "recurring",
   },
   monthly: {

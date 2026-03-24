@@ -333,6 +333,61 @@ describe("IngestionService", () => {
     ])
   })
 
+  it("rejects ingestion with INVALID_ENTITLEMENT_CONFIGURATION when period key calculation throws", async () => {
+    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+    const { consumer, mocks } = createServiceHarness({
+      grants: [createUsageGrant()],
+      resolvedStates: [
+        createResolvedState(timestamp, {
+          resetConfig: {
+            name: "daily",
+            resetInterval: "day",
+            resetIntervalCount: 1,
+            resetAnchor: 99,
+            planType: "recurring",
+          },
+        }),
+      ],
+    })
+    const message = createBatchMessage({
+      id: "evt_invalid_period_config",
+      timestamp,
+      properties: {
+        amount: 3,
+      },
+    })
+
+    await consumer.consumeBatch({
+      messages: [message.message],
+    } as unknown as MessageBatch<IngestionQueueMessage>)
+
+    expect(message.ack).toHaveBeenCalledTimes(1)
+    expect(message.retry).not.toHaveBeenCalled()
+    expect(mocks.apply).not.toHaveBeenCalled()
+    expect(mocks.send).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: "evt_invalid_period_config",
+        rejection_reason: "INVALID_ENTITLEMENT_CONFIGURATION",
+        state: "rejected",
+      }),
+    ])
+    expect(mocks.logger.warn).toHaveBeenCalledWith(
+      "invalid resolved-state period configuration for ingestion",
+      expect.objectContaining({
+        event: expect.objectContaining({
+          id: "evt_invalid_period_config",
+        }),
+        invalidStates: expect.arrayContaining([
+          expect.objectContaining({
+            featureSlug: "api_calls",
+            streamId: "stream_123",
+            errorMessage: expect.stringContaining("daily intervals"),
+          }),
+        ]),
+      })
+    )
+  })
+
   it("ingests a single feature synchronously without the outer idempotency claim", async () => {
     const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
     const state = createResolvedState(timestamp)
@@ -547,6 +602,47 @@ describe("IngestionService", () => {
       status: "invalid_entitlement_configuration",
       timestamp,
     })
+  })
+
+  it("returns invalid_entitlement_configuration for verify when period key calculation throws", async () => {
+    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+    const invalidState = createResolvedState(timestamp, {
+      resetConfig: {
+        name: "daily",
+        resetInterval: "day",
+        resetIntervalCount: 1,
+        resetAnchor: 99,
+        planType: "recurring",
+      },
+    })
+    const { service, mocks } = createServiceHarness({
+      grants: [createUsageGrant()],
+      resolvedFeatureStatesBySlug: mapFeatureStatesBySlug([invalidState]),
+      resolvedStates: [invalidState],
+    })
+
+    const result = await service.verifyFeatureStatus({
+      customerId: "cus_123",
+      featureSlug: "api_calls",
+      projectId: "proj_123",
+      timestamp,
+    })
+
+    expect(result).toEqual({
+      allowed: false,
+      featureSlug: "api_calls",
+      featureType: "usage",
+      message: "Unable to resolve the current meter window for this feature",
+      status: "invalid_entitlement_configuration",
+      timestamp,
+    })
+    expect(mocks.getEnforcementState).not.toHaveBeenCalled()
+    expect(mocks.logger.warn).toHaveBeenCalledWith(
+      "invalid resolved-state period configuration for feature verification",
+      expect.objectContaining({
+        featureSlug: "api_calls",
+      })
+    )
   })
 
   it("fans out one async event to five entitlements and verify returns per-feature usage", async () => {

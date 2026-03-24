@@ -401,7 +401,9 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
 
     if (cached?.id) {
       const cachedProperties = cached.availableProperties ?? []
-      const mergedCachedProperties = Array.from(new Set([...cachedProperties, ...normalizedProperties]))
+      const mergedCachedProperties = Array.from(
+        new Set([...cachedProperties, ...normalizedProperties])
+      )
 
       if (mergedCachedProperties.length !== cachedProperties.length) {
         const result = await updateEvent.mutateAsync({

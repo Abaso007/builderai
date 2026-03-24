@@ -27,7 +27,6 @@ import {
   type IngestionQueueMessage,
   computeResolvedStatePeriodEndAt,
   computeResolvedStatePeriodKey,
-  filterMatchingResolvedStates,
   filterResolvedStatesWithValidAggregationPayload,
 } from "./message"
 import { createQueueServices } from "./queue"
@@ -325,7 +324,42 @@ export class IngestionService {
     }
 
     const { state } = resolvedFeatureState
-    const periodKey = computeResolvedStatePeriodKey(state, timestamp)
+    let periodKey: string | null = null
+    try {
+      periodKey = computeResolvedStatePeriodKey(state, timestamp)
+    } catch (error) {
+      const detail = {
+        customerId,
+        error,
+        featureSlug,
+        meterConfig: state.meterConfig,
+        projectId,
+        activeGrantIds: state.activeGrantIds,
+        resetConfig: state.resetConfig,
+        streamEndAt: state.streamEndAt,
+        streamId: state.streamId,
+        streamStartAt: state.streamStartAt,
+        timestamp,
+      }
+
+      this.logger.warn(
+        "invalid resolved-state period configuration for feature verification",
+        detail
+      )
+      this.logger.debug(
+        "invalid entitlement configuration details for feature verification",
+        detail
+      )
+
+      return {
+        allowed: false,
+        featureSlug,
+        featureType: "usage",
+        message: "Unable to resolve the current meter window for this feature",
+        status: "invalid_entitlement_configuration",
+        timestamp,
+      }
+    }
 
     if (!periodKey) {
       this.logger.warn("unable to resolve feature verification period key", {
@@ -780,10 +814,57 @@ export class IngestionService {
     states: IngestionResolvedState[]
   }): Promise<Result<IngestionResolvedState[], IngestionRejectionReason>> {
     const { message, states } = params
-    const matchingStates = filterMatchingResolvedStates({
-      states,
-      event: message,
-    })
+    const matchingStates: IngestionResolvedState[] = []
+    const invalidStates: Array<{
+      activeGrantIds: string[]
+      errorMessage: string
+      featureSlug: string
+      meterConfig: IngestionResolvedState["meterConfig"]
+      resetConfig: IngestionResolvedState["resetConfig"]
+      streamEndAt: number | null
+      streamId: string
+      streamStartAt: number
+    }> = []
+
+    for (const state of states) {
+      if (state.meterConfig.eventSlug !== message.slug) {
+        continue
+      }
+
+      try {
+        const periodKey = computeResolvedStatePeriodKey(state, message.timestamp)
+
+        if (periodKey !== null) {
+          matchingStates.push(state)
+        }
+      } catch (error) {
+        invalidStates.push({
+          activeGrantIds: state.activeGrantIds,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          featureSlug: state.featureSlug,
+          meterConfig: state.meterConfig,
+          resetConfig: state.resetConfig,
+          streamEndAt: state.streamEndAt,
+          streamId: state.streamId,
+          streamStartAt: state.streamStartAt,
+        })
+      }
+    }
+
+    if (invalidStates.length > 0) {
+      const detail = {
+        event: message,
+        invalidStates,
+        invalidStatesCount: invalidStates.length,
+      }
+
+      this.logger.warn("invalid resolved-state period configuration for ingestion", detail)
+      this.logger.debug("invalid entitlement configuration details for ingestion", detail)
+
+      return {
+        err: "INVALID_ENTITLEMENT_CONFIGURATION",
+      }
+    }
 
     if (matchingStates.length === 0) {
       this.logger.debug("no matching ingestion streams", {
@@ -820,9 +901,7 @@ export class IngestionService {
       }
     }
 
-    return {
-      val: processableStates,
-    }
+    return { val: processableStates }
   }
 
   private async applyResolvedStates(params: ApplyResolvedStatesParams): Promise<void> {
