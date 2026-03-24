@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createStandaloneRequestLogger, emitWideEvent, initObservability } from "./index"
+import { createDrain, createStandaloneRequestLogger, emitWideEvent, initObservability } from "./index"
 
 describe("@unprice/observability", () => {
   beforeEach(() => {
@@ -86,5 +86,54 @@ describe("@unprice/observability", () => {
       route: "/trpc/analytics.getRealtimeTicket",
       requestId: "req_transport",
     })
+  })
+
+  it("does not create a drain when token and dataset are missing", () => {
+    const drain = createDrain({
+      environment: "production",
+    })
+
+    expect(drain).toBeUndefined()
+    expect(console.warn).not.toHaveBeenCalled()
+  })
+
+  it("creates a drain when token and dataset are present outside development", () => {
+    const drain = createDrain({
+      environment: "production",
+      token: "xaat_test",
+      dataset: "unprice-tests",
+    })
+
+    expect(drain).toBeTypeOf("function")
+    expect(typeof drain?.flush).toBe("function")
+  })
+
+  it("warns once and skips drain for partial axiom config", () => {
+    const firstAttempt = createDrain({
+      environment: "production",
+      token: "xaat_test",
+    })
+
+    const secondAttempt = createDrain({
+      environment: "production",
+      dataset: "unprice-tests",
+    })
+
+    expect(firstAttempt).toBeUndefined()
+    expect(secondAttempt).toBeUndefined()
+    expect(console.warn).toHaveBeenCalledTimes(1)
+    expect(console.warn).toHaveBeenCalledWith(
+      "[observability] Axiom drain disabled: both AXIOM_API_TOKEN and AXIOM_DATASET are required."
+    )
+  })
+
+  it("keeps logger.flush as a no-op when no drain adapter is provided", async () => {
+    const { logger } = createStandaloneRequestLogger({
+      method: "GET",
+      path: "/health",
+      requestId: "req_flush_noop",
+    })
+
+    await expect(logger.flush()).resolves.toBeUndefined()
   })
 })

@@ -1,7 +1,6 @@
 import { createTRPCRouter } from "#trpc"
 import { getBrowserVisits } from "./getBrowserVisits"
 import { getCountryVisits } from "./getCountryVisits"
-import { getFeaturesOverview } from "./getFeaturesOverview"
 import { getLakehouseFilePlan } from "./getLakehouseFilePlan"
 import { getLatestEvents } from "./getLatestEvents"
 import { getOverviewStats } from "./getOverviewStats"
@@ -18,7 +17,6 @@ export const analyticsRouter = createTRPCRouter({
   getCountryVisits: getCountryVisits,
   getOverviewStats: getOverviewStats,
   getPlansConversion: getPlansConversion,
-  getFeaturesOverview: getFeaturesOverview,
   getPlansStats: getPlansStats,
   getPagesOverview: getPagesOverview,
   getPlanClickBySessionId: getPlanClickBySessionId,

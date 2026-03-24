@@ -10,6 +10,11 @@ const drain = createDrain({
 })
 
 export default defineNitroPlugin((nitroApp) => {
+  if (!drain) {
+    return
+  }
+
   // Register the drain with evlog
   nitroApp.hooks.hook("evlog:drain", drain)
+  nitroApp.hooks.hook("close", () => drain.flush?.())
 })

@@ -5,8 +5,10 @@ import {
   type IngestionQueueConsumerMessage,
   buildEntitlementWindowName,
   computeEntitlementPeriodKey,
+  computeResolvedStatePeriodKey,
   filterEntitlementsWithValidAggregationPayload,
   filterMatchingEntitlements,
+  filterMatchingResolvedStates,
   filterResolvedStatesWithValidAggregationPayload,
   ingestionQueueMessageSchema,
   partitionDuplicateQueuedMessages,
@@ -53,6 +55,136 @@ describe("ingestion message helpers", () => {
     expect(computeEntitlementPeriodKey(entitlement, Date.UTC(2026, 2, 20))).toBe(
       `month:${paidWindowStart}`
     )
+  })
+
+  it("returns null resolved-state period keys outside the stream window", () => {
+    const state = createResolvedState({
+      streamStartAt: Date.UTC(2026, 2, 10),
+      streamEndAt: Date.UTC(2026, 2, 20),
+    })
+
+    expect(computeResolvedStatePeriodKey(state, Date.UTC(2026, 2, 9))).toBeNull()
+    expect(computeResolvedStatePeriodKey(state, Date.UTC(2026, 2, 20))).toBeNull()
+  })
+
+  it("uses one-time period keys when resolved state has no reset config", () => {
+    const streamStartAt = Date.UTC(2026, 2, 10, 8, 0, 0)
+    const state = createResolvedState({
+      streamStartAt,
+      streamEndAt: Date.UTC(2026, 2, 20, 8, 0, 0),
+      resetConfig: null,
+    })
+
+    expect(computeResolvedStatePeriodKey(state, Date.UTC(2026, 2, 15, 12, 0, 0))).toBe(
+      `onetime:${streamStartAt}`
+    )
+  })
+
+  it("computes monthly resolved-state keys and rotates exactly at the monthly anchor", () => {
+    const state = createResolvedState({
+      streamStartAt: Date.UTC(2026, 2, 15, 0, 0, 0),
+      streamEndAt: Date.UTC(2026, 4, 15, 0, 0, 0),
+      resetConfig: {
+        name: "billing",
+        resetInterval: "month",
+        resetIntervalCount: 1,
+        resetAnchor: 15,
+        planType: "recurring",
+      },
+    })
+
+    expect(computeResolvedStatePeriodKey(state, Date.UTC(2026, 3, 14, 23, 59, 59, 999))).toBe(
+      `month:${Date.UTC(2026, 2, 15, 0, 0, 0)}`
+    )
+    expect(computeResolvedStatePeriodKey(state, Date.UTC(2026, 3, 15, 0, 0, 0, 0))).toBe(
+      `month:${Date.UTC(2026, 3, 15, 0, 0, 0)}`
+    )
+  })
+
+  it("computes daily resolved-state keys using the configured reset hour", () => {
+    const state = createResolvedState({
+      streamStartAt: Date.UTC(2026, 2, 1, 0, 0, 0),
+      resetConfig: {
+        name: "daily",
+        resetInterval: "day",
+        resetIntervalCount: 1,
+        resetAnchor: 9,
+        planType: "recurring",
+      },
+    })
+
+    expect(computeResolvedStatePeriodKey(state, Date.UTC(2026, 2, 2, 8, 59, 59, 999))).toBe(
+      `day:${Date.UTC(2026, 2, 1, 9, 0, 0)}`
+    )
+    expect(computeResolvedStatePeriodKey(state, Date.UTC(2026, 2, 2, 9, 0, 0, 0))).toBe(
+      `day:${Date.UTC(2026, 2, 2, 9, 0, 0)}`
+    )
+  })
+
+  it("supports custom reset intervals from grant state (every two months)", () => {
+    const state = createResolvedState({
+      streamStartAt: Date.UTC(2026, 0, 1, 0, 0, 0),
+      resetConfig: {
+        name: "billing",
+        resetInterval: "month",
+        resetIntervalCount: 2,
+        resetAnchor: 5,
+        planType: "recurring",
+      },
+    })
+
+    expect(computeResolvedStatePeriodKey(state, Date.UTC(2026, 3, 10, 0, 0, 0))).toBe(
+      `month:${Date.UTC(2026, 2, 5, 0, 0, 0)}`
+    )
+    expect(computeResolvedStatePeriodKey(state, Date.UTC(2026, 4, 5, 0, 0, 0))).toBe(
+      `month:${Date.UTC(2026, 4, 5, 0, 0, 0)}`
+    )
+  })
+
+  it("matches resolved states against grant-derived stream windows and reset config", () => {
+    const historical = createResolvedState({
+      streamId: "stream_historical",
+      streamStartAt: Date.UTC(2026, 1, 15),
+      streamEndAt: Date.UTC(2026, 2, 15),
+      resetConfig: {
+        name: "billing",
+        resetInterval: "month",
+        resetIntervalCount: 1,
+        resetAnchor: 15,
+        planType: "recurring",
+      },
+    })
+    const current = createResolvedState({
+      streamId: "stream_current",
+      streamStartAt: Date.UTC(2026, 2, 15),
+      streamEndAt: Date.UTC(2026, 3, 15),
+      resetConfig: {
+        name: "billing",
+        resetInterval: "month",
+        resetIntervalCount: 1,
+        resetAnchor: 15,
+        planType: "recurring",
+      },
+    })
+    const wrongSlug = createResolvedState({
+      streamId: "stream_wrong_slug",
+      meterConfig: {
+        eventId: "meter_wrong_slug",
+        eventSlug: "other_event",
+        aggregationMethod: "sum",
+        aggregationField: "amount",
+      },
+    })
+
+    expect(
+      filterMatchingResolvedStates({
+        states: [historical, current, wrongSlug],
+        event: createRawEvent({
+          slug: "tokens_used",
+          timestamp: Date.UTC(2026, 2, 10),
+        }),
+      }).map((state) => state.streamId)
+    ).toEqual(["stream_historical"])
   })
 
   it("filters matching entitlements by feature type, slug, and active period", () => {

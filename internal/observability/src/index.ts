@@ -52,9 +52,30 @@ const loggerScopeStorage = createStorageAdapter<LoggerScope>()
 
 const DEFAULT_AXIOM_BASE_URL = "https://api.axiom.co"
 const DEFAULT_AXIOM_TIMEOUT_MS = 5000
+const AXIOM_PARTIAL_CONFIG_WARNING =
+  "[observability] Axiom drain disabled: both AXIOM_API_TOKEN and AXIOM_DATASET are required."
+let hasWarnedPartialAxiomConfig = false
 
 export function initObservability(config?: LoggerConfig): void {
   initLogger(config)
+}
+
+function normalizeAxiomConfigValue(value?: string): string | undefined {
+  if (typeof value !== "string") {
+    return undefined
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
+
+function warnPartialAxiomConfigOnce(environment?: string): void {
+  if (environment === "development" || hasWarnedPartialAxiomConfig) {
+    return
+  }
+
+  hasWarnedPartialAxiomConfig = true
+  console.warn(AXIOM_PARTIAL_CONFIG_WARNING)
 }
 
 export function createDrain(options: {
@@ -66,7 +87,15 @@ export function createDrain(options: {
   orgId?: string
   timeoutMs?: number
 }): FlushableDrain | undefined {
-  if (!options.token || !options.dataset || options.environment === "development") {
+  const token = normalizeAxiomConfigValue(options.token)
+  const dataset = normalizeAxiomConfigValue(options.dataset)
+
+  if (Boolean(token) !== Boolean(dataset)) {
+    warnPartialAxiomConfigOnce(options.environment)
+    return undefined
+  }
+
+  if (!token || !dataset || options.environment === "development") {
     return undefined
   }
 
@@ -83,11 +112,11 @@ export function createDrain(options: {
   return pipeline(
     createAxiomDrain({
       baseUrl: options.baseUrl,
-      dataset: options.dataset,
+      dataset,
       edgeUrl: options.edgeUrl,
       orgId: options.orgId,
       timeoutMs: options.timeoutMs,
-      token: options.token,
+      token,
     })
   )
 }

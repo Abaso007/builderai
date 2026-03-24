@@ -2,9 +2,12 @@ import { render } from "@react-email/render"
 import { Resend } from "resend"
 import { env } from "./env"
 
-const resend = new Resend(env.RESEND_API_KEY)
+const resendApiKey = env.RESEND_API_KEY?.trim()
+const resend = resendApiKey ? new Resend(resendApiKey) : null
 
 const RESEND_DEFAULT_FROM_EMAIL = "Seb from Unprice <seb@unprice.dev>"
+const MISSING_RESEND_API_KEY_ERROR =
+  "RESEND_API_KEY is missing. Configure it to send emails outside development."
 
 // Lazy load nodemailer only when needed (development + server)
 // biome-ignore lint/suspicious/noExplicitAny: <explanation>
@@ -58,6 +61,10 @@ export const sendEmail = async ({
     }
   }
 
+  if (!resend) {
+    return { data: null, error: new Error(MISSING_RESEND_API_KEY_ERROR) }
+  }
+
   try {
     return await resend.emails.send({ react, subject, to, from })
   } catch (error) {
@@ -84,12 +91,16 @@ export const sendEmailHtml = async ({
     }
   }
 
+  if (!resendApiKey) {
+    return { data: null, error: new Error(MISSING_RESEND_API_KEY_ERROR) }
+  }
+
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${env.RESEND_API_KEY}`,
+        Authorization: `Bearer ${resendApiKey}`,
       },
       body: JSON.stringify({ to, from, subject, html }),
     })

@@ -93,6 +93,43 @@ describe("computePeriodKey", () => {
     ).toBe(`onetime:${effectiveStartDate}`)
   })
 
+  it("keeps the onetime key stable inside a finite one-time window", () => {
+    const effectiveStartDate = Date.UTC(2026, 0, 1, 12, 0, 0)
+    const effectiveEndDate = Date.UTC(2026, 1, 1, 12, 0, 0)
+
+    expect(
+      computePeriodKey({
+        now: Date.UTC(2026, 0, 2, 0, 0, 0),
+        effectiveStartDate,
+        effectiveEndDate,
+        trialEndsAt: null,
+        config: {
+          name: "test",
+          interval: "onetime",
+          intervalCount: 1,
+          anchor: "dayOfCreation",
+          planType: "onetime",
+        },
+      })
+    ).toBe(`onetime:${effectiveStartDate}`)
+
+    expect(
+      computePeriodKey({
+        now: Date.UTC(2026, 1, 1, 11, 59, 59),
+        effectiveStartDate,
+        effectiveEndDate,
+        trialEndsAt: null,
+        config: {
+          name: "test",
+          interval: "onetime",
+          intervalCount: 1,
+          anchor: "dayOfCreation",
+          planType: "onetime",
+        },
+      })
+    ).toBe(`onetime:${effectiveStartDate}`)
+  })
+
   it("returns interval:start for recurring month plans using the shared cycle logic", () => {
     const effectiveStartDate = Date.UTC(2026, 0, 1, 0, 0, 0)
     const now = Date.UTC(2026, 1, 20, 0, 0, 0)
@@ -114,6 +151,99 @@ describe("computePeriodKey", () => {
     ).toBe(`month:${Date.UTC(2026, 1, 15, 0, 0, 0)}`)
   })
 
+  it("uses the paid-start stub for monthly cycles and rotates at the monthly anchor boundary", () => {
+    const effectiveStartDate = Date.UTC(2026, 0, 10, 0, 0, 0)
+    const config = {
+      name: "test",
+      interval: "month" as const,
+      intervalCount: 1,
+      anchor: 15,
+      planType: "recurring" as const,
+    }
+
+    expect(
+      computePeriodKey({
+        now: Date.UTC(2026, 0, 12, 0, 0, 0),
+        effectiveStartDate,
+        effectiveEndDate: null,
+        trialEndsAt: null,
+        config,
+      })
+    ).toBe(`month:${effectiveStartDate}`)
+
+    expect(
+      computePeriodKey({
+        now: Date.UTC(2026, 0, 15, 0, 0, 0),
+        effectiveStartDate,
+        effectiveEndDate: null,
+        trialEndsAt: null,
+        config,
+      })
+    ).toBe(`month:${Date.UTC(2026, 0, 15, 0, 0, 0)}`)
+  })
+
+  it("rotates daily period keys exactly at the configured reset hour", () => {
+    const effectiveStartDate = Date.UTC(2026, 2, 1, 0, 0, 0)
+    const config = {
+      name: "test",
+      interval: "day" as const,
+      intervalCount: 1,
+      anchor: 6,
+      planType: "recurring" as const,
+    }
+
+    expect(
+      computePeriodKey({
+        now: Date.UTC(2026, 2, 2, 5, 59, 59, 999),
+        effectiveStartDate,
+        effectiveEndDate: null,
+        trialEndsAt: null,
+        config,
+      })
+    ).toBe(`day:${Date.UTC(2026, 2, 1, 6, 0, 0)}`)
+
+    expect(
+      computePeriodKey({
+        now: Date.UTC(2026, 2, 2, 6, 0, 0, 0),
+        effectiveStartDate,
+        effectiveEndDate: null,
+        trialEndsAt: null,
+        config,
+      })
+    ).toBe(`day:${Date.UTC(2026, 2, 2, 6, 0, 0)}`)
+  })
+
+  it("supports custom recurring periods using intervalCount greater than one", () => {
+    const effectiveStartDate = Date.UTC(2026, 0, 1, 0, 0, 0)
+    const config = {
+      name: "test",
+      interval: "month" as const,
+      intervalCount: 2,
+      anchor: 10,
+      planType: "recurring" as const,
+    }
+
+    expect(
+      computePeriodKey({
+        now: Date.UTC(2026, 3, 10, 0, 0, 0),
+        effectiveStartDate,
+        effectiveEndDate: null,
+        trialEndsAt: null,
+        config,
+      })
+    ).toBe(`month:${Date.UTC(2026, 2, 10, 0, 0, 0)}`)
+
+    expect(
+      computePeriodKey({
+        now: Date.UTC(2026, 4, 10, 0, 0, 0),
+        effectiveStartDate,
+        effectiveEndDate: null,
+        trialEndsAt: null,
+        config,
+      })
+    ).toBe(`month:${Date.UTC(2026, 4, 10, 0, 0, 0)}`)
+  })
+
   it("throws when there is no active cycle for the requested timestamp", () => {
     expect(() =>
       computePeriodKey({
@@ -127,6 +257,24 @@ describe("computePeriodKey", () => {
           intervalCount: 1,
           anchor: 15,
           planType: "recurring",
+        },
+      })
+    ).toThrow(PeriodKeyComputationError)
+  })
+
+  it("throws for onetime plans when now hits the exclusive end boundary", () => {
+    expect(() =>
+      computePeriodKey({
+        now: Date.UTC(2026, 1, 1, 12, 0, 0),
+        effectiveStartDate: Date.UTC(2026, 0, 1, 12, 0, 0),
+        effectiveEndDate: Date.UTC(2026, 1, 1, 12, 0, 0),
+        trialEndsAt: null,
+        config: {
+          name: "test",
+          interval: "onetime",
+          intervalCount: 1,
+          anchor: "dayOfCreation",
+          planType: "onetime",
         },
       })
     ).toThrow(PeriodKeyComputationError)

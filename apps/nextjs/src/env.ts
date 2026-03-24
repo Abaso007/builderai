@@ -16,19 +16,14 @@ export const env = createEnv({
     VERCEL_TEAM_ID: z.string(),
     VERCEL_TOKEN: z.string(),
     ENCRYPTION_KEY: z.string(),
-    AXIOM_API_TOKEN: z.string(),
-    AXIOM_DATASET: z.string(),
-    OPENROUTER_API_KEY: z.string(),
-    USERJOT_ID: z.string().describe("The UserJot ID"),
+    AXIOM_API_TOKEN: z.string().optional(),
+    AXIOM_DATASET: z.string().optional(),
+    OPENROUTER_API_KEY: z.string().optional(),
+    USERJOT_ID: z.string().optional().describe("The UserJot ID"),
     USERJOT_SECRET: z
       .string()
       .optional()
       .describe("The UserJot Secret Key for Identity Verification"),
-    FLAGS_SECRET: z
-      .string()
-      .describe(
-        "This secret is used to encrypt and sign overrides, and so Flags Explorer can make authenticated requests to the /.well-known/vercel/flags"
-      ),
   },
   runtimeEnv: process.env,
   clientPrefix: "NEXT_PUBLIC_",
