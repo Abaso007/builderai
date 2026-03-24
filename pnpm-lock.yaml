@@ -120,9 +120,6 @@ importers:
       ulid:
         specifier: ^3.0.2
         version: 3.0.2
-      xxhash-wasm:
-        specifier: ^1.1.0
-        version: 1.1.0
       zod:
         specifier: ^3.24.2
         version: 3.25.76
@@ -902,9 +899,6 @@ importers:
       p-limit:
         specifier: ^7.1.1
         version: 7.3.0
-      ulid:
-        specifier: ^3.0.2
-        version: 3.0.2
       xstate:
         specifier: ^5.21.0
         version: 5.28.0
@@ -12285,9 +12279,6 @@ packages:
 
   xstate@5.28.0:
     resolution: {integrity: sha512-Iaqq6ZrUzqeUtA3hC5LQKZfR8ZLzEFTImMHJM3jWEdVvXWdKvvVLXZEiNQWm3SCA9ZbEou/n5rcsna1wb9t28A==}
-
-  xxhash-wasm@1.1.0:
-    resolution: {integrity: sha512-147y/6YNh+tlp6nd/2pWq38i9h6mz/EuQ6njIrmW8D1BS5nCqs0P6DG+m6zTGnNz5I+uhZ0SHxBs9BsPrwcKDA==}
 
   y18n@5.0.8:
     resolution: {integrity: sha512-0pfFzegeDWJHJIAmTLRP2DwHjdF5s7jo9tuztdQxAhINCdvS+3nGINqPd00AphqJR/0LhANUS6/+7SCb98YOfA==}
@@ -25715,8 +25706,6 @@ snapshots:
   xmlhttprequest-ssl@2.0.0: {}
 
   xstate@5.28.0: {}
-
-  xxhash-wasm@1.1.0: {}
 
   y18n@5.0.8: {}
 
