@@ -1,5 +1,4 @@
 import type {
-  FeaturesOverview,
   PageBrowserVisits,
   PageCountryVisits,
   PageOverview,
@@ -64,7 +63,6 @@ export type CacheNamespaces = {
   pageCountryVisits: PageCountryVisits | null
   pageBrowserVisits: PageBrowserVisits | null
   getPagesOverview: PageOverview | null
-  getFeaturesOverview: FeaturesOverview | null
   getPlansStats: Stats | null
   getOverviewStats: Stats | null
   getUsage: Usage | null

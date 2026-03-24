@@ -30,9 +30,12 @@ export function FinalStep({ className }: React.ComponentProps<"div">) {
               flowData: {
                 project: undefined,
                 customer: undefined,
+                subscription: undefined,
                 paymentProvider: undefined,
                 planVersionId: undefined,
                 apiKey: undefined,
+                templatePlansCreated: undefined,
+                seededMetrics: undefined,
                 done: true,
               },
             })

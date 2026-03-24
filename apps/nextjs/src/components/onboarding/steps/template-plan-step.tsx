@@ -19,6 +19,8 @@ import { useTRPC } from "~/trpc/client"
 type TemplateStatus = "pending" | "working" | "done" | "error"
 
 const AGGREGATION_METHODS_WITHOUT_FIELD = new Set<AggregationMethod>(["count"])
+const ONBOARDING_USAGE_EVENT_SLUG = "onboarding_usage_ingestion"
+const ONBOARDING_USAGE_EVENT_NAME = "Onboarding Usage Ingestion"
 
 type UsageTier = {
   firstUnit: number
@@ -101,12 +103,12 @@ const CREDITS_FEATURE: FlatFeature = {
 
 const TEMPLATE_PLANS: TemplatePlan[] = [
   {
-    key: "seat-starter",
-    label: "Seat Starter",
+    key: "starter",
+    label: "STARTER",
     summary: "Seat packs with simple usage metering.",
     plan: {
-      title: "Seat Starter",
-      slug: "seat-starter",
+      title: "STARTER",
+      slug: "starter",
       description: "Seat-based plan with metered usage.",
     },
     billingConfig: {
@@ -146,12 +148,12 @@ const TEMPLATE_PLANS: TemplatePlan[] = [
     ],
   },
   {
-    key: "growth-mix",
-    label: "Growth Mix",
+    key: "growth",
+    label: "GROWTH",
     summary: "Seat packs plus tiered usage for growth teams.",
     plan: {
-      title: "Growth Mix",
-      slug: "growth-mix",
+      title: "GROWTH",
+      slug: "growth",
       description: "Balanced pricing with tiered usage.",
     },
     billingConfig: {
@@ -194,12 +196,12 @@ const TEMPLATE_PLANS: TemplatePlan[] = [
     ],
   },
   {
-    key: "enterprise-annual",
-    label: "Enterprise Annual",
+    key: "enterprise",
+    label: "ENTERPRISE",
     summary: "Annual enterprise plan with seat-based pricing.",
     plan: {
-      title: "Enterprise Annual",
-      slug: "enterprise-annual",
+      title: "ENTERPRISE",
+      slug: "enterprise",
       description: "Annual plan with seat-based access and enterprise add-ons.",
     },
     billingConfig: {
@@ -256,6 +258,10 @@ function toDineroPrice(amount: string, currency: string) {
     },
     displayAmount: amount,
   }
+}
+
+function toUsageAggregationField(featureSlug: string) {
+  return `usage_${slugify(featureSlug).replace(/-/g, "_")}`
 }
 
 function getStatusLabel(status: TemplateStatus) {
@@ -394,6 +400,20 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
     const normalizedProperties = Array.from(new Set(availableProperties.filter(Boolean)))
 
     if (cached?.id) {
+      const cachedProperties = cached.availableProperties ?? []
+      const mergedCachedProperties = Array.from(new Set([...cachedProperties, ...normalizedProperties]))
+
+      if (mergedCachedProperties.length !== cachedProperties.length) {
+        const result = await updateEvent.mutateAsync({
+          id: cached.id,
+          name: cached.name,
+          availableProperties: mergedCachedProperties,
+        })
+
+        eventCacheRef.current.set(slug, result.event)
+        return result.event
+      }
+
       return cached
     }
 
@@ -433,21 +453,19 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
   }
 
   const buildMeterConfig = async ({
-    eventSlug,
-    eventName,
+    featureSlug,
     aggregationMethod,
   }: {
-    eventSlug: string
-    eventName: string
+    featureSlug: string
     aggregationMethod: AggregationMethod
   }) => {
     const aggregationField = AGGREGATION_METHODS_WITHOUT_FIELD.has(aggregationMethod)
       ? undefined
-      : "value"
+      : toUsageAggregationField(featureSlug)
 
     const event = await getOrCreateEvent({
-      slug: eventSlug,
-      name: eventName,
+      slug: ONBOARDING_USAGE_EVENT_SLUG,
+      name: ONBOARDING_USAGE_EVENT_NAME,
       availableProperties: aggregationField ? [aggregationField] : [],
     })
 
@@ -599,8 +617,7 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
 
         const usageAggregationMethod = template.usage.config.aggregationMethod ?? "sum"
         const usageMeterConfig = await buildMeterConfig({
-          eventSlug: slugify(template.usage.slug),
-          eventName: template.usage.title,
+          featureSlug: usageFeature.slug,
           aggregationMethod: usageAggregationMethod,
         })
 
@@ -657,8 +674,7 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
         }
 
         const creditsMeterConfig = await buildMeterConfig({
-          eventSlug: slugify(creditsFeature.slug),
-          eventName: creditsFeature.title,
+          featureSlug: creditsFeature.slug,
           aggregationMethod: "sum",
         })
 

@@ -206,29 +206,6 @@ export class Analytics {
     })
   }
 
-  // analytics features
-  public get getFeaturesOverview() {
-    return this.readClient.buildPipe({
-      pipe: "v1_get_features_overview",
-      parameters: z.object({
-        interval_days: z.number().optional(),
-        project_id: z.string().optional(),
-        timezone: z.string().optional(),
-      }),
-      data: z.object({
-        date: z.coerce.date(),
-        latency: z.number(),
-        verifications: z.number(),
-        usage: z.number(),
-      }),
-      opts: {
-        cache: "no-store",
-        retries: 3,
-        timeout: 5000, // 5 seconds
-      },
-    })
-  }
-
   // analytics usage
   public get getFeaturesUsagePeriod() {
     return this.readClient.buildPipe({

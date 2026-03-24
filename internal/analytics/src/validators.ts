@@ -374,7 +374,6 @@ export type PlanConversionResponse = z.infer<typeof planConversionResponseSchema
 export type PageCountryVisits = Awaited<ReturnType<Analytics["getCountryVisits"]>>["data"]
 export type PageBrowserVisits = Awaited<ReturnType<Analytics["getBrowserVisits"]>>["data"]
 export type PageOverview = Awaited<ReturnType<Analytics["getPagesOverview"]>>["data"]
-export type FeaturesOverview = Awaited<ReturnType<Analytics["getFeaturesOverview"]>>["data"]
 export type FeaturesUsage = Awaited<ReturnType<Analytics["getFeaturesUsage"]>>["data"]
 export type PlansConversion = Awaited<ReturnType<Analytics["getPlansConversion"]>>["data"]
 export type Usage = Awaited<ReturnType<Analytics["getFeaturesUsagePeriod"]>>["data"]

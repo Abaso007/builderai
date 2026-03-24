@@ -18,7 +18,6 @@ export const env = createEnv({
     ENCRYPTION_KEY: z.string(),
     AXIOM_API_TOKEN: z.string().optional(),
     AXIOM_DATASET: z.string().optional(),
-    OPENROUTER_API_KEY: z.string().optional(),
     USERJOT_ID: z.string().optional().describe("The UserJot ID"),
     USERJOT_SECRET: z
       .string()

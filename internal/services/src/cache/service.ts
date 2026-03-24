@@ -137,11 +137,6 @@ export class CacheService {
         fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
         stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
       }),
-      getFeaturesOverview: new Namespace<CacheNamespaces["getFeaturesOverview"]>(this.context, {
-        ...defaultOpts,
-        fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
-        stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
-      }),
       getPlansStats: new Namespace<CacheNamespaces["getPlansStats"]>(this.context, {
         ...defaultOpts,
         fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds

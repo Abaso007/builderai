@@ -30,14 +30,6 @@ export default async function DashboardOverview(props: {
         ...ANALYTICS_CONFIG_REALTIME,
       }
     ),
-    trpc.analytics.getFeaturesOverview.queryOptions(
-      {
-        interval_days: interval.intervalDays,
-      },
-      {
-        ...ANALYTICS_CONFIG_REALTIME,
-      }
-    ),
     trpc.analytics.getUsage.queryOptions(
       {
         range: interval.name,

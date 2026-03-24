@@ -48,7 +48,6 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
     server: {
       AUTH_SECRET: z.string(),
       VERSION: z.string().default("unknown"),
-      MAIN_PROJECT_ID: z.string().optional(),
       projectdo: z.custom<DurableObjectNamespace<DurableObjectProject>>(
         (ns) => typeof ns === "object"
       ),
