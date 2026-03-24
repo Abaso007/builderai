@@ -1,45 +1,19 @@
-import { Ok } from "@unprice/error"
-import type { AppLogger } from "@unprice/observability"
-import type { CustomerService } from "@unprice/services/customers"
-import type { GrantsManager } from "@unprice/services/entitlements"
 import { describe, expect, it, vi } from "vitest"
-import { IngestionQueueConsumer } from "./consumer"
 import type { IngestionQueueMessage } from "./message"
-import { IngestionService } from "./service"
+import {
+  createBatchMessage,
+  createBooleanGrant,
+  createRawBatchMessage,
+  createResolvedState,
+  createServiceHarness,
+  createUsageGrant,
+  mapFeatureStatesBySlug,
+} from "./testing/serviceTestHarness"
 
 vi.mock("@unprice/lakehouse", () => ({
   getLakehouseSourceCurrentVersion: vi.fn(() => 1),
   parseLakehouseEvent: vi.fn((_source: string, payload: unknown) => payload),
 }))
-
-type LoggerStub = {
-  debug: ReturnType<typeof vi.fn>
-  error: ReturnType<typeof vi.fn>
-  warn: ReturnType<typeof vi.fn>
-}
-
-type HarnessOptions = {
-  apply?: ReturnType<typeof vi.fn>
-  beginResult?:
-    | {
-        decision: "busy"
-        retryAfterSeconds?: number
-      }
-    | {
-        decision: "duplicate"
-      }
-    | {
-        decision: "process"
-      }
-  customer?: {
-    projectId: string
-  } | null
-  grants?: unknown[]
-  resolvedFeatureState?: unknown
-  resolvedStates?: unknown[]
-  send?: ReturnType<typeof vi.fn>
-  getEnforcementState?: ReturnType<typeof vi.fn>
-}
 
 describe("IngestionService", () => {
   it("drops malformed queue messages and acks them", async () => {
@@ -130,6 +104,30 @@ describe("IngestionService", () => {
       }),
     ])
     expect(mocks.apply).not.toHaveBeenCalled()
+  })
+
+  it("acks and audits NO_MATCHING_ENTITLEMENT when no usage entitlements are available", async () => {
+    const { consumer, mocks } = createServiceHarness({
+      grants: [createBooleanGrant()],
+    })
+    const message = createBatchMessage({
+      id: "evt_no_usage_entitlement",
+    })
+
+    await consumer.consumeBatch({
+      messages: [message.message],
+    } as unknown as MessageBatch<IngestionQueueMessage>)
+
+    expect(message.ack).toHaveBeenCalledTimes(1)
+    expect(message.retry).not.toHaveBeenCalled()
+    expect(mocks.apply).not.toHaveBeenCalled()
+    expect(mocks.send).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: "evt_no_usage_entitlement",
+        rejection_reason: "NO_MATCHING_ENTITLEMENT",
+        state: "rejected",
+      }),
+    ])
   })
 
   it("acks duplicate idempotency claims without publishing audit events", async () => {
@@ -307,11 +305,41 @@ describe("IngestionService", () => {
     ])
   })
 
+  it("rejects ingestion with INVALID_ENTITLEMENT_CONFIGURATION when grant resolution fails", async () => {
+    const { consumer, mocks } = createServiceHarness({
+      grants: [createUsageGrant()],
+      resolveIngestionStatesError: new Error("bad grant configuration"),
+    })
+    const message = createBatchMessage({
+      id: "evt_invalid_entitlement_config",
+      properties: {
+        amount: 2,
+      },
+    })
+
+    await consumer.consumeBatch({
+      messages: [message.message],
+    } as unknown as MessageBatch<IngestionQueueMessage>)
+
+    expect(message.ack).toHaveBeenCalledTimes(1)
+    expect(message.retry).not.toHaveBeenCalled()
+    expect(mocks.apply).not.toHaveBeenCalled()
+    expect(mocks.send).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: "evt_invalid_entitlement_config",
+        rejection_reason: "INVALID_ENTITLEMENT_CONFIGURATION",
+        state: "rejected",
+      }),
+    ])
+  })
+
   it("ingests a single feature synchronously without the outer idempotency claim", async () => {
     const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+    const state = createResolvedState(timestamp)
     const { service, mocks } = createServiceHarness({
       grants: [createUsageGrant()],
-      resolvedFeatureState: createUsageFeatureState(createResolvedState(timestamp)),
+      resolvedStates: [state],
+      resolvedFeatureStatesBySlug: mapFeatureStatesBySlug([state]),
     })
     const message = createBatchMessage({
       id: "evt_sync_feature",
@@ -355,78 +383,88 @@ describe("IngestionService", () => {
     ])
   })
 
-  it("ingests a single feature synchronously with parseable numeric-string payloads", async () => {
+  it("enforces sync limits and verify reports only persisted usage", async () => {
     const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+    const state = createResolvedState(timestamp, {
+      limit: 10,
+      meterConfig: {
+        eventId: "meter_limit",
+        eventSlug: "tokens_used",
+        aggregationMethod: "sum",
+        aggregationField: "amount",
+      },
+    })
     const { service, mocks } = createServiceHarness({
       grants: [createUsageGrant()],
-      resolvedFeatureState: createUsageFeatureState(createResolvedState(timestamp)),
+      resolvedStates: [state],
+      resolvedFeatureStatesBySlug: mapFeatureStatesBySlug([state]),
     })
-    const message = createBatchMessage({
-      id: "evt_sync_feature_numeric_string",
+    const firstMessage = createBatchMessage({
+      id: "evt_sync_allowed",
+      idempotencyKey: "idem_sync_allowed",
       timestamp,
       properties: {
-        amount: "5.75",
+        amount: 7,
+      },
+    }).message.body
+    const secondMessage = createBatchMessage({
+      id: "evt_sync_denied",
+      idempotencyKey: "idem_sync_denied",
+      timestamp: timestamp + 1,
+      properties: {
+        amount: 5,
       },
     }).message.body
 
-    const result = await service.ingestFeatureSync({
+    const firstResult = await service.ingestFeatureSync({
       featureSlug: "api_calls",
-      message,
+      message: firstMessage,
+    })
+    const secondResult = await service.ingestFeatureSync({
+      featureSlug: "api_calls",
+      message: secondMessage,
+    })
+    const verifyResult = await service.verifyFeatureStatus({
+      customerId: "cus_123",
+      featureSlug: "api_calls",
+      projectId: "proj_123",
+      timestamp: timestamp + 1,
     })
 
-    expect(result).toEqual({
+    expect(firstResult).toEqual({
       allowed: true,
       message: undefined,
       rejectionReason: undefined,
       state: "processed",
     })
-    expect(mocks.apply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        enforceLimit: true,
-        featureSlug: "api_calls",
-      })
-    )
-    expect(mocks.send).toHaveBeenCalledWith([
-      expect.objectContaining({
-        id: "evt_sync_feature_numeric_string",
-        state: "processed",
-      }),
-    ])
-  })
-
-  it("rejects synchronous feature ingestion when the limit is exceeded", async () => {
-    const { service, mocks } = createServiceHarness({
-      grants: [createUsageGrant()],
-      resolvedFeatureState: createUsageFeatureState(createResolvedState()),
-      apply: vi.fn().mockResolvedValue({
-        allowed: false,
-        deniedReason: "LIMIT_EXCEEDED",
-        message: "Limit exceeded for meter meter_123",
-      }),
-    })
-    const message = createBatchMessage({
-      id: "evt_sync_denied",
-    }).message.body
-
-    const result = await service.ingestFeatureSync({
-      featureSlug: "api_calls",
-      message,
-    })
-
-    expect(result).toEqual({
+    expect(secondResult).toEqual({
       allowed: false,
-      message: "Limit exceeded for meter meter_123",
+      message: expect.stringContaining("Limit exceeded"),
       rejectionReason: "LIMIT_EXCEEDED",
       state: "rejected",
     })
-    expect(mocks.begin).not.toHaveBeenCalled()
-    expect(mocks.send).toHaveBeenCalledWith([
+    expect(verifyResult).toEqual(
       expect.objectContaining({
-        id: "evt_sync_denied",
-        rejection_reason: "LIMIT_EXCEEDED",
-        state: "rejected",
-      }),
-    ])
+        allowed: true,
+        status: "usage",
+        usage: 7,
+        limit: 10,
+        isLimitReached: false,
+      })
+    )
+    expect(mocks.apply).toHaveBeenCalledTimes(2)
+    expect(mocks.apply).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        enforceLimit: true,
+      })
+    )
+    expect(mocks.apply).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        enforceLimit: true,
+      })
+    )
   })
 
   it("rejects synchronous feature ingestion when the customer is missing", async () => {
@@ -459,61 +497,6 @@ describe("IngestionService", () => {
     ])
   })
 
-  it("returns the live usage snapshot for a usage feature", async () => {
-    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
-    const { service, mocks } = createServiceHarness({
-      grants: [createUsageGrant()],
-      resolvedFeatureState: createUsageFeatureState(createResolvedState(timestamp)),
-      getEnforcementState: vi.fn().mockResolvedValue({
-        isLimitReached: false,
-        limit: 100,
-        usage: 42,
-      }),
-    })
-
-    const result = await service.verifyFeatureStatus({
-      customerId: "cus_123",
-      featureSlug: "api_calls",
-      projectId: "proj_123",
-      timestamp,
-    })
-
-    expect(result).toEqual({
-      allowed: true,
-      featureSlug: "api_calls",
-      featureType: "usage",
-      isLimitReached: false,
-      limit: 100,
-      meterConfig: {
-        eventId: "meter_123",
-        eventSlug: "tokens_used",
-        aggregationMethod: "sum",
-        aggregationField: "amount",
-      },
-      overageStrategy: "none",
-      periodKey: `onetime:${timestamp}`,
-      status: "usage",
-      streamEndAt: null,
-      streamId: "stream_123",
-      streamStartAt: timestamp,
-      timestamp,
-      usage: 42,
-    })
-    expect(mocks.getEnforcementState).toHaveBeenCalledWith({
-      limit: 100,
-      meterConfig: {
-        eventId: "meter_123",
-        eventSlug: "tokens_used",
-        aggregationMethod: "sum",
-        aggregationField: "amount",
-      },
-      overageStrategy: "none",
-    })
-    expect(mocks.begin).not.toHaveBeenCalled()
-    expect(mocks.apply).not.toHaveBeenCalled()
-    expect(mocks.send).not.toHaveBeenCalled()
-  })
-
   it("returns an active non-usage feature without meter state", async () => {
     const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
     const { service, mocks } = createServiceHarness({
@@ -542,222 +525,453 @@ describe("IngestionService", () => {
     })
     expect(mocks.getEnforcementState).not.toHaveBeenCalled()
   })
-})
 
-function createServiceHarness(options: HarnessOptions = {}) {
-  const getCustomer = vi
-    .fn()
-    .mockResolvedValue(
-      Ok((options.customer === undefined ? { projectId: "proj_123" } : options.customer) as never)
-    )
-  const getGrantsForCustomer = vi.fn().mockResolvedValue(
-    Ok({
-      grants: options.grants ?? [],
-    } as never)
-  )
-  const resolveIngestionStatesFromGrants = vi
-    .fn()
-    .mockResolvedValue(Ok((options.resolvedStates ?? []) as never))
-  const resolveFeatureStateAtTimestamp = vi
-    .fn()
-    .mockResolvedValue(
-      Ok((options.resolvedFeatureState ?? createUsageFeatureState(createResolvedState())) as never)
-    )
-  const begin = vi.fn().mockResolvedValue(options.beginResult ?? { decision: "process" as const })
-  const complete = vi.fn().mockResolvedValue(undefined)
-  const abort = vi.fn().mockResolvedValue(undefined)
-  const apply = options.apply ?? vi.fn().mockResolvedValue({ allowed: true })
-  const getEnforcementState =
-    options.getEnforcementState ??
-    vi.fn().mockResolvedValue({
-      isLimitReached: false,
-      limit: 100,
-      usage: 0,
+  it("returns invalid_entitlement_configuration for verify when feature state resolution fails", async () => {
+    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+    const { service } = createServiceHarness({
+      grants: [createUsageGrant()],
+      resolveFeatureStateError: new Error("bad feature config"),
     })
-  const send = options.send ?? vi.fn().mockResolvedValue(undefined)
-  const logger = createLoggerStub()
-  const getIdempotencyStub = vi.fn().mockReturnValue({
-    begin,
-    complete,
-    abort,
-  })
-  const getEntitlementWindowStub = vi.fn().mockReturnValue({
-    apply,
-    getEnforcementState,
-  })
 
-  const service = new IngestionService({
-    customerService: {
-      getCustomer,
-    } as unknown as Pick<CustomerService, "getCustomer">,
-    entitlementWindowClient: {
-      getEntitlementWindowStub,
-    },
-    grantsManager: {
-      getGrantsForCustomer,
-      resolveFeatureStateAtTimestamp,
-      resolveIngestionStatesFromGrants,
-    } as unknown as Pick<
-      GrantsManager,
-      "getGrantsForCustomer" | "resolveFeatureStateAtTimestamp" | "resolveIngestionStatesFromGrants"
-    >,
-    idempotencyClient: {
-      getIdempotencyStub,
-    },
-    logger,
-    pipelineEvents: {
-      send,
-    },
+    const result = await service.verifyFeatureStatus({
+      customerId: "cus_123",
+      featureSlug: "api_calls",
+      projectId: "proj_123",
+      timestamp,
+    })
+
+    expect(result).toEqual({
+      allowed: false,
+      featureSlug: "api_calls",
+      message: "bad feature config",
+      status: "invalid_entitlement_configuration",
+      timestamp,
+    })
   })
 
-  const consumer = new IngestionQueueConsumer({
-    logger,
-    processor: service,
-  })
-
-  return {
-    consumer,
-    service,
-    mocks: {
-      abort,
-      apply,
-      begin,
-      complete,
-      getCustomer,
-      getEntitlementWindowStub,
-      getEnforcementState,
-      getGrantsForCustomer,
-      getIdempotencyStub,
-      logger,
-      resolveFeatureStateAtTimestamp,
-      resolveIngestionStatesFromGrants,
-      send,
-    },
-  }
-}
-
-function createUsageGrant() {
-  return {
-    featurePlanVersion: {
-      feature: {
-        slug: "api_calls",
-      },
-      featureType: "usage",
-      meterConfig: {
-        eventId: "meter_123",
-      },
-    },
-  }
-}
-
-function createBooleanGrant() {
-  return {
-    featurePlanVersion: {
-      feature: {
-        slug: "team_members",
-      },
-      featureType: "boolean",
-      meterConfig: null,
-    },
-  }
-}
-
-function createResolvedState(
-  timestamp = Date.UTC(2026, 2, 19, 12, 0, 0),
-  overrides: Record<string, unknown> = {}
-) {
-  return {
-    activeGrantIds: ["grant_123"],
-    customerId: "cus_123",
-    featureSlug: "api_calls",
-    limit: 100,
-    meterConfig: {
-      eventId: "meter_123",
-      eventSlug: "tokens_used",
-      aggregationMethod: "sum",
-      aggregationField: "amount",
-    },
-    overageStrategy: "none",
-    projectId: "proj_123",
-    resetConfig: null,
-    streamEndAt: null,
-    streamId: "stream_123",
-    streamStartAt: timestamp,
-    ...overrides,
-  }
-}
-
-function createUsageFeatureState(state = createResolvedState()) {
-  return {
-    kind: "usage",
-    state,
-  }
-}
-
-function createBatchMessage(overrides: Partial<IngestionQueueMessage> = {}): {
-  ack: ReturnType<typeof vi.fn>
-  message: {
-    body: IngestionQueueMessage
-    ack: ReturnType<typeof vi.fn>
-    retry: ReturnType<typeof vi.fn>
-  }
-  retry: ReturnType<typeof vi.fn>
-} {
-  const ack = vi.fn()
-  const retry = vi.fn()
-
-  return {
-    ack,
-    retry,
-    message: {
-      ack,
-      retry,
-      body: {
-        version: 1,
-        projectId: "proj_123",
-        customerId: "cus_123",
-        requestId: "req_123",
-        receivedAt: Date.UTC(2026, 2, 19, 12, 0, 0),
-        idempotencyKey: "idem_123",
-        id: "evt_123",
-        slug: "tokens_used",
-        timestamp: Date.UTC(2026, 2, 19, 12, 0, 0),
-        properties: {
-          amount: 1,
+  it("fans out one async event to five entitlements and verify returns per-feature usage", async () => {
+    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+    const states = [
+      createResolvedState(timestamp, {
+        featureSlug: "feature_sum",
+        streamId: "stream_sum",
+        meterConfig: {
+          eventId: "meter_sum",
+          eventSlug: "tokens_used",
+          aggregationMethod: "sum",
+          aggregationField: "amount",
         },
-        ...overrides,
+      }),
+      createResolvedState(timestamp, {
+        featureSlug: "feature_count",
+        streamId: "stream_count",
+        limit: 3,
+        meterConfig: {
+          eventId: "meter_count",
+          eventSlug: "tokens_used",
+          aggregationMethod: "count",
+        },
+      }),
+      createResolvedState(timestamp, {
+        featureSlug: "feature_max",
+        streamId: "stream_max",
+        meterConfig: {
+          eventId: "meter_max",
+          eventSlug: "tokens_used",
+          aggregationMethod: "max",
+          aggregationField: "peak",
+        },
+      }),
+      createResolvedState(timestamp, {
+        featureSlug: "feature_latest",
+        streamId: "stream_latest",
+        meterConfig: {
+          eventId: "meter_latest",
+          eventSlug: "tokens_used",
+          aggregationMethod: "latest",
+          aggregationField: "current",
+        },
+      }),
+      createResolvedState(timestamp, {
+        featureSlug: "feature_sum_text",
+        streamId: "stream_sum_text",
+        meterConfig: {
+          eventId: "meter_sum_text",
+          eventSlug: "tokens_used",
+          aggregationMethod: "sum",
+          aggregationField: "creditsText",
+        },
+      }),
+    ]
+    const { consumer, service, mocks } = createServiceHarness({
+      grants: states.map((state) =>
+        createUsageGrant({
+          featureSlug: state.featureSlug,
+        })
+      ),
+      resolvedStates: states,
+      resolvedFeatureStatesBySlug: mapFeatureStatesBySlug(states),
+    })
+    const message = createBatchMessage({
+      id: "evt_fan_out",
+      idempotencyKey: "idem_fan_out",
+      timestamp,
+      properties: {
+        amount: 7,
+        peak: 11,
+        current: 9,
+        creditsText: "4.5",
+      },
+    })
+
+    await consumer.consumeBatch({
+      messages: [message.message],
+    } as unknown as MessageBatch<IngestionQueueMessage>)
+
+    expect(mocks.apply).toHaveBeenCalledTimes(5)
+    for (const call of mocks.apply.mock.calls) {
+      expect(call[0]).toEqual(
+        expect.objectContaining({
+          enforceLimit: false,
+        })
+      )
+    }
+
+    const [sumFeature, countFeature, maxFeature, latestFeature, sumTextFeature] = await Promise.all(
+      [
+        service.verifyFeatureStatus({
+          customerId: "cus_123",
+          featureSlug: "feature_sum",
+          projectId: "proj_123",
+          timestamp,
+        }),
+        service.verifyFeatureStatus({
+          customerId: "cus_123",
+          featureSlug: "feature_count",
+          projectId: "proj_123",
+          timestamp,
+        }),
+        service.verifyFeatureStatus({
+          customerId: "cus_123",
+          featureSlug: "feature_max",
+          projectId: "proj_123",
+          timestamp,
+        }),
+        service.verifyFeatureStatus({
+          customerId: "cus_123",
+          featureSlug: "feature_latest",
+          projectId: "proj_123",
+          timestamp,
+        }),
+        service.verifyFeatureStatus({
+          customerId: "cus_123",
+          featureSlug: "feature_sum_text",
+          projectId: "proj_123",
+          timestamp,
+        }),
+      ]
+    )
+
+    expect(sumFeature).toEqual(expect.objectContaining({ status: "usage", usage: 7 }))
+    expect(countFeature).toEqual(expect.objectContaining({ status: "usage", usage: 1 }))
+    expect(maxFeature).toEqual(expect.objectContaining({ status: "usage", usage: 11 }))
+    expect(latestFeature).toEqual(expect.objectContaining({ status: "usage", usage: 9 }))
+    expect(sumTextFeature).toEqual(expect.objectContaining({ status: "usage", usage: 4.5 }))
+  })
+
+  it("keeps async ingestion non-blocking when usage exceeds limits and verify reports limit reached", async () => {
+    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+    const state = createResolvedState(timestamp, {
+      limit: 5,
+      meterConfig: {
+        eventId: "meter_async_limit",
+        eventSlug: "tokens_used",
+        aggregationMethod: "sum",
+        aggregationField: "amount",
+      },
+    })
+    const { consumer, service, mocks } = createServiceHarness({
+      grants: [createUsageGrant()],
+      resolvedStates: [state],
+      resolvedFeatureStatesBySlug: mapFeatureStatesBySlug([state]),
+    })
+    const message = createBatchMessage({
+      id: "evt_async_limit",
+      idempotencyKey: "idem_async_limit",
+      timestamp,
+      properties: {
+        amount: 10,
+      },
+    })
+
+    await consumer.consumeBatch({
+      messages: [message.message],
+    } as unknown as MessageBatch<IngestionQueueMessage>)
+
+    const verifyResult = await service.verifyFeatureStatus({
+      customerId: "cus_123",
+      featureSlug: "api_calls",
+      projectId: "proj_123",
+      timestamp,
+    })
+
+    expect(message.ack).toHaveBeenCalledTimes(1)
+    expect(message.retry).not.toHaveBeenCalled()
+    expect(mocks.send).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: "evt_async_limit",
+        state: "processed",
+      }),
+    ])
+    expect(verifyResult).toEqual(
+      expect.objectContaining({
+        allowed: false,
+        status: "usage",
+        usage: 10,
+        limit: 5,
+        isLimitReached: true,
+      })
+    )
+  })
+
+  it.each([
+    {
+      aggregationMethod: "sum" as const,
+      aggregationField: "amount",
+      expectedUsage: 4.25,
+      properties: {
+        amount: "4.25",
       },
     },
-  }
-}
-
-function createRawBatchMessage(body: unknown): {
-  ack: ReturnType<typeof vi.fn>
-  message: {
-    body: unknown
-    ack: ReturnType<typeof vi.fn>
-    retry: ReturnType<typeof vi.fn>
-  }
-  retry: ReturnType<typeof vi.fn>
-} {
-  const ack = vi.fn()
-  const retry = vi.fn()
-
-  return {
-    ack,
-    retry,
-    message: {
-      ack,
-      retry,
-      body,
+    {
+      aggregationMethod: "count" as const,
+      aggregationField: undefined,
+      expectedUsage: 1,
+      properties: {},
     },
-  }
-}
+    {
+      aggregationMethod: "max" as const,
+      aggregationField: "peak",
+      expectedUsage: 8,
+      properties: {
+        peak: 8,
+      },
+    },
+    {
+      aggregationMethod: "latest" as const,
+      aggregationField: "current",
+      expectedUsage: 6,
+      properties: {
+        current: 6,
+      },
+    },
+  ])(
+    "processes async payloads for $aggregationMethod meters and verify returns exact usage",
+    async (scenario) => {
+      const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+      const state = createResolvedState(timestamp, {
+        featureSlug: "feature_matrix",
+        streamId: `stream_${scenario.aggregationMethod}`,
+        meterConfig: {
+          eventId: `meter_${scenario.aggregationMethod}`,
+          eventSlug: "tokens_used",
+          aggregationMethod: scenario.aggregationMethod,
+          ...(scenario.aggregationField ? { aggregationField: scenario.aggregationField } : {}),
+        },
+      })
+      const { consumer, service } = createServiceHarness({
+        grants: [
+          createUsageGrant({
+            featureSlug: "feature_matrix",
+          }),
+        ],
+        resolvedStates: [state],
+        resolvedFeatureStatesBySlug: mapFeatureStatesBySlug([state]),
+      })
+      const message = createBatchMessage({
+        id: `evt_matrix_${scenario.aggregationMethod}`,
+        idempotencyKey: `idem_matrix_${scenario.aggregationMethod}`,
+        timestamp,
+        properties: scenario.properties,
+      })
 
-function createLoggerStub(): AppLogger & LoggerStub {
-  return {
-    debug: vi.fn(),
-    error: vi.fn(),
-    warn: vi.fn(),
-  } as unknown as AppLogger & LoggerStub
-}
+      await consumer.consumeBatch({
+        messages: [message.message],
+      } as unknown as MessageBatch<IngestionQueueMessage>)
+
+      const verifyResult = await service.verifyFeatureStatus({
+        customerId: "cus_123",
+        featureSlug: "feature_matrix",
+        projectId: "proj_123",
+        timestamp,
+      })
+
+      expect(verifyResult).toEqual(
+        expect.objectContaining({
+          status: "usage",
+          usage: scenario.expectedUsage,
+        })
+      )
+    }
+  )
+
+  it.each([
+    {
+      aggregationMethod: "sum" as const,
+      aggregationField: "amount",
+      properties: {},
+    },
+    {
+      aggregationMethod: "max" as const,
+      aggregationField: "peak",
+      properties: {
+        peak: "invalid",
+      },
+    },
+    {
+      aggregationMethod: "latest" as const,
+      aggregationField: "current",
+      properties: {},
+    },
+  ])(
+    "rejects invalid async aggregation payloads for $aggregationMethod with INVALID_AGGREGATION_PROPERTIES",
+    async (scenario) => {
+      const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+      const state = createResolvedState(timestamp, {
+        featureSlug: "feature_invalid_payload",
+        streamId: `stream_invalid_${scenario.aggregationMethod}`,
+        meterConfig: {
+          eventId: `meter_invalid_${scenario.aggregationMethod}`,
+          eventSlug: "tokens_used",
+          aggregationMethod: scenario.aggregationMethod,
+          aggregationField: scenario.aggregationField,
+        },
+      })
+      const { consumer, mocks } = createServiceHarness({
+        grants: [
+          createUsageGrant({
+            featureSlug: "feature_invalid_payload",
+          }),
+        ],
+        resolvedStates: [state],
+        resolvedFeatureStatesBySlug: mapFeatureStatesBySlug([state]),
+      })
+      const message = createBatchMessage({
+        id: `evt_invalid_${scenario.aggregationMethod}`,
+        idempotencyKey: `idem_invalid_${scenario.aggregationMethod}`,
+        timestamp,
+        properties: scenario.properties,
+      })
+
+      await consumer.consumeBatch({
+        messages: [message.message],
+      } as unknown as MessageBatch<IngestionQueueMessage>)
+
+      expect(message.ack).toHaveBeenCalledTimes(1)
+      expect(message.retry).not.toHaveBeenCalled()
+      expect(mocks.apply).not.toHaveBeenCalled()
+      expect(mocks.send).toHaveBeenCalledWith([
+        expect.objectContaining({
+          id: `evt_invalid_${scenario.aggregationMethod}`,
+          rejection_reason: "INVALID_AGGREGATION_PROPERTIES",
+          state: "rejected",
+        }),
+      ])
+    }
+  )
+
+  it.each([
+    {
+      aggregationMethod: "sum" as const,
+      aggregationField: "amount",
+      events: [
+        { id: "evt_sum_1", offsetMs: 2_000, properties: { amount: 2 } },
+        { id: "evt_sum_2", offsetMs: 0, properties: { amount: 3 } },
+        { id: "evt_sum_3", offsetMs: 1_000, properties: { amount: 1 } },
+      ],
+      expectedUsage: 6,
+    },
+    {
+      aggregationMethod: "count" as const,
+      aggregationField: undefined,
+      events: [
+        { id: "evt_count_1", offsetMs: 2_000, properties: {} },
+        { id: "evt_count_2", offsetMs: 0, properties: {} },
+        { id: "evt_count_3", offsetMs: 1_000, properties: {} },
+      ],
+      expectedUsage: 3,
+    },
+    {
+      aggregationMethod: "max" as const,
+      aggregationField: "peak",
+      events: [
+        { id: "evt_max_1", offsetMs: 2_000, properties: { peak: 3 } },
+        { id: "evt_max_2", offsetMs: 0, properties: { peak: 9 } },
+        { id: "evt_max_3", offsetMs: 1_000, properties: { peak: 4 } },
+      ],
+      expectedUsage: 9,
+    },
+    {
+      aggregationMethod: "latest" as const,
+      aggregationField: "current",
+      events: [
+        { id: "evt_latest_1", offsetMs: 2_000, properties: { current: 5 } },
+        { id: "evt_latest_2", offsetMs: 0, properties: { current: 2 } },
+        { id: "evt_latest_3", offsetMs: 1_000, properties: { current: 7 } },
+      ],
+      expectedUsage: 5,
+    },
+  ])(
+    "keeps verify usage consistent with ingested async stream for $aggregationMethod",
+    async (scenario) => {
+      const baseTimestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+      const state = createResolvedState(baseTimestamp, {
+        featureSlug: `feature_consistency_${scenario.aggregationMethod}`,
+        streamId: `stream_consistency_${scenario.aggregationMethod}`,
+        meterConfig: {
+          eventId: `meter_consistency_${scenario.aggregationMethod}`,
+          eventSlug: "tokens_used",
+          aggregationMethod: scenario.aggregationMethod,
+          ...(scenario.aggregationField ? { aggregationField: scenario.aggregationField } : {}),
+        },
+      })
+      const { consumer, service, mocks } = createServiceHarness({
+        grants: [
+          createUsageGrant({
+            featureSlug: `feature_consistency_${scenario.aggregationMethod}`,
+          }),
+        ],
+        resolvedStates: [state],
+        resolvedFeatureStatesBySlug: mapFeatureStatesBySlug([state]),
+      })
+      const batchMessages = scenario.events.map(
+        (event, index) =>
+          createBatchMessage({
+            id: event.id,
+            idempotencyKey: `idem_consistency_${scenario.aggregationMethod}_${index}`,
+            timestamp: baseTimestamp + event.offsetMs,
+            properties: event.properties,
+          }).message
+      )
+
+      await consumer.consumeBatch({
+        messages: batchMessages,
+      } as unknown as MessageBatch<IngestionQueueMessage>)
+
+      const verifyResult = await service.verifyFeatureStatus({
+        customerId: "cus_123",
+        featureSlug: `feature_consistency_${scenario.aggregationMethod}`,
+        projectId: "proj_123",
+        timestamp: baseTimestamp + 2_000,
+      })
+
+      expect(mocks.send).toHaveBeenCalledTimes(scenario.events.length)
+      expect(verifyResult).toEqual(
+        expect.objectContaining({
+          status: "usage",
+          usage: scenario.expectedUsage,
+        })
+      )
+    }
+  )
+})

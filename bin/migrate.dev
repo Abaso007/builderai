@@ -81,7 +81,21 @@ if [ "$MODE_ID" = "dev" ]; then
     echo "Applying migrations"
     infisical run --env=preview --path=/ --recursive -- env UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG NODE_ENV=$NODE_ENV APP_ENV=$APP_ENV pnpm --filter db migrate:custom
   fi
+elif [ "$MODE_ID" = "prod" ]; then
+  if [ "$COMMAND" = "drop" ]; then
+    echo "Dropping database"
+    infisical run --env=prod --path=/ --recursive -- pnpm --filter db drop
+  fi
+
+  if [ "$COMMAND" = "migrate:custom" ]; then
+    echo "Generating migrations"
+    infisical run --env=prod --path=/ --recursive -- pnpm --filter db generate
+
+    echo "Applying migrations"
+    infisical run --env=prod --path=/ --recursive -- pnpm --filter db migrate:custom
+  fi
 else
   echo "Invalid mode: $MODE_ID"
   exit 1
 fi
+

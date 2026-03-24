@@ -1,4 +1,5 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
+import { MAX_EVENT_AGE_MS } from "@unprice/services/entitlements"
 import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { UnpriceApiError } from "~/errors"
@@ -132,6 +133,9 @@ describe("ingestEventsV1 route", () => {
     expect(selectedQueue.send).toHaveBeenCalledWith(
       expect.objectContaining({
         idempotencyKey: requestBody.idempotencyKey,
+        projectId: "proj_123",
+        requestId: "req_123",
+        receivedAt: requestBody.timestamp,
       })
     )
     expect(otherQueue.send).not.toHaveBeenCalled()
@@ -178,6 +182,74 @@ describe("ingestEventsV1 route", () => {
     )
 
     expect(response.status).toBe(400)
+  })
+
+  it("returns 400 when the raw event timestamp is too far in the future", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        timestamp: requestBody.timestamp + 5_000,
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        code: "BAD_REQUEST",
+      })
+    )
+  })
+
+  it("returns 400 when the raw event timestamp is older than the max accepted age", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        timestamp: requestBody.timestamp - MAX_EVENT_AGE_MS - 1,
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        code: "BAD_REQUEST",
+      })
+    )
+  })
+
+  it("uses the resolved context project id in the queued ingestion message", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+    authMocks.resolveContextProjectId.mockResolvedValue("proj_resolved_456")
+
+    const { app, env, executionCtx, waitUntilPromises } = createTestApp()
+
+    const response = await app.fetch(buildRequest(), env, executionCtx)
+    await Promise.all(waitUntilPromises)
+
+    expect(response.status).toBe(202)
+
+    const selectedQueue =
+      selectQueueShardIndex(requestBody.customerId) === 0 ? env.QUEUE_SHARD_0 : env.QUEUE_SHARD_1
+
+    expect(selectedQueue.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "proj_resolved_456",
+      })
+    )
   })
 
   it("generates an internal event id when the request id is omitted", async () => {
