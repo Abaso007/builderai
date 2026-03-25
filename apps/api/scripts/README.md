@@ -9,6 +9,7 @@ Reference: [Build an end-to-end data pipeline (Cloudflare)](https://developers.c
 - `configure-queues.sh` – Creates queue resources from `apps/api/wrangler.jsonc` (`producers`, `consumers`, and `dead_letter_queue`).
 - `configure-lakehouse-pipelines.sh` – Configures the **events** stream, sink, and pipeline for one environment.
 - `setup-r2.sh` – Applies lifecycle rules to the selected environment bucket.
+- `delete-r2-bucket.sh` – Force-deletes an R2 bucket by purging objects first, then deleting the bucket.
 - `r2-lifecycle.json` – Lifecycle config used by `setup-r2.sh`.
 - `generate-lakehouse-schemas.ts` – Regenerates `schemas/events.json` from the `@unprice/lakehouse` registry.
 - `schemas/events.json` – Cloudflare stream schema for lakehouse events.
@@ -22,6 +23,7 @@ From `apps/api`:
 - `npm run scripts:queues -- all` (or `dev` / `preview` / `prod`)
 - `npm run scripts:r2-pipelines -- dev` (options: `--skip-lifecycle`, `--skip-compaction`, `--recreate`, `--delete-only`, `--name-prefix`, `--name-suffix`)
 - `npm run scripts:r2-lifecycle -- dev` (or `preview` / `prod`)
+- `npm run scripts:r2-delete-bucket -- dev --yes` (or `preview` / `prod`)
 - `npm run scripts:lakehouse-schemas`
 
 ## Prerequisites
@@ -109,6 +111,28 @@ Lifecycle rules (`r2-lifecycle.json`):
 - `lakehouse/raw/` – Delete after 7 days.
 - `lakehouse/compacted/` – Delete after 1 year.
 - All prefixes – Abort incomplete multipart uploads after 7 days.
+
+## Force-delete bucket (purge + delete)
+
+Wrangler does not support `--force` on `r2 bucket delete`.  
+Use this script to empty the bucket first and then delete it.
+
+```bash
+./scripts/delete-r2-bucket.sh dev --yes
+```
+
+Options:
+
+- `--bucket <name>` – Override resolved LAKEHOUSE bucket.
+- `--skip-purge` – Skip object purge and only attempt delete.
+- `--dry-run` – Print commands only.
+- `--yes` – Skip interactive confirmation.
+
+Required env vars for purge step:
+
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `CLOUDFLARE_ACCOUNT_ID` (or `R2_ACCOUNT_ID`)
 
 ## Regenerate events schema JSON
 
