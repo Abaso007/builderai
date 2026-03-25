@@ -34,15 +34,15 @@
       "queues": {
         "producers": [
           {
-            "binding": "QUEUE_SHARD_0",
+            "binding": "unprice_api_ingestion_shard_0_prod",
             "queue": "unprice-api-ingestion-shard-0-prod"
           },
           {
-            "binding": "QUEUE_SHARD_1",
+            "binding": "unprice_api_ingestion_shard_1_prod",
             "queue": "unprice-api-ingestion-shard-1-prod"
           },
           {
-            "binding": "INGESTION_DLQ",
+            "binding": "unprice_api_ingestion_dlq_prod",
             "queue": "unprice-api-ingestion-dlq-prod"
           }
         ],
@@ -151,15 +151,15 @@
       "queues": {
         "producers": [
           {
-            "binding": "QUEUE_SHARD_0",
+            "binding": "unprice_api_ingestion_shard_0_preview",
             "queue": "unprice-api-ingestion-shard-0-preview"
           },
           {
-            "binding": "QUEUE_SHARD_1",
+            "binding": "unprice_api_ingestion_shard_1_preview",
             "queue": "unprice-api-ingestion-shard-1-preview"
           },
           {
-            "binding": "INGESTION_DLQ",
+            "binding": "unprice_api_ingestion_dlq_preview",
             "queue": "unprice-api-ingestion-dlq-preview"
           }
         ],
