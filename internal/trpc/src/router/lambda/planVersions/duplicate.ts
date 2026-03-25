@@ -6,8 +6,6 @@ import { planVersionSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 
 import { protectedProjectProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
-import { reportUsageFeature } from "#utils/shared"
 
 export const duplicate = protectedProjectProcedure
   .input(
@@ -23,25 +21,10 @@ export const duplicate = protectedProjectProcedure
   .mutation(async (opts) => {
     const { id } = opts.input
     const project = opts.ctx.project
-    const workspace = opts.ctx.project.workspace
+    const _workspace = opts.ctx.project.workspace
 
     // only owner and admin can duplicate a plan version
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
-
-    const result = await featureGuard({
-      customerId: workspace.unPriceCustomerId,
-      featureSlug: "plans",
-      isMain: workspace.isMain,
-      action: "duplicate",
-      metadata: { module: "planVersion" },
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
 
     const planVersionData = await opts.ctx.db.query.versions.findFirst({
       where: (version, { and, eq }) => and(eq(version.id, id), eq(version.projectId, project.id)),
@@ -163,21 +146,6 @@ export const duplicate = protectedProjectProcedure
         code: "INTERNAL_SERVER_ERROR",
         message: "Error duplicating version",
       })
-    }
-
-    // avoid reporting usage for flat features
-    if (result.featureType !== "flat") {
-      opts.ctx.waitUntil(
-        // report usage
-        reportUsageFeature({
-          customerId: workspace.unPriceCustomerId,
-          featureSlug: "plans",
-          usage: 1,
-          isMain: workspace.isMain,
-          action: "duplicate",
-          metadata: { module: "planVersion" },
-        })
-      )
     }
 
     return {

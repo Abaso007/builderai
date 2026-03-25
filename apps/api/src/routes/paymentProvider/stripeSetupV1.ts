@@ -2,10 +2,10 @@ import { env } from "cloudflare:workers"
 import { createRoute } from "@hono/zod-openapi"
 import { and, eq } from "@unprice/db"
 import { customers } from "@unprice/db/schema"
-import * as HttpStatusCodes from "stoker/http-status-codes"
 import { z } from "zod"
 import { UnpriceApiError, openApiErrorResponses } from "~/errors"
 import type { App } from "~/hono/app"
+import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["paymentProvider"]
 

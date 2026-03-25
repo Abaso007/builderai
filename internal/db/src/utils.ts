@@ -55,7 +55,7 @@ export const slugify = (str: string, forDisplayingInput?: boolean) => {
     .normalize("NFD") // Normalize to decomposed form for handling accents
     // .replace(/\p{Diacritic}/gu, "") // Remove any diacritics (accents) from characters
     // .replace(/[^.\p{L}\p{N}\p{Zs}\p{Emoji}]+/gu, "-") // Replace any non-alphanumeric characters (including Unicode and except "." period) with a dash
-    .replace(/[\s_#]+/g, "-") // Replace whitespace, # and underscores with a single dash
+    .replace(/[\s_#]+/g, "_") // Replace whitespace, # and underscores with a single dash
     .replace(/^-+/, "") // Remove dashes from start
     .replace(/\.{2,}/g, ".") // Replace consecutive periods with a single period
     .replace(/^\.+/, "") // Remove periods from the start
@@ -64,7 +64,7 @@ export const slugify = (str: string, forDisplayingInput?: boolean) => {
       ""
     ) // Removes emojis
     .replace(/\s+/g, " ")
-    .replace(/-+/g, "-") // Replace consecutive dashes with a single dash
+    .replace(/-+/g, "_") // Replace consecutive dashes with a single dash
 
   return forDisplayingInput ? s : s.replace(/-+$/, "").replace(/\.*$/, "") // Remove dashes and period from end
 }

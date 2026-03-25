@@ -52,14 +52,12 @@
         "TINYBIRD_URL",
         "UNPRICE_API_KEY",
         "UNPRICE_API_URL",
-        "FLAGS_SECRET",
         "AXIOM_API_TOKEN",
         "AXIOM_DATASET",
         "UPSTASH_REDIS_REST_URL",
         "UPSTASH_REDIS_REST_TOKEN",
         "USERJOT_ID",
-        "USERJOT_SECRET",
-        "OPENROUTER_API_KEY"
+        "USERJOT_SECRET"
       ]
     },
     "fmt": {
@@ -102,14 +100,12 @@
         "TINYBIRD_URL",
         "UNPRICE_API_KEY",
         "UNPRICE_API_URL",
-        "FLAGS_SECRET",
         "AXIOM_API_TOKEN",
         "AXIOM_DATASET",
         "UPSTASH_REDIS_REST_URL",
         "UPSTASH_REDIS_REST_TOKEN",
         "USERJOT_ID",
-        "USERJOT_SECRET",
-        "OPENROUTER_API_KEY"
+        "USERJOT_SECRET"
       ]
     },
     "test": {

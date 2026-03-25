@@ -59,7 +59,7 @@ export default async function PlanPage({
                     defaultValues={{
                       planId: plan.id,
                       description: plan.description,
-                      title: plan.slug,
+                      title: plan.title,
                       projectId: plan.projectId,
                       currency: project.defaultCurrency,
                       paymentProvider: "stripe",

@@ -5,10 +5,7 @@ import {
   projectExtendedSelectSchema,
 } from "@unprice/db/validators"
 import { z } from "zod"
-
-import { FEATURE_SLUGS } from "@unprice/config"
 import { protectedProjectProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
 
 export const getVersionsBySlug = protectedProjectProcedure
   .input(z.object({ slug: z.string() }))
@@ -29,23 +26,7 @@ export const getVersionsBySlug = protectedProjectProcedure
     const { slug } = opts.input
     const project = opts.ctx.project
 
-    const workspace = opts.ctx.project.workspace
-    const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.PLANS.SLUG
-
-    const result = await featureGuard({
-      customerId,
-      featureSlug,
-      isMain: workspace.isMain,
-      action: "getVersionsBySlug",
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
+    const _workspace = opts.ctx.project.workspace
 
     // TODO: better rewrite this query to use joins instead of subqueries
     const planWithVersions = await opts.ctx.db.query.plans

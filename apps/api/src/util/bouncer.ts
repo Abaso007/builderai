@@ -11,12 +11,12 @@ import type { HonoEnv } from "~/hono/env"
  * @returns True if the customer is blocked, false otherwise
  */
 export const bouncer = async (c: Context<HonoEnv>, customerId: string, projectId: string) => {
-  const { usagelimiter } = c.get("services")
+  const { entitlement } = c.get("services")
 
   startTime(c, "bouncer")
 
   // Check access control list in cache (Edge-cached, ~0-10ms latency)
-  const acl = await usagelimiter.getAccessControlList({
+  const acl = await entitlement.getAccessControlList({
     customerId,
     projectId,
     now: Date.now(),

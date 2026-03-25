@@ -4,22 +4,21 @@ import { z } from "zod"
 import { and, eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
 import {
+  getAnchor,
   planVersionFeatureDragDropSchema,
-  planVersionFeatureSelectBaseSchema,
+  planVersionFeatureUpdateBaseSchema,
 } from "@unprice/db/validators"
-
-import { FEATURE_SLUGS } from "@unprice/config"
 import { protectedProjectProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
 
 export const update = protectedProjectProcedure
-  .input(planVersionFeatureSelectBaseSchema.partial().required({ id: true, planVersionId: true }))
+  .input(planVersionFeatureUpdateBaseSchema)
   .output(
     z.object({
       planVersionFeature: planVersionFeatureDragDropSchema,
     })
   )
   .mutation(async (opts) => {
+    const hasMeterConfigOverride = Object.prototype.hasOwnProperty.call(opts.input, "meterConfig")
     const {
       id,
       featureId,
@@ -29,12 +28,12 @@ export const update = protectedProjectProcedure
       planVersionId,
       order,
       defaultQuantity,
-      aggregationMethod,
       limit,
       billingConfig,
       resetConfig,
       type,
       unitOfMeasure,
+      meterConfig,
     } = opts.input
 
     // we purposely don't allow to update the currency and the payment provider
@@ -42,24 +41,23 @@ export const update = protectedProjectProcedure
 
     const project = opts.ctx.project
 
-    const workspace = project.workspace
-    const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.PLAN_VERSIONS.SLUG
+    const _workspace = project.workspace
 
     // only owner and admin can update a feature
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const result = await featureGuard({
-      customerId,
-      featureSlug,
-      isMain: workspace.isMain,
-      action: "update",
+    const existingPlanVersionFeature = await opts.ctx.db.query.planVersionFeatures.findFirst({
+      with: {
+        feature: true,
+      },
+      where: (planVersionFeature, { and, eq }) =>
+        and(eq(planVersionFeature.id, id), eq(planVersionFeature.projectId, project.id)),
     })
 
-    if (!result.success) {
+    if (!existingPlanVersionFeature?.id) {
       throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
+        code: "NOT_FOUND",
+        message: "feature version not found",
       })
     }
 
@@ -83,25 +81,43 @@ export const update = protectedProjectProcedure
     }
 
     // only usage items can have a different billing config but the billing anchor should be the same as the plan version billing config
+    const featureTypeUpdate = featureType ?? existingPlanVersionFeature.featureType
     const billingConfigUpdate =
-      featureType === "usage" ? billingConfig : planVersionData.billingConfig
+      featureTypeUpdate === "usage" ? billingConfig : planVersionData.billingConfig
 
-    let unitOfMeasureUpdate = unitOfMeasure
+    const featureData = existingPlanVersionFeature.feature
+    // define the unit of unitOfMeasure
+    const unitOfMeasureUpdate =
+      unitOfMeasure ?? existingPlanVersionFeature.feature.unitOfMeasure ?? "units"
 
-    if (unitOfMeasureUpdate === undefined && featureId) {
-      const featureData = await opts.ctx.db.query.features.findFirst({
-        where: (feature, { eq, and }) =>
-          and(eq(feature.id, featureId), eq(feature.projectId, project.id)),
+    const shouldUpdateMeterConfig =
+      hasMeterConfigOverride || featureId !== undefined || featureType !== undefined
+
+    const meterConfigUpdate =
+      featureTypeUpdate !== "usage"
+        ? null
+        : hasMeterConfigOverride
+          ? (meterConfig ?? null)
+          : featureData !== undefined
+            ? (featureData.meterConfig ?? null)
+            : (existingPlanVersionFeature.meterConfig ?? null)
+
+    if (featureTypeUpdate === "usage" && shouldUpdateMeterConfig && !meterConfigUpdate) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Usage features require meterConfig or a default feature meterConfig",
       })
+    }
 
-      if (!featureData?.id) {
+    if (resetConfig) {
+      try {
+        getAnchor(Date.now(), resetConfig.resetInterval, resetConfig.resetAnchor)
+      } catch (error) {
         throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "feature not found",
+          code: "BAD_REQUEST",
+          message: `Invalid reset configuration: ${error instanceof Error ? error.message : "invalid reset anchor"}`,
         })
       }
-
-      unitOfMeasureUpdate = featureData.unitOfMeasure ?? "units"
     }
 
     const planVersionFeatureUpdated = await opts.ctx.db
@@ -118,8 +134,8 @@ export const update = protectedProjectProcedure
           defaultQuantity: defaultQuantity === 0 ? null : defaultQuantity,
         }),
         ...(limit !== undefined && { limit: limit === 0 ? null : limit }),
-        ...(aggregationMethod !== undefined && {
-          aggregationMethod: featureType !== "usage" ? "none" : aggregationMethod,
+        ...(shouldUpdateMeterConfig && {
+          meterConfig: meterConfigUpdate,
         }),
         ...(billingConfigUpdate && {
           billingConfig: {

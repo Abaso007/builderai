@@ -1,7 +1,7 @@
 import { createRoute } from "@hono/zod-openapi"
 import { endTime, startTime } from "hono/timing"
-import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
+import * as HttpStatusCodes from "~/util/http-status-codes"
 
 import { customerSignUpSchema, signUpResponseSchema } from "@unprice/db/validators"
 import { UnPriceCustomerError } from "@unprice/services/customers"

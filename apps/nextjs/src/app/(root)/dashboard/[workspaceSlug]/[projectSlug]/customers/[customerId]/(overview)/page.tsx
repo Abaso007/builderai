@@ -8,7 +8,7 @@ import HeaderTab from "~/components/layout/header-tab"
 import { SuperLink } from "~/components/super-link"
 import { api } from "~/trpc/server"
 import { CustomerActions } from "../../_components/customers/customer-actions"
-import { RealtimePanel } from "../_components/realtime/realtime-panel"
+import { CustomerMetricsPanel } from "../_components/usage/customer-metrics-panel"
 
 export default async function CustomerUsagePage({
   params,
@@ -30,12 +30,15 @@ export default async function CustomerUsagePage({
     notFound()
   }
 
-  const realtimeTicketPromise = api.analytics
-    .getRealtimeTicket({
+  const usageSnapshot = await api.analytics
+    .getUsage({
       customerId,
+      range: "30d",
     })
-    .catch(() => null)
-  const realtimeTicket = await realtimeTicketPromise
+    .catch((error) => ({
+      usage: [],
+      error: error instanceof Error ? error.message : "Failed to load usage metrics",
+    }))
 
   return (
     <DashboardShell
@@ -47,7 +50,7 @@ export default async function CustomerUsagePage({
           id={customer.id}
           action={
             <div className="flex items-center gap-2">
-              <CodeApiSheet defaultMethod="getEntitlements">
+              <CodeApiSheet defaultMethod="getUsage">
                 <Button variant={"ghost"}>
                   <Code className="mr-2 h-4 w-4" />
                   API
@@ -73,13 +76,7 @@ export default async function CustomerUsagePage({
         </div>
       </TabNavigation>
 
-      <RealtimePanel
-        customerId={customer.id}
-        projectId={customer.projectId}
-        realtimeTicket={realtimeTicket?.ticket ?? null}
-        realtimeTicketExpiresAt={realtimeTicket?.expiresAt ?? null}
-        runtimeEnv={process.env.NEXT_PUBLIC_APP_ENV ?? "development"}
-      />
+      <CustomerMetricsPanel usageRows={usageSnapshot.usage ?? []} error={usageSnapshot.error} />
     </DashboardShell>
   )
 }

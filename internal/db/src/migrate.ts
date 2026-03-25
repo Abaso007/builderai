@@ -119,7 +119,7 @@ async function main() {
     where: (fields, operators) => operators.eq(fields.slug, "unprice-admin"),
   })
 
-  const unpriceProjectId = unpriceProject?.id ?? newId("project")
+  const unpriceProjectId = unpriceProject?.id ?? env.MAIN_PROJECT_ID ?? newId("project")
   let project: typeof schema.projects.$inferSelect | null = null
 
   if (!unpriceProject?.id) {
@@ -160,7 +160,7 @@ async function main() {
 
   // get user's email
   let unpriceOwner = await db.query.customers.findFirst({
-    where: (fields, operators) => operators.eq(fields.email, "seb@unprice.dev"),
+    where: (fields, operators) => operators.eq(fields.email, "jhonsfran@gmail.com"),
   })
 
   if (!unpriceOwner) {

@@ -36,7 +36,7 @@ export function ProjectStep({ className }: React.ComponentProps<"div"> & StepCom
               }
             }
             onSuccess={async (project) => {
-              // Set cookies so the pricing chat API can access the project
+              // Set cookies so onboarding API requests can resolve the active project context
               await updateContextCookies(workspaceSlug, project.slug)
 
               updateContext({

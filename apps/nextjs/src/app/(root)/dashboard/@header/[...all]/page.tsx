@@ -4,11 +4,9 @@ import { isSlug } from "@unprice/db/utils"
 import { Separator } from "@unprice/ui/separator"
 import { cache } from "react"
 import { Fragment, Suspense } from "react"
-import Flags from "~/components/layout/flags"
 import Header from "~/components/layout/header"
 import { Logo } from "~/components/layout/logo"
 import { UserJotWrapper } from "~/components/userjot"
-import { unprice } from "~/lib/unprice"
 import { getUserJotToken } from "~/lib/userjot"
 import { HydrateClient, prefetch, trpc } from "~/trpc/server"
 import { ProjectSwitcher } from "../../_components/project-switcher"
@@ -57,38 +55,12 @@ export default async function Page(props: {
   //   return null
   // }
 
-  let customerEntitlements: {
-    [x: string]: boolean
-  }[] = []
-
-  let isMain = false
-  let customerId = ""
   const session = await getSession()
   const user = session?.user
 
   if (isSlug(workspaceSlug)) {
     // prefetch data for the workspace and project
     prefetchWorkspaces()
-
-    const atw = session?.user.workspaces.find((w) => w.slug === workspaceSlug)
-
-    if (atw) {
-      isMain = atw.isMain
-      customerId = atw.unPriceCustomerId
-
-      // prefetch entitlements only for non-main workspaces
-      if (!atw.isMain) {
-        const { result: featuresEntitlements } = await unprice.customers.getEntitlements({
-          customerId,
-        })
-
-        const features = featuresEntitlements ?? []
-
-        customerEntitlements = features.map((feature) => ({
-          [feature.featureSlug]: true,
-        }))
-      }
-    }
   }
 
   if (isSlug(projectSlug)) {
@@ -142,12 +114,6 @@ export default async function Page(props: {
               <WorkspaceSwitcher workspaceSlug={workspaceSlug} />
             </Suspense>
           )}
-
-          <Flags
-            customerEntitlements={customerEntitlements}
-            isMain={isMain}
-            customerId={customerId}
-          />
 
           {isSlug(projectSlug) && (
             <Fragment>

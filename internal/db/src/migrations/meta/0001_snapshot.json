@@ -1,6 +1,6 @@
 {
-  "id": "74222aff-88e8-4a9d-a47f-880290f5852b",
-  "prevId": "a3a27e60-f7a8-4103-b480-5c728067b8b3",
+  "id": "7a4a336c-78f8-464d-ae69-c8cf3701c0d3",
+  "prevId": "789f5d17-08cf-478c-8b16-9d3530ef02d7",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -408,6 +408,19 @@
           "type": "varchar(255)",
           "primaryKey": false,
           "notNull": false
+        },
+        "onboarding_completed": {
+          "name": "onboarding_completed",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "onboarding_completed_at": {
+          "name": "onboarding_completed_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
@@ -564,6 +577,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "metadata": {
           "name": "metadata",
           "type": "json",
@@ -612,6 +631,43 @@
           "columns": [
             {
               "expression": "email",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "cp_external_id_idx": {
+          "name": "cp_external_id_idx",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "external_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"unprice_customers\".\"external_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "columns": [
+            {
+              "expression": "id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -769,6 +825,107 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.unprice_events": {
+      "name": "unprice_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at_m": {
+          "name": "created_at_m",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "updated_at_m": {
+          "name": "updated_at_m",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "slug": {
+          "name": "slug",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "available_properties": {
+          "name": "available_properties",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "unique_event_project_slug": {
+          "name": "unique_event_project_slug",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "slug",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "unprice_events_project_id_unprice_projects_id_fk": {
+          "name": "unprice_events_project_id_unprice_projects_id_fk",
+          "tableFrom": "unprice_events",
+          "tableTo": "unprice_projects",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "events_pkey": {
+          "name": "events_pkey",
+          "columns": [
+            "id",
+            "project_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.unprice_features": {
       "name": "unprice_features",
       "schema": "",
@@ -811,8 +968,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "unit": {
-          "name": "unit",
+        "unit_of_measure": {
+          "name": "unit_of_measure",
           "type": "varchar(24)",
           "primaryKey": false,
           "notNull": true,
@@ -827,6 +984,12 @@
         "description": {
           "name": "description",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "meter_config": {
+          "name": "meter_config",
+          "type": "json",
           "primaryKey": false,
           "notNull": false
         }
@@ -883,112 +1046,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.unprice_ingestions": {
-      "name": "unprice_ingestions",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at_m": {
-          "name": "created_at_m",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "updated_at_m": {
-          "name": "updated_at_m",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "schema": {
-          "name": "schema",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "hash": {
-          "name": "hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "parent": {
-          "name": "parent",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "origin": {
-          "name": "origin",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "apikey_id": {
-          "name": "apikey_id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "unprice_ingestions_project_id_unprice_projects_id_fk": {
-          "name": "unprice_ingestions_project_id_unprice_projects_id_fk",
-          "tableFrom": "unprice_ingestions",
-          "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "ingestions_apikey_id_fkey": {
-          "name": "ingestions_apikey_id_fkey",
-          "tableFrom": "unprice_ingestions",
-          "tableTo": "unprice_apikeys",
-          "columnsFrom": [
-            "apikey_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "ingestions_pkey": {
-          "name": "ingestions_pkey",
-          "columns": [
-            "project_id",
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.unprice_billing_periods": {
       "name": "unprice_billing_periods",
       "schema": "",
@@ -1027,12 +1084,6 @@
         },
         "customer_id": {
           "name": "customer_id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "grant_id": {
-          "name": "grant_id",
           "type": "varchar(36)",
           "primaryKey": false,
           "notNull": true
@@ -1267,21 +1318,6 @@
           "tableTo": "unprice_customers",
           "columnsFrom": [
             "customer_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "billing_periods_grant_id_fkey": {
-          "name": "billing_periods_grant_id_fkey",
-          "tableFrom": "unprice_billing_periods",
-          "tableTo": "unprice_grants",
-          "columnsFrom": [
-            "grant_id",
             "project_id"
           ],
           "columnsTo": [
@@ -2657,6 +2693,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "active": {
           "name": "active",
           "type": "boolean",
@@ -2800,6 +2842,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "unit_of_measure": {
+          "name": "unit_of_measure",
+          "type": "varchar(24)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'units'"
+        },
         "features_config": {
           "name": "features_config",
           "type": "json",
@@ -2824,14 +2873,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "aggregation_method": {
-          "name": "aggregation_method",
-          "type": "aggregation_method",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'sum'"
-        },
         "order": {
           "name": "order",
           "type": "double precision",
@@ -2848,6 +2889,12 @@
         "limit": {
           "name": "limit",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "meter_config": {
+          "name": "meter_config",
+          "type": "json",
           "primaryKey": false,
           "notNull": false
         }
@@ -4334,18 +4381,31 @@
           "primaryKey": false,
           "notNull": true
         },
+        "unit_of_measure": {
+          "name": "unit_of_measure",
+          "type": "varchar(24)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'units'"
+        },
         "reset_config": {
           "name": "reset_config",
           "type": "json",
           "primaryKey": false,
           "notNull": false
         },
-        "aggregation_method": {
-          "name": "aggregation_method",
-          "type": "aggregation_method",
-          "typeSchema": "public",
+        "meter_config": {
+          "name": "meter_config",
+          "type": "json",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "is_current": {
+          "name": "is_current",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
         },
         "merging_policy": {
           "name": "merging_policy",
@@ -4361,14 +4421,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "overage_strategy": {
-          "name": "overage_strategy",
-          "type": "overage_strategy",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'none'"
-        },
         "effective_at": {
           "name": "effective_at",
           "type": "bigint",
@@ -4380,25 +4432,6 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": false
-        },
-        "computed_at": {
-          "name": "computed_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "next_revalidate_at": {
-          "name": "next_revalidate_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "version": {
-          "name": "version",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
         },
         "grants": {
           "name": "grants",
@@ -4415,8 +4448,8 @@
         }
       },
       "indexes": {
-        "idx_entitlements_version": {
-          "name": "idx_entitlements_version",
+        "unique_current_subject_feature": {
+          "name": "unique_current_subject_feature",
           "columns": [
             {
               "expression": "project_id",
@@ -4425,7 +4458,47 @@
               "nulls": "last"
             },
             {
-              "expression": "version",
+              "expression": "customer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "feature_slug",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"unprice_entitlements\".\"is_current\" = true",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_entitlements_edge_cache": {
+          "name": "idx_entitlements_edge_cache",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "customer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "feature_slug",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "effective_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -4489,17 +4562,7 @@
           ]
         }
       },
-      "uniqueConstraints": {
-        "unique_subject_feature": {
-          "name": "unique_subject_feature",
-          "nullsNotDistinct": false,
-          "columns": [
-            "project_id",
-            "customer_id",
-            "feature_slug"
-          ]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -4797,14 +4860,10 @@
       "name": "aggregation_method",
       "schema": "public",
       "values": [
-        "none",
         "sum",
-        "sum_all",
-        "last_during_period",
         "count",
-        "count_all",
         "max",
-        "max_all"
+        "latest"
       ]
     },
     "public.billing_interval": {
@@ -4919,7 +4978,8 @@
       "schema": "public",
       "values": [
         "stripe",
-        "square"
+        "square",
+        "sandbox"
       ]
     },
     "public.plan_type": {

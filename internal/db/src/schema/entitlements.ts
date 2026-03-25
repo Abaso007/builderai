@@ -8,12 +8,14 @@ import {
   json,
   primaryKey,
   unique,
+  uniqueIndex,
   varchar,
 } from "drizzle-orm/pg-core"
 
 import { pgTableProject } from "../utils/_table"
 import { projectID } from "../utils/sql"
 
+import { sql } from "drizzle-orm"
 import type { z } from "zod"
 import { cuid, timestamps } from "../utils/fields"
 import type {
@@ -21,10 +23,9 @@ import type {
   entitlementMetadataSchema,
   grantsMetadataSchema,
 } from "../validators/entitlements"
-import type { resetConfigSchema } from "../validators/shared"
+import type { meterConfigSchema, resetConfigSchema } from "../validators/shared"
 import { customers } from "./customers"
 import {
-  aggregationMethodEnum,
   entitlementMergingPolicyEnum,
   grantTypeEnum,
   overageStrategyEnum,
@@ -41,7 +42,7 @@ import { projects } from "./projects"
 // IMPORTANT: All grants for the same featureSlug MUST have the same:
 //   - featureType
 //   - resetConfig
-//   - aggregationMethod
+//   - meterConfig for usage features
 //   - unitOfMeasure
 // Only limit and hardLimit can differ (merged by priority)
 // The effective values are stored directly in the entitlement for performance
@@ -60,9 +61,12 @@ export const entitlements = pgTableProject(
     unitOfMeasure: varchar("unit_of_measure", { length: 24 }).notNull().default("units"),
     // null here mean the entitlement never resets
     resetConfig: json("reset_config").$type<
-      z.infer<typeof resetConfigSchema> & { resetAnchor: number }
+      (z.infer<typeof resetConfigSchema> & { resetAnchor: number }) | null
     >(),
-    aggregationMethod: aggregationMethodEnum("aggregation_method").notNull(),
+    // canonical meter definition for usage features
+    meterConfig: json("meter_config").$type<z.infer<typeof meterConfigSchema> | null>(),
+    // A flag to mark which version is currently active
+    isCurrent: boolean("is_current").notNull().default(true),
 
     // merging policy for the entitlement - sum, max, min, replace, etc.
     // sum limits, max limit, min limit, replace limit and units
@@ -76,19 +80,6 @@ export const entitlements = pgTableProject(
     effectiveAt: bigint("effective_at", { mode: "number" }).notNull(),
     // expires at is the date when the entitlement will expire
     expiresAt: bigint("expires_at", { mode: "number" }),
-
-    // Cache invalidation ----------------------------
-    computedAt: bigint("computed_at", { mode: "number" })
-      .notNull()
-      .$defaultFn(() => Date.now()),
-
-    // next revalidate at is the date when the entitlement will be revalidated
-    // often times is the same as the cycle end at
-    nextRevalidateAt: bigint("next_revalidate_at", { mode: "number" }).notNull(),
-
-    // Version is string because it's a hash of the grants
-    // every time the grants are recomputed, the version is updated
-    version: varchar("version", { length: 64 }).notNull().default(""),
 
     // grants snapshot is the snapshot of the grants that were applied to the customer at the time of the entitlement
     // grants are consumed by priority, so the higher priority will be consumed first
@@ -106,14 +97,18 @@ export const entitlements = pgTableProject(
       columns: [table.id, table.projectId],
       name: "pk_entitlement",
     }),
-    // Unique constraint: one entitlement per subject + feature
-    uniqueSubjectFeature: unique("unique_subject_feature").on(
+    // customer can only have ONE "current" entitlement per feature,
+    // but unlimited historical (isCurrent = false) entitlements!
+    uniqueCurrentSubjectFeature: uniqueIndex("unique_current_subject_feature")
+      .on(table.projectId, table.customerId, table.featureSlug)
+      .where(sql`${table.isCurrent} = true`),
+    // Index for the Edge Cache Worker to quickly grab the 30-day window
+    idxEdgeCache: index("idx_entitlements_edge_cache").on(
       table.projectId,
       table.customerId,
-      table.featureSlug
+      table.featureSlug,
+      table.effectiveAt
     ),
-    // Index for grant version checking
-    idxVersion: index("idx_entitlements_version").on(table.projectId, table.version),
     projectfk: foreignKey({
       columns: [table.projectId],
       foreignColumns: [projects.id],

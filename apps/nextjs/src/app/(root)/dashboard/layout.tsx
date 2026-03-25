@@ -24,26 +24,29 @@ export default async function DashboardLayout({
     theme: "auto",
     position: process.env.NODE_ENV === "development" ? "left" : "right",
   }
+  const userJotId = env.USERJOT_ID?.trim()
 
   return (
     <div className="min-h-screen overflow-hidden ">
-      <Script id="userjot-init" strategy="afterInteractive">
-        {`
-          window.$ujq=window.$ujq||[];
-          window.uj=window.uj||new Proxy({},{get:(_,p)=>(...a)=>window.$ujq.push([p,...a])});
-          const s = document.createElement('script');
-          Object.assign(s, {
-            src: 'https://cdn.userjot.com/sdk/v2/uj.js',
-            type: 'module',
-            async: true,
-            onload: () => {
-              window.dispatchEvent(new CustomEvent('uj:ready'));
-            }
-          });
-          document.head.appendChild(s);
-          window.uj.init("${env.USERJOT_ID}", ${JSON.stringify(userJotOptions)});
-        `}
-      </Script>
+      {userJotId ? (
+        <Script id="userjot-init" strategy="afterInteractive">
+          {`
+            window.$ujq=window.$ujq||[];
+            window.uj=window.uj||new Proxy({},{get:(_,p)=>(...a)=>window.$ujq.push([p,...a])});
+            const s = document.createElement('script');
+            Object.assign(s, {
+              src: 'https://cdn.userjot.com/sdk/v2/uj.js',
+              type: 'module',
+              async: true,
+              onload: () => {
+                window.dispatchEvent(new CustomEvent('uj:ready'));
+              }
+            });
+            document.head.appendChild(s);
+            window.uj.init("${userJotId}", ${JSON.stringify(userJotOptions)});
+          `}
+        </Script>
+      ) : null}
       <NuqsAdapter>
         <TRPCReactProvider allEndpointsProcedures={allEndpointsProcedures}>
           <TooltipProvider delayDuration={300}>

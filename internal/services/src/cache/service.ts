@@ -83,25 +83,14 @@ export class CacheService {
         this.context,
         defaultOpts
       ),
-      customerEntitlement: new Namespace<CacheNamespaces["customerEntitlement"]>(this.context, {
-        ...defaultOpts,
-        fresh: 1000 * 60 * 60 * 24, // 24 hours
-        stale: 1000 * 60 * 60 * 1, // 1 hour
-      }),
+      customerRelevantEntitlements: new Namespace<CacheNamespaces["customerRelevantEntitlements"]>(
+        this.context,
+        defaultOpts
+      ),
       accessControlList: new Namespace<CacheNamespaces["accessControlList"]>(this.context, {
         ...defaultOpts,
         fresh: 1000 * 60 * 1, // Consider them "fresh" for 1 minute
         stale: 1000 * 60 * 60, // Use old data for 1 hour while fetching new data in background
-      }),
-      customerEntitlements: new Namespace<CacheNamespaces["customerEntitlements"]>(this.context, {
-        ...defaultOpts,
-        fresh: 1000 * 60 * 60 * 24, // 24 hours
-        stale: 1000 * 60 * 60 * 1, // 1 hour
-      }),
-      negativeEntitlements: new Namespace<CacheNamespaces["negativeEntitlements"]>(this.context, {
-        ...defaultOpts,
-        fresh: 1000 * 60, // 1 minute
-        stale: 1000 * 60, // 1 minute
       }),
       customerSubscription: new Namespace<CacheNamespaces["customerSubscription"]>(this.context, {
         ...defaultOpts,
@@ -148,11 +137,6 @@ export class CacheService {
         fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
         stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
       }),
-      getFeaturesOverview: new Namespace<CacheNamespaces["getFeaturesOverview"]>(this.context, {
-        ...defaultOpts,
-        fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
-        stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
-      }),
       getPlansStats: new Namespace<CacheNamespaces["getPlansStats"]>(this.context, {
         ...defaultOpts,
         fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
@@ -168,23 +152,15 @@ export class CacheService {
         fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
         stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
       }),
-      getVerifications: new Namespace<CacheNamespaces["getVerifications"]>(this.context, {
-        ...defaultOpts,
-        fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
-        stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
-      }),
-      getVerificationRegions: new Namespace<CacheNamespaces["getVerificationRegions"]>(
-        this.context,
-        {
-          ...defaultOpts,
-          fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
-          stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
-        }
-      ),
       getCurrentUsage: new Namespace<CacheNamespaces["getCurrentUsage"]>(this.context, {
         ...defaultOpts,
         fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
         stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
+      }),
+      getRelevantEntitlementsPerFeature: new Namespace<
+        CacheNamespaces["getRelevantEntitlementsPerFeature"]
+      >(this.context, {
+        ...defaultOpts,
       }),
     })
 

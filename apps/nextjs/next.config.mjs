@@ -28,6 +28,7 @@ const nextConfig = {
     "@unprice/config",
     "@unprice/tailwind-config",
   ],
+  // output: "standalone", // use when deploying with docker
   pageExtensions: ["ts", "tsx", "mdx"],
   images: {
     domains: ["images.unsplash.com"],

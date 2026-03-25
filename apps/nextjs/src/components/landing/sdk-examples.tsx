@@ -38,12 +38,15 @@ const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
 })
 
-// report usage for a feature
-const { result, error } = await unprice.customers.reportUsage({
+// ingest usage event for a feature
+const { result, error } = await unprice.events.ingestSync({
+  idempotencyKey: "123e4567-e89b-12d3-a456-426614174000",
+  eventSlug: "feature-1",
   customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
   featureSlug: "feature-1",
-  usage: 30,
-  idempotenceKey: "123e4567-e89b-12d3-a456-426614174000",
+  properties: {
+    usage: 30,
+  },
 })
 `,
     signUp: `import { Unprice } from "@unprice/api"
@@ -126,7 +129,11 @@ const unprice = new Unprice({
 const {
   result,
   error,
-} = await unprice.customers.getUsage("cus_1GTzSGrapiBW1QwCL3Fcn")
+} = await unprice.analytics.getUsage({
+  project_id: "project_1GTzSGrapiBW1QwCL3Fcn",
+  customer_id: "cus_1GTzSGrapiBW1QwCL3Fcn",
+  range: "30d",
+})
 
 if (error) {
   console.error(error.message)
@@ -176,8 +183,8 @@ const { result, error } = await unprice.plans.listPlanVersions({
       '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    featureSlug: "feature-1",\n  }),\n})',
     reportUsage:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/customer/reportUsage" +
-      '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    featureSlug: "feature-1",\n    usage: 30,\n    idempotenceKey: "123e4567-e89b-12d3-a456-426614174000",\n  }),\n})',
+      "${baseUrl}/v1/events/ingest/sync" +
+      '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    idempotencyKey: "123e4567-e89b-12d3-a456-426614174000",\n    eventSlug: "feature-1",\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    featureSlug: "feature-1",\n    properties: {\n      usage: 30,\n    },\n  }),\n})',
     signUp:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
       "${baseUrl}/v1/customer/signUp" +
@@ -196,8 +203,8 @@ const { result, error } = await unprice.plans.listPlanVersions({
       '", {\n  method: "GET",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n})',
     getUsage:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/customer/cus_1GTzSGrapiBW1QwCL3Fcn/getUsage" +
-      '", {\n  method: "GET",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n})',
+      "${baseUrl}/v1/analytics/usage" +
+      '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    project_id: "project_1GTzSGrapiBW1QwCL3Fcn",\n    customer_id: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    range: "30d",\n  }),\n})',
     getPaymentMethods:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
       "${baseUrl}/v1/customer/getPaymentMethods" +

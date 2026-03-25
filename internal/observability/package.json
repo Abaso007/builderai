@@ -1,0 +1,34 @@
+{
+  "name": "@unprice/observability",
+  "private": true,
+  "version": "1.0.0",
+  "description": "",
+  "author": "Sebastian Franco",
+  "type": "module",
+  "scripts": {
+    "clean": "rm -rf .turbo node_modules",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./env": "./env.ts"
+  },
+  "typesVersions": {
+    "*": {
+      "*": ["src/*"]
+    }
+  },
+  "devDependencies": {
+    "@types/node": "20.11.24",
+    "@unprice/tsconfig": "workspace:*",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "@t3-oss/env-core": "^0.12.0",
+    "@unprice/logs": "workspace:^",
+    "evlog": "2.4.1",
+    "zod": "^3.24.2",
+    "vitest": "^2.1.9"
+  }
+}

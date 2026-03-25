@@ -1,7 +1,8 @@
 {
   "name": "api",
   "scripts": {
-    "scripts:r2-lifecycle": "./scripts/setup-r2-lifecycle.sh",
+    "scripts:queues": "./scripts/configure-queues.sh",
+    "scripts:r2-lifecycle": "./scripts/setup-r2.sh",
     "scripts:r2-pipelines": "./scripts/configure-lakehouse-pipelines.sh",
     "scripts:lakehouse-schemas": "pnpm --filter @unprice/db exec tsx ../../apps/api/scripts/generate-lakehouse-schemas.ts",
     "deploy:preview": "wrangler deploy --env preview",
@@ -38,17 +39,18 @@
     "@unprice/db": "workspace:^",
     "@unprice/error": "workspace:^",
     "@unprice/lakehouse": "workspace:^",
-    "@unprice/logging": "workspace:^",
     "@unprice/logs": "workspace:^",
     "@unprice/metrics": "workspace:^",
+    "@unprice/observability": "workspace:^",
     "@unprice/services": "workspace:^",
     "drizzle-orm": "^0.44.5",
+    "evlog": "2.4.1",
     "hono": "^4.7.4",
     "hono-party": "^0.0.6",
     "partyserver": "^0.3.1",
     "stoker": "^1.4.2",
     "ua-parser-js": "^2.0.3",
-    "xxhash-wasm": "^1.1.0",
+    "ulid": "^3.0.2",
     "zod": "^3.24.2"
   }
 }

@@ -2,15 +2,12 @@ import { TRPCError } from "@trpc/server"
 import * as schema from "@unprice/db/schema"
 import * as utils from "@unprice/db/utils"
 import {
+  getAnchor,
   planVersionFeatureDragDropSchema,
   planVersionFeatureInsertBaseSchema,
 } from "@unprice/db/validators"
 import { z } from "zod"
-
-import { FEATURE_SLUGS } from "@unprice/config"
 import { protectedProjectProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
-import { reportUsageFeature } from "#utils/shared"
 
 export const create = protectedProjectProcedure
   .input(planVersionFeatureInsertBaseSchema)
@@ -20,6 +17,7 @@ export const create = protectedProjectProcedure
     })
   )
   .mutation(async (opts) => {
+    const hasMeterConfigOverride = Object.prototype.hasOwnProperty.call(opts.input, "meterConfig")
     const {
       featureId,
       planVersionId,
@@ -32,31 +30,15 @@ export const create = protectedProjectProcedure
       billingConfig,
       resetConfig,
       type,
-      aggregationMethod,
       unitOfMeasure,
+      meterConfig,
     } = opts.input
     const project = opts.ctx.project
 
-    const workspace = project.workspace
-    const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.PLAN_VERSIONS.SLUG
+    const _workspace = project.workspace
 
     // only owner and admin can create a feature
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
-
-    const result = await featureGuard({
-      customerId,
-      featureSlug,
-      isMain: workspace.isMain,
-      action: "create",
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
 
     const planVersionData = await opts.ctx.db.query.versions.findFirst({
       where: (version, { eq, and }) =>
@@ -96,11 +78,32 @@ export const create = protectedProjectProcedure
     const billingConfigCreate =
       featureType === "usage" ? billingConfig : planVersionData.billingConfig
 
-    // if the aggregation method is lifetime/accumulated or the billing config name is the same as the reset config name we don't need to store the reset config
-    const resetConfigCreate =
-      aggregationMethod?.endsWith("_all") || billingConfigCreate.name === resetConfig?.name
+    const meterConfigSnapshot =
+      featureType !== "usage"
         ? null
-        : resetConfig
+        : hasMeterConfigOverride
+          ? (meterConfig ?? null)
+          : (featureData.meterConfig ?? null)
+
+    if (featureType === "usage" && !meterConfigSnapshot) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Usage features require meterConfig or a default feature meterConfig",
+      })
+    }
+
+    const resetConfigCreate = billingConfigCreate.name === resetConfig?.name ? null : resetConfig
+
+    if (resetConfigCreate) {
+      try {
+        getAnchor(Date.now(), resetConfigCreate.resetInterval, resetConfigCreate.resetAnchor)
+      } catch (error) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Invalid reset configuration: ${error instanceof Error ? error.message : "invalid reset anchor"}`,
+        })
+      }
+    }
 
     const planVersionFeatureCreated = await opts.ctx.db
       .insert(schema.planVersionFeatures)
@@ -125,8 +128,7 @@ export const create = protectedProjectProcedure
         // when null the system will reset given the aggregation method
         resetConfig: resetConfigCreate,
         type,
-        // flat features don't have a meter so we don't need to store the aggregation method
-        aggregationMethod: featureType !== "usage" ? "none" : aggregationMethod,
+        meterConfig: meterConfigSnapshot,
       })
       .returning()
       .then((re) => re[0])
@@ -155,19 +157,6 @@ export const create = protectedProjectProcedure
         code: "INTERNAL_SERVER_ERROR",
         message: "Error fetching the created feature",
       })
-    }
-
-    // avoid reporting usage for flat features
-    if (result.featureType !== "flat") {
-      opts.ctx.waitUntil(
-        reportUsageFeature({
-          customerId,
-          featureSlug,
-          usage: 1,
-          isMain: workspace.isMain,
-          action: "create",
-        })
-      )
     }
 
     return {

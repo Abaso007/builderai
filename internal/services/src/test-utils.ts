@@ -1,5 +1,4 @@
 import type { EntitlementState, Grant } from "@unprice/db/validators"
-import { createWideEventLogger } from "@unprice/logging"
 
 /**
  * Creates a virtual clock for deterministic time-based testing.
@@ -17,22 +16,6 @@ export const createClock = (initialTime: number) => {
   }
 }
 
-export const createMockWideEventLogger = (
-  serviceName: string,
-  serviceVersion: string,
-  serviceEnvironment: "production" | "staging" | "development" | "preview" | "test"
-) => {
-  const mockWideEventLogger = createWideEventLogger({
-    "service.name": serviceName,
-    "service.version": serviceVersion,
-    "service.environment": serviceEnvironment,
-    sampleRate: 1,
-    emitter: (level, message, event) => console.info(JSON.stringify({ level, message, event })),
-  })
-
-  return mockWideEventLogger
-}
-
 /**
  * Factory for creating mock EntitlementState objects.
  */
@@ -48,13 +31,16 @@ export const createMockEntitlementState = (
     featureType: "usage",
     unitOfMeasure: "units",
     limit: 100,
-    aggregationMethod: "sum",
+    meterConfig: {
+      eventId: "event_test_feature",
+      eventSlug: "test-feature",
+      aggregationMethod: "sum",
+      aggregationField: "value",
+    },
     mergingPolicy: "sum",
     effectiveAt: now - 10000,
     expiresAt: now + 10000,
-    nextRevalidateAt: now + 300000,
-    computedAt: now,
-    version: "v1",
+    isCurrent: true,
     grants: [],
     resetConfig: null,
     metadata: {

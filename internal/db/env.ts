@@ -19,6 +19,7 @@ export const env = createEnv({
     DATABASE_READ1_URL: z.string().optional().default(""),
     DATABASE_READ2_URL: z.string().optional().default(""),
     UNPRICE_API_KEY: z.string().optional(),
+    MAIN_PROJECT_ID: z.string().optional(),
   },
   runtimeEnv: process.env,
   skipValidation: !!process.env.SKIP_ENV_VALIDATION || process.env.npm_lifecycle_event === "lint",

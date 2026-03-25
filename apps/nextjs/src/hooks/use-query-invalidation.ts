@@ -35,7 +35,7 @@ interface UseQueryInvalidationOptions {
  *   dataUpdatedAt,
  *   isFetching,
  *   getQueryKey: (param1, param2) => [
- *     ["analytics", "getVerificationRegions"],
+ *     ["analytics", "getUsage"],
  *     {
  *       input: { intervalDays: param1, pageId: param2 },
  *       type: "query",

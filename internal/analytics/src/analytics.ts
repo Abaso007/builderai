@@ -1,14 +1,12 @@
 import { NoopTinybird, Tinybird } from "@jhonsfran/zod-bird"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
-import type { Logger, WideEventHelpers } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import { z } from "zod"
 import { UnPriceAnalyticsError } from "./errors"
 import {
   type AnalyticsEventAction,
   analyticsEventSchema,
-  auditLogSchemaV1,
-  featureUsageSchemaV1,
-  featureVerificationSchemaV1,
+  entitlementMeterFactSchemaV1,
   pageEventSchema,
   schemaPlanClick,
 } from "./validators"
@@ -18,7 +16,6 @@ export class Analytics {
   public readonly writeClient: Tinybird | NoopTinybird
   public readonly isNoop: boolean
   private readonly logger: Logger
-  private wideEventHelpers?: WideEventHelpers
 
   constructor(opts: {
     logger: Logger
@@ -29,10 +26,8 @@ export class Analytics {
       url: string
       token: string
     }
-    wideEventHelpers?: WideEventHelpers
   }) {
     this.logger = opts.logger
-    this.wideEventHelpers = opts.wideEventHelpers
     this.readClient =
       opts.tinybirdToken && opts.emit
         ? new Tinybird({ token: opts.tinybirdToken, baseUrl: opts.tinybirdUrl })
@@ -50,78 +45,10 @@ export class Analytics {
     this.isNoop = this.writeClient instanceof NoopTinybird
   }
 
-  /**
-   * Sets the wide event helpers for request-scoped logging context.
-   * This should be called inside the wideEventLogger.runAsync() context.
-   */
-  public setWideEventHelpers(wideEventHelpers: WideEventHelpers) {
-    this.wideEventHelpers = wideEventHelpers
-  }
-
-  public get ingestSdkTelemetry() {
+  public get ingestEntitlementMeterFacts() {
     return this.writeClient.buildIngestEndpoint({
-      datasource: "sdk_telemetry",
-      event: z.object({
-        runtime: z.string(),
-        platform: z.string(),
-        versions: z.array(z.string()),
-        request_id: z.string(),
-        time: z.number(),
-      }),
-    })
-  }
-
-  public get ingestGenericAuditLogs() {
-    return this.writeClient.buildIngestEndpoint({
-      datasource: "audit_logs__v2",
-      event: auditLogSchemaV1.transform((l) => ({
-        ...l,
-        meta: l.meta ? JSON.stringify(l.meta) : undefined,
-        actor: {
-          ...l.actor,
-          meta: l.actor.meta ? JSON.stringify(l.actor.meta) : undefined,
-        },
-        resources: JSON.stringify(l.resources),
-      })),
-    })
-  }
-
-  public get ingestFeaturesVerification() {
-    return this.writeClient.buildIngestEndpoint({
-      datasource: "unprice_feature_verifications",
-      event: featureVerificationSchemaV1.omit({
-        request_id: true,
-        meta_id: true,
-        metadata: true,
-        country: true,
-        action: true,
-        key_id: true,
-        usage: true,
-        remaining: true,
-        entitlement_id: true,
-      }),
-      // we need to wait for the ingestion to be done before returning
-      wait: true,
-    })
-  }
-
-  public get ingestFeaturesUsage() {
-    return this.writeClient.buildIngestEndpoint({
-      datasource: "unprice_feature_usage_records",
-      event: featureUsageSchemaV1.omit({
-        request_id: true,
-        meta_id: true,
-        metadata: true,
-        country: true,
-        region: true,
-        action: true,
-        key_id: true,
-        cost: true,
-        rate_amount: true,
-        rate_currency: true,
-        entitlement_id: true,
-      }),
-      // we need to wait for the ingestion to be done before returning
+      datasource: "unprice_entitlement_meter_facts",
+      event: entitlementMeterFactSchemaV1,
       wait: true,
     })
   }
@@ -279,103 +206,36 @@ export class Analytics {
     })
   }
 
-  // analytics features
-  public get getFeaturesOverview() {
-    return this.readClient.buildPipe({
-      pipe: "v1_get_features_overview",
-      parameters: z.object({
-        interval_days: z.number().optional(),
-        project_id: z.string().optional(),
-        timezone: z.string().optional(),
-      }),
-      data: z.object({
-        date: z.coerce.date(),
-        latency: z.number(),
-        verifications: z.number(),
-        usage: z.number(),
-      }),
-      opts: {
-        cache: "no-store",
-        retries: 3,
-        timeout: 5000, // 5 seconds
-      },
-    })
-  }
-
-  public get getFeaturesVerifications() {
-    return this.readClient.buildPipe({
-      pipe: "v1_get_feature_verifications",
-      parameters: z.object({
-        project_id: z.string().optional(),
-        customer_id: z.string().optional(),
-        feature_slugs: z.array(z.string()).optional(),
-        interval_days: z.number().optional(),
-      }),
-      data: z.object({
-        project_id: z.string(),
-        customer_id: z.string().optional(),
-        feature_slug: z.string(),
-        count: z.number(),
-        p50_latency: z.number(),
-        p95_latency: z.number(),
-        p99_latency: z.number(),
-      }),
-      opts: {
-        cache: "no-store",
-        retries: 3,
-        timeout: 5000, // 5 seconds
-      },
-    })
-  }
-
-  // analytics verifications
-  public get getFeaturesVerificationRegions() {
-    return this.readClient.buildPipe({
-      pipe: "v1_get_feature_verification_regions",
-      parameters: z.object({
-        interval_days: z.number().optional(),
-        project_id: z.string(),
-        timezone: z.string().optional(),
-        region: z.string().optional(),
-        start: z.number().optional(),
-        end: z.number().optional(),
-      }),
-      data: z.object({
-        date: z.coerce.date(),
-        region: z.string(),
-        count: z.number(),
-        p50_latency: z.number(),
-        p95_latency: z.number(),
-        p99_latency: z.number(),
-      }),
-      opts: {
-        cache: "no-store",
-        retries: 3,
-        timeout: 5000, // 5 seconds
-      },
-    })
-  }
-
   // analytics usage
   public get getFeaturesUsagePeriod() {
     return this.readClient.buildPipe({
       pipe: "v1_get_feature_usage_period",
-      parameters: z.object({
-        project_id: z.string(),
-        customer_id: z.string().optional(),
-        feature_slugs: z.array(z.string()).optional(),
-        interval_days: z.number().optional(),
-        start: z.number().optional(),
-        end: z.number().optional(),
-      }),
+      parameters: z
+        .object({
+          project_id: z.string(),
+          customer_id: z.string().optional(),
+          period_key: z.string().optional(),
+          interval_days: z.number().optional(),
+          start: z.number().optional(),
+          end: z.number().optional(),
+          feature_slugs: z.array(z.string()).optional(),
+        })
+        .superRefine((params, ctx) => {
+          const hasStart = typeof params.start !== "undefined"
+          const hasEnd = typeof params.end !== "undefined"
+
+          if (hasStart !== hasEnd) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "start and end must be provided together",
+            })
+          }
+        }),
       data: z.object({
         project_id: z.string(),
         customer_id: z.string().optional(),
         feature_slug: z.string(),
-        count: z.number(),
-        sum: z.number(),
-        max: z.number(),
-        last_during_period: z.number(),
+        value_after: z.number(),
       }),
       opts: {
         cache: "no-store",
@@ -388,24 +248,17 @@ export class Analytics {
   // analytics usage
   public get getFeaturesUsage() {
     return this.readClient.buildPipe({
-      pipe: "v1_get_feature_usage_cursor",
+      pipe: "v1_get_feature_usage",
       parameters: z.object({
         project_id: z.string(),
         customer_id: z.string(),
-        feature_slug: z.string(),
-        after_record_id: z.string(),
-        before_record_id: z.string().optional(),
-        billing_period_start: z.number().optional(),
+        period_key: z.string(),
       }),
       data: z.object({
-        feature_slug: z.string(),
         project_id: z.string(),
+        feature_slug: z.string(),
         customer_id: z.string(),
-        delta_count: z.number(),
-        delta_sum: z.number(),
-        delta_max: z.number(),
-        last_value: z.number(),
-        last_record_id: z.string(),
+        value: z.string(),
       }),
       opts: {
         cache: "no-store",
@@ -429,10 +282,7 @@ export class Analytics {
         project_id: z.string(),
         customer_id: z.string(),
         feature_slug: z.string(),
-        sum: z.number(),
-        max: z.number(),
-        count: z.number(),
-        last_during_period: z.number(),
+        latest: z.number(),
       }),
       opts: {
         cache: "no-store",
@@ -454,16 +304,7 @@ export class Analytics {
     projectId: string
     features: {
       featureSlug: string
-      aggregationMethod:
-        | "none"
-        | "sum"
-        | "count"
-        | "max"
-        | "last"
-        | "sum_all"
-        | "max_all"
-        | "count_all"
-        | "last_during_period"
+      aggregationMethod: "sum" | "count" | "max" | "latest"
       featureType: "usage" | "package" | "tier" | "flat"
     }[]
     startAt: number
@@ -471,26 +312,7 @@ export class Analytics {
   }): Promise<
     Result<{ featureSlug: string; usage: number }[], FetchError | UnPriceAnalyticsError>
   > {
-    const AGGREGATION_CONFIG: Record<
-      "none" | "sum" | "max" | "count" | "sum_all" | "max_all" | "count_all" | "last_during_period",
-      { behavior: "none" | "sum" | "max" | "last"; scope: "period" | "lifetime" }
-    > = {
-      // Period Scoped (Resets on Cycle)
-      none: { behavior: "none", scope: "period" },
-      sum: { behavior: "sum", scope: "period" },
-      count: { behavior: "sum", scope: "period" }, // count is just sum(+1)
-      max: { behavior: "max", scope: "period" },
-      last_during_period: { behavior: "last", scope: "period" },
-
-      // Lifetime Scoped (Never Resets)
-      sum_all: { behavior: "sum", scope: "lifetime" },
-      count_all: { behavior: "sum", scope: "lifetime" },
-      max_all: { behavior: "max", scope: "lifetime" },
-    }
-    // filter that only usage, package and tier features are being requested
-    const featuresUsage = features.filter((feature) =>
-      ["usage", "package", "tier"].includes(feature.featureType)
-    )
+    const featuresUsage = features.filter((feature) => feature.featureType === "usage")
 
     const featureSlugsArray = featuresUsage.map((feature) => feature.featureSlug)
 
@@ -507,7 +329,6 @@ export class Analytics {
     })
       .then((usage) => usage.data ?? [])
       .catch((error) => {
-        console.error(error)
         this.logger.error(`Error getBillingUsage:${error.message}`, {
           customerId,
           projectId,
@@ -547,38 +368,9 @@ export class Analytics {
         continue
       }
 
-      // get the aggregation config for the feature
-      const config =
-        AGGREGATION_CONFIG[feature.aggregationMethod as keyof typeof AGGREGATION_CONFIG]
-
-      if (!config) {
-        this.logger.error("Invalid aggregation method", {
-          aggregationMethod: feature.aggregationMethod,
-          featureSlug: feature.featureSlug,
-          customerId,
-          projectId,
-        })
-
-        continue
-      }
-
-      let usage = 0
-
-      if (config.behavior === "sum") {
-        if (feature.aggregationMethod === "count") {
-          usage = totalPeriodUsage.count ?? 0
-        } else {
-          usage = totalPeriodUsage.sum ?? 0
-        }
-      } else if (config.behavior === "max") {
-        usage = totalPeriodUsage.max ?? 0
-      } else if (config.behavior === "last") {
-        usage = totalPeriodUsage.last_during_period ?? 0
-      }
-
       result.push({
         featureSlug: feature.featureSlug,
-        usage: usage,
+        usage: totalPeriodUsage.latest ?? 0,
       })
     }
 
@@ -586,138 +378,57 @@ export class Analytics {
   }
 
   /* cursor based usage for reconciliation */
-  public async getFeaturesUsageCursor({
+  public async getFeaturesUsageCustomer({
     customerId,
     projectId,
-    feature,
-    afterRecordId,
-    beforeRecordId,
-    startAt,
+    periodKey,
   }: {
     customerId: string
     projectId: string
-    feature: {
-      featureSlug: string
-      aggregationMethod:
-        | "none"
-        | "sum"
-        | "count"
-        | "max"
-        | "last"
-        | "sum_all"
-        | "max_all"
-        | "count_all"
-        | "last_during_period"
-      featureType: "usage" | "package" | "tier" | "flat"
-    }
-    afterRecordId: string
-    beforeRecordId: string
-    startAt: number
+    periodKey: string
   }): Promise<
     Result<
       {
+        projectId: string
+        customerId: string
         featureSlug: string
-        usage: number
-        lastRecordId: string
-      },
+        value: string
+      }[],
       FetchError | UnPriceAnalyticsError
     >
   > {
-    const AGGREGATION_CONFIG: Record<
-      "none" | "sum" | "max" | "count" | "sum_all" | "max_all" | "count_all" | "last_during_period",
-      { behavior: "none" | "sum" | "max" | "last"; scope: "period" | "lifetime" }
-    > = {
-      // Period Scoped (Resets on Cycle)
-      none: { behavior: "none", scope: "period" },
-      sum: { behavior: "sum", scope: "period" },
-      count: { behavior: "sum", scope: "period" }, // count is just sum(+1)
-      max: { behavior: "max", scope: "period" },
-      last_during_period: { behavior: "last", scope: "period" },
-
-      // Lifetime Scoped (Never Resets)
-      sum_all: { behavior: "sum", scope: "lifetime" },
-      count_all: { behavior: "sum", scope: "lifetime" },
-      max_all: { behavior: "max", scope: "lifetime" },
-    }
-
-    // filter that only usage, package and tier features are being requested
-    if (!["usage", "package", "tier"].includes(feature.featureType)) {
-      return Ok({
-        featureSlug: feature.featureSlug,
-        usage: 0,
-        lastRecordId: "",
-      })
-    }
-
-    const config = AGGREGATION_CONFIG[feature.aggregationMethod as keyof typeof AGGREGATION_CONFIG]
-
-    if (!config) {
-      return Err(new UnPriceAnalyticsError({ message: "Invalid aggregation method" }))
-    }
-
-    let usage = 0
-
-    // we use the same endpoint for billing usage as it's the
-    // more accurate one
-    // TODO: need to improve this for long range dates
-    // and idea could be tiered mv for the different periods
     const result = await this.getFeaturesUsage({
       customer_id: customerId,
       project_id: projectId,
-      feature_slug: feature.featureSlug,
-      after_record_id: afterRecordId,
-      before_record_id: beforeRecordId,
-      billing_period_start: startAt,
-    })
-      .then((usage) => usage.data ?? [])
-      .catch((error) => {
-        this.logger.error("Error getting features usage cursor", {
-          error: {
-            message: error instanceof Error ? error.message : String(error),
-            type: error instanceof Error ? error.name : undefined,
-            stack: error instanceof Error ? error.stack : undefined,
-          },
-          customerId,
-          projectId,
-          featureSlug: feature.featureSlug,
-          afterRecordId,
-          beforeRecordId,
-          startAt,
-        })
-        return null
+      period_key: periodKey,
+    }).catch((error) => {
+      this.logger.error("Error getting features usage", {
+        error: {
+          message: error instanceof Error ? error.message : String(error),
+          type: error instanceof Error ? error.name : undefined,
+          stack: error instanceof Error ? error.stack : undefined,
+        },
+        customerId,
+        projectId,
+        periodKey,
       })
-
-    if (result === null) {
-      return Err(new UnPriceAnalyticsError({ message: "Error getting features usage cursor" }))
-    }
-
-    const delta = result?.[0]
-
-    // if there are no usages, return an empty array
-    if (!delta) {
-      return Ok({
-        featureSlug: feature.featureSlug,
-        usage: 0,
-        lastRecordId: "",
-      })
-    }
-
-    if (config.behavior === "sum") {
-      if (feature.aggregationMethod === "count") {
-        usage = delta.delta_count
-      } else {
-        usage = delta.delta_sum
-      }
-    } else if (config.behavior === "max") {
-      usage = delta.delta_max
-    } else if (config.behavior === "last") {
-      usage = delta.last_value
-    }
-
-    return Ok({
-      featureSlug: feature.featureSlug,
-      usage,
-      lastRecordId: delta.last_record_id,
+      return null
     })
+
+    if (result?.data === null) {
+      return Err(
+        new UnPriceAnalyticsError({ message: "Error getting features usage for customer" })
+      )
+    }
+
+    const data =
+      result?.data.map((row) => ({
+        featureSlug: row.feature_slug,
+        customerId: row.customer_id,
+        value: row.value,
+        projectId: row.project_id,
+      })) ?? []
+
+    return Ok(data)
   }
 }

@@ -12,6 +12,11 @@ type SeedStepKey = "apikey" | "customer" | "subscription" | "usage" | "verificat
 type SeedStepStatus = "pending" | "working" | "done" | "skipped" | "error"
 
 type SeedProgress = Record<SeedStepKey, SeedStepStatus>
+type UsageSeedTarget = {
+  featureSlug: string
+  eventSlug: string
+  aggregationField?: string
+}
 
 const DEFAULT_PROGRESS: SeedProgress = {
   apikey: "pending",
@@ -58,11 +63,21 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
     ?.customer
   const existingSubscription = (state?.context?.flowData as { subscription?: { id?: string } })
     ?.subscription
+  const existingSubscriptionId = existingSubscription?.id
 
   const { data: planVersionData, isLoading: isPlanVersionLoading } = useQuery(
     trpc.planVersions.getById.queryOptions(
       { id: planVersionId ?? "", projectSlug: project?.slug },
       { enabled: !!planVersionId && !!project?.slug }
+    )
+  )
+  const { data: existingSubscriptionData, isLoading: isExistingSubscriptionLoading } = useQuery(
+    trpc.subscriptions.getById.queryOptions(
+      { id: existingSubscriptionId ?? "" },
+      {
+        enabled: !!existingSubscriptionId,
+        retry: false,
+      }
     )
   )
 
@@ -72,10 +87,31 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
 
   const planFeatures = planVersionData?.planVersion?.planFeatures ?? []
 
-  const usageFeatureSlug = useMemo(
-    () => planFeatures.find((feature) => feature.featureType === "usage")?.feature?.slug,
-    [planFeatures]
-  )
+  const usageSeedTargets = useMemo<UsageSeedTarget[]>(() => {
+    const targets = new Map<string, UsageSeedTarget>()
+
+    for (const planFeature of planFeatures) {
+      if (planFeature.featureType !== "usage") {
+        continue
+      }
+
+      const meterConfig = planFeature.meterConfig
+      if (!meterConfig?.eventSlug) {
+        continue
+      }
+
+      const featureSlug = planFeature.feature?.slug ?? meterConfig.eventSlug
+      const key = `${featureSlug}:${meterConfig.aggregationField ?? "count"}`
+
+      targets.set(key, {
+        featureSlug,
+        eventSlug: meterConfig.eventSlug,
+        aggregationField: meterConfig.aggregationField ?? undefined,
+      })
+    }
+
+    return Array.from(targets.values())
+  }, [planFeatures])
 
   const verificationFeatureSlug = useMemo(() => planFeatures[0]?.feature?.slug, [planFeatures])
 
@@ -171,14 +207,36 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
       setStepStatus("customer", "done")
 
       setStepStatus("subscription", "working")
-      if (!existingSubscription?.id) {
+      const now = Date.now()
+      const reusableSubscription = existingSubscriptionData?.subscription
+      const hasMatchingActivePhase =
+        reusableSubscription?.phases.some((phase) => {
+          if (phase.planVersionId !== planVersionId) {
+            return false
+          }
+          if (phase.startAt > now) {
+            return false
+          }
+          return !phase.endAt || phase.endAt > now
+        }) ?? false
+      const reusableSubscriptionId =
+        reusableSubscription?.id &&
+        reusableSubscription?.customerId === customerId &&
+        hasMatchingActivePhase
+          ? reusableSubscription.id
+          : null
+
+      if (!reusableSubscriptionId) {
+        // Backdate phase start a bit to avoid client/server clock skew causing
+        // ingestion events to land before the phase grants become active.
+        const skewSafeStartAt = now - 5 * 60 * 1000
         const subscriptionResult = await createSubscription.mutateAsync({
           customerId,
           timezone: project.timezone ?? "UTC",
           phases: [
             {
               planVersionId,
-              startAt: Date.now(),
+              startAt: skewSafeStartAt,
               trialUnits: planVersionData.planVersion.trialUnits ?? 0,
             },
           ],
@@ -191,41 +249,55 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
             },
           },
         })
+      } else {
+        updateContext({
+          flowData: {
+            subscription: {
+              id: reusableSubscriptionId,
+            },
+          },
+        })
       }
 
       setStepStatus("subscription", "done")
 
-      if (!usageFeatureSlug) {
+      if (!usageSeedTargets.length) {
         setStepStatus("usage", "skipped")
       } else {
         let usageFailed = false
         setStepStatus("usage", "working")
         const usageEvents = [12, 8, 5, 18, 22, 14, 9]
-        for (const usage of usageEvents) {
-          const usageResponse = await fetch(`${API_DOMAIN}v1/customer/reportUsage`, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${apiKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              customerId,
-              featureSlug: usageFeatureSlug,
-              usage,
-              idempotenceKey: crypto.randomUUID(),
-            }),
-          })
+        for (const target of usageSeedTargets) {
+          for (const usage of usageEvents) {
+            const usageResponse = await fetch(`${API_DOMAIN}v1/events/ingest`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${apiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                customerId,
+                eventSlug: target.eventSlug,
+                idempotencyKey: crypto.randomUUID(),
+                properties: target.aggregationField ? { [target.aggregationField]: usage } : {},
+              }),
+            })
 
-          if (!usageResponse.ok) {
-            usageFailed = true
-            const message = await usageResponse.text()
-            setErrorMessage(
-              `Usage events failed to seed. ${message ? `Response: ${message}` : ""}`.trim()
-            )
-            break
+            if (usageResponse.status !== 202) {
+              usageFailed = true
+              const message = await usageResponse.text()
+              setErrorMessage(
+                `Ingestion events failed to seed for ${target.featureSlug}. ${message ? `Response: ${message}` : ""}`.trim()
+              )
+              break
+            }
+
+            await delay(120)
           }
 
-          await delay(200)
+          if (usageFailed) {
+            break
+          }
         }
 
         setStepStatus("usage", usageFailed ? "error" : "done")
@@ -281,23 +353,31 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
     if (hasRunRef.current) return
     if (!project?.slug || !planVersionId) return
     if (isPlanVersionLoading) return
+    if (existingSubscriptionId && isExistingSubscriptionLoading) return
     if (!planVersionData?.planVersion) return
 
     hasRunRef.current = true
     void runSeed()
-  }, [project?.slug, planVersionId, isPlanVersionLoading, planVersionData?.planVersion?.id])
+  }, [
+    project?.slug,
+    planVersionId,
+    isPlanVersionLoading,
+    existingSubscriptionId,
+    isExistingSubscriptionLoading,
+    planVersionData?.planVersion?.id,
+  ])
 
   const steps = [
     { key: "apikey", label: "Create API key" },
     { key: "customer", label: "Create test customer" },
     { key: "subscription", label: "Create subscription" },
-    { key: "usage", label: "Send usage events" },
+    { key: "usage", label: "Send ingestion events" },
     { key: "verification", label: "Send verification events" },
   ] as const
 
   const hasError = Object.values(progress).includes("error") || !!errorMessage
   const showUsageWarning =
-    !!planVersionData?.planVersion && planFeatures.length > 0 && !usageFeatureSlug
+    !!planVersionData?.planVersion && planFeatures.length > 0 && usageSeedTargets.length === 0
 
   return (
     <div className={cn("flex w-full max-w-xl flex-col gap-6", className)}>
@@ -307,7 +387,7 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
         </div>
         <h1 className="animate-content font-bold text-2xl delay-0!">Seeding your dashboard</h1>
         <p className="animate-content text-muted-foreground text-sm delay-0!">
-          We are creating a test customer and sending sample usage + verification events.
+          We are creating a test customer and sending sample ingestion + verification events.
         </p>
       </div>
 
@@ -341,7 +421,8 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
 
       {showUsageWarning && (
         <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-warning text-xs">
-          No usage-based features were found. Usage metrics will remain empty until you add one.
+          No usage-based features with meter configuration were found. Ingestion metrics will stay
+          empty until you add one.
         </div>
       )}
 

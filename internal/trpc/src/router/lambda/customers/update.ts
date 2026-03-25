@@ -1,12 +1,10 @@
 import { z } from "zod"
 
 import { TRPCError } from "@trpc/server"
-import { FEATURE_SLUGS } from "@unprice/config"
 import { and, eq } from "@unprice/db"
 import { customers } from "@unprice/db/schema"
 import { customerSelectSchema } from "@unprice/db/validators"
 import { protectedProjectProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
 import { unprice } from "#utils/unprice"
 
 export const update = protectedProjectProcedure
@@ -40,22 +38,7 @@ export const update = protectedProjectProcedure
     const { email, id, description, metadata, name, timezone, active } = opts.input
     const { project } = opts.ctx
 
-    const unPriceCustomerId = project.workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.CUSTOMERS.SLUG
-
-    const result = await featureGuard({
-      customerId: unPriceCustomerId,
-      featureSlug,
-      isMain: project.workspace.isMain,
-      action: "update",
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
+    const _unPriceCustomerId = project.workspace.unPriceCustomerId
 
     const customerData = await opts.ctx.db.query.customers.findFirst({
       where: (feature, { eq, and }) => and(eq(feature.id, id), eq(feature.projectId, project.id)),

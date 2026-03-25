@@ -1,13 +1,10 @@
 import { z } from "zod"
 
 import { TRPCError } from "@trpc/server"
-import { FEATURE_SLUGS } from "@unprice/config"
 import { customers } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import { customerInsertBaseSchema, customerSelectSchema } from "@unprice/db/validators"
 import { protectedProjectProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
-import { reportUsageFeature } from "#utils/shared"
 
 export const create = protectedProjectProcedure
   .input(customerInsertBaseSchema)
@@ -25,23 +22,7 @@ export const create = protectedProjectProcedure
     } = opts.input
     const { project } = opts.ctx
 
-    const unPriceCustomerId = project.workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.CUSTOMERS.SLUG
-
-    // check if the customer has access to the feature
-    const result = await featureGuard({
-      customerId: unPriceCustomerId,
-      featureSlug,
-      isMain: project.workspace.isMain,
-      action: "create",
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
+    const _unPriceCustomerId = project.workspace.unPriceCustomerId
 
     // remove ip from geolocation
     const { ip, ...geolocation } = opts.ctx.geolocation
@@ -73,20 +54,6 @@ export const create = protectedProjectProcedure
         code: "INTERNAL_SERVER_ERROR",
         message: "Error creating customer",
       })
-    }
-
-    // avoid reporting usage for flat features
-    if (result.featureType !== "flat") {
-      opts.ctx.waitUntil(
-        // report usage for the new project in background
-        reportUsageFeature({
-          customerId: unPriceCustomerId,
-          featureSlug,
-          usage: 1,
-          isMain: project.workspace.isMain,
-          action: "create",
-        })
-      )
     }
 
     return {

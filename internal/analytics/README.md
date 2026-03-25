@@ -76,25 +76,3 @@ For incompatible schema changes:
 For this project, follow the detailed metering evolution guide:
 
 - `apps/docs/concepts/pricing/schema-evolution.mdx`
-
-## Important Validations After Schema Changes
-
-1. Billing dedup parity
-- Validate `v1_get_feature_usage_no_duplicates` output for duplicate keys, latest version wins, and soft-delete cases.
-
-2. Verification regions correctness
-- Validate `v1_get_feature_verification_regions` output against known fixture rows.
-
-3. Storage controls
-- Confirm raw datasource TTLs in:
-  - `internal/analytics/datasources/unprice_feature_usage_records.datasource`
-  - `internal/analytics/datasources/unprice_feature_verifications.datasource`
-  - `internal/analytics/datasources/unprice_feature_metadata.datasource`
-
-4. Runtime safety
-- Confirm ingestion success/quarantine logs and endpoint responses during rollout.
-
-## Notes
-
-- Keep R2 as full-fidelity archive for deep analytics and reprocessing.
-- Keep Tinybird lean: only columns needed for billing and operational dashboards.

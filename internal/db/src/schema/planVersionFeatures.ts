@@ -18,8 +18,8 @@ import type {
   configFeatureSchema,
   planVersionFeatureMetadataSchema,
 } from "../validators/planVersionFeatures"
-import type { BillingConfig, ResetConfig } from "../validators/shared"
-import { aggregationMethodEnum, typeFeatureConfigEnum, typeFeatureEnum } from "./enums"
+import type { BillingConfig, ResetConfig, meterConfigSchema } from "../validators/shared"
+import { typeFeatureConfigEnum, typeFeatureEnum } from "./enums"
 import { features } from "./features"
 import { versions } from "./planVersions"
 import { projects } from "./projects"
@@ -49,14 +49,13 @@ export const planVersionFeatures = pgTableProject(
     resetConfig: json("reset_config").$type<ResetConfig>(),
     // metadata probably will be useful to save external data, etc.
     metadata: json("metadata").$type<z.infer<typeof planVersionFeatureMetadataSchema>>(),
-    // the method to aggregate the feature quantity - use for calculated the current usage of the feature
-    aggregationMethod: aggregationMethodEnum("aggregation_method").default("sum").notNull(),
     order: doublePrecision("order").notNull(),
     // if nulls the feature quantity must be provided at subscription time
     defaultQuantity: integer("default_quantity").default(1),
     // the limit of the feature, if nulls there is no limit, normally used for usage features to limit the usage
     // for the rest of the features types it can be used to limit the quantity of the feature
     limit: integer("limit"),
+    meterConfig: json("meter_config").$type<z.infer<typeof meterConfigSchema>>(),
   },
   (table) => ({
     planversionfk: foreignKey({

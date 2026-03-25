@@ -1,10 +1,12 @@
 import type { Analytics } from "@unprice/analytics"
 import { type Database, type SQL, and, eq, inArray, sql } from "@unprice/db"
-import { subscriptionItems, subscriptionPhases, subscriptions } from "@unprice/db/schema"
+import { grants, subscriptionItems, subscriptionPhases, subscriptions } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import {
+  type GrantType,
   type InsertSubscription,
   type InsertSubscriptionPhase,
+  type OverageStrategy,
   type Subscription,
   type SubscriptionItemConfig,
   type SubscriptionPhase,
@@ -14,18 +16,43 @@ import {
   getAnchor,
 } from "@unprice/db/validators"
 import { Err, Ok, type Result, type SchemaError } from "@unprice/error"
-import type { Logger, WideEventHelpers } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import { env } from "../../env"
 import { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
 import { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
 import type { Metrics } from "../metrics"
-import { unprice } from "../utils/unprice"
+import { toErrorContext } from "../utils/log-context"
 import { UnPriceSubscriptionError } from "./errors"
 import { SubscriptionMachine } from "./machine"
 import { SubscriptionLock } from "./subscriptionLock"
 import type { SusbriptionMachineStatus } from "./types"
+
+type PhaseGrantType = Extract<GrantType, "trial" | "subscription">
+
+interface PhaseGrantItemInput {
+  id: string
+  units: number | null
+  featurePlanVersionId: string
+  featureLimit: number | null
+  overageStrategy: OverageStrategy
+}
+
+interface PhaseGrantTarget {
+  key: string
+  type: PhaseGrantType
+  subscriptionItemId: string
+  featurePlanVersionId: string
+  effectiveAt: number
+  expiresAt: number | null
+  limit: number | null
+  units: number | null
+  overageStrategy: OverageStrategy
+  anchor: number
+}
+
+type PhaseOwnedGrant = typeof grants.$inferSelect
 
 export class SubscriptionService {
   private readonly db: Database
@@ -37,8 +64,6 @@ export class SubscriptionService {
   private readonly waitUntil: (promise: Promise<any>) => void
   private customerService: CustomerService
   private billingService: BillingService
-  private grantService: GrantsManager
-  private wideEventHelpers?: WideEventHelpers
 
   constructor({
     db,
@@ -47,7 +72,6 @@ export class SubscriptionService {
     waitUntil,
     cache,
     metrics,
-    wideEventHelpers,
   }: {
     db: Database
     logger: Logger
@@ -56,7 +80,6 @@ export class SubscriptionService {
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
     metrics: Metrics
-    wideEventHelpers?: WideEventHelpers
   }) {
     this.db = db
     this.logger = logger
@@ -71,7 +94,6 @@ export class SubscriptionService {
       waitUntil,
       cache,
       metrics,
-      wideEventHelpers,
     })
     this.billingService = new BillingService({
       db,
@@ -80,26 +102,416 @@ export class SubscriptionService {
       waitUntil,
       cache,
       metrics,
-      wideEventHelpers,
     })
+  }
 
-    this.grantService = new GrantsManager({
-      db: db ?? this.db,
-      logger: this.logger,
-    })
-
-    this.wideEventHelpers = wideEventHelpers
+  private setLockContext(context: {
+    type?: "metric" | "normal" | "wide_event"
+    resource?: string
+    action?: string
+    acquired?: boolean
+    ttl_ms?: number
+    max_hold_ms?: number
+  }) {
+    this.logger.set({ lock: context })
   }
 
   /**
-   * Sets the wide event helpers for request-scoped logging context.
-   * This should be called inside the wideEventLogger.runAsync() context.
-   * Propagates to nested services (customerService, billingService).
+   * Creates a GrantsManager bound to the current transaction so phase changes and
+   * grant sync stay atomic.
    */
-  public setWideEventHelpers(wideEventHelpers?: WideEventHelpers) {
-    this.wideEventHelpers = wideEventHelpers
-    this.customerService.setWideEventHelpers(wideEventHelpers)
-    this.billingService.setWideEventHelpers(wideEventHelpers)
+  private createGrantManager(db: Database) {
+    return new GrantsManager({
+      db,
+      logger: this.logger,
+    })
+  }
+
+  /**
+   * Builds a stable reconciliation key for a phase-owned grant.
+   *
+   * We key by `featurePlanVersionId + grant type` because a phase currently
+   * materializes at most one subscription item per feature plan version.
+   */
+  private getPhaseGrantKey(input: {
+    featurePlanVersionId: string
+    type: PhaseGrantType
+  }) {
+    return `${input.featurePlanVersionId}:${input.type}`
+  }
+
+  /**
+   * Normalizes phase items into the minimal grant-sync shape used by the
+   * reconciliation helpers below.
+   */
+  private normalizePhaseGrantItems(
+    items: Array<{
+      id: string
+      units: number | null
+      featurePlanVersionId?: string | null
+      featurePlanVersion?: {
+        id?: string
+        limit?: number | null
+        metadata?: { overageStrategy?: OverageStrategy } | null
+      } | null
+    }>
+  ): PhaseGrantItemInput[] {
+    return items
+      .map((item) => {
+        const featurePlanVersionId =
+          item.featurePlanVersionId ?? item.featurePlanVersion?.id ?? null
+
+        if (!featurePlanVersionId) {
+          return null
+        }
+
+        return {
+          id: item.id,
+          units: item.units,
+          featurePlanVersionId,
+          featureLimit: item.featurePlanVersion?.limit ?? null,
+          overageStrategy: item.featurePlanVersion?.metadata?.overageStrategy ?? "none",
+        }
+      })
+      .filter((item): item is PhaseGrantItemInput => item !== null)
+  }
+
+  /**
+   * Expands a phase into the concrete grant records that should exist for it.
+   *
+   * Trials produce a `trial` grant followed by a `subscription` grant for the
+   * remaining window; non-trial phases produce only a `subscription` grant.
+   */
+  private buildPhaseGrantTargets({
+    phase,
+    items,
+  }: {
+    phase: {
+      id: string
+      billingAnchor: number
+      startAt: number
+      endAt: number | null
+      trialEndsAt: number | null
+    }
+    items: PhaseGrantItemInput[]
+  }): PhaseGrantTarget[] {
+    const targets: PhaseGrantTarget[] = []
+
+    const grantWindows: Array<{
+      type: PhaseGrantType
+      effectiveAt: number
+      expiresAt: number | null
+    }> = []
+
+    if (phase.trialEndsAt && phase.trialEndsAt > phase.startAt) {
+      grantWindows.push({
+        type: "trial",
+        effectiveAt: phase.startAt,
+        expiresAt: phase.trialEndsAt,
+      })
+
+      if (phase.endAt === null || phase.trialEndsAt < phase.endAt) {
+        grantWindows.push({
+          type: "subscription",
+          effectiveAt: phase.trialEndsAt,
+          expiresAt: phase.endAt,
+        })
+      }
+    } else {
+      grantWindows.push({
+        type: "subscription",
+        effectiveAt: phase.startAt,
+        expiresAt: phase.endAt,
+      })
+    }
+
+    for (const item of items) {
+      for (const grantWindow of grantWindows) {
+        targets.push({
+          key: this.getPhaseGrantKey({
+            featurePlanVersionId: item.featurePlanVersionId,
+            type: grantWindow.type,
+          }),
+          type: grantWindow.type,
+          subscriptionItemId: item.id,
+          featurePlanVersionId: item.featurePlanVersionId,
+          effectiveAt: grantWindow.effectiveAt,
+          expiresAt: grantWindow.expiresAt,
+          limit: item.units ?? item.featureLimit ?? null,
+          units: item.units,
+          overageStrategy: item.overageStrategy,
+          anchor: phase.billingAnchor,
+        })
+      }
+    }
+
+    return targets
+  }
+
+  /**
+   * Compares the mutable billing attributes of a grant with the desired phase
+   * target. Metadata is intentionally excluded so it stays informational only.
+   */
+  private hasSameGrantConfiguration(existingGrant: PhaseOwnedGrant, target: PhaseGrantTarget) {
+    return (
+      existingGrant.featurePlanVersionId === target.featurePlanVersionId &&
+      existingGrant.type === target.type &&
+      existingGrant.limit === target.limit &&
+      existingGrant.units === target.units &&
+      existingGrant.overageStrategy === target.overageStrategy &&
+      existingGrant.anchor === target.anchor
+    )
+  }
+
+  /**
+   * Same configuration plus identical time bounds, used for future-dated grants
+   * that can be kept as-is during phase edits.
+   */
+  private hasExactFutureGrant(existingGrant: PhaseOwnedGrant, target: PhaseGrantTarget) {
+    return (
+      this.hasSameGrantConfiguration(existingGrant, target) &&
+      existingGrant.effectiveAt === target.effectiveAt &&
+      existingGrant.expiresAt === target.expiresAt
+    )
+  }
+
+  /**
+   * Reconciles the grants that should exist for a subscription phase.
+   *
+   * Rules:
+   * - active phase changes end the old grants at `now` and create replacements
+   * - future phase changes replace only future-dated grants
+   * - metadata is written for observability, but ownership matching is derived
+   *   from the phase's feature plan versions and time window
+   */
+  private async syncPhaseGrants({
+    customerId,
+    subscriptionId,
+    phase,
+    items,
+    db,
+    now,
+  }: {
+    customerId: string
+    subscriptionId: string
+    phase: {
+      id: string
+      projectId: string
+      billingAnchor: number
+      startAt: number
+      endAt: number | null
+      trialEndsAt: number | null
+    }
+    items: PhaseGrantItemInput[]
+    db: Database
+    now: number
+  }): Promise<Result<void, UnPriceSubscriptionError>> {
+    const grantsManager = this.createGrantManager(db)
+    const featurePlanVersionIds = [...new Set(items.map((item) => item.featurePlanVersionId))]
+    const { err: existingErr, val: phaseOwnedGrants } = await grantsManager.getPhaseOwnedGrants({
+      projectId: phase.projectId,
+      customerId,
+      subscriptionPhaseId: phase.id,
+      featurePlanVersionIds,
+      phaseStartAt: phase.startAt,
+      phaseEndAt: phase.endAt,
+    })
+
+    if (existingErr) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: existingErr.message,
+        })
+      )
+    }
+
+    const isActivePhase = phase.startAt <= now && (phase.endAt ?? Number.POSITIVE_INFINITY) >= now
+
+    if (!isActivePhase && phaseOwnedGrants.length === 0) {
+      return Ok(undefined)
+    }
+
+    const desiredTargets = this.buildPhaseGrantTargets({
+      phase,
+      items,
+    })
+
+    const currentGrantsByKey = new Map<string, PhaseOwnedGrant[]>()
+    const futureGrantsByKey = new Map<string, PhaseOwnedGrant[]>()
+
+    for (const grant of phaseOwnedGrants) {
+      const key = this.getPhaseGrantKey({
+        featurePlanVersionId: grant.featurePlanVersionId,
+        type: grant.type as PhaseGrantType,
+      })
+
+      if (grant.effectiveAt > now) {
+        futureGrantsByKey.set(key, [...(futureGrantsByKey.get(key) ?? []), grant])
+        continue
+      }
+
+      if (grant.expiresAt === null || grant.expiresAt > now) {
+        currentGrantsByKey.set(key, [...(currentGrantsByKey.get(key) ?? []), grant])
+      }
+    }
+
+    const keepGrantIds = new Set<string>()
+    const grantIdsToExpire = new Set<string>()
+    const grantIdsToDelete = new Set<string>()
+    const grantExpiryUpdates = new Map<string, number | null>()
+    const targetsToCreate: PhaseGrantTarget[] = []
+
+    for (const target of desiredTargets) {
+      const currentCandidates = currentGrantsByKey.get(target.key) ?? []
+      const futureCandidates = futureGrantsByKey.get(target.key) ?? []
+      const targetIsCurrent =
+        target.effectiveAt <= now && (target.expiresAt === null || target.expiresAt > now)
+
+      if (targetIsCurrent) {
+        const currentMatch = currentCandidates.find((grant) =>
+          this.hasSameGrantConfiguration(grant, target)
+        )
+
+        if (currentMatch) {
+          keepGrantIds.add(currentMatch.id)
+
+          if (currentMatch.expiresAt !== target.expiresAt) {
+            grantExpiryUpdates.set(currentMatch.id, target.expiresAt)
+          }
+        } else {
+          for (const grant of currentCandidates) {
+            grantIdsToExpire.add(grant.id)
+          }
+
+          targetsToCreate.push({
+            ...target,
+            effectiveAt: now,
+          })
+        }
+
+        for (const grant of futureCandidates) {
+          grantIdsToDelete.add(grant.id)
+        }
+        continue
+      }
+
+      const futureMatch = futureCandidates.find((grant) => this.hasExactFutureGrant(grant, target))
+
+      if (futureMatch) {
+        keepGrantIds.add(futureMatch.id)
+      } else {
+        for (const grant of futureCandidates) {
+          grantIdsToDelete.add(grant.id)
+        }
+
+        targetsToCreate.push(target)
+      }
+
+      for (const grant of currentCandidates) {
+        grantIdsToExpire.add(grant.id)
+      }
+    }
+
+    for (const grantsByKey of currentGrantsByKey.values()) {
+      for (const grant of grantsByKey) {
+        if (!keepGrantIds.has(grant.id)) {
+          grantIdsToExpire.add(grant.id)
+        }
+      }
+    }
+
+    for (const grantsByKey of futureGrantsByKey.values()) {
+      for (const grant of grantsByKey) {
+        if (!keepGrantIds.has(grant.id)) {
+          grantIdsToDelete.add(grant.id)
+        }
+      }
+    }
+
+    for (const grantId of grantIdsToDelete) {
+      grantIdsToExpire.delete(grantId)
+      grantExpiryUpdates.delete(grantId)
+    }
+
+    if (grantIdsToExpire.size > 0) {
+      await db
+        .update(grants)
+        .set({
+          expiresAt: now,
+          updatedAtM: now,
+        })
+        .where(
+          and(inArray(grants.id, [...grantIdsToExpire]), eq(grants.projectId, phase.projectId))
+        )
+    }
+
+    for (const [grantId, expiresAt] of grantExpiryUpdates.entries()) {
+      if (grantIdsToExpire.has(grantId) || grantIdsToDelete.has(grantId)) continue
+
+      await db
+        .update(grants)
+        .set({
+          expiresAt,
+          updatedAtM: now,
+        })
+        .where(and(eq(grants.id, grantId), eq(grants.projectId, phase.projectId)))
+    }
+
+    if (grantIdsToDelete.size > 0) {
+      const deletePhaseOwnedGrantsResult = await grantsManager.deletePhaseOwnedGrants({
+        projectId: phase.projectId,
+        customerId,
+        subscriptionPhaseId: phase.id,
+        featurePlanVersionIds,
+        phaseStartAt: phase.startAt,
+        phaseEndAt: phase.endAt,
+        grantIds: [...grantIdsToDelete],
+      })
+
+      if (deletePhaseOwnedGrantsResult.err) {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: deletePhaseOwnedGrantsResult.err.message,
+          })
+        )
+      }
+    }
+
+    for (const target of targetsToCreate) {
+      const createGrantResult = await grantsManager.createGrant({
+        grant: {
+          id: newId("grant"),
+          name: "Base Plan",
+          projectId: phase.projectId,
+          effectiveAt: target.effectiveAt,
+          expiresAt: target.expiresAt,
+          type: target.type,
+          subjectType: "customer",
+          subjectId: customerId,
+          featurePlanVersionId: target.featurePlanVersionId,
+          autoRenew: false,
+          limit: target.limit,
+          overageStrategy: target.overageStrategy,
+          units: target.units,
+          anchor: target.anchor,
+          metadata: {
+            subscriptionId,
+            subscriptionPhaseId: phase.id,
+            subscriptionItemId: target.subscriptionItemId,
+          },
+        },
+      })
+
+      if (createGrantResult.err) {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: createGrantResult.err.message,
+          })
+        )
+      }
+    }
+
+    return Ok(undefined)
   }
 
   private validatePhasesAction({
@@ -294,7 +706,6 @@ export class SubscriptionService {
     const activePhase = subscriptionWithPhases.phases.find((p) => {
       return p.startAt <= now && (p.endAt ?? Number.POSITIVE_INFINITY) >= now
     })
-    const isFirstPhase = subscriptionWithPhases.phases.length === 0
 
     if (activePhase?.planVersionId === planVersionId) {
       return Err(
@@ -418,7 +829,7 @@ export class SubscriptionService {
       })
 
       if (err) {
-        this.wideEventHelpers?.addError(err)
+        this.logger.set({ error: toErrorContext(err) })
         return Err(
           new UnPriceSubscriptionError({
             message: err.message,
@@ -499,24 +910,46 @@ export class SubscriptionService {
       }
 
       // add items to the subscription
+      const subscriptionItemValues = configItemsSubscription.map((item) => ({
+        id: newId("subscription_item"),
+        subscriptionPhaseId: phase.id,
+        projectId: projectId,
+        featurePlanVersionId: item.featurePlanId,
+        units: item.units ?? null,
+        subscriptionId,
+      }))
+
       await trx
         .insert(subscriptionItems)
-        .values(
-          configItemsSubscription.map((item) => ({
-            id: newId("subscription_item"),
-            subscriptionPhaseId: phase.id,
-            projectId: projectId,
-            featurePlanVersionId: item.featurePlanId,
-            units: item.units,
-            subscriptionId,
-          }))
-        )
+        .values(subscriptionItemValues)
         .returning()
         .catch((e) => {
           this.logger.error(e.message)
           trx.rollback()
           throw e
         })
+
+      const normalizedPhaseItems = this.normalizePhaseGrantItems(
+        subscriptionItemValues.map((item) => {
+          const featurePlanVersion = versionData.planFeatures.find(
+            (planFeature) => planFeature.id === item.featurePlanVersionId
+          )
+
+          return {
+            id: item.id,
+            units: item.units,
+            featurePlanVersionId: item.featurePlanVersionId,
+            featurePlanVersion: featurePlanVersion
+              ? {
+                  id: featurePlanVersion.id,
+                  feature: { id: featurePlanVersion.feature.id },
+                  limit: featurePlanVersion.limit ?? null,
+                  metadata: featurePlanVersion.metadata ?? null,
+                }
+              : null,
+          }
+        })
+      )
 
       // update the status of the subscription if the phase is active
       const isActivePhase = phase.startAt <= now && (phase.endAt ?? Number.POSITIVE_INFINITY) >= now
@@ -544,15 +977,17 @@ export class SubscriptionService {
           })
         )
 
-        // reset entitlements if the phase is not the first one and the phase is active
-        if (!isFirstPhase && isActivePhase) {
-          // TODO: change this when implementing webhooks service + qstash
-          this.waitUntil(
-            unprice.customers.resetEntitlements({
-              customerId: subscriptionWithPhases.customerId,
-              projectId,
-            })
-          )
+        const syncPhaseGrantsResult = await this.syncPhaseGrants({
+          customerId: subscriptionWithPhases.customerId,
+          subscriptionId,
+          phase,
+          items: normalizedPhaseItems,
+          db: trx,
+          now,
+        })
+
+        if (syncPhaseGrantsResult.err) {
+          return syncPhaseGrantsResult
         }
       }
 
@@ -624,6 +1059,8 @@ export class SubscriptionService {
     }
 
     const result = await this.db.transaction(async (trx) => {
+      const grantService = this.createGrantManager(trx)
+
       // removing the phase will cascade to the subscription items and entitlements
       const subscriptionPhase = await trx
         .delete(subscriptionPhases)
@@ -640,12 +1077,23 @@ export class SubscriptionService {
       }
 
       // remove the grants for the customer - soft delete
-      await this.grantService.deleteGrants({
-        grantIds: phase.items.map((item) => item.id) ?? [],
+      const deletePhaseOwnedGrantsResult = await grantService.deletePhaseOwnedGrants({
         projectId,
-        subjectType: "customer",
-        subjectId: phase.subscription.customerId,
+        customerId: phase.subscription.customerId,
+        subscriptionPhaseId: phase.id,
+        featurePlanVersionIds: [...new Set(phase.items.map((item) => item.featurePlanVersionId))],
+        phaseStartAt: phase.startAt,
+        phaseEndAt: phase.endAt,
       })
+
+      if (deletePhaseOwnedGrantsResult.err) {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: deletePhaseOwnedGrantsResult.err.message,
+          })
+        )
+      }
+
       return Ok(true)
     })
 
@@ -681,7 +1129,15 @@ export class SubscriptionService {
         phases: {
           where: (phase, { gte }) => gte(phase.startAt, startAt),
           with: {
-            items: true,
+            items: {
+              with: {
+                featurePlanVersion: {
+                  with: {
+                    feature: true,
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -785,7 +1241,7 @@ export class SubscriptionService {
 
         const finalSqlItems: SQL = sql.join(sqlChunksItems, sql.raw(" "))
 
-        await (db ?? this.db)
+        await trx
           .update(subscriptionItems)
           .set({ units: finalSqlItems })
           .where(
@@ -797,16 +1253,34 @@ export class SubscriptionService {
               message: `Error while updating subscription items: ${e.message}`,
             })
           })
+      }
 
-        // TODO: update the units for the entitlements and recompute the entitlements
-        // we need to cut access if needed or extend the access if needed
-        // await this.computeGrantsForPhase({
-        //   itemsIds: itemsToChange.map((item) => item.id),
-        //   projectId,
-        //   customerId: subscriptionWithPhases.customerId,
-        //   db: trx,
-        //   type: "subscription",
-        // })
+      const updatedPhaseItems = itemsFromPhase.map((item) => {
+        const changedItem = itemsToChange?.find((candidate) => candidate.id === item.id)
+        return {
+          ...item,
+          units: changedItem?.units ?? item.units,
+        }
+      })
+
+      const syncPhaseGrantsResult = await this.syncPhaseGrants({
+        customerId: subscriptionWithPhases.customerId,
+        subscriptionId,
+        phase: {
+          id: subscriptionPhase.id,
+          projectId,
+          billingAnchor: subscriptionPhase.billingAnchor,
+          startAt: subscriptionPhase.startAt,
+          endAt: subscriptionPhase.endAt,
+          trialEndsAt: subscriptionPhase.trialEndsAt,
+        },
+        items: this.normalizePhaseGrantItems(updatedPhaseItems),
+        db: trx,
+        now,
+      })
+
+      if (syncPhaseGrantsResult.err) {
+        return syncPhaseGrantsResult
       }
 
       return Ok(subscriptionPhase)
@@ -987,7 +1461,7 @@ export class SubscriptionService {
         staleTakeoverMs: 120_000,
         ownerStaleMs: ttlMs,
       })
-      this.wideEventHelpers?.addLock({
+      this.setLockContext({
         type: "normal",
         resource: "subscription",
         action: "acquire",
@@ -1017,7 +1491,7 @@ export class SubscriptionService {
             if (stopped) return
             const elapsed = Date.now() - startedAt
             if (elapsed > maxHoldMs) {
-              this.wideEventHelpers?.addLock({
+              this.setLockContext({
                 type: "normal",
                 resource: "subscription",
                 action: "heartbeat_stopped",
@@ -1038,7 +1512,7 @@ export class SubscriptionService {
             try {
               const ok = await lock.extend({ ttlMs })
               if (!ok) {
-                this.wideEventHelpers?.addLock({
+                this.setLockContext({
                   type: "normal",
                   resource: "subscription",
                   action: "extend",
@@ -1051,7 +1525,7 @@ export class SubscriptionService {
                 })
               }
             } catch (e) {
-              this.wideEventHelpers?.addLock({
+              this.setLockContext({
                 type: "normal",
                 resource: "subscription",
                 action: "extend_error",

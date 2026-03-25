@@ -1,6 +1,6 @@
 import { createRoute } from "@hono/zod-openapi"
-import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
+import * as HttpStatusCodes from "~/util/http-status-codes"
 
 import { customerPaymentMethodSchema, paymentProviderSchema } from "@unprice/db/validators"
 import { z } from "zod"

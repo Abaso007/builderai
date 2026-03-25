@@ -4,10 +4,7 @@ import * as schema from "@unprice/db/schema"
 import { inviteMembersSchema, invitesSelectBase } from "@unprice/db/validators"
 import { InviteEmail, sendEmail } from "@unprice/email"
 import { z } from "zod"
-
-import { FEATURE_SLUGS } from "@unprice/config"
 import { protectedWorkspaceProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
 
 export const inviteMember = protectedWorkspaceProcedure
   .input(inviteMembersSchema)
@@ -20,7 +17,6 @@ export const inviteMember = protectedWorkspaceProcedure
     const { email, role, name } = opts.input
     const userId = opts.ctx.userId
     const workspace = opts.ctx.workspace
-    const featureSlug = FEATURE_SLUGS.ACCESS_PRO.SLUG
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
@@ -29,20 +25,6 @@ export const inviteMember = protectedWorkspaceProcedure
       throw new TRPCError({
         code: "BAD_REQUEST",
         message: "Cannot invite members to personal workspace, please upgrade to invite members",
-      })
-    }
-
-    const result = await featureGuard({
-      customerId: workspace.unPriceCustomerId,
-      featureSlug,
-      isMain: workspace.isMain,
-      action: "inviteMember",
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
       })
     }
 

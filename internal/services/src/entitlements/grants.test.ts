@@ -1,5 +1,5 @@
 import type { Database } from "@unprice/db"
-import type { Logger } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import * as fc from "fast-check"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { GrantsManager } from "./grants"
@@ -8,6 +8,11 @@ describe("GrantsManager", () => {
   let grantsManager: GrantsManager
   let mockDb: Database
   let mockLogger: Logger
+  let txInsertValuesMock: ReturnType<typeof vi.fn>
+  let txQueryEntitlementsFindFirstMock: ReturnType<typeof vi.fn>
+  let txUpdateSetMock: ReturnType<typeof vi.fn>
+  let txUpdateWhereMock: ReturnType<typeof vi.fn>
+  let txUpdateReturningMock: ReturnType<typeof vi.fn>
 
   const now = Date.now()
   const customerId = "cust_grants_123"
@@ -17,30 +22,75 @@ describe("GrantsManager", () => {
   // Base grant object for reuse
   const baseGrant = {
     id: "grant_base",
+    createdAtM: now - 20_000,
+    updatedAtM: now - 10_000,
     projectId,
+    name: "grant_base",
     subjectType: "customer" as const,
     subjectId: customerId,
     type: "subscription" as const,
     featurePlanVersionId: "fpv_1",
     effectiveAt: now - 10000,
     expiresAt: now + 10000,
+    limit: 100,
+    units: 1,
+    overageStrategy: "none" as const,
+    metadata: null,
     deleted: false,
+    deletedAt: null,
     autoRenew: true,
     priority: 10,
     featurePlanVersion: {
+      id: "fpv_1",
+      createdAtM: now - 20_000,
+      updatedAtM: now - 10_000,
+      projectId,
+      planVersionId: "pv_1",
+      type: "feature" as const,
+      featureId: "feat_1",
+      order: 1,
+      defaultQuantity: 1,
+      limit: 100,
       feature: {
+        id: "feat_1",
+        createdAtM: now - 20_000,
+        updatedAtM: now - 10_000,
+        projectId,
         slug: featureSlug,
+        code: 1,
+        unitOfMeasure: "units",
+        title: "Merge Test Feature",
+        description: null,
+        meterConfig: null,
       },
       featureType: "usage" as const,
       unitOfMeasure: "units",
-      aggregationMethod: "sum" as const,
+      meterConfig: {
+        eventId: "event_usage",
+        eventSlug: "merge-test-feature",
+        aggregationMethod: "sum" as const,
+        aggregationField: "value",
+      },
       config: {
-        usageMode: "sum",
+        usageMode: "unit" as const,
+        price: {
+          dinero: {
+            amount: 0,
+            currency: {
+              code: "USD",
+              base: 10,
+              exponent: 2,
+            },
+            scale: 2,
+          },
+          displayAmount: "0.00",
+        },
       },
       billingConfig: {
         name: "billing",
         billingInterval: "month" as const,
         billingIntervalCount: 1,
+        billingAnchor: 1,
         planType: "recurring" as const,
       },
       resetConfig: {
@@ -51,7 +101,11 @@ describe("GrantsManager", () => {
         resetAnchor: 1,
       },
       metadata: {
+        realtime: false,
+        notifyUsageThreshold: 95,
         overageStrategy: "none" as const,
+        blockCustomer: false,
+        hidden: false,
       },
     },
     anchor: 1,
@@ -60,9 +114,23 @@ describe("GrantsManager", () => {
   beforeEach(() => {
     vi.clearAllMocks()
 
+    txQueryEntitlementsFindFirstMock = vi.fn().mockResolvedValue(null)
+    txUpdateReturningMock = vi.fn().mockResolvedValue([])
+    txUpdateWhereMock = vi.fn().mockImplementation(() => ({
+      returning: txUpdateReturningMock,
+    }))
+    txUpdateSetMock = vi.fn().mockImplementation(() => ({
+      where: txUpdateWhereMock,
+    }))
+    txInsertValuesMock = vi.fn().mockImplementation((values) => ({
+      returning: vi.fn().mockResolvedValue([{ ...values }]),
+    }))
+
     mockLogger = {
+      set: vi.fn(),
       error: vi.fn(),
       debug: vi.fn(),
+      warn: vi.fn(),
     } as unknown as Logger
 
     mockDb = {
@@ -77,6 +145,21 @@ describe("GrantsManager", () => {
           findFirst: vi.fn(),
         },
       },
+      transaction: vi.fn(async (callback) =>
+        callback({
+          query: {
+            entitlements: {
+              findFirst: txQueryEntitlementsFindFirstMock,
+            },
+          },
+          update: vi.fn(() => ({
+            set: txUpdateSetMock,
+          })),
+          insert: vi.fn(() => ({
+            values: txInsertValuesMock,
+          })),
+        })
+      ),
       insert: vi.fn(() => ({
         values: vi.fn(() => ({
           onConflictDoUpdate: vi.fn(() => ({
@@ -109,25 +192,6 @@ describe("GrantsManager", () => {
       }
       return []
     })
-
-    // Mock existing entitlement (not found -> create new)
-    vi.spyOn(mockDb.query.entitlements, "findFirst").mockResolvedValue(undefined)
-
-    // Mock insert to return the object passed to it (simulating DB behavior for test purposes)
-    vi.spyOn(mockDb, "insert").mockReturnValue({
-      values: vi.fn().mockImplementation((values) => ({
-        onConflictDoUpdate: vi.fn().mockImplementation((params) => ({
-          returning: vi.fn().mockResolvedValue([
-            {
-              ...values, // Return the values we just inserted
-              ...params.set, // Apply any updates
-              id: "ent_new_1",
-            },
-          ]),
-        })),
-      })),
-      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-    } as any)
   }
 
   describe("computeGrantsForCustomer - Merge Rules", () => {
@@ -164,18 +228,129 @@ describe("GrantsManager", () => {
       expect(entitlement!.limit).toBe(150) // 100 + 50
       expect(entitlement!.mergingPolicy).toBe("sum")
 
-      // Verify effectiveAt/expiresAt from min/max of grants
+      // Verify the materialized snapshot preserves the business window bounds.
       expect(grants[0]).toBeDefined()
       expect(grants[1]).toBeDefined()
       const minStart = Math.min(grants[0]!.effectiveAt, grants[1]!.effectiveAt)
       const maxEnd = Math.max(grants[0]!.expiresAt, grants[1]!.expiresAt)
       expect(entitlement!.effectiveAt).toBe(minStart)
       expect(entitlement!.expiresAt).toBe(maxEnd)
+      expect(txUpdateSetMock.mock.calls[0]?.[0]).toEqual({
+        isCurrent: false,
+        updatedAtM: expect.any(Number),
+      })
 
       // Verify feature slug and type
       expect(entitlement!.featureSlug).toBe(featureSlug)
       expect(entitlement!.featureType).toBe("usage")
-      expect(entitlement!.aggregationMethod).toBe("sum")
+      expect(entitlement!.meterConfig?.aggregationMethod).toBe("sum")
+    })
+
+    it("reuses the current entitlement snapshot when version and window are unchanged", async () => {
+      vi.useFakeTimers()
+      vi.setSystemTime(now)
+
+      try {
+        const grants = [
+          {
+            ...baseGrant,
+            id: "g1",
+            limit: 100,
+          },
+        ]
+
+        setupMocks(grants)
+
+        const firstResult = await grantsManager.computeGrantsForCustomer({
+          customerId,
+          projectId,
+          now,
+        })
+
+        expect(firstResult.err).toBeUndefined()
+        const firstEntitlement = firstResult.val![0]!
+        const refreshTime = now + 60_000
+
+        txQueryEntitlementsFindFirstMock.mockResolvedValue({
+          ...firstEntitlement,
+          id: "ent_existing",
+          isCurrent: true,
+        })
+        txUpdateReturningMock.mockResolvedValue([
+          {
+            ...firstEntitlement,
+            id: "ent_existing",
+            isCurrent: true,
+            updatedAtM: refreshTime,
+          },
+        ])
+
+        setupMocks(grants)
+        vi.setSystemTime(refreshTime)
+
+        const secondResult = await grantsManager.computeGrantsForCustomer({
+          customerId,
+          projectId,
+          now: refreshTime,
+        })
+
+        expect(secondResult.err).toBeUndefined()
+        expect(txInsertValuesMock).toHaveBeenCalledTimes(1)
+        expect(txUpdateSetMock).toHaveBeenLastCalledWith({
+          updatedAtM: refreshTime,
+        })
+        expect(secondResult.val?.[0]).toEqual(
+          expect.objectContaining({
+            id: "ent_existing",
+            effectiveAt: firstEntitlement.effectiveAt,
+            expiresAt: firstEntitlement.expiresAt,
+          })
+        )
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it("preserves the resolved trial and paid window starts when materializing snapshots", async () => {
+      const phaseStart = Date.UTC(2026, 2, 1)
+      const trialEndsAt = Date.UTC(2026, 2, 15)
+      const phaseEnd = Date.UTC(2026, 3, 1)
+
+      const trialGrant = {
+        ...baseGrant,
+        id: "g_trial",
+        type: "trial" as const,
+        effectiveAt: phaseStart,
+        expiresAt: trialEndsAt,
+      }
+      const paidGrant = {
+        ...baseGrant,
+        id: "g_paid",
+        type: "subscription" as const,
+        effectiveAt: trialEndsAt,
+        expiresAt: phaseEnd,
+      }
+
+      setupMocks([trialGrant])
+      const trialResult = await grantsManager.computeGrantsForCustomer({
+        customerId,
+        projectId,
+        now: phaseStart + 1_000,
+      })
+
+      setupMocks([paidGrant])
+      const paidResult = await grantsManager.computeGrantsForCustomer({
+        customerId,
+        projectId,
+        now: trialEndsAt + 1_000,
+      })
+
+      expect(trialResult.err).toBeUndefined()
+      expect(paidResult.err).toBeUndefined()
+      expect(trialResult.val?.[0]?.effectiveAt).toBe(phaseStart)
+      expect(trialResult.val?.[0]?.expiresAt).toBe(trialEndsAt)
+      expect(paidResult.val?.[0]?.effectiveAt).toBe(trialEndsAt)
+      expect(paidResult.val?.[0]?.expiresAt).toBe(phaseEnd)
     })
 
     it("should take max limit for tier features", async () => {
@@ -218,8 +393,7 @@ describe("GrantsManager", () => {
       expect(entitlement!.limit).toBe(500) // Max of 100, 500, 50
       expect(entitlement!.mergingPolicy).toBe("max")
 
-      // Verify aggregation method
-      expect(entitlement!.aggregationMethod).toBe("sum")
+      expect(entitlement!.meterConfig).toBeNull()
 
       // Verify only the winning grant is kept in the entitlement
       expect(entitlement!.grants).toHaveLength(1)
@@ -263,12 +437,7 @@ describe("GrantsManager", () => {
       expect(entitlement!.grants).toHaveLength(1)
       expect(entitlement!.grants[0]!.id).toBe("g_high") // g_high has priority 100
 
-      // Verify reset config is taken from highest priority grant (if any)
-      expect(entitlement!.resetConfig).toBeDefined()
-      // @ts-ignore
-      expect(entitlement!.resetConfig!.name).toBe("billing")
-      // @ts-ignore
-      expect(entitlement!.resetConfig!.resetAnchor).toBe(1)
+      expect(entitlement!.resetConfig).toBeNull()
     })
 
     it("should allow overage if ANY grant allows it (sum policy)", async () => {
@@ -306,6 +475,88 @@ describe("GrantsManager", () => {
       const entitlement = result.val![0]
       expect(entitlement).toBeDefined()
       expect(entitlement!.metadata?.overageStrategy).toBe("always")
+    })
+
+    it("should reject non-fungible grants with different meter configs", async () => {
+      const grants = [
+        {
+          ...baseGrant,
+          id: "g_input_tokens",
+          limit: 100,
+          featurePlanVersion: {
+            ...baseGrant.featurePlanVersion,
+            meterConfig: {
+              ...baseGrant.featurePlanVersion.meterConfig,
+              aggregationField: "input_tokens",
+            },
+          },
+        },
+        {
+          ...baseGrant,
+          id: "g_output_tokens",
+          limit: 50,
+          priority: 20,
+          featurePlanVersion: {
+            ...baseGrant.featurePlanVersion,
+            meterConfig: {
+              ...baseGrant.featurePlanVersion.meterConfig,
+              aggregationField: "output_tokens",
+            },
+          },
+        },
+      ]
+
+      setupMocks(grants)
+
+      const result = await grantsManager.computeGrantsForCustomer({
+        customerId,
+        projectId,
+        now,
+      })
+
+      expect(result.val).toBeUndefined()
+      expect(result.err).toBeDefined()
+      expect(result.err?.message).toContain('feature "merge-test-feature"')
+      expect(result.err?.message).toContain("fungible")
+      expect(result.err?.message).toContain("meterConfig")
+    })
+
+    it("should reject non-fungible grants with different reset periods", async () => {
+      const grants = [
+        {
+          ...baseGrant,
+          id: "g_monthly",
+          limit: 100,
+        },
+        {
+          ...baseGrant,
+          id: "g_yearly",
+          limit: 50,
+          priority: 20,
+          featurePlanVersion: {
+            ...baseGrant.featurePlanVersion,
+            resetConfig: {
+              ...baseGrant.featurePlanVersion.resetConfig,
+              name: "yearly",
+              resetInterval: "year" as const,
+              resetIntervalCount: 1,
+            },
+          },
+        },
+      ]
+
+      setupMocks(grants)
+
+      const result = await grantsManager.computeGrantsForCustomer({
+        customerId,
+        projectId,
+        now,
+      })
+
+      expect(result.val).toBeUndefined()
+      expect(result.err).toBeDefined()
+      expect(result.err?.message).toContain("Non-fungible grants")
+      expect(result.err?.message).toContain("resetConfig")
     })
 
     it("should allow overage if ANY grant allows it (max policy)", async () => {
@@ -477,6 +728,124 @@ describe("GrantsManager", () => {
 
       expect(result.err).toBeUndefined()
       expect(result.val).toHaveLength(0)
+    })
+  })
+
+  describe("resolveIngestionStatesFromGrants", () => {
+    it("keeps the stream coverage anchored across a continuous same-signature grant chain", async () => {
+      const march1 = Date.UTC(2026, 2, 1)
+      const march15 = Date.UTC(2026, 2, 15)
+      const march31 = Date.UTC(2026, 2, 31)
+      const march20 = Date.UTC(2026, 2, 20)
+
+      const result = await grantsManager.resolveIngestionStatesFromGrants({
+        customerId,
+        projectId,
+        timestamp: march20,
+        grants: [
+          {
+            ...baseGrant,
+            id: "g_chain_1",
+            limit: 100,
+            effectiveAt: march1,
+            expiresAt: march15,
+          },
+          {
+            ...baseGrant,
+            id: "g_chain_2",
+            limit: 50,
+            effectiveAt: march15,
+            expiresAt: march31,
+          },
+        ],
+      })
+
+      expect(result.err).toBeUndefined()
+      expect(result.val).toHaveLength(1)
+      expect(result.val?.[0]).toEqual(
+        expect.objectContaining({
+          activeGrantIds: ["g_chain_2"],
+          featureSlug,
+          limit: 50,
+          streamStartAt: march1,
+          streamEndAt: march31,
+        })
+      )
+      expect(result.val?.[0]?.streamId).toContain("stream_")
+    })
+
+    it("rejects active stacked grants that disagree on meter configuration", async () => {
+      const timestamp = Date.UTC(2026, 2, 20)
+
+      const result = await grantsManager.resolveIngestionStatesFromGrants({
+        customerId,
+        projectId,
+        timestamp,
+        grants: [
+          {
+            ...baseGrant,
+            id: "g_meter_a",
+            effectiveAt: timestamp - 10_000,
+            expiresAt: timestamp + 10_000,
+          },
+          {
+            ...baseGrant,
+            id: "g_meter_b",
+            effectiveAt: timestamp - 5_000,
+            expiresAt: timestamp + 5_000,
+            featurePlanVersion: {
+              ...baseGrant.featurePlanVersion,
+              meterConfig: {
+                ...baseGrant.featurePlanVersion.meterConfig,
+                aggregationField: "other_value",
+              },
+            },
+          },
+        ],
+      })
+
+      expect(result.err).toBeDefined()
+      expect(result.err?.message).toContain("Non-fungible grants")
+    })
+
+    it("derives dayOfCreation reset anchors from grant effectiveAt for daily reset configs", async () => {
+      const effectiveAt = Date.UTC(2026, 2, 24, 15, 30, 0)
+      const timestamp = effectiveAt + 60_000
+
+      const result = await grantsManager.resolveIngestionStatesFromGrants({
+        customerId,
+        projectId,
+        timestamp,
+        grants: [
+          {
+            ...baseGrant,
+            id: "g_daily_day_of_creation",
+            anchor: 24, // subscription phase monthly anchor; should not leak into daily reset config
+            effectiveAt,
+            expiresAt: effectiveAt + 24 * 60 * 60 * 1_000,
+            featurePlanVersion: {
+              ...baseGrant.featurePlanVersion,
+              resetConfig: {
+                ...baseGrant.featurePlanVersion.resetConfig,
+                name: "daily",
+                resetInterval: "day",
+                resetIntervalCount: 1,
+                resetAnchor: "dayOfCreation",
+              },
+            },
+          },
+        ],
+      })
+
+      expect(result.err).toBeUndefined()
+      expect(result.val).toHaveLength(1)
+      expect(result.val?.[0]?.resetConfig).toEqual(
+        expect.objectContaining({
+          name: "daily",
+          resetInterval: "day",
+          resetAnchor: 15,
+        })
+      )
     })
   })
 })

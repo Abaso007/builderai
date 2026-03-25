@@ -1,9 +1,15 @@
-import type { Analytics, Usage } from "@unprice/analytics"
+import { type Usage, analyticsIntervalSchema } from "@unprice/analytics"
 import { z } from "zod"
-import { protectedProjectProcedure } from "#trpc"
+import { protectedWorkspaceProcedure } from "#trpc"
+import { unprice } from "#utils/unprice"
 
-export const getUsage = protectedProjectProcedure
-  .input(z.custom<Omit<Parameters<Analytics["getFeaturesUsagePeriod"]>[0], "project_id">>())
+export const getUsage = protectedWorkspaceProcedure
+  .input(
+    z.object({
+      customerId: z.string().optional(),
+      range: analyticsIntervalSchema,
+    })
+  )
   .output(
     z.object({
       usage: z.custom<Usage>(),
@@ -11,15 +17,31 @@ export const getUsage = protectedProjectProcedure
     })
   )
   .query(async (opts) => {
-    const project_id = opts.ctx.project.id
-    const { interval_days } = opts.input
+    const customerId = opts.input.customerId || opts.ctx.workspace.unPriceCustomerId
+    const range = opts.input.range
 
-    const data = await opts.ctx.analytics
-      .getFeaturesUsagePeriod({
-        project_id,
-        interval_days,
+    if (!customerId) {
+      return {
+        usage: [],
+        error: "Customer ID is required",
+      }
+    }
+
+    const { result, error } = await unprice.analytics.getUsage({
+      customer_id: customerId,
+      range,
+    })
+
+    if (error || !result) {
+      opts.ctx.logger.error(error?.message ?? "Failed to fetch analytics usage from SDK", {
+        customer_id: customerId,
+        range,
       })
-      .then((res) => res.data)
+      return {
+        usage: [],
+        error: error?.message ?? "Failed to fetch usage",
+      }
+    }
 
-    return { usage: data }
+    return { usage: result.usage ?? [] }
   })

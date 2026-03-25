@@ -1,1 +1,0 @@
-DROP TABLE "unprice_ingestions" CASCADE;

@@ -5,10 +5,8 @@ import { isZero } from "dinero.js"
 import { z } from "zod"
 
 import { TRPCError } from "@trpc/server"
-import { FEATURE_SLUGS } from "@unprice/config"
 import { CustomerService } from "@unprice/services/customers"
 import { protectedProjectProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
 
 export const publish = protectedProjectProcedure
   .input(planVersionSelectBaseSchema.partial().required({ id: true }))
@@ -25,22 +23,6 @@ export const publish = protectedProjectProcedure
 
     // only owner and admin can publish a plan version
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
-
-    // check if the customer has access to the feature
-    const result = await featureGuard({
-      customerId: workspace.unPriceCustomerId,
-      featureSlug: FEATURE_SLUGS.PLANS.SLUG,
-      isMain: workspace.isMain,
-      action: "publish",
-      metadata: { module: "planVersion" },
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
 
     const planVersionData = await opts.ctx.db.query.versions.findFirst({
       with: {
@@ -100,11 +82,10 @@ export const publish = protectedProjectProcedure
         metrics: opts.ctx.metrics,
       })
 
-      const { err: validatePaymentMethodErr } = await customerService.validatePaymentMethod({
+      const { err: validatePaymentMethodErr } = await customerService.getPaymentProvider({
         customerId: workspace.unPriceCustomerId,
         projectId: project.id,
-        paymentProvider: planVersionData.paymentProvider,
-        requiredPaymentMethod: true,
+        provider: planVersionData.paymentProvider,
       })
 
       if (validatePaymentMethodErr) {

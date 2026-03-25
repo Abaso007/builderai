@@ -1,9 +1,11 @@
 import { relations } from "drizzle-orm"
-import { primaryKey, serial, text, uniqueIndex, varchar } from "drizzle-orm/pg-core"
+import { json, primaryKey, serial, text, uniqueIndex, varchar } from "drizzle-orm/pg-core"
+import type * as z from "zod"
 
 import { pgTableProject } from "../utils/_table"
 import { timestamps } from "../utils/fields"
 import { projectID } from "../utils/sql"
+import type { meterConfigSchema } from "../validators/shared"
 import { projects } from "./projects"
 
 // features are the way we model our features in the system, after adding a feature to a plan we
@@ -22,6 +24,7 @@ export const features = pgTableProject(
     unitOfMeasure: varchar("unit_of_measure", { length: 24 }).notNull().default("units"),
     title: varchar("title", { length: 50 }).notNull(),
     description: text("description"),
+    meterConfig: json("meter_config").$type<z.infer<typeof meterConfigSchema>>(),
   },
   (table) => ({
     primary: primaryKey({

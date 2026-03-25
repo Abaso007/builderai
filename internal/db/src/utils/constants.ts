@@ -55,37 +55,21 @@ export const USAGE_MODES_MAP = {
 } as const
 
 export const AGGREGATION_METHODS_MAP = {
-  none: {
-    label: "None",
-    description: "No aggregation — usage is not tracked",
-  },
   sum: {
-    label: "Sum (per period)",
-    description: "Total of all reported values — resets to zero each billing cycle",
-  },
-  sum_all: {
-    label: "Sum (lifetime)",
-    description: "Total of all reported values — accumulates forever, never resets",
-  },
-  last_during_period: {
-    label: "Last value (per period)",
-    description: "Only the most recent value counts — resets each billing cycle",
+    label: "Sum",
+    description: "Total of all reported values within the billing period",
   },
   count: {
-    label: "Count (per period)",
-    description: "Number of events reported — resets to zero each billing cycle",
-  },
-  count_all: {
-    label: "Count (lifetime)",
-    description: "Number of events reported — accumulates forever, never resets",
+    label: "Count",
+    description: "Number of events reported within the billing period",
   },
   max: {
-    label: "Maximum (per period)",
-    description: "Highest value reported — resets each billing cycle",
+    label: "Maximum",
+    description: "Highest reported value within the billing period",
   },
-  max_all: {
-    label: "Maximum (lifetime)",
-    description: "Highest value ever reported — never resets",
+  latest: {
+    label: "Latest",
+    description: "Most recent reported value within the billing period",
   },
 } as const
 
@@ -173,7 +157,8 @@ export const RESET_CONFIG: Record<
     description: "Reset daily at the specified reset anchor",
     resetInterval: "day",
     resetIntervalCount: 1,
-    resetAnchorOptions: ["dayOfCreation", ...Array.from({ length: 31 }, (_, i) => i + 1)],
+    // Daily anchors are UTC hours (0-23).
+    resetAnchorOptions: ["dayOfCreation", ...Array.from({ length: 24 }, (_, i) => i)],
     planType: "recurring",
   },
   monthly: {
@@ -273,27 +258,17 @@ export const FEATURE_TYPES = Object.keys(FEATURE_TYPES_MAPS) as unknown as reado
   ...FeatureType[],
 ]
 
-export type Scope = "period" | "lifetime"
-export type Behavior = "sum" | "max" | "last" | "none"
+export type Behavior = "sum" | "max" | "latest"
 
 interface MethodConfig {
-  behavior: Behavior // How do we update the number? (Add, Max, Replace)
-  scope: Scope // When does it reset? (Cycle end vs Never)
-  reset: boolean
+  behavior: Behavior
 }
 
 export const AGGREGATION_CONFIG: Record<AggregationMethod, MethodConfig> = {
-  none: { behavior: "none", scope: "period", reset: false },
-  // Period Scoped (Resets on Cycle)
-  sum: { behavior: "sum", scope: "period", reset: true },
-  count: { behavior: "sum", scope: "period", reset: true }, // count is just sum(+1)
-  max: { behavior: "max", scope: "period", reset: true },
-  last_during_period: { behavior: "last", scope: "period", reset: true },
-
-  // Lifetime Scoped (Never Resets)
-  sum_all: { behavior: "sum", scope: "lifetime", reset: false },
-  count_all: { behavior: "sum", scope: "lifetime", reset: false },
-  max_all: { behavior: "max", scope: "lifetime", reset: false },
+  sum: { behavior: "sum" },
+  count: { behavior: "sum" },
+  max: { behavior: "max" },
+  latest: { behavior: "latest" },
 }
 
 export const OVERAGE_STRATEGIES_MAP: Record<

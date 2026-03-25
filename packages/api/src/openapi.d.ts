@@ -4,7 +4,7 @@
  */
 
 export interface paths {
-  "/v1/customer/reportUsage": {
+  "/v1/events/ingest": {
     parameters: {
       query?: never
       header?: never
@@ -14,10 +14,30 @@ export interface paths {
     get?: never
     put?: never
     /**
-     * report usage
-     * @description Report usage for a customer
+     * ingest raw event
+     * @description Ingest a raw events. All ingested events are reported and a notification will be triggered when the limit is hit.
      */
-    post: operations["customers.reportUsage"]
+    post: operations["events.ingest"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/v1/events/ingest/sync": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * ingest raw event synchronously for a feature
+     * @description Validate and synchronously ingest a raw event for one feature slug. This is useful when you want to enforce exact limits from a ingestion.
+     */
+    post: operations["events.ingestSync"]
     delete?: never
     options?: never
     head?: never
@@ -54,8 +74,8 @@ export interface paths {
     get?: never
     put?: never
     /**
-     * verify feature
-     * @description Verify if a customer can use a feature
+     * get current feature status
+     * @description Resolve the current state of a feature for a customer and, for usage features, return the live meter method, limit, and usage.
      */
     post: operations["customers.verify"]
     delete?: never
@@ -78,26 +98,6 @@ export interface paths {
      * @description Get subscription with the active phase for a customer
      */
     post: operations["customers.getSubscription"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/customer/getUsage": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * get usage
-     * @description Get usage for a customer
-     */
-    post: operations["customers.getUsage"]
     delete?: never
     options?: never
     head?: never
@@ -158,46 +158,6 @@ export interface paths {
      * @description Create a payment method for a customer
      */
     post: operations["customers.createPaymentMethod"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/customer/resetEntitlements": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * reset entitlements
-     * @description Reset entitlements for a customer
-     */
-    post: operations["customers.resetEntitlements"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/customer/resetUsage": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * reset usage
-     * @description Reset usage counters for a customer
-     */
-    post: operations["customers.resetUsage"]
     delete?: never
     options?: never
     head?: never
@@ -532,46 +492,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  "/v1/analytics/verifications": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * get verifications
-     * @description Get verifications for a customer in a given range
-     */
-    post: operations["analytics.getVerifications"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/analytics/realtime": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * get real-time usage metrics
-     * @description Get real-time usage metrics from the Durable Object buffer. Returns unflushed usage and verification records (typically seconds to minutes old). Use this to avoid Tinybird query limits for real-time dashboards.
-     */
-    post: operations["analytics.getRealtimeUsage"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   "/v1/analytics/realtime/ticket": {
     parameters: {
       query?: never
@@ -748,28 +668,6 @@ export interface components {
         requestId: string
       }
     }
-    ErrInternalServerError: {
-      error: {
-        /**
-         * @description A machine readable error code.
-         * @example INTERNAL_SERVER_ERROR
-         * @enum {string}
-         */
-        code: "INTERNAL_SERVER_ERROR"
-        /**
-         * @description A link to our documentation with more details about this error code
-         * @example https://docs.unprice.dev/api-reference/errors/code/INTERNAL_SERVER_ERROR
-         */
-        docs: string
-        /** @description A human readable explanation of what went wrong */
-        message: string
-        /**
-         * @description Please always include the requestId in your error report
-         * @example req_1234
-         */
-        requestId: string
-      }
-    }
     ErrTooManyRequests: {
       error: {
         /**
@@ -792,6 +690,28 @@ export interface components {
         requestId: string
       }
     }
+    ErrInternalServerError: {
+      error: {
+        /**
+         * @description A machine readable error code.
+         * @example INTERNAL_SERVER_ERROR
+         * @enum {string}
+         */
+        code: "INTERNAL_SERVER_ERROR"
+        /**
+         * @description A link to our documentation with more details about this error code
+         * @example https://docs.unprice.dev/api-reference/errors/code/INTERNAL_SERVER_ERROR
+         */
+        docs: string
+        /** @description A human readable explanation of what went wrong */
+        message: string
+        /**
+         * @description Please always include the requestId in your error report
+         * @example req_1234
+         */
+        requestId: string
+      }
+    }
   }
   responses: never
   parameters: never
@@ -801,124 +721,68 @@ export interface components {
 }
 export type $defs = Record<string, never>
 export interface operations {
-  "customers.reportUsage": {
+  "events.ingest": {
     parameters: {
       query?: never
       header?: never
       path?: never
       cookie?: never
     }
-    /** @description The usage to report */
+    /** @description The raw event ingestion payload */
     requestBody: {
       content: {
         "application/json": {
           /**
-           * @description The unprice customer ID
-           * @example cus_1H7KQFLr7RepUyQBKdnvY
+           * @description Optional event id. If omitted, the API will generate an internal event id for processing.
+           * @example evt_123
            */
-          customerId?: string
+          id?: string
           /**
-           * @description The external customer ID provided at sign up
-           * @example user_123
+           * @description Logical idempotency key for deduplicating raw events
+           * @example idem_123
            */
-          externalId?: string
+          idempotencyKey: string
           /**
-           * @description The feature slug
-           * @example tokens
+           * @description The event slug
+           * @example tokens_used
            */
-          featureSlug: string
+          eventSlug: string
           /**
-           * @description The usage
-           * @example 30
+           * @description The unprice customer id
+           * @example cus_123
            */
-          usage: number
+          customerId: string
           /**
-           * Format: uuid
-           * @description The idempotence key
-           * @example 123e4567-e89b-12d3-a456-426614174000
+           * @description Event timestamp in epoch milliseconds, if not provided will use the time of the request
+           * @example 1741454800000
            */
-          idempotenceKey: string
+          timestamp?: number
           /**
-           * @description The action being performed (e.g., 'create', 'update', 'delete', 'send-email', 'flush'). Normalized to lowercase with spaces as hyphens.
-           * @example create
+           * @description Arbitrary event properties
+           * @example {
+           *       "amount": 1
+           *     }
            */
-          action?: string
-          metadata?: {
-            [key: string]: (string | number | boolean) | undefined
+          properties: {
+            [key: string]: unknown
           }
         }
       }
     }
     responses: {
-      /** @description The result of the report usage */
-      200: {
+      /** @description The raw event was accepted for asynchronous processing */
+      202: {
         headers: {
           [name: string]: unknown
         }
         content: {
           "application/json": {
-            allowed: boolean
-            message?: string
-            limit?: number
-            usage?: number
-            cost?: number
-            notifiedOverLimit?: boolean
-            remaining?: number
-            /** @enum {string} */
-            deniedReason?:
-              | "INVALID_USAGE"
-              | "ERROR_SYNCING_ENTITLEMENTS_LAST_USAGE"
-              | "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE"
-              | "ENTITLEMENT_OUTSIDE_OF_CURRENT_BILLING_WINDOW"
-              | "ERROR_RESETTING_DO"
-              | "RATE_LIMITED"
-              | "ENTITLEMENT_NOT_FOUND"
-              | "LIMIT_EXCEEDED"
-              | "ENTITLEMENT_EXPIRED"
-              | "ENTITLEMENT_NOT_ACTIVE"
-              | "DO_NOT_INITIALIZED"
-              | "INCORRECT_USAGE_REPORTING"
-              | "ERROR_INSERTING_USAGE_DO"
-              | "ERROR_INSERTING_VERIFICATION_DO"
-              | "PROJECT_DISABLED"
-              | "CUSTOMER_DISABLED"
-              | "SUBSCRIPTION_DISABLED"
-              | "FETCH_ERROR"
-              | "SUBSCRIPTION_ERROR"
-              | "ENTITLEMENT_ERROR"
-              | "SUBSCRIPTION_EXPIRED"
-              | "NO_DEFAULT_PLAN_FOUND"
-              | "SUBSCRIPTION_NOT_ACTIVE"
-              | "PHASE_NOT_CREATED"
-              | "FEATURE_NOT_FOUND_IN_SUBSCRIPTION"
-              | "CUSTOMER_NOT_FOUND"
-              | "CUSTOMER_EXTERNAL_ID_CONFLICT"
-              | "CUSTOMER_ENTITLEMENTS_NOT_FOUND"
-              | "FEATURE_TYPE_NOT_SUPPORTED"
-              | "PROJECT_DISABLED"
-              | "CUSTOMER_DISABLED"
-              | "PLAN_VERSION_NOT_PUBLISHED"
-              | "PLAN_VERSION_NOT_ACTIVE"
-              | "PAYMENT_PROVIDER_CONFIG_NOT_FOUND"
-              | "ENTITLEMENT_EXPIRED"
-              | "ENTITLEMENT_NOT_ACTIVE"
-              | "CUSTOMER_SESSION_NOT_CREATED"
-              | "CUSTOMER_SESSION_NOT_FOUND"
-              | "PLAN_VERSION_NOT_FOUND"
-              | "PAYMENT_PROVIDER_ERROR"
-              | "SUBSCRIPTION_NOT_CREATED"
-              | "CUSTOMER_NOT_CREATED"
-              | "SUBSCRIPTION_NOT_CANCELED"
-              | "CUSTOMER_PHASE_NOT_FOUND"
-              | "CURRENCY_MISMATCH"
-              | "BILLING_INTERVAL_MISMATCH"
-              | "ENTITLEMENT_NOT_FOUND"
-              | "SUBSCRIPTION_NOT_FOUND"
-              | "INVALID_ENTITLEMENT_TYPE"
-              | "NO_ACTIVE_PHASE_FOUND"
-            degraded?: boolean
-            degradedReason?: string
-            cacheHit?: boolean
+            /**
+             * @description The raw event was accepted for asynchronous processing
+             * @example true
+             * @enum {boolean}
+             */
+            accepted: true
           }
         }
       }
@@ -976,76 +840,179 @@ export interface operations {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
         }
       }
-      /** @description The limit has been exceeded */
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
       429: {
         headers: {
           [name: string]: unknown
         }
         content: {
-          "application/json": {
-            allowed: boolean
-            message?: string
-            limit?: number
-            usage?: number
-            cost?: number
-            notifiedOverLimit?: boolean
-            remaining?: number
-            /** @enum {string} */
-            deniedReason?:
-              | "INVALID_USAGE"
-              | "ERROR_SYNCING_ENTITLEMENTS_LAST_USAGE"
-              | "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE"
-              | "ENTITLEMENT_OUTSIDE_OF_CURRENT_BILLING_WINDOW"
-              | "ERROR_RESETTING_DO"
-              | "RATE_LIMITED"
-              | "ENTITLEMENT_NOT_FOUND"
-              | "LIMIT_EXCEEDED"
-              | "ENTITLEMENT_EXPIRED"
-              | "ENTITLEMENT_NOT_ACTIVE"
-              | "DO_NOT_INITIALIZED"
-              | "INCORRECT_USAGE_REPORTING"
-              | "ERROR_INSERTING_USAGE_DO"
-              | "ERROR_INSERTING_VERIFICATION_DO"
-              | "PROJECT_DISABLED"
-              | "CUSTOMER_DISABLED"
-              | "SUBSCRIPTION_DISABLED"
-              | "FETCH_ERROR"
-              | "SUBSCRIPTION_ERROR"
-              | "ENTITLEMENT_ERROR"
-              | "SUBSCRIPTION_EXPIRED"
-              | "NO_DEFAULT_PLAN_FOUND"
-              | "SUBSCRIPTION_NOT_ACTIVE"
-              | "PHASE_NOT_CREATED"
-              | "FEATURE_NOT_FOUND_IN_SUBSCRIPTION"
-              | "CUSTOMER_NOT_FOUND"
-              | "CUSTOMER_EXTERNAL_ID_CONFLICT"
-              | "CUSTOMER_ENTITLEMENTS_NOT_FOUND"
-              | "FEATURE_TYPE_NOT_SUPPORTED"
-              | "PROJECT_DISABLED"
-              | "CUSTOMER_DISABLED"
-              | "PLAN_VERSION_NOT_PUBLISHED"
-              | "PLAN_VERSION_NOT_ACTIVE"
-              | "PAYMENT_PROVIDER_CONFIG_NOT_FOUND"
-              | "ENTITLEMENT_EXPIRED"
-              | "ENTITLEMENT_NOT_ACTIVE"
-              | "CUSTOMER_SESSION_NOT_CREATED"
-              | "CUSTOMER_SESSION_NOT_FOUND"
-              | "PLAN_VERSION_NOT_FOUND"
-              | "PAYMENT_PROVIDER_ERROR"
-              | "SUBSCRIPTION_NOT_CREATED"
-              | "CUSTOMER_NOT_CREATED"
-              | "SUBSCRIPTION_NOT_CANCELED"
-              | "CUSTOMER_PHASE_NOT_FOUND"
-              | "CURRENCY_MISMATCH"
-              | "BILLING_INTERVAL_MISMATCH"
-              | "ENTITLEMENT_NOT_FOUND"
-              | "SUBSCRIPTION_NOT_FOUND"
-              | "INVALID_ENTITLEMENT_TYPE"
-              | "NO_ACTIVE_PHASE_FOUND"
-            degraded?: boolean
-            degradedReason?: string
-            cacheHit?: boolean
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
+  "events.ingestSync": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The synchronous raw event ingestion payload */
+    requestBody: {
+      content: {
+        "application/json": {
+          /**
+           * @description Optional event id. If omitted, the API will generate an internal event id for processing.
+           * @example evt_123
+           */
+          id?: string
+          /**
+           * @description Logical idempotency key for deduplicating raw events
+           * @example idem_123
+           */
+          idempotencyKey: string
+          /**
+           * @description The event slug
+           * @example tokens_used
+           */
+          eventSlug: string
+          /**
+           * @description The unprice customer id
+           * @example cus_123
+           */
+          customerId: string
+          /**
+           * @description Event timestamp in epoch milliseconds, if not provided will use the time of the request
+           * @example 1741454800000
+           */
+          timestamp?: number
+          /**
+           * @description Arbitrary event properties
+           * @example {
+           *       "amount": 1
+           *     }
+           */
+          properties: {
+            [key: string]: unknown
           }
+          /**
+           * @description The feature slug to verify and ingest synchronously
+           * @example tokens
+           */
+          featureSlug: string
+        }
+      }
+    }
+    responses: {
+      /** @description The synchronous ingestion result for the targeted feature */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            /**
+             * @description Whether the event was accepted and synchronously ingested for the feature
+             * @example true
+             */
+            allowed: boolean
+            /**
+             * @description Synchronous ingestion lifecycle state for the targeted feature
+             * @example processed
+             * @enum {string}
+             */
+            state: "processed" | "rejected"
+            /**
+             * @description Business rejection reason when the event could not be ingested
+             * @example LIMIT_EXCEEDED
+             * @enum {string}
+             */
+            rejectionReason?:
+              | "CUSTOMER_NOT_FOUND"
+              | "INVALID_ENTITLEMENT_CONFIGURATION"
+              | "INVALID_AGGREGATION_PROPERTIES"
+              | "LIMIT_EXCEEDED"
+              | "NO_MATCHING_ENTITLEMENT"
+              | "UNROUTABLE_EVENT"
+            /**
+             * @description Optional details about the synchronous ingestion result
+             * @example Limit exceeded for meter meter_123
+             */
+            message?: string
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
         }
       }
       /** @description The server has encountered a situation it does not know how to handle. */
@@ -1187,105 +1154,93 @@ export interface operations {
            * @description The unprice customer ID
            * @example cus_1H7KQFLr7RepUyQBKdnvY
            */
-          customerId?: string
-          /**
-           * @description The external customer ID provided at sign up
-           * @example user_123
-           */
-          externalId?: string
+          customerId: string
           /**
            * @description The feature slug
            * @example tokens
            */
           featureSlug: string
           /**
-           * @description The action being performed (e.g., 'read', 'write', 'delete'). Normalized to lowercase with spaces as hyphens.
-           * @example read
+           * @description Optional timestamp to inspect a recent point-in-time state. Defaults to the request start time.
+           * @example 1774094400000
            */
-          action?: string
-          metadata?: {
-            [key: string]: (string | number | boolean) | undefined
-          }
-          /**
-           * @description The usage to check feature access for, if not provided, it will be 0
-           * @example 100
-           */
-          usage?: number
+          timestamp?: number
         }
       }
     }
     responses: {
-      /** @description The result of the verify check */
+      /** @description The current feature verification status */
       200: {
         headers: {
           [name: string]: unknown
         }
         content: {
           "application/json": {
+            /**
+             * @description Whether the feature is currently usable for the requested customer and timestamp
+             * @example true
+             */
             allowed: boolean
-            message?: string
-            /** @enum {string} */
-            deniedReason?:
-              | "INVALID_USAGE"
-              | "ERROR_SYNCING_ENTITLEMENTS_LAST_USAGE"
-              | "FLAT_FEATURE_NOT_ALLOWED_REPORT_USAGE"
-              | "ENTITLEMENT_OUTSIDE_OF_CURRENT_BILLING_WINDOW"
-              | "ERROR_RESETTING_DO"
-              | "RATE_LIMITED"
-              | "ENTITLEMENT_NOT_FOUND"
-              | "LIMIT_EXCEEDED"
-              | "ENTITLEMENT_EXPIRED"
-              | "ENTITLEMENT_NOT_ACTIVE"
-              | "DO_NOT_INITIALIZED"
-              | "INCORRECT_USAGE_REPORTING"
-              | "ERROR_INSERTING_USAGE_DO"
-              | "ERROR_INSERTING_VERIFICATION_DO"
-              | "PROJECT_DISABLED"
-              | "CUSTOMER_DISABLED"
-              | "SUBSCRIPTION_DISABLED"
-              | "FETCH_ERROR"
-              | "SUBSCRIPTION_ERROR"
-              | "ENTITLEMENT_ERROR"
-              | "SUBSCRIPTION_EXPIRED"
-              | "NO_DEFAULT_PLAN_FOUND"
-              | "SUBSCRIPTION_NOT_ACTIVE"
-              | "PHASE_NOT_CREATED"
-              | "FEATURE_NOT_FOUND_IN_SUBSCRIPTION"
-              | "CUSTOMER_NOT_FOUND"
-              | "CUSTOMER_EXTERNAL_ID_CONFLICT"
-              | "CUSTOMER_ENTITLEMENTS_NOT_FOUND"
-              | "FEATURE_TYPE_NOT_SUPPORTED"
-              | "PROJECT_DISABLED"
-              | "CUSTOMER_DISABLED"
-              | "PLAN_VERSION_NOT_PUBLISHED"
-              | "PLAN_VERSION_NOT_ACTIVE"
-              | "PAYMENT_PROVIDER_CONFIG_NOT_FOUND"
-              | "ENTITLEMENT_EXPIRED"
-              | "ENTITLEMENT_NOT_ACTIVE"
-              | "CUSTOMER_SESSION_NOT_CREATED"
-              | "CUSTOMER_SESSION_NOT_FOUND"
-              | "PLAN_VERSION_NOT_FOUND"
-              | "PAYMENT_PROVIDER_ERROR"
-              | "SUBSCRIPTION_NOT_CREATED"
-              | "CUSTOMER_NOT_CREATED"
-              | "SUBSCRIPTION_NOT_CANCELED"
-              | "CUSTOMER_PHASE_NOT_FOUND"
-              | "CURRENCY_MISMATCH"
-              | "BILLING_INTERVAL_MISMATCH"
-              | "ENTITLEMENT_NOT_FOUND"
-              | "SUBSCRIPTION_NOT_FOUND"
-              | "INVALID_ENTITLEMENT_TYPE"
-              | "NO_ACTIVE_PHASE_FOUND"
-            /** @enum {string} */
-            featureType?: "flat" | "tier" | "package" | "usage"
-            cacheHit?: boolean
-            remaining?: number
-            limit?: number
+            /**
+             * @description The current verification status for the requested feature
+             * @example usage
+             * @enum {string}
+             */
+            status:
+              | "customer_not_found"
+              | "feature_inactive"
+              | "feature_missing"
+              | "invalid_entitlement_configuration"
+              | "non_usage"
+              | "usage"
+            /**
+             * @description The feature slug that was verified
+             * @example tokens
+             */
+            featureSlug: string
+            /** @description The resolved meter configuration for usage-based features */
+            meterConfig?: {
+              eventId: string
+              eventSlug: string
+              /**
+               * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+               * @enum {string}
+               */
+              aggregationMethod: "sum" | "count" | "max" | "latest"
+              aggregationField?: string
+              filters?: {
+                [key: string]: string | undefined
+              }
+              groupBy?: string[]
+              /** @enum {string} */
+              windowSize?: "MINUTE" | "HOUR" | "DAY"
+            }
+            /**
+             * @description Current usage in the active meter window
+             * @example 42
+             */
             usage?: number
-            cost?: number
-            latency?: number
-            degraded?: boolean
-            degradedReason?: string
+            /**
+             * @description Configured limit for the active meter window
+             * @example 100
+             */
+            limit?: number | null
+            /**
+             * @description Whether the current usage has reached the current limit
+             * @example false
+             */
+            isLimitReached?: boolean
+            /**
+             * @description How the feature behaves once the limit is reached
+             * @example none
+             * @enum {string}
+             */
+            overageStrategy?: "none" | "last-call" | "always"
+            /**
+             * @description Optional detail about the verification result
+             * @example Unable to resolve the current meter window for this feature
+             */
+            message?: string
           }
         }
       }
@@ -1558,218 +1513,6 @@ export interface operations {
                 paymentMethodRequired: boolean
                 version: number
               }
-            }
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "customers.getUsage": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Body of the request */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The customer ID
-           * @example cus_1H7KQFLr7RepUyQBKdnvY
-           */
-          customerId: string
-          /**
-           * @description The project ID
-           * @example prj_1H7KQFLr7RepUyQBKdnvY
-           */
-          projectId?: string
-        }
-      }
-    }
-    responses: {
-      /** @description The result of the get usage */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            planName: string
-            planDescription?: string
-            billingPeriod: string
-            billingPeriodLabel: string
-            currency: string
-            renewalDate?: string
-            daysRemaining?: number
-            groups: {
-              id: string
-              name: string
-              featureCount: number
-              features: (
-                | {
-                    id: string
-                    name: string
-                    description?: string
-                    /** @enum {string} */
-                    type: "flat"
-                    typeLabel: string
-                    currency: string
-                    price: string
-                    enabled: boolean
-                    billing: {
-                      billingFrequencyLabel: string
-                      resetFrequencyLabel: string
-                    }
-                  }
-                | {
-                    id: string
-                    name: string
-                    description?: string
-                    /** @enum {string} */
-                    type: "tiered"
-                    typeLabel: string
-                    currency: string
-                    price: string
-                    billing: {
-                      billingFrequencyLabel: string
-                      resetFrequencyLabel: string
-                    }
-                    tieredDisplay: {
-                      currentUsage: number
-                      billableUsage: number
-                      unit: string
-                      freeAmount: number
-                      tiers: {
-                        min: number
-                        max: number | null
-                        pricePerUnit: number
-                        label?: string
-                        isActive: boolean
-                      }[]
-                      currentTierLabel?: string
-                    }
-                  }
-                | {
-                    id: string
-                    name: string
-                    description?: string
-                    /** @enum {string} */
-                    type: "usage"
-                    typeLabel: string
-                    currency: string
-                    price: string
-                    billing: {
-                      billingFrequencyLabel: string
-                      resetFrequencyLabel: string
-                    }
-                    usageBar: {
-                      current: number
-                      included: number
-                      limit?: number
-                      /** @enum {string} */
-                      limitType: "hard" | "soft" | "none"
-                      unit: string
-                      notifyThreshold?: number
-                      /** @enum {string} */
-                      overageStrategy?: "none" | "last-call" | "always"
-                    }
-                  }
-                | {
-                    id: string
-                    name: string
-                    description?: string
-                    /** @enum {string} */
-                    type: "package"
-                    typeLabel: string
-                    currency: string
-                    price: string
-                    billing: {
-                      billingFrequencyLabel: string
-                      resetFrequencyLabel: string
-                    }
-                  }
-              )[]
-            }[]
-            priceSummary: {
-              totalPrice: string
-              flatTotal: string
-              tieredTotal: string
-              packageTotal: string
-              usageTotal: string
             }
           }
         }
@@ -2330,226 +2073,6 @@ export interface operations {
       }
     }
   }
-  "customers.resetEntitlements": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description The customer ID */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The customer ID
-           * @example cus_1H7KQFLr7RepUyQBKdnvY
-           */
-          customerId: string
-          /**
-           * @description The project ID
-           * @example proj_1H7KQFLr7RepUyQBKdnvY
-           */
-          projectId: string
-        }
-      }
-    }
-    responses: {
-      /** @description The result of the reset entitlements */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            success: boolean
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "customers.resetUsage": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description The customer ID */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The customer ID
-           * @example cus_1H7KQFLr7RepUyQBKdnvY
-           */
-          customerId: string
-          /**
-           * @description The project ID
-           * @example proj_1H7KQFLr7RepUyQBKdnvY
-           */
-          projectId: string
-        }
-      }
-    }
-    responses: {
-      /** @description The result of the reset usage */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            success: boolean
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
   "customers.updateACL": {
     parameters: {
       query?: never
@@ -2683,6 +2206,23 @@ export interface operations {
               unitOfMeasure: string
               title: string
               description: string | null
+              /** @description Default meter template for usage-style features. When present, new plan version feature snapshots can copy this event-native measurement configuration */
+              meterConfig?: {
+                eventId: string
+                eventSlug: string
+                /**
+                 * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                 * @enum {string}
+                 */
+                aggregationMethod: "sum" | "count" | "max" | "latest"
+                aggregationField?: string
+                filters?: {
+                  [key: string]: string | undefined
+                }
+                groupBy?: string[]
+                /** @enum {string} */
+                windowSize?: "MINUTE" | "HOUR" | "DAY"
+              } | null
             }[]
           }
         }
@@ -3247,7 +2787,7 @@ export interface operations {
                    */
                   notifyUsageThreshold: number
                   /**
-                   * @description How to handle usage that exceeds the feature limit. Options: 'none' (deny access), 'charge' (bill for overage), 'allow' (permit without extra charge)
+                   * @description How to handle usage that exceeds the feature limit. Options: 'none' (strict deny), 'last-call' (allow one final call while tokens remain), 'always' (allow and record overage)
                    * @default none
                    * @enum {string}
                    */
@@ -3263,20 +2803,6 @@ export interface operations {
                    */
                   hidden: boolean
                 } | null
-                /**
-                 * @description How usage events are aggregated: 'sum' (total all values), 'count' (count events), 'max' (highest value), 'last_during_period' (most recent). Default: 'sum'
-                 * @default sum
-                 * @enum {string}
-                 */
-                aggregationMethod:
-                  | "none"
-                  | "sum"
-                  | "sum_all"
-                  | "last_during_period"
-                  | "count"
-                  | "count_all"
-                  | "max"
-                  | "max_all"
                 order: number
                 /**
                  * @description Default quantity of this feature included when a customer subscribes. Example: 5 for '5 team members included'. Default: 1
@@ -3285,6 +2811,23 @@ export interface operations {
                 defaultQuantity: number | null
                 /** @description Maximum allowed usage for this feature per billing period. Null or undefined means unlimited. Example: 10000 for 10,000 API calls/month */
                 limit?: number | null
+                /** @description Snapshotted event-native meter configuration for this plan version feature. When present, it is the authoritative source for how usage should be measured */
+                meterConfig?: {
+                  eventId: string
+                  eventSlug: string
+                  /**
+                   * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                   * @enum {string}
+                   */
+                  aggregationMethod: "sum" | "count" | "max" | "latest"
+                  aggregationField?: string
+                  filters?: {
+                    [key: string]: string | undefined
+                  }
+                  groupBy?: string[]
+                  /** @enum {string} */
+                  windowSize?: "MINUTE" | "HOUR" | "DAY"
+                } | null
                 /** @description The text you can use to show the clients */
                 displayFeatureText: string
                 /** @description The feature information */
@@ -3298,6 +2841,23 @@ export interface operations {
                   unitOfMeasure: string
                   title: string
                   description: string | null
+                  /** @description Default meter template for usage-style features. When present, new plan version feature snapshots can copy this event-native measurement configuration */
+                  meterConfig?: {
+                    eventId: string
+                    eventSlug: string
+                    /**
+                     * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                     * @enum {string}
+                     */
+                    aggregationMethod: "sum" | "count" | "max" | "latest"
+                    aggregationField?: string
+                    filters?: {
+                      [key: string]: string | undefined
+                    }
+                    groupBy?: string[]
+                    /** @enum {string} */
+                    windowSize?: "MINUTE" | "HOUR" | "DAY"
+                  } | null
                 }
               }[]
               /** @description Flat price of the plan */
@@ -3903,7 +3463,7 @@ export interface operations {
                    */
                   notifyUsageThreshold: number
                   /**
-                   * @description How to handle usage that exceeds the feature limit. Options: 'none' (deny access), 'charge' (bill for overage), 'allow' (permit without extra charge)
+                   * @description How to handle usage that exceeds the feature limit. Options: 'none' (strict deny), 'last-call' (allow one final call while tokens remain), 'always' (allow and record overage)
                    * @default none
                    * @enum {string}
                    */
@@ -3919,20 +3479,6 @@ export interface operations {
                    */
                   hidden: boolean
                 } | null
-                /**
-                 * @description How usage events are aggregated: 'sum' (total all values), 'count' (count events), 'max' (highest value), 'last_during_period' (most recent). Default: 'sum'
-                 * @default sum
-                 * @enum {string}
-                 */
-                aggregationMethod:
-                  | "none"
-                  | "sum"
-                  | "sum_all"
-                  | "last_during_period"
-                  | "count"
-                  | "count_all"
-                  | "max"
-                  | "max_all"
                 order: number
                 /**
                  * @description Default quantity of this feature included when a customer subscribes. Example: 5 for '5 team members included'. Default: 1
@@ -3941,6 +3487,23 @@ export interface operations {
                 defaultQuantity: number | null
                 /** @description Maximum allowed usage for this feature per billing period. Null or undefined means unlimited. Example: 10000 for 10,000 API calls/month */
                 limit?: number | null
+                /** @description Snapshotted event-native meter configuration for this plan version feature. When present, it is the authoritative source for how usage should be measured */
+                meterConfig?: {
+                  eventId: string
+                  eventSlug: string
+                  /**
+                   * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                   * @enum {string}
+                   */
+                  aggregationMethod: "sum" | "count" | "max" | "latest"
+                  aggregationField?: string
+                  filters?: {
+                    [key: string]: string | undefined
+                  }
+                  groupBy?: string[]
+                  /** @enum {string} */
+                  windowSize?: "MINUTE" | "HOUR" | "DAY"
+                } | null
                 /** @description The text you can use to show the clients */
                 displayFeatureText: string
                 /** @description The feature information */
@@ -3954,6 +3517,23 @@ export interface operations {
                   unitOfMeasure: string
                   title: string
                   description: string | null
+                  /** @description Default meter template for usage-style features. When present, new plan version feature snapshots can copy this event-native measurement configuration */
+                  meterConfig?: {
+                    eventId: string
+                    eventSlug: string
+                    /**
+                     * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                     * @enum {string}
+                     */
+                    aggregationMethod: "sum" | "count" | "max" | "latest"
+                    aggregationField?: string
+                    filters?: {
+                      [key: string]: string | undefined
+                    }
+                    groupBy?: string[]
+                    /** @enum {string} */
+                    windowSize?: "MINUTE" | "HOUR" | "DAY"
+                  } | null
                 }
               }[]
               /** @description Flat price of the plan */
@@ -4056,7 +3636,7 @@ export interface operations {
            * @description The project ID (optional, only available for main projects)
            * @example project_1H7KQFLr7RepUyQBKdnvY
            */
-          project_id: string
+          project_id?: string
           /**
            * @description The range of the usage, last hour, day, week or month
            * @example 24h
@@ -4078,283 +3658,8 @@ export interface operations {
               project_id: string
               customer_id?: string
               feature_slug: string
-              count: number
-              sum: number
-              max: number
-              last_during_period: number
+              value_after: number
             }[]
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "analytics.getVerifications": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Body of the request for the get verifications */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The customer ID if you want to get the verifications for a specific customer
-           * @example cus_1H7KQFLr7RepUyQBKdnvY
-           */
-          customer_id?: string
-          /**
-           * @description The project ID (optional, if not provided, the project ID will be the one of the key)
-           * @example project_1H7KQFLr7RepUyQBKdnvY
-           */
-          project_id: string
-          /**
-           * @description The range of the verifications, last hour, day, week or month
-           * @example 24h
-           * @enum {string}
-           */
-          range: "24h" | "7d" | "30d" | "90d"
-        }
-      }
-    }
-    responses: {
-      /** @description The result of the get verifications */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            verifications: {
-              project_id: string
-              customer_id?: string
-              feature_slug: string
-              count: number
-              p50_latency: number
-              p95_latency: number
-              p99_latency: number
-            }[]
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "analytics.getRealtimeUsage": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Body of the request for real-time usage metrics */
-    requestBody: {
-      content: {
-        "application/json": {
-          /**
-           * @description The customer ID to get real-time metrics for
-           * @example cus_1H7KQFLr7RepUyQBKdnvY
-           */
-          customer_id: string
-          /**
-           * @description The project ID (optional, only available for main projects)
-           * @example project_1H7KQFLr7RepUyQBKdnvY
-           */
-          project_id: string
-          /**
-           * @description Time history window in seconds (5m, 60m, 1d, 7d)
-           * @example 3600
-           */
-          window_seconds?: 300 | 3600 | 86400 | 604800
-        }
-      }
-    }
-    responses: {
-      /** @description Real-time usage metrics from the Durable Object buffer */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            metrics: {
-              usageCount: number
-              verificationCount: number
-              totalUsage: number
-              allowedCount: number
-              deniedCount: number
-              limitExceededCount: number
-              bucketSizeSeconds: number
-              featureStats: {
-                featureSlug: string
-                usageCount: number
-                verificationCount: number
-                totalUsage: number
-              }[]
-              usageSeries: {
-                bucketStart: number
-                usageCount: number
-                totalUsage: number
-              }[]
-              verificationSeries: {
-                bucketStart: number
-                verificationCount: number
-                allowedCount: number
-                deniedCount: number
-                limitExceededCount: number
-              }[]
-              oldestTimestamp: number | null
-              newestTimestamp: number | null
-            }
-            /**
-             * @description Indicates data comes from unflushed DO buffer, not Tinybird
-             * @enum {string}
-             */
-            source: "durable_object"
           }
         }
       }

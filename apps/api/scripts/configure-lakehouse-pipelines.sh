@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Configure Cloudflare Pipelines + R2 Data Catalog sinks for lakehouse sources.
+# Configure Cloudflare Pipelines + R2 Data Catalog sink for the events lakehouse source.
 # Assumes R2 buckets already exist.
 #
 # Run from apps/api:
@@ -9,6 +9,8 @@
 # Options:
 #   --skip-lifecycle
 #   --skip-compaction
+#   --recreate
+#   --delete-only
 #   --name-prefix <prefix>
 #   --name-suffix <suffix>   (default: "_<environment>")
 #
@@ -20,6 +22,7 @@ export CI="${CI:-1}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 API_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SCHEMAS_DIR="$SCRIPT_DIR/schemas"
+WRANGLER_CONFIG="$API_DIR/wrangler.jsonc"
 
 SKIP_LIFECYCLE=false
 SKIP_COMPACTION=false
@@ -54,6 +57,111 @@ resource_name() {
   local source="$1"
   local kind="$2"
   echo "${NAME_PREFIX}lakehouse_${source}_${kind}${NAME_SUFFIX}"
+}
+
+resolve_lakehouse_bucket() {
+  local wrangler_config_path="$1"
+  local environment="$2"
+
+  node --input-type=module - "$wrangler_config_path" "$environment" <<'NODE'
+import { readFileSync } from "node:fs"
+
+const [, , configPath, envName] = process.argv
+
+function stripJsonComments(text) {
+  let result = ""
+  let inString = false
+  let inLineComment = false
+  let inBlockComment = false
+  let escaped = false
+  let stringDelimiter = ""
+
+  for (let index = 0; index < text.length; index += 1) {
+    const current = text[index]
+    const next = text[index + 1]
+
+    if (inLineComment) {
+      if (current === "\n") {
+        inLineComment = false
+        result += current
+      }
+      continue
+    }
+
+    if (inBlockComment) {
+      if (current === "*" && next === "/") {
+        inBlockComment = false
+        index += 1
+      }
+      continue
+    }
+
+    if (inString) {
+      result += current
+
+      if (escaped) {
+        escaped = false
+        continue
+      }
+
+      if (current === "\\") {
+        escaped = true
+        continue
+      }
+
+      if (current === stringDelimiter) {
+        inString = false
+        stringDelimiter = ""
+      }
+
+      continue
+    }
+
+    if (current === "\"" || current === "'") {
+      inString = true
+      stringDelimiter = current
+      result += current
+      continue
+    }
+
+    if (current === "/" && next === "/") {
+      inLineComment = true
+      index += 1
+      continue
+    }
+
+    if (current === "/" && next === "*") {
+      inBlockComment = true
+      index += 1
+      continue
+    }
+
+    result += current
+  }
+
+  return result
+}
+
+const content = readFileSync(configPath, "utf8")
+const config = JSON.parse(stripJsonComments(content))
+const envConfig = config?.env?.[envName]
+
+if (!envConfig || typeof envConfig !== "object") {
+  console.error(`Environment '${envName}' was not found in ${configPath}`)
+  process.exit(1)
+}
+
+const buckets = Array.isArray(envConfig.r2_buckets) ? envConfig.r2_buckets : []
+const lakehouseBucket =
+  buckets.find((bucket) => bucket?.binding === "LAKEHOUSE") ?? buckets[0]
+
+if (!lakehouseBucket?.bucket_name) {
+  console.error(`No LAKEHOUSE bucket configured for environment '${envName}' in ${configPath}`)
+  process.exit(1)
+}
+
+process.stdout.write(String(lakehouseBucket.bucket_name))
+NODE
 }
 
 find_resource_id() {
@@ -390,20 +498,15 @@ if [[ -z "$NAME_SUFFIX" ]]; then
 fi
 
 case "$ENV" in
-  dev)
-    BUCKET="unprice-lakehouse-dev"
-    ;;
-  preview)
-    BUCKET="unprice-lakehouse-preview"
-    ;;
-  prod)
-    BUCKET="unprice-lakehouse-prod"
+  dev|preview|prod)
     ;;
   *)
     echo "Error: Unknown environment '$ENV'"
     usage
     ;;
 esac
+
+BUCKET="$(resolve_lakehouse_bucket "$WRANGLER_CONFIG" "$ENV")"
 
 cd "$API_DIR"
 
@@ -422,40 +525,27 @@ else
 fi
 
 echo "=== Environment: $ENV | Bucket: $BUCKET ==="
-echo "=== Resource name format: ${NAME_PREFIX}lakehouse_<source>_<stream|sink|pipeline>${NAME_SUFFIX} ==="
+echo "=== Resource name format: ${NAME_PREFIX}lakehouse_events_<stream|sink|pipeline>${NAME_SUFFIX} ==="
 if [[ "$DELETE_ONLY" != true && -n "$TOKEN_SOURCE" ]]; then
   echo "=== Using API token from: $TOKEN_SOURCE ==="
 fi
 echo ""
 
 STREAM_SPECS=(
-  "usage:usage:usage"
-  "verifications:verifications:verification"
-  "metadata:metadata:metadata"
-  "entitlements:entitlements:entitlement_snapshot"
+  "events:events:events"
 )
 
-STREAM_BINDING_SPECS=(
-  "usage:PIPELINE_USAGE"
-  "verifications:PIPELINE_VERIFICATIONS"
-  "metadata:PIPELINE_METADATA"
-  "entitlements:PIPELINE_ENTITLEMENTS"
-)
+print_pipeline_binding_hint() {
+  local pipeline_name
+  pipeline_name="$(resource_name "events" "pipeline")"
 
-print_stream_env_block() {
-  local source
-  local binding_name
-  local stream_name
-
-  echo "Copy/paste for wrangler bindings:"
-  for spec in "${STREAM_BINDING_SPECS[@]}"; do
-    source="${spec%%:*}"
-    binding_name="${spec##*:}"
-    stream_name="$(resource_name "$source" "stream")"
-    printf "%s=%s\n" "$binding_name" "$stream_name"
-  done
-
-  printf "LAKEHOUSE_CREDENTIAL_TOKEN=\${WRANGLER_R2_SQL_AUTH_TOKEN}\n"
+  echo "Update wrangler pipeline binding for env '$ENV':"
+  echo "  \"pipelines\": ["
+  echo "    {"
+  echo "      \"pipeline\": \"$pipeline_name\","
+  echo "      \"binding\": \"PIPELINE_EVENTS\""
+  echo "    }"
+  echo "  ]"
 }
 if [[ "$RECREATE" == true || "$DELETE_ONLY" == true ]]; then
   echo ">>> Cleanup mode: deleting existing pipelines/sinks/streams for this environment naming scheme"
@@ -573,12 +663,12 @@ fi
 echo "=== Done. ==="
 echo ""
 echo "Created or ensured:"
-echo "  Streams:   ${NAME_PREFIX}lakehouse_<usage|verifications|metadata|entitlements>_stream${NAME_SUFFIX}"
-echo "  Sinks:     ${NAME_PREFIX}lakehouse_<usage|verifications|metadata|entitlements>_sink${NAME_SUFFIX}"
-echo "  Pipelines: ${NAME_PREFIX}lakehouse_<usage|verifications|metadata|entitlements>_pipeline${NAME_SUFFIX}"
+echo "  Stream:   ${NAME_PREFIX}lakehouse_events_stream${NAME_SUFFIX}"
+echo "  Sink:     ${NAME_PREFIX}lakehouse_events_sink${NAME_SUFFIX}"
+echo "  Pipeline: ${NAME_PREFIX}lakehouse_events_pipeline${NAME_SUFFIX}"
 echo ""
 echo "Next steps:"
 echo "  - Get stream ingest endpoints: npx wrangler pipelines streams list"
-echo "  - Query R2 SQL: npx wrangler r2 sql query \"<WAREHOUSE>\" \"SELECT * FROM $NAMESPACE.usage LIMIT 10\""
+echo "  - Query R2 SQL: npx wrangler r2 sql query \"<WAREHOUSE>\" \"SELECT * FROM $NAMESPACE.events LIMIT 10\""
 echo ""
-print_stream_env_block
+print_pipeline_binding_hint

@@ -471,8 +471,6 @@ function LakehouseDashboardInner() {
     if (hasUsage && hasMetadata) return PREDEFINED_LAKEHOUSE_QUERIES.allUsage.query
     if (hasUsage) return PREDEFINED_LAKEHOUSE_QUERIES.usageByFeature.query
     if (hasVerification) return PREDEFINED_LAKEHOUSE_QUERIES.verificationByFeature.query
-    if (hasMetadata) return PREDEFINED_LAKEHOUSE_QUERIES.metadataRaw.query
-    if (hasEntitlementSnapshots) return PREDEFINED_LAKEHOUSE_QUERIES.entitlementSnapshotsRaw.query
     return ""
   }, [hasUsage, hasMetadata, hasVerification, hasEntitlementSnapshots])
 

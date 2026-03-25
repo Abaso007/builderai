@@ -9,9 +9,9 @@ import { planVersionFeatures } from "../schema/planVersionFeatures"
 import { FEATURE_TYPES_MAPS, USAGE_MODES_MAP } from "../utils"
 import { featureSelectBaseSchema } from "./features"
 import {
-  aggregationMethodSchema,
   billingConfigSchema,
   featureConfigType,
+  meterConfigSchema,
   overageStrategySchema,
   resetConfigSchema,
   tierModeSchema,
@@ -138,7 +138,7 @@ export const planVersionFeatureMetadataSchema = z
       .optional()
       .default("none")
       .describe(
-        "How to handle usage that exceeds the feature limit. Options: 'none' (deny access), 'charge' (bill for overage), 'allow' (permit without extra charge)"
+        "How to handle usage that exceeds the feature limit. Options: 'none' (strict deny), 'last-call' (allow one final call while tokens remain), 'always' (allow and record overage)"
       ),
     blockCustomer: z
       .boolean()
@@ -487,6 +487,12 @@ export const planVersionFeatureSelectBaseSchema = createSelectSchema(planVersion
   config: configFeatureSchema.describe(
     "Pricing configuration for this feature. Structure depends on featureType"
   ),
+  meterConfig: meterConfigSchema
+    .nullable()
+    .optional()
+    .describe(
+      "Snapshotted event-native meter configuration for this plan version feature. When present, it is the authoritative source for how usage should be measured"
+    ),
   resetConfig: resetConfigSchema
     .optional()
     .describe(
@@ -502,11 +508,6 @@ export const planVersionFeatureSelectBaseSchema = createSelectSchema(planVersion
     .default(1)
     .describe(
       "Default quantity of this feature included when a customer subscribes. Example: 5 for '5 team members included'. Default: 1"
-    ),
-  aggregationMethod: aggregationMethodSchema
-    .default("sum")
-    .describe(
-      "How usage events are aggregated: 'sum' (total all values), 'count' (count events), 'max' (highest value), 'last_during_period' (most recent). Default: 'sum'"
     ),
   limit: z.coerce
     .number()
@@ -541,24 +542,22 @@ export const parseFeaturesConfig = (feature: PlanVersionFeature) => {
   }
 }
 
-// We avoid the use of discriminated union because of the complexity of the schema
-// also zod is planning to deprecated it
-// TODO: improve this when switch api is available
-export const planVersionFeatureInsertBaseSchema = createInsertSchema(planVersionFeatures, {
+const planVersionFeatureMutationBaseObject = createInsertSchema(planVersionFeatures, {
   config: configFeatureSchema
     .optional()
     .describe(
       "Pricing configuration for this feature. Required structure depends on featureType. See configFlatSchema, configTierSchema, configUsageSchema, or configPackageSchema"
     ),
+  meterConfig: meterConfigSchema
+    .nullable()
+    .optional()
+    .describe(
+      "Optional event-native meter configuration snapshot. Allowed only for usage features and treated as the authoritative usage measurement configuration when present"
+    ),
   metadata: planVersionFeatureMetadataSchema
     .optional()
     .describe(
       "Optional additional settings for the feature including real-time tracking, usage notifications, overage handling, and visibility"
-    ),
-  aggregationMethod: aggregationMethodSchema
-    .default("count")
-    .describe(
-      "How to aggregate usage events for billing: 'sum', 'count', 'max', 'last_during_period', 'sum_all', 'count_all', 'max_all'. Default: 'count'"
     ),
   billingConfig: billingConfigSchema.describe(
     "Required billing cycle settings: billingInterval ('month', 'year', 'week', 'day'), billingIntervalCount, billingAnchor, and planType ('recurring', 'onetime')"
@@ -591,11 +590,156 @@ export const planVersionFeatureInsertBaseSchema = createInsertSchema(planVersion
     .describe(
       "Feature configuration type for categorization. Options vary based on system configuration"
     ),
+}).omit({
+  createdAtM: true,
+  updatedAtM: true,
 })
-  .omit({
-    createdAtM: true,
-    updatedAtM: true,
-  })
+
+const normalizePlanVersionFeatureMutation = <
+  T extends {
+    featureType?: z.infer<typeof typeFeatureSchema>
+    config?: z.infer<typeof configFeatureSchema>
+  },
+>(
+  data: T
+) => {
+  if (data.config && data.featureType) {
+    // remove unnecessary fields
+    switch (data.featureType) {
+      case FEATURE_TYPES_MAPS.flat.code:
+        delete data.config.tiers
+        delete data.config.tierMode
+        delete data.config.usageMode
+        delete data.config.units
+        return data
+
+      case FEATURE_TYPES_MAPS.package.code:
+        delete data.config.usageMode
+        delete data.config.tiers
+        delete data.config.tierMode
+        delete data.config.usageMode
+
+        return data
+
+      case FEATURE_TYPES_MAPS.tier.code:
+        delete data.config.price
+        delete data.config.usageMode
+        delete data.config.units
+
+        return data
+
+      case FEATURE_TYPES_MAPS.usage.code:
+        if (data.config.usageMode === USAGE_MODES_MAP.unit.code) {
+          delete data.config.tierMode
+          delete data.config.tiers
+        }
+
+        if (data.config.usageMode === USAGE_MODES_MAP.tier.code) {
+          delete data.config.price
+          delete data.config.units
+        }
+
+        if (data.config.usageMode === USAGE_MODES_MAP.package.code) {
+          delete data.config.tierMode
+          delete data.config.tiers
+        }
+
+        return data
+      default:
+        throw new Error("Feature type not supported")
+    }
+  }
+
+  return data
+}
+
+const validatePlanVersionFeatureMutation = ({
+  data,
+  ctx,
+  validateConfigWithoutFeatureType = false,
+  requireMeterConfigForUsage = false,
+}: {
+  data: {
+    featureType?: z.infer<typeof typeFeatureSchema>
+    meterConfig?: z.infer<typeof meterConfigSchema> | null
+    config?: z.infer<typeof configFeatureSchema>
+  }
+  ctx: z.RefinementCtx
+  validateConfigWithoutFeatureType?: boolean
+  requireMeterConfigForUsage?: boolean
+}) => {
+  if (data.featureType && data.featureType !== FEATURE_TYPES_MAPS.usage.code && data.meterConfig) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Meter config is only supported for usage features",
+      path: ["meterConfig"],
+      fatal: true,
+    })
+
+    return false
+  }
+
+  if (
+    requireMeterConfigForUsage &&
+    data.featureType === FEATURE_TYPES_MAPS.usage.code &&
+    !data.meterConfig
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Meter config is required for usage features",
+      path: ["meterConfig"],
+      fatal: true,
+    })
+
+    return false
+  }
+
+  try {
+    if (data.config && (data.featureType || validateConfigWithoutFeatureType)) {
+      switch (data.featureType) {
+        case FEATURE_TYPES_MAPS.flat.code:
+          configFlatSchema.parse(data.config)
+          break
+        case FEATURE_TYPES_MAPS.tier.code:
+          configTierSchema.parse(data.config)
+          break
+        case FEATURE_TYPES_MAPS.package.code:
+          configPackageSchema.parse(data.config)
+          break
+        case FEATURE_TYPES_MAPS.usage.code:
+          configUsageSchema.parse(data.config)
+          break
+        default:
+          if (validateConfigWithoutFeatureType) {
+            configFeatureSchema.parse(data.config)
+            break
+          }
+
+          throw new Error("Feature type not supported")
+      }
+    }
+  } catch (err) {
+    if (err instanceof ZodError) {
+      err.errors.forEach((issue) => {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: issue.message,
+          path: [`config.${issue.path.join(".")}`],
+          fatal: true,
+        })
+      })
+    }
+
+    return false
+  }
+
+  return true
+}
+
+// We avoid the use of discriminated union because of the complexity of the schema
+// also zod is planning to deprecated it
+// TODO: improve this when switch api is available
+export const planVersionFeatureInsertBaseSchema = planVersionFeatureMutationBaseObject
   .partial({
     projectId: true,
     id: true,
@@ -608,96 +752,48 @@ export const planVersionFeatureInsertBaseSchema = createInsertSchema(planVersion
     featureType: true,
     billingConfig: true,
   })
-  .transform((data) => {
-    if (data.config) {
-      // remove unnecessary fields
-      switch (data.featureType) {
-        case FEATURE_TYPES_MAPS.flat.code:
-          delete data.config.tiers
-          delete data.config.tierMode
-          delete data.config.usageMode
-          delete data.config.units
-
-          return data
-
-        case FEATURE_TYPES_MAPS.package.code:
-          delete data.config.usageMode
-          delete data.config.tiers
-          delete data.config.tierMode
-          delete data.config.usageMode
-
-          return data
-
-        case FEATURE_TYPES_MAPS.tier.code:
-          delete data.config.price
-          delete data.config.usageMode
-          delete data.config.units
-
-          return data
-
-        case FEATURE_TYPES_MAPS.usage.code:
-          if (data.config.usageMode === USAGE_MODES_MAP.unit.code) {
-            delete data.config.tierMode
-            delete data.config.tiers
-          }
-
-          if (data.config.usageMode === USAGE_MODES_MAP.tier.code) {
-            delete data.config.price
-            delete data.config.units
-          }
-
-          if (data.config.usageMode === USAGE_MODES_MAP.package.code) {
-            delete data.config.tierMode
-            delete data.config.tiers
-          }
-
-          return data
-        default:
-          throw new Error("Feature type not supported")
-      }
-    }
-
-    return data
+  .extend({
+    aggregationMethod: z.never().optional(),
   })
   .superRefine((data, ctx) => {
-    try {
-      if (data.config) {
-        switch (data.featureType) {
-          case FEATURE_TYPES_MAPS.flat.code:
-            configFlatSchema.parse(data.config)
-            break
-          case FEATURE_TYPES_MAPS.tier.code:
-            configTierSchema.parse(data.config)
-            break
-          case FEATURE_TYPES_MAPS.package.code:
-            configPackageSchema.parse(data.config)
-            break
-          case FEATURE_TYPES_MAPS.usage.code:
-            // TODO: when usage mode is unit, price is required
-            configUsageSchema.parse(data.config)
-            break
-          default:
-            throw new Error("Feature type not supported")
-        }
-      }
-    } catch (err) {
-      if (err instanceof ZodError) {
-        // add issues to the context
-        err.errors.forEach((issue) => {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: issue.message,
-            path: [`config.${issue.path.join(".")}`],
-            fatal: true,
-          })
-        })
-      }
-
-      return false
-    }
-
-    return true
+    return validatePlanVersionFeatureMutation({
+      data,
+      ctx,
+      validateConfigWithoutFeatureType: true,
+      requireMeterConfigForUsage: true,
+    })
   })
+  .transform((data) => normalizePlanVersionFeatureMutation(data))
+
+export const planVersionFeatureUpdateBaseSchema = planVersionFeatureMutationBaseObject
+  .partial({
+    projectId: true,
+    id: true,
+    config: true,
+    metadata: true,
+    featureId: true,
+    featureType: true,
+    billingConfig: true,
+    resetConfig: true,
+    unitOfMeasure: true,
+    defaultQuantity: true,
+    limit: true,
+    type: true,
+    planVersionId: true,
+    order: true,
+    meterConfig: true,
+  })
+  .required({
+    id: true,
+    planVersionId: true,
+  })
+  .extend({
+    aggregationMethod: z.never().optional(),
+  })
+  .superRefine((data, ctx) => {
+    return validatePlanVersionFeatureMutation({ data, ctx })
+  })
+  .transform((data) => normalizePlanVersionFeatureMutation(data))
 
 export const planVersionFeatureDragDropSchema = planVersionFeatureSelectBaseSchema
   .extend({
@@ -711,4 +807,5 @@ export const planVersionFeatureDragDropSchema = planVersionFeatureSelectBaseSche
 
 export type PlanVersionFeature = z.infer<typeof planVersionFeatureSelectBaseSchema>
 export type PlanVersionFeatureInsert = z.infer<typeof planVersionFeatureInsertBaseSchema>
+export type PlanVersionFeatureUpdate = z.infer<typeof planVersionFeatureUpdateBaseSchema>
 export type PlanVersionFeatureDragDrop = z.infer<typeof planVersionFeatureDragDropSchema>

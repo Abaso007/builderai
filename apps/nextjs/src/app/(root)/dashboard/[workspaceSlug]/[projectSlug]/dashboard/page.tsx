@@ -1,4 +1,3 @@
-import { prepareInterval } from "@unprice/analytics"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 import { IntervalFilter } from "~/components/analytics/interval-filter"
@@ -6,9 +5,9 @@ import { DashboardShell } from "~/components/layout/dashboard-shell"
 import { intervalParams } from "~/lib/searchParams"
 import { HydrateClient, batchPrefetch, trpc } from "~/trpc/server"
 import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
-import { FeaturesStats, FeaturesStatsSkeleton } from "./_components/features-stats"
 import OverviewStats, { OverviewStatsSkeleton } from "./_components/overview-stats"
 import TabsDashboard from "./_components/tabs-dashboard"
+import { UsageStats, UsageStatsSkeleton } from "./_components/usage-stats"
 
 export const dynamic = "force-dynamic"
 
@@ -19,7 +18,6 @@ export default async function DashboardOverview(props: {
   const { projectSlug, workspaceSlug } = props.params
   const baseUrl = `/${workspaceSlug}/${projectSlug}`
   const filter = intervalParams(props.searchParams)
-  const interval = prepareInterval(filter.intervalFilter)
 
   batchPrefetch([
     trpc.analytics.getOverviewStats.queryOptions(
@@ -30,33 +28,9 @@ export default async function DashboardOverview(props: {
         ...ANALYTICS_CONFIG_REALTIME,
       }
     ),
-    trpc.analytics.getFeaturesOverview.queryOptions(
+    trpc.analytics.getProjectUsage.queryOptions(
       {
-        interval_days: interval.intervalDays,
-      },
-      {
-        ...ANALYTICS_CONFIG_REALTIME,
-      }
-    ),
-    trpc.analytics.getUsage.queryOptions(
-      {
-        interval_days: interval.intervalDays,
-      },
-      {
-        ...ANALYTICS_CONFIG_REALTIME,
-      }
-    ),
-    trpc.analytics.getVerifications.queryOptions(
-      {
-        interval_days: interval.intervalDays,
-      },
-      {
-        ...ANALYTICS_CONFIG_REALTIME,
-      }
-    ),
-    trpc.analytics.getVerificationRegions.queryOptions(
-      {
-        interval_days: interval.intervalDays,
+        range: filter.intervalFilter,
       },
       {
         ...ANALYTICS_CONFIG_REALTIME,
@@ -77,8 +51,8 @@ export default async function DashboardOverview(props: {
           </Suspense>
         </div>
         <div className="min-h-[520px]">
-          <Suspense fallback={<FeaturesStatsSkeleton />}>
-            <FeaturesStats />
+          <Suspense fallback={<UsageStatsSkeleton />}>
+            <UsageStats />
           </Suspense>
         </div>
       </HydrateClient>

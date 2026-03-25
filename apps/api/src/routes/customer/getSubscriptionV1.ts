@@ -1,7 +1,7 @@
 import { createRoute } from "@hono/zod-openapi"
 import { subscriptionCacheSchema } from "@unprice/db/validators"
-import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
+import * as HttpStatusCodes from "~/util/http-status-codes"
 
 import { z } from "zod"
 import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"

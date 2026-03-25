@@ -4,11 +4,7 @@ import * as schema from "@unprice/db/schema"
 import * as utils from "@unprice/db/utils"
 import { planVersionSelectBaseSchema, versionInsertBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
-
-import { FEATURE_SLUGS } from "@unprice/config"
 import { protectedProjectProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
-import { reportUsageFeature } from "#utils/shared"
 
 export const create = protectedProjectProcedure
   .input(versionInsertBaseSchema)
@@ -34,27 +30,10 @@ export const create = protectedProjectProcedure
       autoRenew,
     } = opts.input
     const project = opts.ctx.project
-    const workspace = opts.ctx.project.workspace
-    const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.PLANS.SLUG
+    const _workspace = opts.ctx.project.workspace
 
     // only owner and admin can create a plan version
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
-
-    // check if the customer has access to the feature
-    const result = await featureGuard({
-      customerId,
-      featureSlug,
-      isMain: workspace.isMain,
-      action: "create",
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
 
     const planData = await opts.ctx.db.query.plans.findFirst({
       where: (plan, { eq, and }) => and(eq(plan.id, planId), eq(plan.projectId, project.id)),
@@ -135,19 +114,6 @@ export const create = protectedProjectProcedure
         })
       }
     })
-
-    // avoid reporting usage for flat features
-    if (result.featureType !== "flat") {
-      opts.ctx.waitUntil(
-        reportUsageFeature({
-          customerId,
-          featureSlug,
-          usage: 1,
-          isMain: workspace.isMain,
-          action: "create",
-        })
-      )
-    }
 
     return {
       planVersion: planVersionData,

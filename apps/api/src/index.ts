@@ -1,3 +1,4 @@
+import { log } from "evlog"
 import { partyserverMiddleware } from "hono-party"
 import { cors } from "hono/cors"
 import { type Env, createRuntimeEnv } from "~/env"
@@ -6,19 +7,18 @@ import { init } from "~/middleware/init"
 
 import serveEmojiFavicon from "stoker/middlewares/serve-emoji-favicon"
 
-export { DurableObjectUsagelimiter } from "~/usagelimiter/do"
 export { DurableObjectProject } from "~/project/do"
+export { EntitlementWindowDO } from "~/ingestion/EntitlementWindowDO"
+export { IngestionIdempotencyDO } from "~/ingestion/IngestionIdempotencyDO"
 
-import { registerReportUsageV1 } from "~/routes/customer/reportUsageV1"
 import { registerCreatePaymentMethodV1 } from "./routes/customer/createPaymentMethodV1"
 import { registerGetEntitlementsV1 } from "./routes/customer/getEntitlementsV1"
 import { registerGetPaymentMethodsV1 } from "./routes/customer/getPaymentMethodsV1"
 import { registerGetSubscriptionV1 } from "./routes/customer/getSubscriptionV1"
-import { registerGetUsageV1 } from "./routes/customer/getUsageV1"
-import { registerResetEntitlementsV1 } from "./routes/customer/resetEntitlementsV1"
-import { registerResetUsageV1 } from "./routes/customer/resetUsageV1"
 import { registerSignUpV1 } from "./routes/customer/signUpV1"
 import { registerVerifyV1 } from "./routes/customer/verifyV1"
+import { registerIngestEventsSyncV1 } from "./routes/events/ingestEventsSyncV1"
+import { registerIngestEventsV1 } from "./routes/events/ingestEventsV1"
 import { registerGetLakehouseFilePlanV1 } from "./routes/lakehouse/getLakehouseFilePlanV1"
 import { registerStripeSetupV1 } from "./routes/paymentProvider/stripeSetupV1"
 import { registerStripeSignUpV1 } from "./routes/paymentProvider/stripeSignUpV1"
@@ -27,14 +27,14 @@ import { registerListPlanVersionsV1 } from "./routes/plans/listPlanVersionsV1"
 import { registerGetFeaturesV1 } from "./routes/project/getFeaturesV1"
 
 import { env } from "cloudflare:workers"
-import { ConsoleLogger } from "@unprice/logging"
 import { timing } from "hono/timing"
 import { verifyRealtimeTicket } from "~/auth/ticket"
+import type { IngestionQueueMessage } from "~/ingestion/message"
+import { consumeIngestionBatch } from "~/ingestion/service"
 import { obs } from "~/middleware/obs"
+import { apiEvlog } from "~/observability"
 import { registerGetRealtimeTicketV1 } from "./routes/analitycs/getRealtimeTicketV1"
-import { registerGetRealtimeUsageV1 } from "./routes/analitycs/getRealtimeUsageV1"
 import { registerGetAnalyticsUsageV1 } from "./routes/analitycs/getUsageV1"
-import { registerGetAnalyticsVerificationsV1 } from "./routes/analitycs/getVerificationsV1"
 import { registerUpdateACLV1 } from "./routes/customer/updateACLV1"
 
 const app = newApp()
@@ -42,6 +42,7 @@ const app = newApp()
 app.use(timing())
 app.use(serveEmojiFavicon("◎"))
 app.use("*", cors())
+app.use("*", apiEvlog)
 app.use("*", init())
 app.use("*", obs())
 
@@ -68,7 +69,7 @@ const resolvePartyAndRoomFromPath = (pathname: string) => {
 app.use(
   "/broadcast/**",
   partyserverMiddleware({
-    onError: (error) => console.error(error),
+    onError: (error) => log.error({ message: "Partyserver websocket error", error }),
     options: {
       prefix: "broadcast",
       onBeforeConnect: async (req) => {
@@ -120,16 +121,14 @@ app.use(
 )
 
 // Customer routes
-registerReportUsageV1(app)
+registerIngestEventsV1(app)
+registerIngestEventsSyncV1(app)
 registerGetEntitlementsV1(app)
 registerVerifyV1(app)
 registerGetSubscriptionV1(app)
-registerGetUsageV1(app)
 registerGetPaymentMethodsV1(app)
 registerSignUpV1(app)
 registerCreatePaymentMethodV1(app)
-registerResetEntitlementsV1(app)
-registerResetUsageV1(app)
 registerUpdateACLV1(app)
 // Project routes
 registerGetFeaturesV1(app)
@@ -144,8 +143,6 @@ registerStripeSetupV1(app)
 
 // Analytics routes
 registerGetAnalyticsUsageV1(app)
-registerGetAnalyticsVerificationsV1(app)
-registerGetRealtimeUsageV1(app)
 registerGetRealtimeTicketV1(app)
 
 // Lakehouse routes
@@ -155,17 +152,14 @@ registerGetLakehouseFilePlanV1(app)
 const handler = {
   fetch: (req: Request, env: Env, executionCtx: ExecutionContext) => {
     try {
-      const parsedEnv = createRuntimeEnv(
-        env as unknown as Record<string, string | number | boolean>
-      )
+      const parsedEnv = createRuntimeEnv(env as unknown as Record<string, unknown>)
 
       return app.fetch(req, parsedEnv, executionCtx)
     } catch (error) {
-      new ConsoleLogger({
-        requestId: "",
-        environment: env.NODE_ENV,
-        service: "api",
-      }).fatal(`BAD_ENVIRONMENT: ${error instanceof Error ? error.message : "Unknown error"}`)
+      log.error({
+        code: "BAD_ENVIRONMENT",
+        error: error instanceof Error ? error : new Error(String(error ?? "Unknown error")),
+      })
       return Response.json(
         {
           code: "BAD_ENVIRONMENT",
@@ -176,6 +170,14 @@ const handler = {
       )
     }
   },
-} satisfies ExportedHandler<Env>
+  queue: async (
+    batch: MessageBatch<IngestionQueueMessage>,
+    env: Env,
+    executionCtx: ExecutionContext
+  ) => {
+    const parsedEnv = createRuntimeEnv(env as unknown as Record<string, unknown>)
+    await consumeIngestionBatch(batch, parsedEnv, executionCtx)
+  },
+} satisfies ExportedHandler<Env, IngestionQueueMessage>
 
 export default handler

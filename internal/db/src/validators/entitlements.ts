@@ -8,10 +8,11 @@ import {
   deniedReasonSchema,
   entitlementMergingPolicySchema,
   grantTypeSchema,
+  meterConfigSchema,
   overageStrategySchema,
   resetConfigSchema,
 } from "./shared"
-import { aggregationMethodSchema, typeFeatureSchema } from "./shared"
+import { typeFeatureSchema } from "./shared"
 import {
   subscriptionItemsSelectSchema,
   subscriptionPhaseSelectSchema,
@@ -165,10 +166,12 @@ export const entitlementGrantsSnapshotSchema = z.object({
 export const entitlementSchema = createSelectSchema(schema.entitlements, {
   metadata: entitlementMetadataSchema.nullable(),
   grants: entitlementGrantsSnapshotSchema.array(),
-  resetConfig: resetConfigSchema.extend({
-    resetAnchor: z.number(),
-  }),
-  aggregationMethod: aggregationMethodSchema,
+  resetConfig: resetConfigSchema
+    .extend({
+      resetAnchor: z.number(),
+    })
+    .nullable(),
+  meterConfig: meterConfigSchema.nullable(),
   featureType: typeFeatureSchema,
   mergingPolicy: entitlementMergingPolicySchema,
   unitOfMeasure: z

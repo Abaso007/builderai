@@ -1,8 +1,8 @@
 import { createRoute } from "@hono/zod-openapi"
 import { minimalEntitlementSchema } from "@unprice/db/validators"
 import { endTime, startTime } from "hono/timing"
-import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
+import * as HttpStatusCodes from "~/util/http-status-codes"
 
 import { z } from "zod"
 import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
@@ -55,8 +55,7 @@ export type GetEntitlementsResponse = z.infer<
 export const registerGetEntitlementsV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customerId, projectId } = c.req.valid("json")
-    const { usagelimiter } = c.get("services")
-    const requestStartedAt = c.get("requestStartedAt")
+    const { entitlement } = c.get("services")
 
     // validate the request
     const key = await keyAuth(c)
@@ -71,10 +70,10 @@ export const registerGetEntitlementsV1 = (app: App) =>
     })
 
     // validate usage from db
-    const { err, val: result } = await usagelimiter.getActiveEntitlements({
+    const { err, val: result } = await entitlement.getRelevantEntitlementsForIngestion({
       customerId,
       projectId: finalProjectId,
-      now: requestStartedAt,
+      historicalDays: 0,
     })
 
     // end the timer

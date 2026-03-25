@@ -90,7 +90,12 @@ console.log(result);
           "featureType": "usage",
           "config": {},
           "metadata": {},
-          "aggregationMethod": "sum",
+          "meterConfig": {
+            "eventId": "event_1234567890",
+            "eventSlug": "llm_completion",
+            "aggregationMethod": "sum",
+            "aggregationField": "input_tokens"
+          },
           "order": 1,
           "hidden": false,
           "feature": {
@@ -360,8 +365,24 @@ console.log(result);
     Additional metadata for the feature
 </ResponseField>
 
-<ResponseField name="planVersions[].planFeatures[].aggregationMethod" type="string" required>
-    The aggregation method for the feature
+<ResponseField name="planVersions[].planFeatures[].meterConfig" type="object">
+    Snapshotted meter configuration for usage features
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].meterConfig.eventId" type="string">
+    The reusable project event linked to this meter snapshot
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].meterConfig.eventSlug" type="string">
+    The immutable SDK event slug snapshotted into this plan version feature
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].meterConfig.aggregationMethod" type="string">
+    The aggregation method used to measure usage for this feature
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].meterConfig.aggregationField" type="string">
+    The numeric event payload property used when the aggregation method requires one
 </ResponseField>
 
 <ResponseField name="planVersions[].planFeatures[].order" type="number" required>

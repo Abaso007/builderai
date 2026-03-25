@@ -1,7 +1,14 @@
 import * as currencies from "@dinero.js/currencies"
 import { type StepComponentProps, useOnboarding } from "@onboardjs/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import type { Currency, PaymentProvider } from "@unprice/db/validators"
+import { slugify } from "@unprice/db/utils"
+import type {
+  AggregationMethod,
+  Currency,
+  Event,
+  Feature,
+  PaymentProvider,
+} from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@unprice/ui/card"
 import { cn } from "@unprice/ui/utils"
@@ -10,6 +17,10 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useTRPC } from "~/trpc/client"
 
 type TemplateStatus = "pending" | "working" | "done" | "error"
+
+const AGGREGATION_METHODS_WITHOUT_FIELD = new Set<AggregationMethod>(["count"])
+const ONBOARDING_USAGE_EVENT_SLUG = "onboarding_usage_ingestion"
+const ONBOARDING_USAGE_EVENT_NAME = "Onboarding Usage Ingestion"
 
 type UsageTier = {
   firstUnit: number
@@ -22,13 +33,13 @@ type UsageConfig =
       mode: "unit"
       price: string
       limit?: number
-      aggregationMethod?: "sum" | "last_during_period"
+      aggregationMethod?: "sum" | "latest"
     }
   | {
       mode: "tier"
       tiers: UsageTier[]
       limit?: number
-      aggregationMethod?: "sum" | "last_during_period"
+      aggregationMethod?: "sum" | "latest"
     }
 
 type FlatFeature = {
@@ -92,12 +103,12 @@ const CREDITS_FEATURE: FlatFeature = {
 
 const TEMPLATE_PLANS: TemplatePlan[] = [
   {
-    key: "seat-starter",
-    label: "Seat Starter",
+    key: "starter",
+    label: "STARTER",
     summary: "Seat packs with simple usage metering.",
     plan: {
-      title: "Seat Starter",
-      slug: "seat-starter",
+      title: "STARTER",
+      slug: "starter",
       description: "Seat-based plan with metered usage.",
     },
     billingConfig: {
@@ -137,12 +148,12 @@ const TEMPLATE_PLANS: TemplatePlan[] = [
     ],
   },
   {
-    key: "growth-mix",
-    label: "Growth Mix",
+    key: "growth",
+    label: "GROWTH",
     summary: "Seat packs plus tiered usage for growth teams.",
     plan: {
-      title: "Growth Mix",
-      slug: "growth-mix",
+      title: "GROWTH",
+      slug: "growth",
       description: "Balanced pricing with tiered usage.",
     },
     billingConfig: {
@@ -185,12 +196,12 @@ const TEMPLATE_PLANS: TemplatePlan[] = [
     ],
   },
   {
-    key: "enterprise-annual",
-    label: "Enterprise Annual",
+    key: "enterprise",
+    label: "ENTERPRISE",
     summary: "Annual enterprise plan with seat-based pricing.",
     plan: {
-      title: "Enterprise Annual",
-      slug: "enterprise-annual",
+      title: "ENTERPRISE",
+      slug: "enterprise",
       description: "Annual plan with seat-based access and enterprise add-ons.",
     },
     billingConfig: {
@@ -208,7 +219,7 @@ const TEMPLATE_PLANS: TemplatePlan[] = [
         mode: "unit",
         price: "20",
         limit: 500,
-        aggregationMethod: "last_during_period",
+        aggregationMethod: "latest",
       },
     },
     flatFeatures: [
@@ -249,6 +260,10 @@ function toDineroPrice(amount: string, currency: string) {
   }
 }
 
+function toUsageAggregationField(featureSlug: string) {
+  return `usage_${slugify(featureSlug).replace(/-/g, "_")}`
+}
+
 function getStatusLabel(status: TemplateStatus) {
   switch (status) {
     case "working":
@@ -269,7 +284,7 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const hasRunRef = useRef(false)
-  const featureCacheRef = useRef(new Map<string, { id: string } & Record<string, unknown>>())
+  const featureCacheRef = useRef(new Map<string, Feature>())
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isComplete, setIsComplete] = useState(false)
@@ -290,8 +305,11 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
   const createPlan = useMutation(trpc.plans.create.mutationOptions())
   const createPlanVersion = useMutation(trpc.planVersions.create.mutationOptions())
   const createFeature = useMutation(trpc.features.create.mutationOptions())
+  const createEvent = useMutation(trpc.events.create.mutationOptions())
+  const updateEvent = useMutation(trpc.events.update.mutationOptions())
   const createPlanVersionFeature = useMutation(trpc.planVersionFeatures.create.mutationOptions())
   const publishPlanVersion = useMutation(trpc.planVersions.publish.mutationOptions())
+  const eventCacheRef = useRef(new Map<string, Event>())
 
   const resetState = () => {
     setProgress(createProgressState())
@@ -366,6 +384,98 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
 
       featureCacheRef.current.set(feature.slug, featureResult.feature)
       return featureResult.feature
+    }
+  }
+
+  const getOrCreateEvent = async ({
+    slug,
+    name,
+    availableProperties = [],
+  }: {
+    slug: string
+    name: string
+    availableProperties?: string[]
+  }) => {
+    const cached = eventCacheRef.current.get(slug)
+    const normalizedProperties = Array.from(new Set(availableProperties.filter(Boolean)))
+
+    if (cached?.id) {
+      const cachedProperties = cached.availableProperties ?? []
+      const mergedCachedProperties = Array.from(
+        new Set([...cachedProperties, ...normalizedProperties])
+      )
+
+      if (mergedCachedProperties.length !== cachedProperties.length) {
+        const result = await updateEvent.mutateAsync({
+          id: cached.id,
+          name: cached.name,
+          availableProperties: mergedCachedProperties,
+        })
+
+        eventCacheRef.current.set(slug, result.event)
+        return result.event
+      }
+
+      return cached
+    }
+
+    const existingEvents = await queryClient.fetchQuery(
+      trpc.events.listByActiveProject.queryOptions()
+    )
+    const existingEvent = existingEvents.events.find((event) => event.slug === slug)
+
+    if (existingEvent?.id) {
+      const mergedProperties = Array.from(
+        new Set([...(existingEvent.availableProperties ?? []), ...normalizedProperties])
+      )
+
+      if (mergedProperties.length !== (existingEvent.availableProperties ?? []).length) {
+        const result = await updateEvent.mutateAsync({
+          id: existingEvent.id,
+          name: existingEvent.name,
+          availableProperties: mergedProperties,
+        })
+
+        eventCacheRef.current.set(slug, result.event)
+        return result.event
+      }
+
+      eventCacheRef.current.set(slug, existingEvent)
+      return existingEvent
+    }
+
+    const result = await createEvent.mutateAsync({
+      name,
+      slug,
+      availableProperties: normalizedProperties.length ? normalizedProperties : undefined,
+    })
+
+    eventCacheRef.current.set(slug, result.event)
+    return result.event
+  }
+
+  const buildMeterConfig = async ({
+    featureSlug,
+    aggregationMethod,
+  }: {
+    featureSlug: string
+    aggregationMethod: AggregationMethod
+  }) => {
+    const aggregationField = AGGREGATION_METHODS_WITHOUT_FIELD.has(aggregationMethod)
+      ? undefined
+      : toUsageAggregationField(featureSlug)
+
+    const event = await getOrCreateEvent({
+      slug: ONBOARDING_USAGE_EVENT_SLUG,
+      name: ONBOARDING_USAGE_EVENT_NAME,
+      availableProperties: aggregationField ? [aggregationField] : [],
+    })
+
+    return {
+      eventId: event.id,
+      eventSlug: event.slug,
+      aggregationMethod,
+      ...(aggregationField ? { aggregationField } : {}),
     }
   }
 
@@ -447,7 +557,6 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
             planType: planVersion.billingConfig.planType,
           },
           defaultQuantity: 1,
-          aggregationMethod: "none",
           metadata: {
             hidden: true,
           },
@@ -473,7 +582,6 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
             },
             defaultQuantity: 1,
             limit: template.seatPack.units,
-            aggregationMethod: "none",
           })
         }
 
@@ -496,7 +604,6 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
               planType: planVersion.billingConfig.planType,
             },
             defaultQuantity: 1,
-            aggregationMethod: "none",
           })
         }
 
@@ -509,6 +616,12 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
                 description: template.usage.description,
                 unitOfMeasure: template.usage.unitOfMeasure,
               })
+
+        const usageAggregationMethod = template.usage.config.aggregationMethod ?? "sum"
+        const usageMeterConfig = await buildMeterConfig({
+          featureSlug: usageFeature.slug,
+          aggregationMethod: usageAggregationMethod,
+        })
 
         if (template.usage.config.mode === "unit") {
           await createPlanVersionFeature.mutateAsync({
@@ -530,7 +643,7 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
             },
             defaultQuantity: 1,
             limit: template.usage.config.limit,
-            aggregationMethod: template.usage.config.aggregationMethod ?? "sum",
+            meterConfig: usageMeterConfig,
           })
         } else {
           await createPlanVersionFeature.mutateAsync({
@@ -558,9 +671,14 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
             },
             defaultQuantity: 1,
             limit: template.usage.config.limit,
-            aggregationMethod: template.usage.config.aggregationMethod ?? "sum",
+            meterConfig: usageMeterConfig,
           })
         }
+
+        const creditsMeterConfig = await buildMeterConfig({
+          featureSlug: creditsFeature.slug,
+          aggregationMethod: "sum",
+        })
 
         await createPlanVersionFeature.mutateAsync({
           planVersionId: planVersion.id,
@@ -581,7 +699,7 @@ export function TemplatePlanStep({ className }: React.ComponentProps<"div"> & St
           },
           defaultQuantity: 1,
           limit: 100,
-          aggregationMethod: "sum",
+          meterConfig: creditsMeterConfig,
         })
 
         await publishPlanVersion.mutateAsync({

@@ -1,13 +1,9 @@
 import { TRPCError } from "@trpc/server"
-import { z } from "zod"
-
-import { FEATURE_SLUGS } from "@unprice/config"
 import * as schema from "@unprice/db/schema"
 import * as utils from "@unprice/db/utils"
 import { planInsertBaseSchema, planSelectBaseSchema } from "@unprice/db/validators"
+import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
-import { featureGuard } from "#utils/feature-guard"
-import { reportUsageFeature } from "#utils/shared"
 
 export const create = protectedProjectProcedure
   .input(planInsertBaseSchema)
@@ -19,27 +15,10 @@ export const create = protectedProjectProcedure
   .mutation(async (opts) => {
     const { slug, description, defaultPlan, enterprisePlan, title } = opts.input
     const project = opts.ctx.project
-    const workspace = opts.ctx.project.workspace
-    const customerId = workspace.unPriceCustomerId
-    const featureSlug = FEATURE_SLUGS.PLANS.SLUG
+    const _workspace = opts.ctx.project.workspace
 
     // only owner and admin can create a plan
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
-
-    // check if the customer has access to the feature
-    const result = await featureGuard({
-      customerId,
-      featureSlug,
-      isMain: workspace.isMain,
-      action: "create",
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
 
     const planId = utils.newId("plan")
 
@@ -100,19 +79,6 @@ export const create = protectedProjectProcedure
         code: "INTERNAL_SERVER_ERROR",
         message: "error creating plan",
       })
-    }
-
-    // avoid reporting usage for flat features
-    if (result.featureType !== "flat") {
-      opts.ctx.waitUntil(
-        reportUsageFeature({
-          customerId,
-          featureSlug,
-          usage: 1,
-          isMain: workspace.isMain,
-          action: "create",
-        })
-      )
     }
 
     return {

@@ -1,11 +1,8 @@
 import { TRPCError } from "@trpc/server"
 import { selectApiKeySchema } from "@unprice/db/validators"
+import { ApiKeysService } from "@unprice/services/apikey"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
-
-import { FEATURE_SLUGS } from "@unprice/config"
-import { ApiKeysService } from "@unprice/services/apikey"
-import { featureGuard } from "#utils/feature-guard"
 
 export const roll = protectedProjectProcedure
   .input(z.object({ hashKey: z.string() }))
@@ -18,24 +15,9 @@ export const roll = protectedProjectProcedure
   )
   .mutation(async (opts) => {
     const { hashKey } = opts.input
-    const project = opts.ctx.project
-    const featureSlug = FEATURE_SLUGS.API_KEYS.SLUG
+    const _project = opts.ctx.project
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
-
-    const result = await featureGuard({
-      customerId: project.workspace.unPriceCustomerId,
-      featureSlug: featureSlug,
-      isMain: project.workspace.isMain,
-      action: "roll",
-    })
-
-    if (!result.success) {
-      throw new TRPCError({
-        code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
-      })
-    }
 
     const apikeyService = new ApiKeysService({
       cache: opts.ctx.cache,

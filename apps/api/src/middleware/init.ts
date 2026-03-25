@@ -2,25 +2,20 @@ import { CloudflareStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
-import {
-  AxiomLogger,
-  ConsoleLogger,
-  createWideEventHelpers,
-  createWideEventLogger,
-} from "@unprice/logging"
-import { shouldEmitLogsToBackend, shouldEmitMetrics } from "@unprice/logging/env"
+import { shouldEmitMetrics } from "@unprice/observability/env"
 import { ApiKeysService } from "@unprice/services/apikey"
 import { CacheService } from "@unprice/services/cache"
 import { CustomerService } from "@unprice/services/customers"
 import { LogdrainMetrics, NoopMetrics } from "@unprice/services/metrics"
 import type { MiddlewareHandler } from "hono"
 import type { HonoEnv } from "~/hono/env"
+import { createApiLogger } from "~/observability"
 import { ApiProjectService } from "~/project"
-import { UsageLimiterService } from "~/usagelimiter/service"
 
+import { EntitlementService, GrantsManager } from "@unprice/services/entitlements"
 import { SubscriptionService } from "@unprice/services/subscriptions"
-import { LakehousePipelineService } from "~/lakehouse/pipeline"
-import { NoopUsageLimiter } from "~/usagelimiter/noop"
+import { CloudflareEntitlementWindowClient, CloudflareIdempotencyClient } from "~/ingestion/clients"
+import { IngestionService } from "~/ingestion/service"
 
 /**
  * These maps persist between worker executions and are used for caching
@@ -62,7 +57,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
 
     const requestStartedAt = Date.now()
     const performanceStart = Date.now()
-    // start a new timer
 
     c.set("isolateId", isolateId)
     c.set("isolateCreatedAt", isolateCreatedAt)
@@ -70,82 +64,39 @@ export function init(): MiddlewareHandler<HonoEnv> {
     c.set("requestStartedAt", requestStartedAt)
     c.set("performanceStart", performanceStart)
 
-    const emitLogsToBackend = shouldEmitLogsToBackend(c.env)
     const emitMetrics = shouldEmitMetrics(c.env)
+    const logger = createApiLogger(c.get("log"), requestId)
+    const requestUrl = new URL(c.req.url)
+    const protocol = requestUrl.protocol === "https:" ? "https" : "http"
 
-    const logger = emitLogsToBackend
-      ? new AxiomLogger({
-          apiKey: c.env.AXIOM_API_TOKEN,
-          dataset: c.env.AXIOM_DATASET,
-          requestId,
-          environment: c.env.APP_ENV,
-          service: "api",
-          logLevel: c.env.APP_ENV === "production" ? "warn" : "info",
-          defaultFields: {
-            path: c.req.path,
-            version: c.env.VERSION,
-          },
-        })
-      : new ConsoleLogger({
-          requestId,
-          environment: c.env.APP_ENV,
-          service: "api",
-          logLevel: c.env.APP_ENV === "production" ? "warn" : "info",
-          defaultFields: {
-            path: c.req.path,
-            version: c.env.VERSION,
-          },
-        })
-
-    const WAIT_UNTIL_TIMEOUT_MS = 8_000
-    const registerWaitUntil = c.executionCtx.waitUntil.bind(c.executionCtx)
-    const boundedWaitUntil = (promise: Promise<unknown>, task: string) => {
-      registerWaitUntil(
-        (async () => {
-          let timeoutId: ReturnType<typeof setTimeout> | null = null
-          const timeoutPromise = new Promise<"timeout">((resolve) => {
-            timeoutId = setTimeout(() => resolve("timeout"), WAIT_UNTIL_TIMEOUT_MS)
-          })
-
-          try {
-            const outcome = await Promise.race([
-              promise.then(() => "done" as const),
-              timeoutPromise,
-            ])
-
-            if (outcome === "timeout") {
-              logger.warn("waitUntil task timed out", {
-                task,
-                timeoutMs: WAIT_UNTIL_TIMEOUT_MS,
-              })
-            }
-          } catch (error) {
-            logger.warn("waitUntil task failed", {
-              task,
-              error: error instanceof Error ? error.message : String(error ?? "unknown"),
-            })
-          } finally {
-            if (timeoutId) {
-              clearTimeout(timeoutId)
-            }
-          }
-        })()
-      )
-    }
-
-    const wideEventLogger = createWideEventLogger({
-      "service.name": "api",
-      "service.version": c.env.VERSION,
-      "service.environment": c.env.APP_ENV,
-      sampleRate: c.env.APP_ENV === "production" ? 0.1 : 1,
-      emitter: (level, message, event) => logger.emit(level, message, event),
+    logger.set({
+      request: {
+        id: requestId,
+        parent_id: upstreamRequestId,
+        timestamp: new Date().toISOString(),
+        method: c.req.method as "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS",
+        path: c.req.path,
+        referer: c.req.header("referer"),
+        host: c.req.header("host") ?? requestUrl.host,
+        protocol,
+        query: requestUrl.search ? requestUrl.search.slice(1) : undefined,
+      },
+      cloud: {
+        platform: "cloudflare",
+        isolate_id: isolateId,
+        region: stats.region,
+      },
+      geo: {
+        colo: stats.colo,
+        country: stats.country,
+        continent: stats.continent,
+        city: stats.city,
+        region: stats.region,
+        ip: stats.ip,
+        ua: stats.ua,
+        source: stats.source,
+      },
     })
-
-    const wideEventHelpers = createWideEventHelpers(wideEventLogger)
-
-    // Pass wideEventLogger through context for request-scoped access
-    c.set("wideEventLogger", wideEventLogger)
-    c.set("wideEventHelpers", wideEventHelpers)
 
     const metrics = emitMetrics
       ? new LogdrainMetrics({
@@ -163,7 +114,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
     const cacheService = new CacheService(
       {
         // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-        waitUntil: (promise: Promise<any>) => boundedWaitUntil(promise, "cache-service"),
+        waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
       },
       metrics,
       emitMetrics
@@ -216,7 +167,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       logger,
       analytics,
       // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      waitUntil: (promise: Promise<any>) => boundedWaitUntil(promise, "customer-service"),
+      waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
       cache,
       metrics,
       db,
@@ -228,27 +179,9 @@ export function init(): MiddlewareHandler<HonoEnv> {
       cache,
       db,
       // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      waitUntil: (promise: Promise<any>) => boundedWaitUntil(promise, "subscription-service"),
+      waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
       metrics,
     })
-
-    const usageLimiterService = c.env.usagelimit
-      ? new UsageLimiterService({
-          namespace: c.env.usagelimit,
-          projectNamespace: c.env.projectdo,
-          requestId,
-          logger,
-          metrics,
-          analytics,
-          cache,
-          db,
-          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-          waitUntil: (promise: Promise<any>) => boundedWaitUntil(promise, "usagelimiter-service"),
-          customer,
-          stats: c.get("stats"),
-          hashCache,
-        })
-      : new NoopUsageLimiter()
 
     const project = new ApiProjectService({
       cache,
@@ -256,7 +189,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       logger,
       metrics,
       // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      waitUntil: (promise: Promise<any>) => boundedWaitUntil(promise, "project-service"),
+      waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
       db,
       requestId,
     })
@@ -268,25 +201,38 @@ export function init(): MiddlewareHandler<HonoEnv> {
       metrics,
       db,
       // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      waitUntil: (promise: Promise<any>) => boundedWaitUntil(promise, "apikey-service"),
+      waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
       hashCache,
     })
 
-    const lakehouse = new LakehousePipelineService({
+    const entitlement = new EntitlementService({
+      db,
+      logger: logger,
+      analytics,
+      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+      waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
+      cache,
+      metrics,
+    })
+
+    const ingestion = new IngestionService({
+      customerService: customer,
+      entitlementWindowClient: new CloudflareEntitlementWindowClient(c.env),
+      grantsManager: new GrantsManager({
+        db,
+        logger,
+      }),
+      idempotencyClient: new CloudflareIdempotencyClient(c.env),
       logger,
-      pipelines: {
-        usage: c.env.PIPELINE_USAGE,
-        verification: c.env.PIPELINE_VERIFICATIONS,
-        metadata: c.env.PIPELINE_METADATA,
-        entitlement_snapshot: c.env.PIPELINE_ENTITLEMENTS,
-      },
+      pipelineEvents: c.env.PIPELINE_EVENTS,
     })
 
     c.set("services", {
       version: "1.0.0",
-      usagelimiter: usageLimiterService,
       subscription,
+      entitlement,
       analytics,
+      ingestion,
       project,
       cache,
       logger,
@@ -294,56 +240,13 @@ export function init(): MiddlewareHandler<HonoEnv> {
       apikey,
       db,
       customer,
-      lakehouse,
-      wideEventHelpers,
     })
 
-    // Run within the wide event context so add() and emit() see the same store
-    await wideEventLogger.runAsync(async () => {
-      // Set wide event helpers on all services inside the runAsync context
-      // This ensures AsyncLocalStorage context is properly propagated
-      customer.setWideEventHelpers(wideEventHelpers)
-      subscription.setWideEventHelpers(wideEventHelpers)
-      project.setWideEventHelpers(wideEventHelpers)
-      apikey.setWideEventHelpers(wideEventHelpers)
-      analytics.setWideEventHelpers(wideEventHelpers)
-      usageLimiterService.setWideEventHelpers(wideEventHelpers)
-
-      wideEventLogger.addMany({
-        request: {
-          id: requestId,
-          parent_id: upstreamRequestId,
-          timestamp: new Date().toISOString(),
-          method: c.req.method as "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS",
-          path: c.req.path,
-          referer: c.req.header("referer"),
-          host: c.req.header("host"),
-          protocol: c.req.header("protocol") as "http" | "https" | undefined,
-          query: JSON.stringify(c.req.query()),
-        },
-        cloud: {
-          platform: "cloudflare",
-          isolate_id: isolateId,
-          region: stats.region,
-        },
-        geo: {
-          colo: stats.colo,
-          country: stats.country,
-          continent: stats.continent,
-          city: stats.city,
-          region: stats.region,
-          ip: stats.ip,
-          ua: stats.ua,
-          source: stats.source,
-        },
-      })
-
-      metrics.emit({
-        metric: "metric.init",
-        duration: Date.now() - performanceStart,
-      })
-
-      await next()
+    metrics.emit({
+      metric: "metric.init",
+      duration: Date.now() - performanceStart,
     })
+
+    await next()
   }
 }

@@ -69,7 +69,7 @@ export function UsageChart() {
   } = useSuspenseQuery(
     trpc.analytics.getUsage.queryOptions(
       {
-        interval_days: intervalFilter.intervalDays,
+        range: intervalFilter.name,
       },
       {
         ...ANALYTICS_CONFIG_REALTIME,
@@ -79,14 +79,14 @@ export function UsageChart() {
 
   // invalidate the query when the interval changes
   useQueryInvalidation({
-    paramKey: intervalFilter.intervalDays,
+    paramKey: intervalFilter.name,
     dataUpdatedAt,
     isFetching,
     getQueryKey: (param) => [
       ["analytics", "getUsage"],
       {
         input: {
-          interval_days: param,
+          range: param,
         },
         type: "query",
       },
@@ -99,7 +99,7 @@ export function UsageChart() {
 
   const chartData = usage.usage.map((v) => ({
     feature: v.feature_slug,
-    usage: v.sum,
+    usage: v.value_after,
   }))
 
   const maxHeight = 400

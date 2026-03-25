@@ -4,59 +4,8 @@ import { members, workspaces } from "@unprice/db/schema"
 import { createSlug, newId } from "@unprice/db/utils"
 import type { WorkspaceInsert } from "@unprice/db/validators"
 import { CustomerService } from "@unprice/services/customers"
-import uuid from "uuid-random"
 import type { Context } from "#trpc"
 import { unprice } from "./unprice"
-
-// abstract the usage reporting to the feature service
-// so we can use the same logic for edge and lambda endpoints
-export const reportUsageFeature = async ({
-  customerId,
-  featureSlug,
-  usage,
-  isMain,
-  metadata,
-  action,
-}: {
-  customerId: string
-  featureSlug: string
-  usage: number
-  isMain?: boolean
-  metadata?: Record<string, string | undefined>
-  action?: string
-}) => {
-  // if the feature is main, we don't need to report usage
-  if (isMain) {
-    return {
-      success: true,
-    }
-  }
-
-  try {
-    const { result, error } = await unprice.customers.reportUsage({
-      customerId,
-      featureSlug,
-      usage,
-      idempotenceKey: uuid(),
-      metadata,
-      action,
-    })
-
-    if (error) {
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: error.code,
-      })
-    }
-
-    return result
-  } catch (e) {
-    throw new TRPCError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: e instanceof Error ? e.message : "Error checking feature access",
-    })
-  }
-}
 
 export const createWorkspace = async ({
   input,
