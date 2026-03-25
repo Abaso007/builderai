@@ -210,8 +210,7 @@
       },
       "pipelines": [
         {
-          // TODO: replace with the real preview PIPELINE_EVENTS id
-          "pipeline": "PIPELINE_EVENTS",
+          "pipeline": "c9884129e550480383e900929202980c",
           "binding": "PIPELINE_EVENTS"
         }
       ],
@@ -251,8 +250,7 @@
       "r2_buckets": [
         {
           "binding": "LAKEHOUSE",
-          "bucket_name": "unprice-lakehouse-dev",
-          "remote": true
+          "bucket_name": "unprice-lakehouse-dev"
         }
       ],
       "analytics_engine_datasets": [
@@ -339,7 +337,6 @@
       },
       "pipelines": [
         {
-          // TODO: replace with the real dev PIPELINE_EVENTS id
           "pipeline": "PIPELINE_EVENTS",
           "binding": "PIPELINE_EVENTS"
         }
@@ -365,6 +362,16 @@
       "type": "Text",
       "globs": ["**/*.sql"],
       "fallthrough": true
+    }
+  ],
+  "r2_buckets": [
+    {
+      "bucket_name": "unprice-lakehouse-dev",
+      "binding": "unprice_lakehouse_dev"
+    },
+    {
+      "bucket_name": "unprice-lakehouse-prod",
+      "binding": "unprice_lakehouse_prod"
     }
   ]
   // disable smart placement for now
