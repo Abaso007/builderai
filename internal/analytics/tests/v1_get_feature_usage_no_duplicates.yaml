@@ -1,11 +1,11 @@
 - name: deduplicates_usage
   description: Verifies latest value_after is returned for duplicate writes in the same window
-  parameters: project_id=p1&customer_id=c1&feature_slugs=f1&start=1767225500000&end=1767225900000
+  parameters: project_id=p1&customer_id=c1&feature_slugs=f1&start=4070908700000&end=4070909100000
   expected_result: |
     {"project_id":"p1","customer_id":"c1","feature_slug":"f1","latest":10}
 
 - name: keeps_latest_value_after_when_feature_is_updated
   description: Verifies latest value_after wins when the same feature is updated within the window
-  parameters: project_id=p1&customer_id=c1&feature_slugs=f4&start=1767225500000&end=1767225900000
+  parameters: project_id=p1&customer_id=c1&feature_slugs=f4&start=4070908700000&end=4070909100000
   expected_result: |
     {"project_id":"p1","customer_id":"c1","feature_slug":"f4","latest":3}
