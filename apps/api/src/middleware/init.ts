@@ -5,17 +5,13 @@ import { newId } from "@unprice/db/utils"
 import { shouldEmitMetrics } from "@unprice/observability/env"
 import { ApiKeysService } from "@unprice/services/apikey"
 import { CacheService } from "@unprice/services/cache"
-import { CustomerService } from "@unprice/services/customers"
+import { createServiceContext } from "@unprice/services/context"
 import { LogdrainMetrics, NoopMetrics } from "@unprice/services/metrics"
 import type { MiddlewareHandler } from "hono"
 import type { HonoEnv } from "~/hono/env"
 import { createApiLogger } from "~/observability"
-import { ApiProjectService } from "~/project"
 
-import { EntitlementService, GrantsManager } from "@unprice/services/entitlements"
-import { SubscriptionService } from "@unprice/services/subscriptions"
-import { CloudflareEntitlementWindowClient, CloudflareIdempotencyClient } from "~/ingestion/clients"
-import { IngestionService } from "~/ingestion/service"
+import { createIngestionService } from "~/ingestion/service"
 
 /**
  * These maps persist between worker executions and are used for caching
@@ -163,35 +159,17 @@ export function init(): MiddlewareHandler<HonoEnv> {
       logger,
     })
 
-    const customer = new CustomerService({
-      logger,
-      analytics,
-      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
-      cache,
-      metrics,
-      db,
-    })
+    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+    const waitUntil = (promise: Promise<any>) => c.executionCtx.waitUntil(promise)
 
-    const subscription = new SubscriptionService({
+    // Build the shared service graph from infrastructure deps.
+    const svcCtx = createServiceContext({
+      db,
       logger,
       analytics,
+      waitUntil,
       cache,
-      db,
-      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
       metrics,
-    })
-
-    const project = new ApiProjectService({
-      cache,
-      analytics,
-      logger,
-      metrics,
-      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
-      db,
-      requestId,
     })
 
     const apikey = new ApiKeysService({
@@ -200,46 +178,32 @@ export function init(): MiddlewareHandler<HonoEnv> {
       logger,
       metrics,
       db,
-      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
+      waitUntil,
       hashCache,
     })
 
-    const entitlement = new EntitlementService({
-      db,
-      logger: logger,
-      analytics,
-      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
-      cache,
-      metrics,
+    const ingestion = createIngestionService({
+      customerService: svcCtx.customers,
+      grantsManager: svcCtx.grantsManager,
+      logger,
+      env: c.env,
     })
 
-    const ingestion = new IngestionService({
-      customerService: customer,
-      entitlementWindowClient: new CloudflareEntitlementWindowClient(c.env),
-      grantsManager: new GrantsManager({
-        db,
-        logger,
-      }),
-      idempotencyClient: new CloudflareIdempotencyClient(c.env),
-      logger,
-      pipelineEvents: c.env.PIPELINE_EVENTS,
-    })
+    c.set("cache", cache)
+    c.set("logger", logger)
+    c.set("metrics", metrics)
+    c.set("analytics", analytics)
+    c.set("db", db)
+    c.set("waitUntil", waitUntil)
 
     c.set("services", {
-      version: "1.0.0",
-      subscription,
-      entitlement,
-      analytics,
+      subscription: svcCtx.subscriptions,
+      entitlement: svcCtx.entitlements,
       ingestion,
-      project,
-      cache,
-      logger,
-      metrics,
+      project: svcCtx.projects,
       apikey,
-      db,
-      customer,
+      customer: svcCtx.customers,
+      plans: svcCtx.plans,
     })
 
     metrics.emit({

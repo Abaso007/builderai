@@ -1,5 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import { SubscriptionService } from "@unprice/services/subscriptions"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
@@ -8,10 +7,9 @@ export const removePhase = protectedProjectProcedure
   .output(z.object({ result: z.boolean() }))
   .mutation(async (opts) => {
     const projectId = opts.ctx.project.id
+    const { subscriptions } = opts.ctx.services
 
-    const subscriptionService = new SubscriptionService(opts.ctx)
-
-    const { err, val } = await subscriptionService.removePhase({
+    const { err, val } = await subscriptions.removePhase({
       phaseId: opts.input.id,
       projectId,
       now: Date.now(),

@@ -35,11 +35,12 @@ import type { Logger } from "@unprice/logs"
 import { addDays } from "date-fns"
 import type { z } from "zod"
 import type { Cache } from "../cache"
-import { CustomerService } from "../customers/service"
-import { GrantsManager } from "../entitlements"
+import type { CustomerService } from "../customers/service"
+import type { GrantsManager } from "../entitlements"
 import type { Metrics } from "../metrics"
 import { SubscriptionMachine } from "../subscriptions/machine"
 import { SubscriptionLock } from "../subscriptions/subscriptionLock"
+import { toErrorContext } from "../utils/log-context"
 import { UnPriceBillingError } from "./errors"
 
 interface ComputeInvoiceItemsResult {
@@ -74,8 +75,8 @@ export class BillingService {
   private readonly metrics: Metrics
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
-  private customerService: CustomerService
-  private grantsManager: GrantsManager
+  private readonly customerService: CustomerService
+  private readonly grantsManager: GrantsManager
 
   constructor({
     db,
@@ -84,6 +85,8 @@ export class BillingService {
     waitUntil,
     cache,
     metrics,
+    customerService,
+    grantsManager,
   }: {
     db: Database
     logger: Logger
@@ -92,6 +95,8 @@ export class BillingService {
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
     metrics: Metrics
+    customerService: CustomerService
+    grantsManager: GrantsManager
   }) {
     this.db = db
     this.logger = logger
@@ -99,18 +104,8 @@ export class BillingService {
     this.cache = cache
     this.metrics = metrics
     this.waitUntil = waitUntil
-    this.customerService = new CustomerService({
-      db,
-      logger,
-      analytics,
-      waitUntil,
-      cache,
-      metrics,
-    })
-    this.grantsManager = new GrantsManager({
-      db,
-      logger,
-    })
+    this.customerService = customerService
+    this.grantsManager = grantsManager
   }
 
   private setLockContext(context: {
@@ -230,7 +225,7 @@ export class BillingService {
                 ttl_ms: ttlMs,
               })
               this.logger.error("subscription lock heartbeat extend failed", {
-                error: e instanceof Error ? e.message : String(e),
+                error: toErrorContext(e),
                 subscriptionId,
                 projectId,
               })
@@ -1026,7 +1021,7 @@ export class BillingService {
         this.logger.error("Error finalizing invoice", {
           invoiceId: openInvoiceData.id,
           projectId: openInvoiceData.projectId,
-          error: error instanceof Error ? error.message : "unknown error",
+          error: toErrorContext(error),
         })
         tx.rollback()
         throw error
@@ -1139,7 +1134,7 @@ export class BillingService {
           if (computedStateResult.err) {
             this.logger.error("Failed to compute entitlement state for feature", {
               featureSlug,
-              error: computedStateResult.err.message,
+              error: toErrorContext(computedStateResult.err),
             })
             continue
           }
@@ -1178,7 +1173,7 @@ export class BillingService {
 
           if (usageErr) {
             this.logger.error("Failed to batch fetch usage data for cycle", {
-              error: usageErr.message,
+              error: toErrorContext(usageErr),
               cycleKey,
             })
             return Err(new UnPriceBillingError({ message: usageErr.message }))
@@ -1205,7 +1200,7 @@ export class BillingService {
           if (calcResult.err) {
             this.logger.error("Error calculating feature price", {
               featureSlug,
-              error: calcResult.err.message,
+              error: toErrorContext(calcResult.err),
             })
             // Continue with other features? Or fail invoice?
             // Existing logic failed the invoice on error.
@@ -1368,7 +1363,7 @@ export class BillingService {
     } catch (e) {
       const error = e as Error
       this.logger.error("Error calculating invoice items price", {
-        error: error.message,
+        error: toErrorContext(error),
       })
       return Err(new UnPriceBillingError({ message: `Unhandled error: ${error.message}` }))
     }
@@ -1615,7 +1610,7 @@ export class BillingService {
     } catch (e) {
       const error = e as Error
       this.logger.error("Provider item upsert failed", {
-        error: error.message,
+        error: toErrorContext(error),
         invoiceId: invoice.id,
       })
       return Err(new UnPriceBillingError({ message: error.message }))
@@ -2292,7 +2287,7 @@ export class BillingService {
           projectId,
           billingStartAt,
           billingEndAt,
-          error: usageErr.message,
+          error: toErrorContext(usageErr),
         })
         return Err(new UnPriceBillingError({ message: usageErr.message }))
       }
@@ -2425,7 +2420,7 @@ export class BillingService {
           customerId,
           projectId,
           featureSlug,
-          error: grantsErr.message,
+          error: toErrorContext(grantsErr),
         })
         return Err(new UnPriceBillingError({ message: grantsErr.message }))
       }
@@ -2450,7 +2445,7 @@ export class BillingService {
         featureSlug,
         customerId,
         projectId,
-        error: computedStateResult.err.message,
+        error: toErrorContext(computedStateResult.err),
       })
       return Err(new UnPriceBillingError({ message: computedStateResult.err.message }))
     }
@@ -2538,7 +2533,7 @@ export class BillingService {
         this.logger.warn("Failed to calculate free units for grant", {
           grantId: grant.id,
           featureSlug,
-          error: freeUnitsResult.err.message,
+          error: toErrorContext(freeUnitsResult.err),
         })
       }
 
@@ -2633,7 +2628,7 @@ export class BillingService {
       this.logger.error("Failed to get grants for customer", {
         customerId,
         projectId,
-        error: grantsErr.message,
+        error: toErrorContext(grantsErr),
       })
       return Err(new UnPriceBillingError({ message: grantsErr.message }))
     }
@@ -2683,7 +2678,7 @@ export class BillingService {
       if (computedStateResult.err) {
         this.logger.error("Failed to compute entitlement state", {
           featureSlug,
-          error: computedStateResult.err.message,
+          error: toErrorContext(computedStateResult.err),
         })
         continue
       }
@@ -2699,7 +2694,7 @@ export class BillingService {
       if (billingWindowResult.err) {
         this.logger.error("Failed to calculate billing window", {
           featureSlug,
-          error: billingWindowResult.err.message,
+          error: toErrorContext(billingWindowResult.err),
         })
         continue
       }
@@ -2777,7 +2772,7 @@ export class BillingService {
 
         if (usageErr) {
           this.logger.error("Failed to batch fetch usage data", {
-            error: usageErr.message,
+            error: toErrorContext(usageErr),
             windowKey,
           })
           // Continue with other windows, but log error
@@ -2810,7 +2805,7 @@ export class BillingService {
       if (calculationResult.err) {
         this.logger.error("Failed to calculate feature price", {
           featureSlug,
-          error: calculationResult.err.message,
+          error: toErrorContext(calculationResult.err),
         })
         continue
       }

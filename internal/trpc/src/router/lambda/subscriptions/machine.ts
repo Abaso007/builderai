@@ -1,6 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import { BillingService } from "@unprice/services/billing"
-import { SubscriptionService } from "@unprice/services/subscriptions"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
@@ -15,9 +13,7 @@ export const machine = protectedProjectProcedure
   .output(z.object({ status: z.string() }))
   .mutation(async ({ input, ctx }) => {
     const projectId = ctx.project.id
-
-    const subscriptionService = new SubscriptionService(ctx)
-    const billingService = new BillingService(ctx)
+    const { billing, subscriptions } = ctx.services
 
     switch (input.event) {
       case "collect_payment": {
@@ -28,7 +24,7 @@ export const machine = protectedProjectProcedure
           })
         }
 
-        const { err, val } = await billingService.billingInvoice({
+        const { err, val } = await billing.billingInvoice({
           subscriptionId: input.subscriptionId,
           invoiceId: input.invoiceId,
           projectId,
@@ -55,7 +51,7 @@ export const machine = protectedProjectProcedure
           })
         }
 
-        const { err, val } = await billingService.finalizeInvoice({
+        const { err, val } = await billing.finalizeInvoice({
           subscriptionId: input.subscriptionId,
           projectId,
           invoiceId: input.invoiceId,
@@ -77,7 +73,7 @@ export const machine = protectedProjectProcedure
       }
 
       case "invoice": {
-        const { err, val } = await subscriptionService.invoiceSubscription({
+        const { err, val } = await subscriptions.invoiceSubscription({
           subscriptionId: input.subscriptionId,
           projectId,
           now: Date.now(),
@@ -94,7 +90,7 @@ export const machine = protectedProjectProcedure
       }
 
       case "renew": {
-        const { err, val } = await subscriptionService.renewSubscription({
+        const { err, val } = await subscriptions.renewSubscription({
           subscriptionId: input.subscriptionId,
           projectId,
           now: Date.now(),
@@ -113,7 +109,7 @@ export const machine = protectedProjectProcedure
       }
 
       case "billing_period": {
-        const { err } = await billingService.generateBillingPeriods({
+        const { err } = await billing.generateBillingPeriods({
           subscriptionId: input.subscriptionId,
           projectId,
           now: Date.now(),

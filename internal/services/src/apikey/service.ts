@@ -1,16 +1,17 @@
 import type { Analytics } from "@unprice/analytics"
 import { hashStringSHA256, newId } from "@unprice/db/utils"
-import type { ApiKey, ApiKeyExtended } from "@unprice/db/validators"
+import type { ApiKey, ApiKeyExtended, SearchParamsDataTable } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, type SchemaError, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { Cache } from "@unprice/services/cache"
 import type { Metrics } from "@unprice/services/metrics"
 
 import type { Database } from "@unprice/db"
-import { and, eq } from "@unprice/db"
+import { and, count, eq, getTableColumns, ilike, inArray, isNull } from "@unprice/db"
 import { apikeys } from "@unprice/db/schema"
+import { withDateFilters, withPagination } from "@unprice/db/utils"
+import { cachedQuery } from "../utils/cached-query"
 import { toErrorContext } from "../utils/log-context"
-import { retry } from "../utils/retry"
 import { UnPriceApiKeyError } from "./errors"
 
 export type ApiKeyLimiter = {
@@ -43,6 +44,179 @@ export class ApiKeysService {
     this.db = opts.db
     this.waitUntil = opts.waitUntil
     this.hashCache = opts.hashCache
+  }
+
+  public async listApiKeysByProject({
+    projectId,
+    query,
+  }: {
+    projectId: string
+    query: SearchParamsDataTable
+  }): Promise<Result<{ apikeys: ApiKey[]; pageCount: number }, FetchError>> {
+    const { page, page_size, search, from, to } = query
+    const columns = getTableColumns(apikeys)
+    const filter = `%${search}%`
+
+    const expressions = [
+      search ? ilike(columns.name, filter) : undefined,
+      projectId ? eq(columns.projectId, projectId) : undefined,
+    ]
+
+    const { val, err } = await wrapResult(
+      this.db.transaction(async (tx) => {
+        const query = tx.select().from(apikeys).$dynamic()
+        const whereQuery = withDateFilters<ApiKey>(expressions, columns.createdAtM, from, to)
+
+        const data = await withPagination(
+          query,
+          whereQuery,
+          [
+            {
+              column: columns.createdAtM,
+              order: "desc",
+            },
+          ],
+          page,
+          page_size
+        )
+
+        const total = await tx
+          .select({
+            count: count(),
+          })
+          .from(apikeys)
+          .where(whereQuery)
+          .execute()
+          .then((res) => res[0]?.count ?? 0)
+
+        return {
+          data,
+          total,
+        }
+      }),
+      (error) =>
+        new FetchError({
+          message: `error listing api keys by project: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error listing api keys by project", {
+        error: toErrorContext(err),
+        projectId,
+      })
+      return Err(err)
+    }
+
+    const pageCount = Math.ceil(val.total / page_size)
+
+    return Ok({
+      apikeys: val.data as ApiKey[],
+      pageCount,
+    })
+  }
+
+  public async createApiKey({
+    projectId,
+    isRoot,
+    name,
+    expiresAt,
+  }: {
+    projectId: string
+    isRoot: boolean
+    name: string
+    expiresAt?: number | null
+  }): Promise<Result<ApiKey & { key: string }, FetchError>> {
+    const apiKey = newId("apikey_key")
+    const apiKeyId = newId("apikey")
+    const apiKeyHash = await hashStringSHA256(apiKey)
+
+    const { val, err } = await wrapResult(
+      this.db
+        .insert(apikeys)
+        .values({
+          id: apiKeyId,
+          name,
+          hash: apiKeyHash,
+          expiresAt,
+          projectId,
+          isRoot,
+        })
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error creating api key: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error creating api key", {
+        error: toErrorContext(err),
+        projectId,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "Failed to create API key",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok({
+      ...(val as ApiKey),
+      key: apiKey,
+    })
+  }
+
+  public async revokeApiKeys({
+    projectId,
+    ids,
+  }: {
+    projectId: string
+    ids: string[]
+  }): Promise<Result<{ state: "not_found" } | { state: "ok"; numRevoked: number }, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db
+        .update(apikeys)
+        .set({ revokedAt: Date.now(), updatedAtM: Date.now() })
+        .where(
+          and(inArray(apikeys.id, ids), eq(apikeys.projectId, projectId), isNull(apikeys.revokedAt))
+        )
+        .returning(),
+      (error) =>
+        new FetchError({
+          message: `error revoking api keys: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error revoking api keys", {
+        error: toErrorContext(err),
+        projectId,
+      })
+      return Err(err)
+    }
+
+    if (val.length === 0) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    this.waitUntil(Promise.all(val.map((apikey) => this.cache.apiKeyByHash.remove(apikey.hash))))
+
+    return Ok({
+      state: "ok",
+      numRevoked: val.length,
+    })
   }
 
   // in memory cache with size and TTL limits
@@ -114,7 +288,7 @@ export class ApiKeysService {
       .catch((e) => {
         this.logger.set({ error: toErrorContext(e) })
         this.logger.error(`Error fetching apikey from db: ${e.message}`, {
-          error: e,
+          error: toErrorContext(e),
           keyHash,
         })
 
@@ -156,32 +330,30 @@ export class ApiKeysService {
       })
     }
 
-    const { val: data, err } = opts?.skipCache
-      ? await wrapResult(
-          this.getData(keyHash),
-          (err) =>
-            new FetchError({
-              message: `unable to query db, ${err.message}`,
-              retry: false,
-              context: {
-                error: err.message,
-                url: "",
-                method: "",
-                keyHash,
-              },
-            })
-        )
-      : await retry(
-          3,
-          async () => this.cache.apiKeyByHash.swr(keyHash, (h) => this.getData(h)),
-          (attempt, err) => {
-            this.logger.warn("Failed to fetch key data, retrying... getApiKey", {
-              hash: keyHash,
-              attempt,
-              error: err.message,
-            })
-          }
-        )
+    const { val: data, err } = await cachedQuery({
+      skipCache: opts?.skipCache,
+      cache: this.cache.apiKeyByHash,
+      cacheKey: keyHash,
+      load: () => this.getData(keyHash),
+      wrapLoadError: (err) =>
+        new FetchError({
+          message: `unable to query db, ${err.message}`,
+          retry: false,
+          context: {
+            error: err.message,
+            url: "",
+            method: "",
+            keyHash,
+          },
+        }),
+      onRetry: (attempt, err) => {
+        this.logger.warn("Failed to fetch key data, retrying... getApiKey", {
+          hash: keyHash,
+          attempt,
+          error: toErrorContext(err),
+        })
+      },
+    })
 
     if (err) {
       return Err(
@@ -220,7 +392,7 @@ export class ApiKeysService {
         }
       ).catch(async (err) => {
         this.logger.error(`verify error, retrying without cache, ${err.message}`, {
-          error: err.message,
+          error: toErrorContext(err),
         })
 
         await this.cache.apiKeyByHash.remove(await this.hash(req.key))
@@ -236,11 +408,7 @@ export class ApiKeysService {
 
       if (result.err) {
         this.logger.error("Error verifying apikey after retrying without cache", {
-          error: {
-            type: result.err.name,
-            message: result.err.message,
-            stack: result.err.stack,
-          },
+          error: toErrorContext(result.err),
         })
 
         return result
@@ -288,7 +456,7 @@ export class ApiKeysService {
     } catch (e) {
       const error = e as Error
       this.logger.error("Unhandled error while getting the apikey", {
-        error: JSON.stringify(error),
+        error: toErrorContext(error),
       })
 
       return Err(

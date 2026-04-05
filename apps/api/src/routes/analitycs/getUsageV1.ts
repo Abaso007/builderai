@@ -10,7 +10,7 @@ import * as HttpStatusCodes from "~/util/http-status-codes"
 
 import { z } from "zod"
 import { keyAuth } from "~/auth/key"
-import { UnpriceApiError } from "~/errors"
+import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 
@@ -65,7 +65,8 @@ export type GetAnalyticsUsageResponse = z.infer<
 export const registerGetAnalyticsUsageV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customer_id: customerId, range, project_id: projectId } = c.req.valid("json")
-    const { analytics, cache } = c.get("services")
+    const analytics = c.get("analytics")
+    const cache = c.get("cache")
 
     // validate the request
     const key = await keyAuth(c)
@@ -107,7 +108,7 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
     endTime(c, "getUsage")
 
     if (err) {
-      throw err
+      throw toUnpriceApiError(err)
     }
 
     return c.json(

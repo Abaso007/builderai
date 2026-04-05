@@ -6,6 +6,7 @@ import type { Logger } from "@unprice/logs"
 import { format } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
 import type { CustomerService } from "../customers/service"
+import { toErrorContext } from "../utils/log-context"
 import type { SubscriptionContext } from "./types"
 
 export async function loadSubscription(payload: {
@@ -47,14 +48,12 @@ export async function loadSubscription(payload: {
   })
 
   if (!result) {
-    logger.error(`Subscription with ID ${subscriptionId} not found`)
     throw new Error(`Subscription with ID ${subscriptionId} not found`)
   }
 
   const { phases, customer, ...subscription } = result
 
   if (!customer) {
-    logger.error(`Customer with ID ${result.customerId} not found`)
     throw new Error(`Customer with ID ${result.customerId} not found`)
   }
 
@@ -223,7 +222,7 @@ export async function renewSubscription(opts: {
     logger.error(
       `Error while renewing subscription ${error instanceof Error ? error.message : "unknown error"}`,
       {
-        error: JSON.stringify(error),
+        error: toErrorContext(error),
         subscriptionId: subscription.id,
       }
     )
@@ -297,11 +296,6 @@ export async function invoiceSubscription({
     })
 
     if (!phase || !phase.planVersion || !phase.subscription) {
-      logger.warn("Phase not found or missing plan version or subscription", {
-        phaseId: periodItemGroup.subscriptionPhaseId,
-        projectId: periodItemGroup.projectId,
-        subscriptionId: periodItemGroup.subscriptionId,
-      })
       continue
     }
 
@@ -329,11 +323,6 @@ export async function invoiceSubscription({
 
     // if no billing periods to invoice, skip
     if (!billingPeriodsToInvoice) {
-      logger.warn("Billing period to invoice not found", {
-        phaseId: periodItemGroup.subscriptionPhaseId,
-        projectId: periodItemGroup.projectId,
-        subscriptionId: periodItemGroup.subscriptionId,
-      })
       continue
     }
 
@@ -431,7 +420,7 @@ export async function invoiceSubscription({
               phaseId: phase.id,
               statementStartAt: statementStartAt,
               statementEndAt: statementEndAt,
-              error: error instanceof Error ? error.message : "unknown error",
+              error: toErrorContext(error),
             })
             throw error
           })
@@ -511,7 +500,7 @@ export async function invoiceSubscription({
               phaseId: phase.id,
               statementStartAt: statementStartAt,
               statementEndAt: statementEndAt,
-              error: error instanceof Error ? error.message : "unknown error",
+              error: toErrorContext(error),
             })
             throw error
           })
@@ -549,7 +538,7 @@ export async function invoiceSubscription({
           phaseId: phase.id,
           statementStartAt: statementStartAt,
           statementEndAt: statementEndAt,
-          error: error instanceof Error ? error.message : "unknown error",
+          error: toErrorContext(error),
         })
 
         tx.rollback()

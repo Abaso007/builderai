@@ -1,7 +1,13 @@
 import type { Analytics } from "@unprice/analytics"
-import { type Database, type SQL, and, eq, inArray, sql } from "@unprice/db"
-import { grants, subscriptionItems, subscriptionPhases, subscriptions } from "@unprice/db/schema"
-import { newId } from "@unprice/db/utils"
+import { type Database, type SQL, and, count, eq, getTableColumns, inArray, sql } from "@unprice/db"
+import {
+  customers,
+  grants,
+  subscriptionItems,
+  subscriptionPhases,
+  subscriptions,
+} from "@unprice/db/schema"
+import { newId, withDateFilters, withPagination } from "@unprice/db/utils"
 import {
   type GrantType,
   type InsertSubscription,
@@ -18,9 +24,9 @@ import {
 import { Err, Ok, type Result, type SchemaError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { env } from "../../env"
-import { BillingService } from "../billing/service"
+import type { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
-import { CustomerService } from "../customers/service"
+import type { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
 import type { Metrics } from "../metrics"
 import { toErrorContext } from "../utils/log-context"
@@ -62,8 +68,8 @@ export class SubscriptionService {
   private readonly metrics: Metrics
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
-  private customerService: CustomerService
-  private billingService: BillingService
+  private readonly customerService: CustomerService
+  private readonly billingService: BillingService
 
   constructor({
     db,
@@ -72,6 +78,8 @@ export class SubscriptionService {
     waitUntil,
     cache,
     metrics,
+    customerService,
+    billingService,
   }: {
     db: Database
     logger: Logger
@@ -80,6 +88,8 @@ export class SubscriptionService {
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
     metrics: Metrics
+    customerService: CustomerService
+    billingService: BillingService
   }) {
     this.db = db
     this.logger = logger
@@ -87,22 +97,8 @@ export class SubscriptionService {
     this.cache = cache
     this.metrics = metrics
     this.waitUntil = waitUntil
-    this.customerService = new CustomerService({
-      db,
-      logger,
-      analytics,
-      waitUntil,
-      cache,
-      metrics,
-    })
-    this.billingService = new BillingService({
-      db,
-      logger,
-      analytics,
-      waitUntil,
-      cache,
-      metrics,
-    })
+    this.customerService = customerService
+    this.billingService = billingService
   }
 
   private setLockContext(context: {
@@ -1354,63 +1350,38 @@ export class SubscriptionService {
     // project defaults
     const timezoneToUse = timezone || customerData.project.timezone
 
-    // execute this in a transaction
-    const result = await trx.transaction(async (innerTrx) => {
-      try {
-        // create the subscription
-        const subscriptionId = newId("subscription")
+    const subscriptionId = newId("subscription")
 
-        // create the subscription and then phases
-        const newSubscription = await innerTrx
-          .insert(subscriptions)
-          .values({
-            id: subscriptionId,
-            projectId,
-            customerId: customerData.id,
-            active: false,
-            status: "active",
-            timezone: timezoneToUse,
-            metadata: metadata,
-            // provisional values
-            currentCycleStartAt: Date.now(),
-            currentCycleEndAt: Date.now(),
-          })
-          .returning()
-          .then((re) => re[0])
-          .catch((e) => {
-            this.logger.error(e.message)
-            return null
-          })
+    const newSubscription = await trx
+      .insert(subscriptions)
+      .values({
+        id: subscriptionId,
+        projectId,
+        customerId: customerData.id,
+        active: false,
+        status: "active",
+        timezone: timezoneToUse,
+        metadata: metadata,
+        // provisional values
+        currentCycleStartAt: Date.now(),
+        currentCycleEndAt: Date.now(),
+      })
+      .returning()
+      .then((re) => re[0])
+      .catch((e) => {
+        this.logger.error(e.message)
+        return null
+      })
 
-        if (!newSubscription) {
-          return Err(
-            new UnPriceSubscriptionError({
-              message: "Error while creating subscription",
-            })
-          )
-        }
-
-        return Ok(newSubscription)
-      } catch (e) {
-        this.logger.error("Error creating subscription", {
-          error: JSON.stringify(e),
+    if (!newSubscription) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: "Error while creating subscription",
         })
-
-        return Err(
-          new UnPriceSubscriptionError({
-            message: "Error while creating subscription",
-          })
-        )
-      }
-    })
-
-    if (result.err) {
-      return Err(result.err)
+      )
     }
 
-    const subscription = result.val
-
-    return Ok(subscription)
+    return Ok(newSubscription)
   }
 
   public async getSubscriptionData({
@@ -1436,6 +1407,177 @@ export class SubscriptionService {
     }
 
     return subscriptionData
+  }
+
+  public async getSubscriptionById({
+    subscriptionId,
+  }: {
+    subscriptionId: string
+  }): Promise<Result<unknown | null, UnPriceSubscriptionError>> {
+    try {
+      const subscriptionData = await this.db.query.subscriptions.findFirst({
+        where: (subscription, { eq }) => eq(subscription.id, subscriptionId),
+        with: {
+          phases: {
+            with: {
+              planVersion: {
+                with: {
+                  plan: true,
+                },
+              },
+              items: {
+                with: {
+                  featurePlanVersion: {
+                    with: {
+                      feature: true,
+                    },
+                  },
+                },
+              },
+            },
+            orderBy: (phases, { asc }) => asc(phases.startAt),
+          },
+        },
+      })
+
+      return Ok(subscriptionData ?? null)
+    } catch (err) {
+      this.logger.error("error getting subscription by id", {
+        error: toErrorContext(err),
+        subscriptionId,
+      })
+      return Err(
+        new UnPriceSubscriptionError({
+          message: err instanceof Error ? err.message : "Error getting subscription by id",
+        })
+      )
+    }
+  }
+
+  public async listSubscriptionsByProject({
+    projectId,
+    page,
+    pageSize,
+    from,
+    to,
+  }: {
+    projectId: string
+    page: number
+    pageSize: number
+    from?: number | null
+    to?: number | null
+  }): Promise<Result<{ subscriptions: unknown[]; pageCount: number }, UnPriceSubscriptionError>> {
+    const columns = getTableColumns(subscriptions)
+    const customerColumns = getTableColumns(customers)
+
+    try {
+      const expressions = [eq(columns.projectId, projectId)]
+
+      const { data, total } = await this.db.transaction(async (tx) => {
+        const query = tx
+          .select({
+            subscriptions: subscriptions,
+            customer: customerColumns,
+          })
+          .from(subscriptions)
+          .innerJoin(
+            customers,
+            and(
+              eq(subscriptions.customerId, customers.id),
+              eq(customers.projectId, subscriptions.projectId)
+            )
+          )
+          .$dynamic()
+
+        const whereQuery = withDateFilters<Subscription>(
+          expressions,
+          columns.createdAtM,
+          from ?? null,
+          to ?? null
+        )
+
+        const data = await withPagination(
+          query,
+          whereQuery,
+          [
+            {
+              column: columns.createdAtM,
+              order: "desc",
+            },
+          ],
+          page,
+          pageSize
+        )
+
+        const total = await tx
+          .select({
+            count: count(),
+          })
+          .from(subscriptions)
+          .where(whereQuery)
+          .execute()
+          .then((res) => res[0]?.count ?? 0)
+
+        const subscriptionsData = data.map((row) => ({
+          ...row.subscriptions,
+          customer: row.customer,
+        }))
+
+        return {
+          data: subscriptionsData,
+          total,
+        }
+      })
+
+      return Ok({
+        subscriptions: data,
+        pageCount: Math.ceil(total / pageSize),
+      })
+    } catch (err) {
+      this.logger.error("error listing subscriptions by project", {
+        error: toErrorContext(err),
+        projectId,
+      })
+
+      return Err(
+        new UnPriceSubscriptionError({
+          message: "There was an error listing subscriptions. Contact support.",
+        })
+      )
+    }
+  }
+
+  public async listSubscriptionsByPlanVersion({
+    planVersionId,
+    projectId,
+  }: {
+    planVersionId: string
+    projectId: string
+  }): Promise<Result<Subscription[], UnPriceSubscriptionError>> {
+    try {
+      const subscriptionData = await this.db.query.subscriptions.findMany({
+        with: {
+          phases: {
+            where: (phase, { eq }) => eq(phase.planVersionId, planVersionId),
+          },
+        },
+        where: (subscription, { eq }) => eq(subscription.projectId, projectId),
+      })
+
+      return Ok(subscriptionData as Subscription[])
+    } catch (err) {
+      this.logger.error("error listing subscriptions by plan version", {
+        error: toErrorContext(err),
+        planVersionId,
+        projectId,
+      })
+      return Err(
+        new UnPriceSubscriptionError({
+          message:
+            err instanceof Error ? err.message : "Error listing subscriptions by plan version",
+        })
+      )
+    }
   }
 
   private async withSubscriptionMachine<T>(args: {
@@ -1533,7 +1675,7 @@ export class SubscriptionService {
                 ttl_ms: ttlMs,
               })
               this.logger.error("subscription lock heartbeat extend failed", {
-                error: e instanceof Error ? e.message : String(e),
+                error: toErrorContext(e),
                 subscriptionId,
                 projectId,
               })

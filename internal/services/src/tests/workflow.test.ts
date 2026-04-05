@@ -5,7 +5,10 @@ import type { Logger } from "@unprice/logs"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
+import { CustomerService } from "../customers/service"
+import { GrantsManager } from "../entitlements/grants"
 import type { Metrics } from "../metrics"
+import { PaymentProviderResolver } from "../payment-provider/resolver"
 import { SubscriptionService } from "../subscriptions/service"
 import { createClock } from "../test-utils"
 
@@ -279,8 +282,18 @@ describe("Workflow - Billing and Subscriptions", () => {
       metrics: mockMetrics,
     }
 
-    _billingService = new BillingService(serviceDeps)
-    subscriptionService = new SubscriptionService(serviceDeps)
+    const paymentProviderResolver = new PaymentProviderResolver({
+      db: mockDb,
+      logger: mockLogger,
+    })
+    const customerService = new CustomerService({ ...serviceDeps, paymentProviderResolver })
+    const grantsManager = new GrantsManager({ db: mockDb, logger: mockLogger })
+    _billingService = new BillingService({ ...serviceDeps, customerService, grantsManager })
+    subscriptionService = new SubscriptionService({
+      ...serviceDeps,
+      customerService,
+      billingService: _billingService,
+    })
   })
 
   const captureInsertValues = () => {

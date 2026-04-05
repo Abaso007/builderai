@@ -1,5 +1,4 @@
 import { task } from "@trigger.dev/sdk/v3"
-import { BillingService } from "@unprice/services/billing"
 import { createContext } from "./context"
 
 export const finilizeTask = task({
@@ -37,8 +36,7 @@ export const finilizeTask = task({
     let status = 200
 
     try {
-      const billingService = new BillingService(context)
-      const finalizeInvoiceResult = await billingService.finalizeInvoice({
+      const finalizeInvoiceResult = await context.services.billing.finalizeInvoice({
         projectId,
         subscriptionId,
         invoiceId,

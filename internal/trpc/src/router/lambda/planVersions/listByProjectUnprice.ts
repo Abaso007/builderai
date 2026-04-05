@@ -1,6 +1,5 @@
 import { TRPCError } from "@trpc/server"
 import { getPlanVersionApiResponseSchema } from "@unprice/db/validators"
-import { PlanService } from "@unprice/services/plans"
 import { z } from "zod"
 import { protectedProcedure } from "#trpc"
 
@@ -20,27 +19,21 @@ export const listByProjectUnprice = protectedProcedure
   )
   .query(async (opts) => {
     const { published, enterprisePlan } = opts.input
+    const { projects, plans } = opts.ctx.services
 
-    // find unprice project
-    const mainProject = await opts.ctx.db.query.projects.findFirst({
-      where: (project, { eq, and }) =>
-        and(eq(project.isMain, true), eq(project.slug, "unprice-admin")),
+    const { err: projectErr, val: mainProject } = await projects.getMainProjectBySlug({
+      slug: "unprice-admin",
     })
 
-    if (!mainProject) {
+    if (projectErr) {
+      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: projectErr.message })
+    }
+
+    if (!mainProject?.id) {
       throw new TRPCError({ code: "NOT_FOUND", message: "Project not found" })
     }
 
-    const planService = new PlanService({
-      cache: opts.ctx.cache,
-      analytics: opts.ctx.analytics,
-      logger: opts.ctx.logger,
-      metrics: opts.ctx.metrics,
-      waitUntil: opts.ctx.waitUntil,
-      db: opts.ctx.db,
-    })
-
-    const { err, val: planVersionData } = await planService.listPlanVersions({
+    const { err, val: planVersionData } = await plans.listPlanVersions({
       projectId: mainProject.id,
       query: {
         published,

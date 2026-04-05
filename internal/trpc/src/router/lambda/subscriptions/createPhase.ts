@@ -3,7 +3,6 @@ import {
   subscriptionPhaseInsertSchema,
   subscriptionPhaseSelectSchema,
 } from "@unprice/db/validators"
-import { SubscriptionService } from "@unprice/services/subscriptions"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
@@ -12,10 +11,9 @@ export const createPhase = protectedProjectProcedure
   .output(z.object({ phase: subscriptionPhaseSelectSchema }))
   .mutation(async ({ input, ctx }) => {
     const projectId = ctx.project.id
+    const { subscriptions } = ctx.services
 
-    const subscriptionService = new SubscriptionService(ctx)
-
-    const { err, val } = await subscriptionService.createPhase({
+    const { err, val } = await subscriptions.createPhase({
       input,
       projectId,
       now: Date.now(),

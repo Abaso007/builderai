@@ -3,20 +3,21 @@ import { type Database, and, eq } from "@unprice/db"
 import { add, currencies, dinero, formatMoney, toDecimal } from "@unprice/db/utils"
 import type { Dinero } from "@unprice/db/utils"
 import type { Currency, CurrentUsage, EntitlementState } from "@unprice/db/validators"
-import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
+import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger, WideEventInput } from "@unprice/logs"
 import { format } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
-import { BillingService } from "../billing"
+import type { BillingService } from "../billing"
 import type { CacheNamespaces } from "../cache/namespaces"
 import type { Cache } from "../cache/service"
+import type { CustomerService } from "../customers/service"
 import type { Metrics } from "../metrics"
-import { retry } from "../utils/retry"
-import { UnPriceEntitlementError, type UnPriceEntitlementStorageError } from "./errors"
-import { GrantsManager } from "./grants"
+import { cachedQuery } from "../utils/cached-query"
+import { toErrorContext } from "../utils/log-context"
+import { UnPriceEntitlementError } from "./errors"
+import type { GrantsManager } from "./grants"
 
 import { customers, subscriptions } from "@unprice/db/schema"
-import { CustomerService } from "../customers/service"
 import { deriveLimitType } from "./policy"
 
 /**
@@ -38,6 +39,7 @@ export class EntitlementService {
   private readonly cache: Cache
   private readonly metrics: Metrics
   private readonly customerService: CustomerService
+  private readonly billingService: BillingService
 
   constructor(opts: {
     db: Database
@@ -47,25 +49,19 @@ export class EntitlementService {
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
     metrics: Metrics
+    customerService: CustomerService
+    grantsManager: GrantsManager
+    billingService: BillingService
   }) {
-    this.grantsManager = new GrantsManager({
-      db: opts.db,
-      logger: opts.logger,
-    })
+    this.grantsManager = opts.grantsManager
     this.db = opts.db
     this.logger = opts.logger
     this.analytics = opts.analytics
     this.waitUntil = opts.waitUntil
     this.cache = opts.cache
     this.metrics = opts.metrics
-    this.customerService = new CustomerService({
-      db: opts.db,
-      logger: opts.logger,
-      analytics: opts.analytics,
-      waitUntil: opts.waitUntil,
-      cache: opts.cache,
-      metrics: opts.metrics,
-    })
+    this.customerService = opts.customerService
+    this.billingService = opts.billingService
   }
 
   private addBusinessContext(context: WideEventInput["business"]) {
@@ -149,38 +145,29 @@ export class EntitlementService {
   }): Promise<Result<CacheNamespaces["customerRelevantEntitlements"], FetchError>> {
     const cacheKey = `${projectId}:${customerId}:${historicalDays}`
 
-    const { val, err } = opts?.skipCache
-      ? await wrapResult(
-          this.getRelevantEntitlementsForIngestionFromDB({
-            projectId,
+    const { val, err } = await cachedQuery({
+      skipCache: opts?.skipCache,
+      cache: this.cache.customerRelevantEntitlements,
+      cacheKey,
+      load: () =>
+        this.getRelevantEntitlementsForIngestionFromDB({
+          projectId,
+          customerId,
+          historicalDays,
+        }),
+      wrapLoadError: (error) =>
+        new FetchError({
+          message: `unable to query entitlements from db in getRelevantEntitlementsForIngestionFromDB - ${error.message}`,
+          retry: false,
+          context: {
+            error: error.message,
+            url: "",
             customerId,
-            historicalDays,
-          }),
-          (error) =>
-            new FetchError({
-              message: `unable to query entitlements from db in getRelevantEntitlementsForIngestionFromDB - ${error.message}`,
-              retry: false,
-              context: {
-                error: error.message,
-                url: "",
-                customerId,
-                projectId,
-                method: "getRelevantEntitlementsForIngestionFromDB",
-              },
-            })
-        )
-      : await retry(
-          3,
-          async () =>
-            this.cache.customerRelevantEntitlements.swr(cacheKey, () =>
-              this.getRelevantEntitlementsForIngestionFromDB({
-                projectId,
-                customerId,
-                historicalDays,
-              })
-            ),
-          () => {}
-        )
+            projectId,
+            method: "getRelevantEntitlementsForIngestionFromDB",
+          },
+        }),
+    })
 
     if (err) {
       return Err(
@@ -212,41 +199,31 @@ export class EntitlementService {
   }): Promise<Result<CacheNamespaces["getRelevantEntitlementsPerFeature"], FetchError>> {
     const cacheKey = `${projectId}:${customerId}:${featureSlug}:${historicalDays}`
 
-    const { val, err } = opts?.skipCache
-      ? await wrapResult(
-          this.getRelevantEntitlementsPerFeatureFromDB({
-            projectId,
+    const { val, err } = await cachedQuery({
+      skipCache: opts?.skipCache,
+      cache: this.cache.getRelevantEntitlementsPerFeature,
+      cacheKey,
+      load: () =>
+        this.getRelevantEntitlementsPerFeatureFromDB({
+          projectId,
+          customerId,
+          featureSlug,
+          historicalDays,
+        }),
+      wrapLoadError: (error) =>
+        new FetchError({
+          message: `unable to query entitlements from db in getRelevantEntitlementsPerFeatureFromDB - ${error.message}`,
+          retry: false,
+          context: {
+            error: error.message,
+            url: "",
             customerId,
+            projectId,
             featureSlug,
-            historicalDays,
-          }),
-          (error) =>
-            new FetchError({
-              message: `unable to query entitlements from db in getRelevantEntitlementsPerFeatureFromDB - ${error.message}`,
-              retry: false,
-              context: {
-                error: error.message,
-                url: "",
-                customerId,
-                projectId,
-                featureSlug,
-                method: "getRelevantEntitlementsPerFeatureFromDB",
-              },
-            })
-        )
-      : await retry(
-          3,
-          async () =>
-            this.cache.getRelevantEntitlementsPerFeature.swr(cacheKey, () =>
-              this.getRelevantEntitlementsPerFeatureFromDB({
-                projectId,
-                customerId,
-                featureSlug,
-                historicalDays,
-              })
-            ),
-          () => {}
-        )
+            method: "getRelevantEntitlementsPerFeatureFromDB",
+          },
+        }),
+    })
 
     if (err) {
       return Err(
@@ -283,7 +260,7 @@ export class EntitlementService {
           this.logger.error("Failed to get current usage", {
             customerId,
             projectId,
-            error: usageErr.message,
+            error: toErrorContext(usageErr),
           })
           return null
         }
@@ -340,7 +317,7 @@ export class EntitlementService {
       this.logger.error("Failed to check if customer is blocked", {
         customerId,
         projectId,
-        error: aclErr.message,
+        error: toErrorContext(aclErr),
       })
       return null
     }
@@ -359,44 +336,33 @@ export class EntitlementService {
       skipCache?: boolean // skip cache to force revalidation
       now?: number
     }
-  }): Promise<
-    Result<CurrentUsage, UnPriceEntitlementError | UnPriceEntitlementStorageError | FetchError>
-  > {
+  }): Promise<Result<CurrentUsage, UnPriceEntitlementError | FetchError>> {
     const cacheKey = `${projectId}:${customerId}`
 
     // first try to get the entitlement from cache, if not found try to get it from DO,
-    const { val, err } = opts?.skipCache
-      ? await wrapResult(
-          this._getCurrentUsage({
-            customerId,
-            projectId,
-            now: opts.now ?? Date.now(),
-          }),
-          (err) =>
-            new FetchError({
-              message: `unable to query usage from _getCurrentUsage - ${err.message}`,
-              retry: false,
-              context: {
-                error: err.message,
-                url: "",
-                customerId: customerId,
-                projectId: projectId,
-                method: "_getCurrentUsage",
-              },
-            })
-        )
-      : await retry(
-          3,
-          async () =>
-            this.cache.getCurrentUsage.swr(cacheKey, () =>
-              this._getCurrentUsage({
-                customerId,
-                projectId,
-                now: opts?.now ?? Date.now(),
-              })
-            ),
-          () => {}
-        )
+    const { val, err } = await cachedQuery({
+      skipCache: opts?.skipCache,
+      cache: this.cache.getCurrentUsage,
+      cacheKey,
+      load: () =>
+        this._getCurrentUsage({
+          customerId,
+          projectId,
+          now: opts?.now ?? Date.now(),
+        }),
+      wrapLoadError: (err) =>
+        new FetchError({
+          message: `unable to query usage from _getCurrentUsage - ${err.message}`,
+          retry: false,
+          context: {
+            error: err.message,
+            url: "",
+            customerId: customerId,
+            projectId: projectId,
+            method: "_getCurrentUsage",
+          },
+        }),
+    })
 
     if (err) {
       return Err(
@@ -599,16 +565,7 @@ export class EntitlementService {
       UnPriceEntitlementError
     >
   > {
-    const billingService = new BillingService({
-      db: this.db,
-      logger: this.logger,
-      analytics: this.analytics,
-      waitUntil: this.waitUntil,
-      cache: this.cache,
-      metrics: this.metrics,
-    })
-
-    const result = await billingService.estimatePriceCurrentUsage({
+    const result = await this.billingService.estimatePriceCurrentUsage({
       customerId,
       projectId,
       now,

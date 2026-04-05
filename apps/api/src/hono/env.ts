@@ -7,26 +7,31 @@ import type { Cache } from "@unprice/services/cache"
 import type { CustomerService } from "@unprice/services/customers"
 import type { EntitlementService } from "@unprice/services/entitlements"
 import type { Metrics } from "@unprice/services/metrics"
+import type { PlanService } from "@unprice/services/plans"
+import type { ProjectService } from "@unprice/services/projects"
 import type { SubscriptionService } from "@unprice/services/subscriptions"
 import type { EvlogVariables } from "evlog/hono"
 import type { Env } from "~/env"
 import type { IngestionService } from "~/ingestion/service"
-import type { ApiProjectService } from "~/project"
 
-export type ServiceContext = {
-  version: string
-  analytics: Analytics
-  cache: Cache
-  logger: AppLogger
-  metrics: Metrics
-  entitlement: EntitlementService
-  ingestion: IngestionService
-  apikey: ApiKeysService
-  project: ApiProjectService
+/**
+ * Domain services — business logic, properly wired via createServiceContext.
+ */
+export type DomainServiceContext = {
   customer: CustomerService
   subscription: SubscriptionService
-  db: Database
+  entitlement: EntitlementService
+  plans: PlanService
+  ingestion: IngestionService
+  project: ProjectService
+  apikey: ApiKeysService
 }
+
+/**
+ * Domain service bag set on `c.get("services")`.
+ * Infrastructure primitives live on top-level context variables.
+ */
+export type ServiceContext = DomainServiceContext
 
 export type HonoEnv = EvlogVariables & {
   Bindings: Env
@@ -41,6 +46,13 @@ export type HonoEnv = EvlogVariables & {
     projectId?: string
     isInternal?: boolean
     isMain?: boolean
+    db: Database
+    cache: Cache
+    logger: AppLogger
+    metrics: Metrics
+    analytics: Analytics
+    // biome-ignore lint/suspicious/noExplicitAny: platform-specific promise handler
+    waitUntil: (promise: Promise<any>) => void
     services: ServiceContext
     stats: Stats
   }

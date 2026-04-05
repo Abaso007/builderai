@@ -5,6 +5,10 @@ import {
   EventTimestampTooOldError,
   validateEventTimestamp,
 } from "@unprice/services/entitlements"
+import {
+  type IngestionQueueMessage,
+  ingestionQueueMessageSchema,
+} from "@unprice/services/ingestion"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { ulid } from "ulid"
 import { z } from "zod"
@@ -13,7 +17,6 @@ import type { Env } from "~/env"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import { type IngestionQueueMessage, ingestionQueueMessageSchema } from "~/ingestion/message"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["ingestion"]
@@ -91,7 +94,7 @@ export const registerIngestEventsV1 = (app: App) =>
     // we use this as the time of the request to avoid clock skews
     const receivedAt = c.get("requestStartedAt")
     const timestamp = body.timestamp ?? receivedAt
-    const { logger } = c.get("services")
+    const logger = c.get("logger")
 
     // we shard the load in 2 queues for now, more than enough as we scale we add more
     const availableQueues = [c.env.QUEUE_SHARD_0, c.env.QUEUE_SHARD_1]

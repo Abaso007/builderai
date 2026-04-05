@@ -1,7 +1,6 @@
 import { TRPCError } from "@trpc/server"
-import * as schema from "@unprice/db/schema"
-import * as utils from "@unprice/db/utils"
 import { planInsertBaseSchema, planSelectBaseSchema } from "@unprice/db/validators"
+import { createPlan } from "@unprice/services/use-cases"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
@@ -13,71 +12,27 @@ export const create = protectedProjectProcedure
     })
   )
   .mutation(async (opts) => {
-    const { slug, description, defaultPlan, enterprisePlan, title } = opts.input
     const project = opts.ctx.project
-    const _workspace = opts.ctx.project.workspace
 
     // only owner and admin can create a plan
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const planId = utils.newId("plan")
+    const { err, val: planData } = await createPlan(
+      {
+        services: opts.ctx.services,
+        db: opts.ctx.db,
+        logger: opts.ctx.logger,
+      },
+      {
+        input: opts.input,
+        projectId: project.id,
+      }
+    )
 
-    if (defaultPlan && enterprisePlan) {
+    if (err) {
       throw new TRPCError({
         code: "CONFLICT",
-        message: "A plan cannot be both a default and enterprise plan",
-      })
-    }
-
-    if (defaultPlan) {
-      const defaultPlanData = await opts.ctx.db.query.plans.findFirst({
-        where: (plan, { eq, and }) =>
-          and(eq(plan.projectId, project.id), eq(plan.defaultPlan, true)),
-      })
-
-      if (defaultPlanData?.id) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "There is already a default plan for this app",
-        })
-      }
-    }
-
-    if (enterprisePlan) {
-      const enterprisePlanData = await opts.ctx.db.query.plans.findFirst({
-        where: (plan, { eq, and }) =>
-          and(eq(plan.projectId, project.id), eq(plan.enterprisePlan, true)),
-      })
-
-      if (enterprisePlanData?.id) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "There is already an enterprise plan for this app, create a new version instead",
-        })
-      }
-    }
-
-    const planData = await opts.ctx.db
-      .insert(schema.plans)
-      .values({
-        id: planId,
-        slug,
-        title,
-        projectId: project.id,
-        description: description ?? "",
-        active: true,
-        defaultPlan: defaultPlan ?? false,
-        enterprisePlan: enterprisePlan ?? false,
-      })
-      .returning()
-      .then((planData) => {
-        return planData[0]
-      })
-
-    if (!planData?.id) {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: "error creating plan",
+        message: err.message,
       })
     }
 

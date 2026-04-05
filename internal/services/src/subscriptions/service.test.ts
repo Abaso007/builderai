@@ -6,10 +6,12 @@ import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
 import { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
 import type { Metrics } from "../metrics"
+import { PaymentProviderResolver } from "../payment-provider/resolver"
 import { SubscriptionService } from "./service"
 
 vi.mock("../../env", () => ({
@@ -358,13 +360,25 @@ describe("SubscriptionService - grant lifecycle", () => {
     )
     vi.spyOn(CustomerService.prototype, "updateAccessControlList").mockResolvedValue(undefined)
 
-    subscriptionService = new SubscriptionService({
+    const serviceDeps = {
       db: mockDb,
       logger: mockLogger,
       analytics: mockAnalytics,
-      waitUntil: (promise) => promise,
+      waitUntil: (promise: Promise<unknown>) => promise,
       cache: mockCache,
       metrics: mockMetrics,
+    }
+    const paymentProviderResolver = new PaymentProviderResolver({
+      db: mockDb,
+      logger: mockLogger,
+    })
+    const customerService = new CustomerService({ ...serviceDeps, paymentProviderResolver })
+    const grantsManager = new GrantsManager({ db: mockDb, logger: mockLogger })
+    const billingService = new BillingService({ ...serviceDeps, customerService, grantsManager })
+    subscriptionService = new SubscriptionService({
+      ...serviceDeps,
+      customerService,
+      billingService,
     })
   })
 

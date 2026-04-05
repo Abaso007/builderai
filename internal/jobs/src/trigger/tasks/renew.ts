@@ -1,5 +1,4 @@
 import { task } from "@trigger.dev/sdk/v3"
-import { SubscriptionService } from "@unprice/services/subscriptions"
 import { createContext } from "./context"
 
 export const renewTask = task({
@@ -37,9 +36,7 @@ export const renewTask = task({
     let status = 200
 
     try {
-      const subscriptionService = new SubscriptionService(context)
-
-      const renewResult = await subscriptionService.renewSubscription({
+      const renewResult = await context.services.subscriptions.renewSubscription({
         subscriptionId,
         projectId,
         now,

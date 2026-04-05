@@ -1,58 +1,23 @@
 import type { Analytics } from "@unprice/analytics"
-import { type Database, and, eq } from "@unprice/db"
-import { customerSessions, customers, subscriptions } from "@unprice/db/schema"
-import { AesGCM, newId } from "@unprice/db/utils"
+import { type Database, and, count, eq, getTableColumns, ilike, or } from "@unprice/db"
+import { customers, subscriptions } from "@unprice/db/schema"
+import { newId, withDateFilters, withPagination } from "@unprice/db/utils"
 import type {
   Customer,
   CustomerPaymentMethod,
-  CustomerSignUp,
   PaymentProvider,
-  Plan,
-  PlanVersion,
-  Project,
   SubscriptionCache,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { env } from "../../env"
 import type { CacheNamespaces, CustomerCache, CustomersProjectCache } from "../cache"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
-import { PaymentProviderService } from "../payment-provider/service"
-import { SubscriptionService } from "../subscriptions/service"
+import type { PaymentProviderResolver } from "../payment-provider/resolver"
+import type { PaymentProviderService } from "../payment-provider/service"
+import { cachedQuery } from "../utils/cached-query"
 import { toErrorContext } from "../utils/log-context"
-import { retry } from "../utils/retry"
 import { UnPriceCustomerError } from "./errors"
-
-type SignUpContext = {
-  input: CustomerSignUp
-  projectId: string
-  planVersion: PlanVersion & { project: Project; plan: Plan }
-  pageId: string | null
-  customerId: string
-  successUrl: string
-  cancelUrl: string
-}
-
-function isExternalIdConflictError(error: unknown): boolean {
-  if (!error || typeof error !== "object") {
-    return false
-  }
-
-  const dbError = error as {
-    code?: string
-    constraint?: string
-    message?: string
-  }
-
-  return (
-    dbError.code === "23505" &&
-    (dbError.constraint === "cp_external_id_idx" ||
-      dbError.message?.includes("cp_external_id_idx") ||
-      dbError.message?.includes("external_id") ||
-      false)
-  )
-}
 
 export class CustomerService {
   private readonly db: Database
@@ -60,6 +25,7 @@ export class CustomerService {
   private readonly analytics: Analytics
   private readonly cache: Cache
   private readonly metrics: Metrics
+  private readonly paymentProviderResolver: PaymentProviderResolver
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
 
@@ -70,6 +36,7 @@ export class CustomerService {
     waitUntil,
     cache,
     metrics,
+    paymentProviderResolver,
   }: {
     db: Database
     logger: Logger
@@ -78,6 +45,7 @@ export class CustomerService {
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
     metrics: Metrics
+    paymentProviderResolver: PaymentProviderResolver
   }) {
     this.db = db
     this.logger = logger
@@ -85,6 +53,7 @@ export class CustomerService {
     this.waitUntil = waitUntil
     this.cache = cache
     this.metrics = metrics
+    this.paymentProviderResolver = paymentProviderResolver
   }
 
   /**
@@ -142,7 +111,7 @@ export class CustomerService {
       })
       .catch((e) => {
         this.logger.error("error getting getActiveSubscriptionData from db", {
-          error: e.message,
+          error: toErrorContext(e),
         })
 
         return null
@@ -199,36 +168,28 @@ export class CustomerService {
       })
     }
 
-    const { val, err } = opts?.skipCache
-      ? await wrapResult(
-          this.getCustomersProjectData(projectId),
-          (err) =>
-            new FetchError({
-              message: `unable to query for getCustomersProjectData, ${err.message}`,
-              retry: false,
-            })
-        )
-      : await retry(
-          3,
-          async () =>
-            this.cache.customersProject.swr(projectId, () =>
-              this.getCustomersProjectData(projectId)
-            ),
-          (attempt, err) => {
-            this.logger.warn(
-              "Failed to fetch getCustomersProjectData data from cache, retrying...",
-              {
-                projectId: projectId,
-                attempt,
-                error: err.message,
-              }
-            )
-          }
-        )
+    const { val, err } = await cachedQuery({
+      skipCache: opts?.skipCache,
+      cache: this.cache.customersProject,
+      cacheKey: projectId,
+      load: () => this.getCustomersProjectData(projectId),
+      wrapLoadError: (err) =>
+        new FetchError({
+          message: `unable to query for getCustomersProjectData, ${err.message}`,
+          retry: false,
+        }),
+      onRetry: (attempt, err) => {
+        this.logger.warn("Failed to fetch getCustomersProjectData data from cache, retrying...", {
+          projectId: projectId,
+          attempt,
+          error: toErrorContext(err),
+        })
+      },
+    })
 
     if (err) {
       this.logger.error("error getting getCustomersProjectData", {
-        error: err.message,
+        error: toErrorContext(err),
       })
 
       return Err(
@@ -311,30 +272,28 @@ export class CustomerService {
       })
     }
 
-    const { val, err } = opts?.skipCache
-      ? await wrapResult(
-          this.getCustomerData(customerId),
-          (err) =>
-            new FetchError({
-              message: `unable to query for getCustomerData, ${err.message}`,
-              retry: false,
-            })
-        )
-      : await retry(
-          3,
-          async () => this.cache.customer.swr(customerId, () => this.getCustomerData(customerId)),
-          (attempt, err) => {
-            this.logger.warn("Failed to fetch getCustomerData data from cache, retrying...", {
-              customerId: customerId,
-              attempt,
-              error: err.message,
-            })
-          }
-        )
+    const { val, err } = await cachedQuery({
+      skipCache: opts?.skipCache,
+      cache: this.cache.customer,
+      cacheKey: customerId,
+      load: () => this.getCustomerData(customerId),
+      wrapLoadError: (err) =>
+        new FetchError({
+          message: `unable to query for getCustomerData, ${err.message}`,
+          retry: false,
+        }),
+      onRetry: (attempt, err) => {
+        this.logger.warn("Failed to fetch getCustomerData data from cache, retrying...", {
+          customerId: customerId,
+          attempt,
+          error: toErrorContext(err),
+        })
+      },
+    })
 
     if (err) {
       this.logger.error("error getting getCustomerData", {
-        error: err.message,
+        error: toErrorContext(err),
       })
 
       return Err(
@@ -373,37 +332,32 @@ export class CustomerService {
       })
     }
 
-    const { val, err } = opts?.skipCache
-      ? await wrapResult(
-          this.getCustomerByExternalIdData(projectId, externalId),
-          (err) =>
-            new FetchError({
-              message: `unable to query for getCustomerByExternalIdData, ${err.message}`,
-              retry: false,
-            })
-        )
-      : await retry(
-          3,
-          async () =>
-            this.cache.customerByExternalId.swr(cacheKey, () =>
-              this.getCustomerByExternalIdData(projectId, externalId)
-            ),
-          (attempt, err) => {
-            this.logger.warn(
-              "Failed to fetch getCustomerByExternalIdData data from cache, retrying...",
-              {
-                projectId,
-                externalId,
-                attempt,
-                error: err.message,
-              }
-            )
+    const { val, err } = await cachedQuery({
+      skipCache: opts?.skipCache,
+      cache: this.cache.customerByExternalId,
+      cacheKey,
+      load: () => this.getCustomerByExternalIdData(projectId, externalId),
+      wrapLoadError: (err) =>
+        new FetchError({
+          message: `unable to query for getCustomerByExternalIdData, ${err.message}`,
+          retry: false,
+        }),
+      onRetry: (attempt, err) => {
+        this.logger.warn(
+          "Failed to fetch getCustomerByExternalIdData data from cache, retrying...",
+          {
+            projectId,
+            externalId,
+            attempt,
+            error: toErrorContext(err),
           }
         )
+      },
+    })
 
     if (err) {
       this.logger.error("error getting getCustomerByExternalIdData", {
-        error: err.message,
+        error: toErrorContext(err),
       })
 
       return Err(
@@ -421,6 +375,117 @@ export class CustomerService {
     this.waitUntil(this.cache.customer.set(val.id, val))
 
     return Ok(val)
+  }
+
+  public async getCustomerByIdInProject({
+    id,
+    projectId,
+  }: {
+    id: string
+    projectId: string
+  }): Promise<Result<Customer | null, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.customers.findFirst({
+        where: (customer, { eq, and }) =>
+          and(eq(customer.projectId, projectId), eq(customer.id, id)),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting customer by id in project: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting customer by id in project", {
+        error: toErrorContext(err),
+        projectId,
+        customerId: id,
+      })
+      return Err(err)
+    }
+
+    return Ok((val as Customer | null) ?? null)
+  }
+
+  public async updateCustomerRecord({
+    id,
+    projectId,
+    email,
+    description,
+    metadata,
+    name,
+    timezone,
+    active,
+  }: {
+    id: string
+    projectId: string
+    email?: Customer["email"]
+    description?: Customer["description"]
+    metadata?: Customer["metadata"]
+    name?: Customer["name"]
+    timezone?: Customer["timezone"]
+    active?: Customer["active"]
+  }): Promise<Result<{ state: "not_found" } | { state: "ok"; customer: Customer }, FetchError>> {
+    const customerData = await this.db.query.customers.findFirst({
+      where: (customer, { eq, and }) => and(eq(customer.id, id), eq(customer.projectId, projectId)),
+    })
+
+    if (!customerData?.id) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    const { val, err } = await wrapResult(
+      this.db
+        .update(customers)
+        .set({
+          ...(email && { email }),
+          ...(description && { description }),
+          ...(name && { name }),
+          ...(metadata && {
+            metadata: {
+              ...customerData.metadata,
+              ...metadata,
+            },
+          }),
+          ...(timezone && { timezone }),
+          ...(active !== undefined && { active }),
+          updatedAtM: Date.now(),
+        })
+        .where(and(eq(customers.id, id), eq(customers.projectId, projectId)))
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error updating customer record: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error updating customer record", {
+        error: toErrorContext(err),
+        projectId,
+        customerId: id,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "Error updating customer",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok({
+      state: "ok",
+      customer: val as Customer,
+    })
   }
 
   public async resolveCustomerId(opts: {
@@ -478,6 +543,400 @@ export class CustomerService {
     return Ok({ customerId: val.id, projectId: val.projectId })
   }
 
+  public async customerExistsByEmail({
+    projectId,
+    email,
+  }: {
+    projectId: string
+    email: string
+  }): Promise<Result<boolean, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.customers.findFirst({
+        columns: {
+          id: true,
+        },
+        where: (customer, { eq, and }) =>
+          and(eq(customer.projectId, projectId), eq(customer.email, email)),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error checking customer existence by email: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error checking customer existence by email", {
+        error: toErrorContext(err),
+        projectId,
+      })
+      return Err(err)
+    }
+
+    return Ok(Boolean(val))
+  }
+
+  public async getCustomerByEmail({
+    projectId,
+    email,
+  }: {
+    projectId: string
+    email: string
+  }): Promise<Result<Customer | null, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.customers.findFirst({
+        where: (customer, { eq, and }) =>
+          and(eq(customer.projectId, projectId), eq(customer.email, email)),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting customer by email: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting customer by email", {
+        error: toErrorContext(err),
+        projectId,
+      })
+      return Err(err)
+    }
+
+    return Ok((val as Customer | null) ?? null)
+  }
+
+  public async getCustomerSubscriptions({
+    customerId,
+    projectId,
+    now,
+  }: {
+    customerId: string
+    projectId: string
+    now: number
+  }): Promise<Result<unknown | null, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.customers.findFirst({
+        with: {
+          subscriptions: {
+            with: {
+              customer: true,
+              phases: {
+                where: (table, { and, gte, lte, isNull, or }) =>
+                  and(lte(table.startAt, now), or(isNull(table.endAt), gte(table.endAt, now))),
+                orderBy: (table, { desc }) => [desc(table.startAt)],
+                limit: 1,
+              },
+            },
+          },
+          invoices: {
+            orderBy: (table, { desc }) => [desc(table.dueAt)],
+          },
+        },
+        where: (table, { eq, and }) =>
+          and(eq(table.id, customerId), eq(table.projectId, projectId)),
+        orderBy: (table, { desc }) => [desc(table.createdAtM)],
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting customer subscriptions: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting customer subscriptions", {
+        error: toErrorContext(err),
+        customerId,
+        projectId,
+      })
+      return Err(err)
+    }
+
+    return Ok(val ?? null)
+  }
+
+  public async getCustomerInvoices({
+    customerId,
+    projectId,
+  }: {
+    customerId: string
+    projectId: string
+  }): Promise<Result<unknown | null, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.customers.findFirst({
+        with: {
+          invoices: {
+            orderBy: (table, { desc }) => [desc(table.dueAt)],
+          },
+        },
+        where: (table, { eq, and }) =>
+          and(eq(table.id, customerId), eq(table.projectId, projectId)),
+        orderBy: (table, { desc }) => [desc(table.createdAtM)],
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting customer invoices: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting customer invoices", {
+        error: toErrorContext(err),
+        customerId,
+        projectId,
+      })
+      return Err(err)
+    }
+
+    return Ok(val ?? null)
+  }
+
+  public async getInvoiceById({
+    invoiceId,
+    customerId,
+    projectId,
+  }: {
+    invoiceId: string
+    customerId: string
+    projectId: string
+  }): Promise<Result<unknown | null, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.invoices.findFirst({
+        with: {
+          customer: true,
+          subscription: true,
+          invoiceItems: {
+            with: {
+              featurePlanVersion: {
+                with: {
+                  planVersion: {
+                    with: {
+                      plan: true,
+                    },
+                  },
+                  feature: true,
+                },
+              },
+              billingPeriod: true,
+            },
+          },
+        },
+        where: (table, { eq, and }) =>
+          and(
+            eq(table.id, invoiceId),
+            eq(table.customerId, customerId),
+            eq(table.projectId, projectId)
+          ),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting invoice by id: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting invoice by id", {
+        error: toErrorContext(err),
+        customerId,
+        projectId,
+      })
+      return Err(err)
+    }
+
+    return Ok(val ?? null)
+  }
+
+  public async listCustomersByProject({
+    projectId,
+    page,
+    pageSize,
+    search,
+    from,
+    to,
+  }: {
+    projectId: string
+    page: number
+    pageSize: number
+    search?: string
+    from?: number
+    to?: number
+  }): Promise<Result<{ customers: Customer[]; pageCount: number }, FetchError>> {
+    const columns = getTableColumns(customers)
+    const filter = `%${search ?? ""}%`
+    const expressions = [
+      search ? or(ilike(columns.name, filter), ilike(columns.email, filter)) : undefined,
+      eq(columns.projectId, projectId),
+      eq(columns.isMain, false),
+    ]
+
+    const { val, err } = await wrapResult(
+      this.db.transaction(async (tx) => {
+        const query = tx.select().from(customers).$dynamic()
+        const whereQuery = withDateFilters<Customer>(
+          expressions,
+          columns.createdAtM,
+          from ?? null,
+          to ?? null
+        )
+
+        const data = await withPagination(
+          query,
+          whereQuery,
+          [
+            {
+              column: columns.createdAtM,
+              order: "desc",
+            },
+          ],
+          page,
+          pageSize
+        )
+
+        const total = await tx
+          .select({
+            count: count(),
+          })
+          .from(customers)
+          .where(whereQuery)
+          .execute()
+          .then((res) => res[0]?.count ?? 0)
+
+        return {
+          customers: data as Customer[],
+          pageCount: Math.ceil(total / pageSize),
+        }
+      }),
+      (error) =>
+        new FetchError({
+          message: `error listing customers by project: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error listing customers by project", {
+        error: toErrorContext(err),
+        projectId,
+      })
+      return Err(err)
+    }
+
+    return Ok(val)
+  }
+
+  public async createCustomerRecord({
+    projectId,
+    description,
+    name,
+    email,
+    metadata,
+    defaultCurrency,
+    stripeCustomerId,
+    timezone,
+    externalId,
+  }: {
+    projectId: string
+    description?: Customer["description"]
+    name?: Customer["name"]
+    email: Customer["email"]
+    metadata?: Customer["metadata"]
+    defaultCurrency?: Customer["defaultCurrency"]
+    stripeCustomerId?: Customer["stripeCustomerId"]
+    timezone?: Customer["timezone"]
+    externalId?: Customer["externalId"]
+  }): Promise<Result<Customer, FetchError>> {
+    const customerId = newId("customer")
+
+    const { val, err } = await wrapResult(
+      this.db
+        .insert(customers)
+        .values({
+          id: customerId,
+          name: name ?? "",
+          email,
+          projectId,
+          description,
+          timezone: timezone || "UTC",
+          active: true,
+          ...(metadata && { metadata }),
+          ...(externalId && { externalId }),
+          ...(defaultCurrency && { defaultCurrency }),
+          ...(stripeCustomerId && { stripeCustomerId }),
+        })
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error creating customer: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error creating customer", {
+        error: toErrorContext(err),
+        projectId,
+        email,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "Error creating customer",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok(val as Customer)
+  }
+
+  public async removeCustomerRecord({
+    projectId,
+    id,
+  }: {
+    projectId: string
+    id: string
+  }): Promise<Result<{ state: "not_found" } | { state: "ok"; customer: Customer }, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db
+        .delete(customers)
+        .where(and(eq(customers.projectId, projectId), eq(customers.id, id)))
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error deleting customer: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error deleting customer", {
+        error: toErrorContext(err),
+        projectId,
+        customerId: id,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    return Ok({
+      state: "ok",
+      customer: val as Customer,
+    })
+  }
+
   /**
    * Gets the active subscription for a customer
    * @param customerId - Customer id
@@ -509,50 +968,39 @@ export class CustomerService {
     }
 
     // swr handle cache stampede and other problems for us :)
-    const { val, err } = opts?.skipCache
-      ? await wrapResult(
-          this.getActiveSubscriptionData({
-            customerId,
-            projectId,
-            now,
-          }),
-          (err) =>
-            new FetchError({
-              message: `unable to query db for getActiveSubscriptionData, ${err.message}`,
-              retry: false,
-              context: {
-                error: err.message,
-                url: "",
-                customerId: customerId,
-                method: "getActiveSubscription",
-              },
-            })
-        )
-      : await retry(
-          3,
-          async () =>
-            this.cache.customerSubscription.swr(cacheKey, () =>
-              this.getActiveSubscriptionData({
-                customerId,
-                projectId,
-                now,
-              })
-            ),
-          (attempt, err) => {
-            this.logger.warn(
-              "Failed to fetch getActiveSubscriptionData data from cache, retrying...",
-              {
-                customerId: customerId,
-                attempt,
-                error: err.message,
-              }
-            )
-          }
-        )
+    const { val, err } = await cachedQuery({
+      skipCache: opts?.skipCache,
+      cache: this.cache.customerSubscription,
+      cacheKey,
+      load: () =>
+        this.getActiveSubscriptionData({
+          customerId,
+          projectId,
+          now,
+        }),
+      wrapLoadError: (err) =>
+        new FetchError({
+          message: `unable to query db for getActiveSubscriptionData, ${err.message}`,
+          retry: false,
+          context: {
+            error: err.message,
+            url: "",
+            customerId: customerId,
+            method: "getActiveSubscription",
+          },
+        }),
+      onRetry: (attempt, err) => {
+        this.logger.warn("Failed to fetch getActiveSubscriptionData data from cache, retrying...", {
+          customerId: customerId,
+          attempt,
+          error: toErrorContext(err),
+        })
+      },
+    })
 
     if (err) {
       this.logger.error("error getting customer subscription", {
-        error: err.message,
+        error: toErrorContext(err),
       })
 
       return Err(
@@ -685,92 +1133,11 @@ export class CustomerService {
     projectId: string
     provider: PaymentProvider
   }): Promise<Result<PaymentProviderService, FetchError | UnPriceCustomerError>> {
-    let customerData: Customer | undefined
-
-    // validate customer if provided
-    if (customerId) {
-      customerData = await this.db.query.customers.findFirst({
-        where: (customer, { and, eq }) => and(eq(customer.id, customerId)),
-      })
-
-      if (!customerData) {
-        return Err(
-          new UnPriceCustomerError({
-            code: "CUSTOMER_NOT_FOUND",
-            message: "Customer not found",
-          })
-        )
-      }
-    }
-
-    // get config payment provider
-    const config = await this.db.query.paymentProviderConfig
-      .findFirst({
-        where: (config, { and, eq }) =>
-          and(
-            eq(config.projectId, projectId),
-            eq(config.paymentProvider, provider),
-            eq(config.active, true)
-          ),
-      })
-      .catch((e) => {
-        this.logger.error("error getting payment provider config", {
-          error: e.message,
-          customerId,
-          projectId,
-          provider,
-        })
-
-        throw e
-      })
-
-    if (!config) {
-      this.logger.error("error getting payment provider config", {
-        customerId,
-        projectId,
-        provider,
-      })
-
-      return Err(
-        new UnPriceCustomerError({
-          code: "PAYMENT_PROVIDER_CONFIG_NOT_FOUND",
-          message: "Payment provider config not found or not active",
-        })
-      )
-    }
-
-    const aesGCM = await AesGCM.withBase64Key(env.ENCRYPTION_KEY)
-
-    const decryptedKey = await aesGCM.decrypt({
-      iv: config.keyIv,
-      ciphertext: config.key,
+    return this.paymentProviderResolver.resolve({
+      customerId,
+      projectId,
+      provider,
     })
-
-    const providerCustomerId = this.getProviderCustomerId(customerData, provider)
-
-    const paymentProviderService = new PaymentProviderService({
-      providerCustomerId: providerCustomerId,
-      logger: this.logger,
-      paymentProvider: provider,
-      token: decryptedKey,
-    })
-
-    return Ok(paymentProviderService)
-  }
-
-  private getProviderCustomerId(
-    customerData: Customer | undefined,
-    provider: PaymentProvider
-  ): string | undefined {
-    if (provider === "stripe") {
-      return customerData?.stripeCustomerId ?? undefined
-    }
-
-    if (provider === "sandbox") {
-      return customerData?.id ?? undefined
-    }
-
-    return customerData?.stripeCustomerId ?? undefined
   }
 
   /**
@@ -822,9 +1189,6 @@ export class CustomerService {
       await paymentProviderService.getDefaultPaymentMethodId()
 
     if (paymentMethodErr) {
-      this.logger.error(
-        `Payment validation failed: ${paymentMethodErr.message} for project ${projectId} and payment provider ${paymentProvider}`
-      )
       return Err(
         new FetchError({
           message: paymentMethodErr.message,
@@ -834,9 +1198,6 @@ export class CustomerService {
     }
 
     if (requiredPaymentMethod && !paymentMethodId?.paymentMethodId) {
-      this.logger.error(
-        `Required payment method not found for project ${projectId} and payment provider ${paymentProvider}`
-      )
       return Err(
         new FetchError({
           message: "Required payment method not found",
@@ -894,7 +1255,7 @@ export class CustomerService {
           customerId,
           projectId,
           provider,
-          error: err.message,
+          error: toErrorContext(err),
         })
         return []
       }
@@ -907,7 +1268,7 @@ export class CustomerService {
         customerId,
         projectId,
         provider,
-        error: error.message,
+        error: toErrorContext(error),
       })
       return []
     }
@@ -946,48 +1307,40 @@ export class CustomerService {
     }
 
     // first try to get the payment methods from cache, if not found try to get it from DO,
-    const { val, err } = opts?.skipCache
-      ? await wrapResult(
-          this.getPaymentMethodsData({
-            customerId,
-            provider,
-            projectId,
-          }),
-          (err) =>
-            new FetchError({
-              message: "unable to query payment methods from db",
-              retry: false,
-              context: {
-                error: err.message,
-                url: "",
-                customerId: customerId,
-                provider: provider,
-                method: "getPaymentMethods",
-              },
-            })
-        )
-      : await retry(
-          3,
-          async () =>
-            this.cache.customerPaymentMethods.swr(cacheKey, () =>
-              this.getPaymentMethodsData({
-                customerId,
-                provider,
-                projectId,
-              })
-            ),
-          (attempt, err) => {
-            this.logger.warn("Failed to fetch payment methods data from cache, retrying...", {
-              customerId: customerId,
-              attempt,
-              error: err.message,
-            })
-          }
-        )
+    const { val, err } = await cachedQuery({
+      skipCache: opts?.skipCache,
+      cache: this.cache.customerPaymentMethods,
+      cacheKey,
+      load: () =>
+        this.getPaymentMethodsData({
+          customerId,
+          provider,
+          projectId,
+        }),
+      wrapLoadError: (err) =>
+        new FetchError({
+          message: "unable to query payment methods from db",
+          retry: false,
+          context: {
+            error: err.message,
+            url: "",
+            customerId: customerId,
+            provider: provider,
+            method: "getPaymentMethods",
+          },
+        }),
+      onRetry: (attempt, err) => {
+        this.logger.warn("Failed to fetch payment methods data from cache, retrying...", {
+          customerId: customerId,
+          attempt,
+          error: toErrorContext(err),
+        })
+      },
+    })
 
     if (err) {
       this.logger.error("error getting payment methods", {
-        error: err.message,
+        error: toErrorContext(err),
       })
 
       return Err(
@@ -1004,639 +1357,6 @@ export class CustomerService {
     }
 
     return Ok(val)
-  }
-
-  /**
-   * Signs up a customer for a project
-   * @param opts - Options
-   * @returns Sign up result
-   */
-  public async signUp(opts: {
-    input: CustomerSignUp
-    projectId: string
-  }): Promise<
-    Result<
-      { success: boolean; url: string; error?: string; customerId: string },
-      UnPriceCustomerError | FetchError
-    >
-  > {
-    const { input, projectId } = opts
-
-    // Step 1: Resolve the Plan Version (Pure Logic)
-    const planResolution = await this.resolvePlanVersion({
-      input,
-      projectId,
-    })
-
-    if (planResolution.err) {
-      this.logger.set({ error: toErrorContext(planResolution.err) })
-      return Err(planResolution.err)
-    }
-
-    const { planVersion, pageId } = planResolution.val
-
-    if (input.externalId) {
-      const { err: existingCustomerErr, val: existingCustomer } =
-        await this.getCustomerByExternalId(projectId, input.externalId, {
-          skipCache: true,
-        })
-
-      if (existingCustomerErr) {
-        this.logger.set({ error: toErrorContext(existingCustomerErr) })
-        return Err(existingCustomerErr)
-      }
-
-      if (existingCustomer) {
-        return Err(
-          new UnPriceCustomerError({
-            code: "CUSTOMER_EXTERNAL_ID_CONFLICT",
-            message: "External customer id already exists for this project",
-          })
-        )
-      }
-    }
-
-    const customerId = newId("customer")
-    const successUrl = input.successUrl.replace("{CUSTOMER_ID}", customerId)
-
-    // Step 2: Prepare the Customer Context
-    const context: SignUpContext = {
-      projectId,
-      planVersion,
-      pageId,
-      input,
-      customerId,
-      successUrl,
-      cancelUrl: input.cancelUrl,
-    }
-
-    this.logger.set({
-      customers: {
-        operation: "sign_up",
-        name: input.name,
-        email: input.email,
-        plan_version_id: planVersion.id,
-        plan_slug: planVersion.plan.slug,
-        success_url: successUrl,
-        cancel_url: input.cancelUrl,
-        session_id: input.sessionId,
-        currency: input.defaultCurrency,
-      },
-    })
-
-    // let's skip the payment required flow if the payment provider is sandbox
-    const isSandbox = planVersion.paymentProvider === "sandbox"
-
-    // Step 3: Branch Logic
-    if (planVersion.paymentMethodRequired && !isSandbox) {
-      return this.handlePaymentRequiredFlow(context)
-    }
-
-    return this.handleDirectProvisioningFlow(context)
-  }
-
-  /**
-   * Helper: Encapsulates all the "Plan Guessing" logic
-   */
-  private async resolvePlanVersion(opts: {
-    input: CustomerSignUp
-    projectId: string
-  }): Promise<
-    Result<
-      { planVersion: PlanVersion & { project: Project; plan: Plan }; pageId: string | null },
-      UnPriceCustomerError
-    >
-  > {
-    const { input, projectId } = opts
-    const { planVersionId, defaultCurrency, planSlug, sessionId, billingInterval } = input
-
-    let planVersion: (PlanVersion & { project: Project; plan: Plan }) | null = null
-    let pageId: string | null = null
-
-    if (sessionId) {
-      this.logger.set({
-        customers: {
-          session_id: sessionId,
-          currency: defaultCurrency,
-        },
-      })
-
-      // if session id is provided, we need to get the plan version from the session
-      // get the session from analytics
-      const data = await this.analytics.getPlanClickBySessionId({
-        session_id: sessionId,
-        action: "plan_click",
-      })
-
-      const session = data.data.at(0)
-
-      if (!session) {
-        if (!planVersionId) {
-          return Err(
-            new UnPriceCustomerError({
-              code: "PLAN_VERSION_NOT_FOUND",
-              message: "Session not found",
-            })
-          )
-        }
-
-        planVersion = await this.db.query.versions
-          .findFirst({
-            with: {
-              project: true,
-              plan: true,
-            },
-            where: (version, { eq, and }) =>
-              and(eq(version.id, planVersionId), eq(version.projectId, projectId)),
-          })
-          .then((data) => data ?? null)
-      } else {
-        pageId = session.payload.page_id
-
-        planVersion = await this.db.query.versions
-          .findFirst({
-            with: {
-              project: true,
-              plan: true,
-            },
-            where: (version, { eq, and }) =>
-              and(
-                eq(version.id, session.payload.plan_version_id),
-                eq(version.projectId, projectId)
-              ),
-          })
-          .then((data) => data ?? null)
-      }
-    } else if (planVersionId) {
-      planVersion = await this.db.query.versions
-        .findFirst({
-          with: {
-            project: true,
-            plan: true,
-          },
-          where: (version, { eq, and }) =>
-            and(
-              eq(version.id, planVersionId),
-              eq(version.projectId, projectId),
-              // filter by currency if provided
-              defaultCurrency ? eq(version.currency, defaultCurrency) : undefined
-            ),
-        })
-        .then((data) => data ?? null)
-    } else if (planSlug) {
-      // find the plan version by the plan slug
-      const plan = await this.db.query.plans
-        .findFirst({
-          with: {
-            versions: {
-              with: {
-                project: true,
-                plan: true,
-              },
-              where: (version, { eq, and }) =>
-                and(
-                  // filter by latest version
-                  eq(version.latest, true),
-                  // filter by project
-                  eq(version.projectId, projectId),
-                  // filter by currency if provided
-                  defaultCurrency ? eq(version.currency, defaultCurrency) : undefined
-                ),
-            },
-          },
-          where: (plan, { eq, and }) => and(eq(plan.projectId, projectId), eq(plan.slug, planSlug)),
-        })
-        .then((data) => {
-          if (!data) {
-            return null
-          }
-
-          // filter by billing interval if provided
-          if (billingInterval) {
-            const versions = data.versions.filter(
-              (version) => version.billingConfig.billingInterval === billingInterval
-            )
-
-            return {
-              ...data,
-              versions: versions ?? [],
-            }
-          }
-
-          return data
-        })
-
-      if (!plan) {
-        return Err(
-          new UnPriceCustomerError({
-            code: "PLAN_VERSION_NOT_FOUND",
-            message: "Plan version not found",
-          })
-        )
-      }
-
-      planVersion = plan.versions[0] ?? null
-    }
-
-    // if no plan version is provided, we use the default plan
-    if (!planVersion) {
-      // if no plan version is provided, we use the default plan
-      const defaultPlan = await this.db.query.plans.findFirst({
-        where: (plan, { eq, and }) =>
-          and(eq(plan.projectId, projectId), eq(plan.defaultPlan, true)),
-      })
-
-      if (!defaultPlan) {
-        return Err(
-          new UnPriceCustomerError({
-            code: "NO_DEFAULT_PLAN_FOUND",
-            message: "Default plan not found, provide a plan version id, slug or session id",
-          })
-        )
-      }
-
-      planVersion = await this.db.query.versions
-        .findFirst({
-          with: {
-            project: true,
-            plan: true,
-          },
-          where: (version, { eq, and }) =>
-            and(
-              eq(version.planId, defaultPlan.id),
-              eq(version.latest, true),
-              eq(version.status, "published"),
-              eq(version.active, true)
-            ),
-        })
-        .then((data) => data ?? null)
-    }
-
-    if (!planVersion) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "PLAN_VERSION_NOT_FOUND",
-          message: "Plan version not found",
-        })
-      )
-    }
-
-    this.logger.set({
-      customers: {
-        plan_version_id: planVersion.id,
-        plan_slug: planVersion.plan.slug,
-        currency: planVersion.currency,
-      },
-    })
-
-    if (planVersion.status !== "published") {
-      return Err(
-        new UnPriceCustomerError({
-          code: "PLAN_VERSION_NOT_PUBLISHED",
-          message: "Plan version is not published",
-        })
-      )
-    }
-
-    if (planVersion.active === false) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "PLAN_VERSION_NOT_ACTIVE",
-          message: "Plan version is not active",
-        })
-      )
-    }
-
-    const planProject = planVersion.project
-    const currency = defaultCurrency ?? planProject.defaultCurrency
-    const defaultBillingInterval = billingInterval ?? planVersion.billingConfig.billingInterval
-
-    if (
-      defaultBillingInterval &&
-      planVersion.billingConfig.billingInterval !== defaultBillingInterval
-    ) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "BILLING_INTERVAL_MISMATCH",
-          message: "Billing interval mismatch",
-        })
-      )
-    }
-
-    // validate the currency if provided
-    // TODO: why this is needed?
-    if (currency !== planVersion.currency) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "CURRENCY_MISMATCH",
-          message: `Currency mismatch, the project default currency does not match the plan version currency: ${currency} !== ${planVersion.currency}`,
-        })
-      )
-    }
-
-    return Ok({ planVersion, pageId })
-  }
-
-  /**
-   * Helper: Handles the external Payment Provider interaction
-   */
-  private async handlePaymentRequiredFlow(
-    context: SignUpContext
-  ): Promise<
-    Result<
-      { success: boolean; url: string; error?: string; customerId: string },
-      UnPriceCustomerError | FetchError
-    >
-  > {
-    const { input, projectId, planVersion, customerId, pageId, successUrl, cancelUrl } = context
-    const { email, name, config, timezone, externalId, metadata } = input
-
-    const paymentProvider = planVersion.paymentProvider
-    const paymentRequired = planVersion.paymentMethodRequired
-    const currency = input.defaultCurrency ?? planVersion.project.defaultCurrency
-
-    // For the main project we use the default key
-    // get config payment provider
-    const configPaymentProvider = await this.db.query.paymentProviderConfig.findFirst({
-      where: (config, { and, eq }) =>
-        and(
-          eq(config.projectId, projectId),
-          eq(config.paymentProvider, paymentProvider),
-          eq(config.active, true)
-        ),
-    })
-
-    if (!configPaymentProvider) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "PAYMENT_PROVIDER_CONFIG_NOT_FOUND",
-          message: "Payment provider config not found or not active",
-        })
-      )
-    }
-
-    const aesGCM = await AesGCM.withBase64Key(env.ENCRYPTION_KEY)
-
-    const decryptedKey = await aesGCM.decrypt({
-      iv: configPaymentProvider.keyIv,
-      ciphertext: configPaymentProvider.key,
-    })
-
-    const paymentProviderService = new PaymentProviderService({
-      logger: this.logger,
-      paymentProvider: paymentProvider,
-      token: decryptedKey,
-    })
-
-    // create a session with the data of the customer, the plan version and the success and cancel urls
-    // pass the session id to stripe metadata and then once the customer adds a payment method, we call our api to create the subscription
-    const customerSessionId = newId("customer_session")
-    const customerSession = await this.db
-      .insert(customerSessions)
-      .values({
-        id: customerSessionId,
-        customer: {
-          id: customerId,
-          name: name,
-          email: email,
-          currency: currency,
-          timezone: timezone || planVersion.project.timezone,
-          projectId: projectId,
-          externalId: externalId,
-          metadata: metadata,
-        },
-        planVersion: {
-          id: planVersion.id,
-          projectId: projectId,
-          config: config,
-          paymentMethodRequired: paymentRequired,
-        },
-        metadata: {
-          sessionId: input.sessionId ?? undefined,
-          pageId: pageId ?? undefined,
-        },
-      })
-      .returning()
-      .then((data) => data[0])
-
-    if (!customerSession) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "CUSTOMER_SESSION_NOT_CREATED",
-          message: "Error creating customer session",
-        })
-      )
-    }
-
-    const { err, val } = await paymentProviderService.signUp({
-      successUrl: successUrl,
-      cancelUrl: cancelUrl,
-      customerSessionId: customerSession.id,
-      customer: {
-        id: customerId,
-        email: email,
-        currency: currency,
-        projectId: projectId,
-      },
-    })
-
-    if (err) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "PAYMENT_PROVIDER_ERROR",
-          message: err.message,
-        })
-      )
-    }
-
-    if (!val) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "PAYMENT_PROVIDER_ERROR",
-          message: "Error creating payment provider signup",
-        })
-      )
-    }
-
-    // send event to analytics for tracking conversions
-    this.waitUntil(
-      this.analytics.ingestEvents({
-        action: "signup",
-        version: "1",
-        session_id: input.sessionId ?? "",
-        project_id: projectId,
-        timestamp: new Date().toISOString(),
-        payload: {
-          customer_id: customerId,
-          plan_version_id: planVersion.id,
-          page_id: pageId,
-          status: "waiting_payment_provider_setup",
-        },
-      })
-    )
-
-    return Ok({
-      success: true,
-      url: val.url,
-      customerId: val.customerId,
-    })
-  }
-
-  /**
-   * Helper: Handles the Atomic Database Transaction
-   */
-  private async handleDirectProvisioningFlow(
-    context: SignUpContext
-  ): Promise<
-    Result<
-      { success: boolean; url: string; error?: string; customerId: string },
-      UnPriceCustomerError | FetchError
-    >
-  > {
-    const { input, projectId, planVersion, customerId, pageId, successUrl, cancelUrl } = context
-    const { email, name, config, timezone, metadata, externalId } = input
-
-    const currency = input.defaultCurrency ?? planVersion.project.defaultCurrency
-
-    const customerMetadata = externalId ? { ...metadata, externalId } : metadata
-
-    try {
-      await this.db.transaction(async (trx) => {
-        const newCustomer = await trx
-          .insert(customers)
-          .values({
-            id: customerId,
-            name: name ?? email,
-            email: email,
-            projectId: projectId,
-            defaultCurrency: currency,
-            timezone: timezone ?? planVersion.project.timezone,
-            active: true,
-            externalId: externalId,
-            metadata: customerMetadata,
-          })
-          .returning()
-          .then((data) => data[0])
-
-        if (!newCustomer?.id) {
-          return Err(
-            new UnPriceCustomerError({
-              code: "CUSTOMER_NOT_CREATED",
-              message: "Error creating customer",
-            })
-          )
-        }
-
-        const subscriptionService = new SubscriptionService({
-          logger: this.logger,
-          analytics: this.analytics,
-          waitUntil: this.waitUntil,
-          cache: this.cache,
-          metrics: this.metrics,
-          db: this.db,
-        })
-
-        const { err, val: newSubscription } = await subscriptionService.createSubscription({
-          input: {
-            customerId: newCustomer.id,
-            projectId: projectId,
-            timezone: timezone ?? planVersion.project.timezone,
-          },
-          projectId: projectId,
-          db: trx,
-        })
-
-        if (err) {
-          this.logger.set({ error: toErrorContext(err) })
-          this.logger.error("Error creating subscription", {
-            error: err.message,
-          })
-
-          trx.rollback()
-          throw err
-        }
-
-        const phaseTimestamp = Date.now()
-
-        // create the phase
-        const { err: createPhaseErr, val: newPhase } = await subscriptionService.createPhase({
-          input: {
-            planVersionId: planVersion.id,
-            startAt: phaseTimestamp,
-            config: config,
-            paymentMethodRequired: planVersion.paymentMethodRequired,
-            customerId: newCustomer.id,
-            subscriptionId: newSubscription.id,
-          },
-          projectId: projectId,
-          db: trx,
-          now: phaseTimestamp,
-        })
-
-        if (createPhaseErr) {
-          this.logger.set({ error: toErrorContext(createPhaseErr) })
-          trx.rollback()
-
-          return Err(
-            new UnPriceCustomerError({
-              code: "PHASE_NOT_CREATED",
-              message: "Error creating phase",
-            })
-          )
-        }
-
-        this.logger.set({
-          customers: {
-            customer_id: customerId,
-            subscription_id: newSubscription?.id ?? "",
-            subscription_phase_id: newPhase?.id ?? "",
-          },
-        })
-
-        return { newCustomer, newSubscription }
-      })
-
-      // send event to analytics for tracking conversions
-      this.waitUntil(
-        this.analytics.ingestEvents({
-          action: "signup",
-          version: "1",
-          session_id: input.sessionId ?? "",
-          project_id: projectId,
-          timestamp: new Date().toISOString(),
-          payload: {
-            customer_id: customerId,
-            plan_version_id: planVersion.id,
-            page_id: pageId,
-            status: "signup_success",
-          },
-        })
-      )
-
-      return Ok({
-        success: true,
-        url: successUrl,
-        customerId: customerId,
-      })
-    } catch (error) {
-      if (isExternalIdConflictError(error)) {
-        return Err(
-          new UnPriceCustomerError({
-            code: "CUSTOMER_EXTERNAL_ID_CONFLICT",
-            message: "External customer id already exists for this project",
-          })
-        )
-      }
-
-      const err = error as Error
-
-      return Ok({
-        success: false,
-        url: cancelUrl,
-        error: `Error while signing up: ${err.message}`,
-        customerId: "",
-      })
-    }
   }
 
   // TODO: to implement

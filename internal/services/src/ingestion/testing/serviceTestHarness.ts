@@ -1,19 +1,22 @@
 import type { MeterConfig, OverageStrategy } from "@unprice/db/validators"
 import { Err, Ok } from "@unprice/error"
-import type { AppLogger } from "@unprice/observability"
-import type { CustomerService } from "@unprice/services/customers"
+import type { Logger } from "@unprice/logs"
+import { vi } from "vitest"
+import type { CustomerService } from "../../customers"
 import {
   type GrantsManager,
   type IngestionResolvedState,
   type ResolvedFeatureStateAtTimestamp,
   deriveMeterKey,
-} from "@unprice/services/entitlements"
-import { vi } from "vitest"
+} from "../../entitlements"
 import { IngestionQueueConsumer } from "../consumer"
 import type { IngestionQueueMessage } from "../message"
 import { IngestionService } from "../service"
 
 type LoggerStub = {
+  flush: ReturnType<typeof vi.fn>
+  info: ReturnType<typeof vi.fn>
+  set: ReturnType<typeof vi.fn>
   debug: ReturnType<typeof vi.fn>
   error: ReturnType<typeof vi.fn>
   warn: ReturnType<typeof vi.fn>
@@ -75,9 +78,11 @@ type HarnessOptions = {
   customer?: {
     projectId: string
   } | null
-  getEnforcementState?: ReturnType<typeof vi.fn<[EnforcementInput], Promise<EnforcementResult>>>
+  getEnforcementState?: ReturnType<
+    typeof vi.fn<(input: EnforcementInput) => Promise<EnforcementResult>>
+  >
   grants?: unknown[]
-  apply?: ReturnType<typeof vi.fn<[ApplyInput], Promise<ApplyResult>>>
+  apply?: ReturnType<typeof vi.fn<(input: ApplyInput) => Promise<ApplyResult>>>
   resolveFeatureStateError?: Error
   resolveIngestionStatesError?: Error
   resolvedFeatureState?: ResolvedFeatureStateAtTimestamp
@@ -97,8 +102,8 @@ export function createServiceHarness(options: HarnessOptions = {}) {
   const meterWindowsByKey = new Map<string, MeterWindow>()
   const logger = createLoggerStub()
   const send = options.send ?? vi.fn().mockResolvedValue(undefined)
-  const apply = vi.fn<[ApplyInput], Promise<ApplyResult>>()
-  const getEnforcementState = vi.fn<[EnforcementInput], Promise<EnforcementResult>>()
+  const apply = vi.fn<(input: ApplyInput) => Promise<ApplyResult>>()
+  const getEnforcementState = vi.fn<(input: EnforcementInput) => Promise<EnforcementResult>>()
 
   const getCustomer = vi
     .fn()
@@ -198,7 +203,7 @@ export function createServiceHarness(options: HarnessOptions = {}) {
   const service = new IngestionService({
     customerService: {
       getCustomer,
-    } as unknown as Pick<CustomerService, "getCustomer">,
+    } as unknown as CustomerService,
     entitlementWindowClient: {
       getEntitlementWindowStub,
     },
@@ -206,10 +211,7 @@ export function createServiceHarness(options: HarnessOptions = {}) {
       getGrantsForCustomer,
       resolveFeatureStateAtTimestamp,
       resolveIngestionStatesFromGrants,
-    } as unknown as Pick<
-      GrantsManager,
-      "getGrantsForCustomer" | "resolveFeatureStateAtTimestamp" | "resolveIngestionStatesFromGrants"
-    >,
+    } as unknown as GrantsManager,
     idempotencyClient: {
       getIdempotencyStub,
     },
@@ -440,7 +442,7 @@ export function createBooleanGrant(
       feature: {
         slug: params.featureSlug ?? "team_members",
       },
-      featureType: "boolean",
+      featureType: "flat",
       meterConfig: null,
     },
   }
@@ -554,10 +556,13 @@ export function createRawBatchMessage(body: unknown): {
   }
 }
 
-function createLoggerStub(): AppLogger & LoggerStub {
+function createLoggerStub(): Logger & LoggerStub {
   return {
+    flush: vi.fn().mockResolvedValue(undefined),
+    info: vi.fn(),
+    set: vi.fn(),
     debug: vi.fn(),
     error: vi.fn(),
     warn: vi.fn(),
-  } as unknown as AppLogger & LoggerStub
+  } as unknown as Logger & LoggerStub
 }
