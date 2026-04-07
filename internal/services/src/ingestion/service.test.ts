@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
+import { computePayloadHash, selectIngestionAuditShardIndex } from "./audit"
 import type { IngestionQueueBatch } from "./consumer"
 import {
   createBatchMessage,
@@ -11,7 +12,7 @@ import {
 } from "./testing/serviceTestHarness"
 
 vi.mock("@unprice/lakehouse", () => ({
-  getLakehouseSourceCurrentVersion: vi.fn(() => 1),
+  getLakehouseSourceCurrentVersion: vi.fn(() => 2),
   parseLakehouseEvent: vi.fn((_source: string, payload: unknown) => payload),
 }))
 
@@ -30,8 +31,7 @@ describe("IngestionService", () => {
     expect(malformed.ack).toHaveBeenCalledTimes(1)
     expect(malformed.retry).not.toHaveBeenCalled()
     expect(mocks.getCustomer).not.toHaveBeenCalled()
-    expect(mocks.begin).not.toHaveBeenCalled()
-    expect(mocks.send).not.toHaveBeenCalled()
+    expect(mocks.commit).not.toHaveBeenCalled()
     expect(mocks.logger.error).toHaveBeenCalledWith(
       "dropping malformed ingestion queue message",
       expect.objectContaining({
@@ -61,23 +61,17 @@ describe("IngestionService", () => {
     expect(duplicate.retry).not.toHaveBeenCalled()
     expect(mocks.getCustomer).toHaveBeenCalledTimes(1)
     expect(mocks.getGrantsForCustomer).toHaveBeenCalledTimes(1)
-    expect(mocks.getIdempotencyStub).toHaveBeenCalledTimes(1)
-    expect(mocks.begin).toHaveBeenCalledTimes(1)
-    expect(mocks.complete).toHaveBeenCalledTimes(1)
-    expect(mocks.abort).not.toHaveBeenCalled()
-    expect(mocks.send).toHaveBeenCalledTimes(1)
-    expect(mocks.send).toHaveBeenCalledWith([
+    expect(mocks.commit).toHaveBeenCalledWith([
       expect.objectContaining({
-        id: "evt_first",
-        idempotency_key: "idem_shared",
-        rejection_reason: "NO_MATCHING_ENTITLEMENT",
-        state: "rejected",
+        idempotencyKey: "idem_shared",
+        status: "rejected",
+        rejectionReason: "NO_MATCHING_ENTITLEMENT",
       }),
     ])
     expect(mocks.apply).not.toHaveBeenCalled()
   })
 
-  it("publishes a rejected audit event without claiming idempotency when the customer is missing", async () => {
+  it("commits a rejected audit entry when the customer is missing", async () => {
     const { consumer, mocks } = createServiceHarness({
       customer: null,
     })
@@ -91,22 +85,18 @@ describe("IngestionService", () => {
 
     expect(mocks.getCustomer).toHaveBeenCalledTimes(1)
     expect(mocks.getGrantsForCustomer).not.toHaveBeenCalled()
-    expect(mocks.begin).not.toHaveBeenCalled()
-    expect(mocks.complete).not.toHaveBeenCalled()
-    expect(mocks.abort).not.toHaveBeenCalled()
     expect(message.ack).toHaveBeenCalledTimes(1)
     expect(message.retry).not.toHaveBeenCalled()
-    expect(mocks.send).toHaveBeenCalledWith([
+    expect(mocks.commit).toHaveBeenCalledWith([
       expect.objectContaining({
-        id: "evt_missing_customer",
-        rejection_reason: "CUSTOMER_NOT_FOUND",
-        state: "rejected",
+        status: "rejected",
+        rejectionReason: "CUSTOMER_NOT_FOUND",
       }),
     ])
     expect(mocks.apply).not.toHaveBeenCalled()
   })
 
-  it("acks and audits NO_MATCHING_ENTITLEMENT when no usage entitlements are available", async () => {
+  it("acks and commits NO_MATCHING_ENTITLEMENT when no usage entitlements are available", async () => {
     const { consumer, mocks } = createServiceHarness({
       grants: [createBooleanGrant()],
     })
@@ -121,60 +111,12 @@ describe("IngestionService", () => {
     expect(message.ack).toHaveBeenCalledTimes(1)
     expect(message.retry).not.toHaveBeenCalled()
     expect(mocks.apply).not.toHaveBeenCalled()
-    expect(mocks.send).toHaveBeenCalledWith([
+    expect(mocks.commit).toHaveBeenCalledWith([
       expect.objectContaining({
-        id: "evt_no_usage_entitlement",
-        rejection_reason: "NO_MATCHING_ENTITLEMENT",
-        state: "rejected",
+        status: "rejected",
+        rejectionReason: "NO_MATCHING_ENTITLEMENT",
       }),
     ])
-  })
-
-  it("acks duplicate idempotency claims without publishing audit events", async () => {
-    const { consumer, mocks } = createServiceHarness({
-      beginResult: {
-        decision: "duplicate",
-      },
-    })
-    const message = createBatchMessage({
-      id: "evt_duplicate_claim",
-    })
-
-    await consumer.consumeBatch({
-      messages: [message.message],
-    } as unknown as IngestionQueueBatch)
-
-    expect(message.ack).toHaveBeenCalledTimes(1)
-    expect(message.retry).not.toHaveBeenCalled()
-    expect(mocks.send).not.toHaveBeenCalled()
-    expect(mocks.complete).not.toHaveBeenCalled()
-    expect(mocks.abort).not.toHaveBeenCalled()
-    expect(mocks.resolveIngestionStatesFromGrants).not.toHaveBeenCalled()
-  })
-
-  it("retries busy idempotency claims with the provided delay", async () => {
-    const { consumer, mocks } = createServiceHarness({
-      beginResult: {
-        decision: "busy",
-        retryAfterSeconds: 12,
-      },
-    })
-    const message = createBatchMessage({
-      id: "evt_busy_claim",
-    })
-
-    await consumer.consumeBatch({
-      messages: [message.message],
-    } as unknown as IngestionQueueBatch)
-
-    expect(message.ack).not.toHaveBeenCalled()
-    expect(message.retry).toHaveBeenCalledTimes(1)
-    expect(message.retry).toHaveBeenCalledWith({
-      delaySeconds: 12,
-    })
-    expect(mocks.send).not.toHaveBeenCalled()
-    expect(mocks.complete).not.toHaveBeenCalled()
-    expect(mocks.abort).not.toHaveBeenCalled()
   })
 
   it("routes processable events through a stable stream identity", async () => {
@@ -211,21 +153,22 @@ describe("IngestionService", () => {
         limit: 100,
       })
     )
-    expect(mocks.send).toHaveBeenCalledWith([
+    expect(mocks.commit).toHaveBeenCalledWith([
       expect.objectContaining({
-        id: "evt_stream",
-        state: "processed",
+        idempotencyKey: "idem_stream",
+        status: "processed",
       }),
     ])
   })
 
-  it("aborts claimed idempotency and retries when processing fails after the claim", async () => {
-    const send = vi.fn().mockRejectedValue(new Error("send failed"))
+  it("retries the entire group when processing fails with an unrecoverable error", async () => {
     const { consumer, mocks } = createServiceHarness({
-      grants: [createUsageGrant()],
-      resolvedStates: [createResolvedState()],
-      send,
+      customer: null,
     })
+
+    // Override getCustomer to throw instead of returning a result
+    mocks.getCustomer.mockRejectedValue(new Error("unrecoverable DB error"))
+
     const message = createBatchMessage({
       id: "evt_processing_failure",
     })
@@ -234,12 +177,8 @@ describe("IngestionService", () => {
       messages: [message.message],
     } as unknown as IngestionQueueBatch)
 
-    expect(mocks.begin).toHaveBeenCalledTimes(1)
-    expect(mocks.apply).toHaveBeenCalledTimes(1)
-    expect(mocks.complete).not.toHaveBeenCalled()
-    expect(mocks.abort).toHaveBeenCalledWith({
-      idempotencyKey: "idem_123",
-    })
+    expect(mocks.apply).not.toHaveBeenCalled()
+    expect(mocks.commit).not.toHaveBeenCalled()
     expect(message.ack).not.toHaveBeenCalled()
     expect(message.retry).toHaveBeenCalledTimes(1)
   })
@@ -262,16 +201,14 @@ describe("IngestionService", () => {
 
     expect(mocks.resolveIngestionStatesFromGrants).toHaveBeenCalledTimes(1)
     expect(mocks.apply).not.toHaveBeenCalled()
-    expect(mocks.complete).toHaveBeenCalledTimes(1)
-    expect(message.ack).toHaveBeenCalledTimes(1)
-    expect(message.retry).not.toHaveBeenCalled()
-    expect(mocks.send).toHaveBeenCalledWith([
+    expect(mocks.commit).toHaveBeenCalledWith([
       expect.objectContaining({
-        id: "evt_invalid_aggregation",
-        rejection_reason: "INVALID_AGGREGATION_PROPERTIES",
-        state: "rejected",
+        status: "rejected",
+        rejectionReason: "INVALID_AGGREGATION_PROPERTIES",
       }),
     ])
+    expect(message.ack).toHaveBeenCalledTimes(1)
+    expect(message.retry).not.toHaveBeenCalled()
   })
 
   it("accepts parseable numeric-string aggregation payloads and processes the event", async () => {
@@ -294,15 +231,13 @@ describe("IngestionService", () => {
 
     expect(mocks.resolveIngestionStatesFromGrants).toHaveBeenCalledTimes(1)
     expect(mocks.apply).toHaveBeenCalledTimes(1)
-    expect(mocks.complete).toHaveBeenCalledTimes(1)
-    expect(message.ack).toHaveBeenCalledTimes(1)
-    expect(message.retry).not.toHaveBeenCalled()
-    expect(mocks.send).toHaveBeenCalledWith([
+    expect(mocks.commit).toHaveBeenCalledWith([
       expect.objectContaining({
-        id: "evt_valid_numeric_string_aggregation",
-        state: "processed",
+        status: "processed",
       }),
     ])
+    expect(message.ack).toHaveBeenCalledTimes(1)
+    expect(message.retry).not.toHaveBeenCalled()
   })
 
   it("rejects ingestion with INVALID_ENTITLEMENT_CONFIGURATION when grant resolution fails", async () => {
@@ -324,11 +259,10 @@ describe("IngestionService", () => {
     expect(message.ack).toHaveBeenCalledTimes(1)
     expect(message.retry).not.toHaveBeenCalled()
     expect(mocks.apply).not.toHaveBeenCalled()
-    expect(mocks.send).toHaveBeenCalledWith([
+    expect(mocks.commit).toHaveBeenCalledWith([
       expect.objectContaining({
-        id: "evt_invalid_entitlement_config",
-        rejection_reason: "INVALID_ENTITLEMENT_CONFIGURATION",
-        state: "rejected",
+        status: "rejected",
+        rejectionReason: "INVALID_ENTITLEMENT_CONFIGURATION",
       }),
     ])
   })
@@ -364,11 +298,10 @@ describe("IngestionService", () => {
     expect(message.ack).toHaveBeenCalledTimes(1)
     expect(message.retry).not.toHaveBeenCalled()
     expect(mocks.apply).not.toHaveBeenCalled()
-    expect(mocks.send).toHaveBeenCalledWith([
+    expect(mocks.commit).toHaveBeenCalledWith([
       expect.objectContaining({
-        id: "evt_invalid_period_config",
-        rejection_reason: "INVALID_ENTITLEMENT_CONFIGURATION",
-        state: "rejected",
+        status: "rejected",
+        rejectionReason: "INVALID_ENTITLEMENT_CONFIGURATION",
       }),
     ])
     expect(mocks.logger.warn).toHaveBeenCalledWith(
@@ -388,7 +321,7 @@ describe("IngestionService", () => {
     )
   })
 
-  it("ingests a single feature synchronously without the outer idempotency claim", async () => {
+  it("ingests a single feature synchronously using waitUntil for the audit commit", async () => {
     const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
     const state = createResolvedState(timestamp)
     const { service, mocks } = createServiceHarness({
@@ -415,7 +348,6 @@ describe("IngestionService", () => {
       rejectionReason: undefined,
       state: "processed",
     })
-    expect(mocks.begin).not.toHaveBeenCalled()
     expect(mocks.resolveFeatureStateAtTimestamp).toHaveBeenCalledWith(
       expect.objectContaining({
         customerId: "cus_123",
@@ -430,12 +362,7 @@ describe("IngestionService", () => {
         featureSlug: "api_calls",
       })
     )
-    expect(mocks.send).toHaveBeenCalledWith([
-      expect.objectContaining({
-        id: "evt_sync_feature",
-        state: "processed",
-      }),
-    ])
+    expect(mocks.waitUntil).toHaveBeenCalledTimes(1)
   })
 
   it("enforces sync limits and verify reports only persisted usage", async () => {
@@ -522,6 +449,52 @@ describe("IngestionService", () => {
     )
   })
 
+  it("batches audit commits per touched shard instead of per event", async () => {
+    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+    const [firstKey, secondKey] = findIdempotencyKeysForSameAuditShard()
+    const { consumer, mocks } = createServiceHarness({
+      grants: [createUsageGrant()],
+      resolvedStates: [createResolvedState(timestamp)],
+    })
+    const firstMessage = createBatchMessage({
+      id: "evt_same_shard_1",
+      idempotencyKey: firstKey,
+      timestamp,
+      properties: { amount: 2 },
+    })
+    const secondMessage = createBatchMessage({
+      id: "evt_same_shard_2",
+      idempotencyKey: secondKey,
+      timestamp: timestamp + 1,
+      properties: { amount: 3 },
+    })
+
+    await consumer.consumeBatch({
+      messages: [firstMessage.message, secondMessage.message],
+    } as unknown as IngestionQueueBatch)
+
+    const expectedShardIndex = selectIngestionAuditShardIndex(firstKey)
+
+    expect(selectIngestionAuditShardIndex(secondKey)).toBe(expectedShardIndex)
+    expect(mocks.getAuditStub).toHaveBeenCalledTimes(1)
+    expect(mocks.getAuditStub).toHaveBeenCalledWith({
+      customerId: "cus_123",
+      projectId: "proj_123",
+      shardIndex: expectedShardIndex,
+    })
+    expect(mocks.commit).toHaveBeenCalledTimes(1)
+    expect(mocks.commit).toHaveBeenCalledWith([
+      expect.objectContaining({
+        idempotencyKey: firstKey,
+        status: "processed",
+      }),
+      expect.objectContaining({
+        idempotencyKey: secondKey,
+        status: "processed",
+      }),
+    ])
+  })
+
   it("rejects synchronous feature ingestion when the customer is missing", async () => {
     const { service, mocks } = createServiceHarness({
       customer: null,
@@ -541,15 +514,8 @@ describe("IngestionService", () => {
       rejectionReason: "CUSTOMER_NOT_FOUND",
       state: "rejected",
     })
-    expect(mocks.begin).not.toHaveBeenCalled()
     expect(mocks.apply).not.toHaveBeenCalled()
-    expect(mocks.send).toHaveBeenCalledWith([
-      expect.objectContaining({
-        id: "evt_sync_missing_customer",
-        rejection_reason: "CUSTOMER_NOT_FOUND",
-        state: "rejected",
-      }),
-    ])
+    expect(mocks.waitUntil).toHaveBeenCalledTimes(1)
   })
 
   it("returns an active non-usage feature without meter state", async () => {
@@ -773,6 +739,36 @@ describe("IngestionService", () => {
     expect(maxFeature).toEqual(expect.objectContaining({ status: "usage", usage: 11 }))
     expect(latestFeature).toEqual(expect.objectContaining({ status: "usage", usage: 9 }))
     expect(sumTextFeature).toEqual(expect.objectContaining({ status: "usage", usage: 4.5 }))
+    expect(mocks.getCustomer).toHaveBeenCalledTimes(2)
+    expect(mocks.getGrantsForCustomer).toHaveBeenCalledTimes(2)
+  })
+
+  it("reloads grant context when verify crosses the in-memory cache bucket", async () => {
+    const baseTimestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+    const state = createResolvedState(baseTimestamp)
+    const { service, mocks } = createServiceHarness({
+      grants: [createUsageGrant()],
+      resolvedFeatureStatesBySlug: mapFeatureStatesBySlug([state]),
+      resolvedStates: [state],
+      now: () => baseTimestamp,
+    })
+
+    await service.verifyFeatureStatus({
+      customerId: "cus_123",
+      featureSlug: "api_calls",
+      projectId: "proj_123",
+      timestamp: baseTimestamp,
+    })
+
+    await service.verifyFeatureStatus({
+      customerId: "cus_123",
+      featureSlug: "api_calls",
+      projectId: "proj_123",
+      timestamp: baseTimestamp + 60_000,
+    })
+
+    expect(mocks.getCustomer).toHaveBeenCalledTimes(2)
+    expect(mocks.getGrantsForCustomer).toHaveBeenCalledTimes(2)
   })
 
   it("keeps async ingestion non-blocking when usage exceeds limits and verify reports limit reached", async () => {
@@ -813,10 +809,9 @@ describe("IngestionService", () => {
 
     expect(message.ack).toHaveBeenCalledTimes(1)
     expect(message.retry).not.toHaveBeenCalled()
-    expect(mocks.send).toHaveBeenCalledWith([
+    expect(mocks.commit).toHaveBeenCalledWith([
       expect.objectContaining({
-        id: "evt_async_limit",
-        state: "processed",
+        status: "processed",
       }),
     ])
     expect(verifyResult).toEqual(
@@ -966,11 +961,10 @@ describe("IngestionService", () => {
       expect(message.ack).toHaveBeenCalledTimes(1)
       expect(message.retry).not.toHaveBeenCalled()
       expect(mocks.apply).not.toHaveBeenCalled()
-      expect(mocks.send).toHaveBeenCalledWith([
+      expect(mocks.commit).toHaveBeenCalledWith([
         expect.objectContaining({
-          id: `evt_invalid_${scenario.aggregationMethod}`,
-          rejection_reason: "INVALID_AGGREGATION_PROPERTIES",
-          state: "rejected",
+          status: "rejected",
+          rejectionReason: "INVALID_AGGREGATION_PROPERTIES",
         }),
       ])
     }
@@ -1061,7 +1055,7 @@ describe("IngestionService", () => {
         timestamp: baseTimestamp + 2_000,
       })
 
-      expect(mocks.send).toHaveBeenCalledTimes(scenario.events.length)
+      expect(mocks.commit).toHaveBeenCalled()
       expect(verifyResult).toEqual(
         expect.objectContaining({
           status: "usage",
@@ -1070,4 +1064,96 @@ describe("IngestionService", () => {
       )
     }
   )
+
+  it("builds the same payload hash when property order changes", async () => {
+    const message = createBatchMessage({
+      id: "evt_hash_order_a",
+      properties: {
+        b: 2,
+        nested: {
+          y: 2,
+          x: 1,
+        },
+        a: 1,
+      },
+    }).message.body
+    const reorderedMessage = createBatchMessage({
+      id: "evt_hash_order_b",
+      properties: {
+        a: 1,
+        nested: {
+          x: 1,
+          y: 2,
+        },
+        b: 2,
+      },
+    }).message.body
+
+    const [leftHash, rightHash] = await Promise.all([
+      computePayloadHash(message),
+      computePayloadHash(reorderedMessage),
+    ])
+
+    expect(leftHash).toBe(rightHash)
+  })
+
+  it("ignores generated event id differences when hashing the same event payload", async () => {
+    const baseMessage = createBatchMessage({
+      id: "evt_generated_a",
+      properties: {
+        amount: 5,
+      },
+    }).message.body
+    const retriedMessage = createBatchMessage({
+      id: "evt_generated_b",
+      properties: {
+        amount: 5,
+      },
+    }).message.body
+
+    const [leftHash, rightHash] = await Promise.all([
+      computePayloadHash(baseMessage),
+      computePayloadHash(retriedMessage),
+    ])
+
+    expect(leftHash).toBe(rightHash)
+  })
+
+  it("changes the payload hash when business payload changes", async () => {
+    const original = createBatchMessage({
+      properties: {
+        amount: 5,
+      },
+    }).message.body
+    const changed = createBatchMessage({
+      properties: {
+        amount: 6,
+      },
+    }).message.body
+
+    const [leftHash, rightHash] = await Promise.all([
+      computePayloadHash(original),
+      computePayloadHash(changed),
+    ])
+
+    expect(leftHash).not.toBe(rightHash)
+  })
 })
+
+function findIdempotencyKeysForSameAuditShard(): [string, string] {
+  const keysByShard = new Map<number, string>()
+
+  for (let index = 0; index < 1_000; index++) {
+    const candidate = `idem_same_shard_${index}`
+    const shardIndex = selectIngestionAuditShardIndex(candidate)
+    const existing = keysByShard.get(shardIndex)
+
+    if (existing) {
+      return [existing, candidate]
+    }
+
+    keysByShard.set(shardIndex, candidate)
+  }
+
+  throw new Error("Unable to find two idempotency keys on the same audit shard")
+}

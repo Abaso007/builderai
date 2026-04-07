@@ -13,20 +13,18 @@ import {
   type Fact,
   MAX_EVENT_AGE_MS,
   type MeterConfig,
-  type RawEvent,
   deriveMeterKey,
 } from "@unprice/services/entitlements"
 import { findLimitExceededFact } from "@unprice/services/entitlements"
 import { asc, eq, inArray, lt, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
+import { z } from "zod"
 import { apiDrain } from "~/observability"
 import { idempotencyKeysTable, meterFactsOutboxTable, meterStateTable } from "./db/schema"
 import { schema } from "./db/schema"
 import { DrizzleStorageAdapter } from "./drizzle-adapter"
 import migrations from "./drizzle/migrations"
-
-const VALID_OVERAGE_STRATEGIES = new Set<OverageStrategy>(["none", "last-call", "always"])
 
 class EntitlementWindowLimitExceededError extends Error {
   constructor(
@@ -42,22 +40,6 @@ class EntitlementWindowLimitExceededError extends Error {
   }
 }
 
-type ApplyInput = {
-  event: RawEvent
-  idempotencyKey: string
-  projectId: string
-  customerId: string
-  streamId: string
-  featureSlug: string
-  periodKey: string
-  meters: MeterConfig[]
-  limit?: number | null
-  overageStrategy?: OverageStrategy
-  enforceLimit: boolean
-  now: number
-  periodEndAt: number
-}
-
 type ApplyResult = {
   allowed: boolean
   deniedReason?: "LIMIT_EXCEEDED"
@@ -68,6 +50,36 @@ type OutboxBatchRow = {
   id: number
   payload: string
 }
+
+const rawEventSchema = z.object({
+  id: z.string(),
+  slug: z.string(),
+  timestamp: z.number(),
+  properties: z.record(z.unknown()),
+})
+
+const overageStrategySchema = z.enum(["none", "last-call", "always"] satisfies readonly [
+  OverageStrategy,
+  ...OverageStrategy[],
+])
+
+const applyInputSchema = z.object({
+  event: rawEventSchema,
+  idempotencyKey: z.string().min(1),
+  projectId: z.string().min(1),
+  customerId: z.string().min(1),
+  streamId: z.string().min(1),
+  featureSlug: z.string().min(1),
+  periodKey: z.string().min(1),
+  meters: z.array(z.custom<MeterConfig>()),
+  limit: z.number().finite().nullable().optional(),
+  overageStrategy: overageStrategySchema.optional(),
+  enforceLimit: z.boolean(),
+  now: z.number(),
+  periodEndAt: z.number().finite(),
+})
+
+type ApplyInput = z.infer<typeof applyInputSchema>
 
 export class EntitlementWindowDO extends DurableObject {
   private readonly analytics: Analytics
@@ -118,11 +130,11 @@ export class EntitlementWindowDO extends DurableObject {
     })
   }
 
-  public async apply(input: ApplyInput): Promise<ApplyResult> {
+  public async apply(rawInput: ApplyInput): Promise<ApplyResult> {
     await this.ready
 
-    // 1. validate the input
-    this.assertValidInput(input)
+    const input = this.parseApplyInput(rawInput)
+
     // The DO has a idempotency key per period to deduplicate
     const idempotencyKey = input.idempotencyKey
     const createdAt = Date.now()
@@ -373,42 +385,14 @@ export class EntitlementWindowDO extends DurableObject {
     this.isAlarmScheduled = true
   }
 
-  private assertValidInput(input: ApplyInput): void {
-    const hasValidLimit =
-      input.limit === undefined ||
-      input.limit === null ||
-      (typeof input.limit === "number" && Number.isFinite(input.limit))
+  private parseApplyInput(input: ApplyInput): ApplyInput {
+    const result = applyInputSchema.safeParse(input)
 
-    const hasValidOverageStrategy =
-      input.overageStrategy === undefined || VALID_OVERAGE_STRATEGIES.has(input.overageStrategy)
-    const hasValidIdempotencyKey =
-      typeof input.idempotencyKey === "string" && input.idempotencyKey.length > 0
-    const hasValidContext =
-      typeof input.projectId === "string" &&
-      input.projectId.length > 0 &&
-      typeof input.customerId === "string" &&
-      input.customerId.length > 0 &&
-      typeof input.streamId === "string" &&
-      input.streamId.length > 0 &&
-      typeof input.featureSlug === "string" &&
-      input.featureSlug.length > 0 &&
-      typeof input.periodKey === "string" &&
-      input.periodKey.length > 0
-    const hasValidPeriodEndAt =
-      typeof input.periodEndAt === "number" && !Number.isNaN(input.periodEndAt)
-
-    if (
-      !input ||
-      !input.event ||
-      !hasValidIdempotencyKey ||
-      !hasValidContext ||
-      !Array.isArray(input.meters) ||
-      !hasValidLimit ||
-      !hasValidOverageStrategy ||
-      !hasValidPeriodEndAt
-    ) {
+    if (!result.success) {
       throw new TypeError("Invalid apply payload")
     }
+
+    return result.data
   }
 
   private parseStoredResult(result: string): ApplyResult {

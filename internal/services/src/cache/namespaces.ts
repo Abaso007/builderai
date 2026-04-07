@@ -21,6 +21,7 @@ import type {
   Workspace,
   WorkspaceRole,
 } from "@unprice/db/validators"
+import type { PreparedCustomerGrantContext } from "../ingestion/preparation-service"
 
 export type ProjectFeatureCache = {
   project: {
@@ -68,6 +69,7 @@ export type CacheNamespaces = {
   getUsage: Usage | null
   getCurrentUsage: CurrentUsage | null
   getRelevantEntitlementsPerFeature: Entitlement[]
+  ingestionPreparedGrantContext: PreparedCustomerGrantContext
 }
 
 export type CacheNamespace = keyof CacheNamespaces

@@ -1,13 +1,21 @@
-import { parseLakehouseEvent } from "@unprice/lakehouse"
+import { FetchError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
+import type { Cache } from "../cache/service"
 import type { CustomerService } from "../customers"
 import { type GrantsManager, type IngestionResolvedState, MAX_EVENT_AGE_MS } from "../entitlements"
+import { cachedQuery } from "../utils/cached-query"
+import {
+  type IngestionAuditClient,
+  type IngestionAuditEntry,
+  computeCanonicalAuditId,
+  computePayloadHash,
+  selectIngestionAuditShardIndex,
+} from "./audit"
 import {
   EVENTS_SCHEMA_VERSION,
   type FeatureVerificationResult,
   type IngestionMessageProcessingResult,
   type IngestionOutcome,
-  type IngestionPipelineEvent,
   type IngestionRejectionReason,
   type IngestionSyncResult,
 } from "./interface"
@@ -31,11 +39,6 @@ type IngestionContext = {
   projectId: string
 }
 
-type ProcessMessageParams = {
-  context: IngestionContext
-  rejectionReason?: IngestionRejectionReason
-}
-
 type HandleMessageParams = {
   context: IngestionContext
   rejectionReason?: IngestionRejectionReason
@@ -54,43 +57,6 @@ type ApplyResolvedStateParams = {
   message: IngestionQueueMessage
   projectId: string
   state: IngestionResolvedState
-}
-
-type MessageLogContext = {
-  customerId: string
-  eventId: string
-  idempotencyKey: string
-  projectId: string
-}
-
-export type PipelineEventsQueue = {
-  send: (events: IngestionPipelineEvent[]) => Promise<void>
-}
-
-export type IngestionIdempotencyDecision =
-  | {
-      decision: "duplicate"
-    }
-  | {
-      decision: "busy"
-      retryAfterSeconds?: number
-    }
-  | {
-      decision: "process"
-    }
-
-export type IngestionIdempotencyController = {
-  abort: (params: { idempotencyKey: string }) => Promise<void>
-  begin: (params: { idempotencyKey: string; now: number }) => Promise<IngestionIdempotencyDecision>
-  complete: (params: { idempotencyKey: string; now: number; result: string }) => Promise<void>
-}
-
-export interface IdempotencyClient {
-  getIdempotencyStub(params: {
-    customerId: string
-    idempotencyKey: string
-    projectId: string
-  }): IngestionIdempotencyController
 }
 
 export type EntitlementWindowApplyInput = {
@@ -144,33 +110,48 @@ type EntitlementWindowApplyResult = {
 
 type Result<T, E> = { err: E; val?: undefined } | { err?: undefined; val: T }
 
+type MessageOutcome = {
+  message: IngestionQueueMessage
+  outcome: IngestionOutcome
+}
+
+type ShardedAuditEntry = {
+  entry: IngestionAuditEntry
+  shardIndex: number
+}
+
+const VERIFY_GRANT_CONTEXT_CACHE_BUCKET_MS = 60_000
+
 export class IngestionService {
   private readonly preparationService: IngestionPreparationService
   private readonly stateResolutionService: IngestionStateResolutionService
   private readonly customerService: CustomerService
   private readonly grantsManager: GrantsManager
   private readonly entitlementWindowClient: EntitlementWindowClient
-  private readonly idempotencyClient: IdempotencyClient
+  private readonly auditClient: IngestionAuditClient
+  private readonly cache: Pick<Cache, "ingestionPreparedGrantContext">
   private readonly logger: Logger
   private readonly now: () => number
-  private readonly pipelineEvents: PipelineEventsQueue
+  private readonly waitUntil: (promise: Promise<unknown>) => void
 
   constructor(opts: {
+    cache: Pick<Cache, "ingestionPreparedGrantContext">
     customerService: CustomerService
     entitlementWindowClient: EntitlementWindowClient
     grantsManager: GrantsManager
-    idempotencyClient: IdempotencyClient
+    auditClient: IngestionAuditClient
     logger: Logger
-    pipelineEvents: PipelineEventsQueue
     now?: () => number
+    waitUntil: (promise: Promise<unknown>) => void
   }) {
     this.customerService = opts.customerService
     this.entitlementWindowClient = opts.entitlementWindowClient
-    this.idempotencyClient = opts.idempotencyClient
+    this.auditClient = opts.auditClient
+    this.cache = opts.cache
     this.logger = opts.logger
     this.grantsManager = opts.grantsManager
-    this.pipelineEvents = opts.pipelineEvents
     this.now = opts.now ?? (() => Date.now())
+    this.waitUntil = opts.waitUntil
     this.preparationService = new IngestionPreparationService({
       customerService: this.customerService,
       grantsManager: this.grantsManager,
@@ -181,33 +162,13 @@ export class IngestionService {
     })
   }
 
-  // TODO: for EU countries we have to keep the stub in the EU namespace
-  // private getStub(
-  //   name: string,
-  //   locationHint?: DurableObjectLocationHint
-  // ): DurableObjectStub<DurableObjectUsagelimiter> {
-  //   // jurisdiction is only available in production
-  //   if (this.stats.isEUCountry && this.env.APP_ENV === "production") {
-  //     const euSubnamespace = this.namespace.jurisdiction("eu")
-  //     const euStub = euSubnamespace.get(euSubnamespace.idFromName(name), {
-  //       locationHint,
-  //     })
-
-  //     return euStub
-  //   }
-
-  //   return this.namespace.get(this.namespace.idFromName(name), {
-  //     locationHint,
-  //   })
-  // }
-
   public async ingestFeatureSync(params: {
     featureSlug: string
     message: IngestionQueueMessage
   }): Promise<IngestionSyncResult> {
     const { featureSlug, message } = params
     const { customerId, projectId } = message
-    const preparedContext = await this.prepareCustomerGrantContext({
+    const preparedContext = await this.preparationService.prepareCustomerGrantContext({
       customerId,
       projectId,
       startAt: Math.max(0, message.timestamp - MAX_EVENT_AGE_MS),
@@ -215,13 +176,17 @@ export class IngestionService {
     })
 
     if (preparedContext.rejectionReason === "CUSTOMER_NOT_FOUND") {
-      const outcome = await this.rejectMessage(message, preparedContext.rejectionReason)
+      const outcome: IngestionOutcome = {
+        state: "rejected",
+        rejectionReason: preparedContext.rejectionReason,
+      }
       this.logRejectedMessage({
         customerId,
         message,
         projectId,
         rejectionReason: outcome.rejectionReason,
       })
+      this.commitToAuditAsync(message, outcome)
 
       return this.toSyncResult({
         allowed: false,
@@ -268,7 +233,7 @@ export class IngestionService {
 
     const applyResult = await this.applyResolvedState({
       customerId,
-      enforceLimit: true, // throw if limit is hit since is sync check
+      enforceLimit: true,
       message,
       projectId,
       state: resolvedState,
@@ -293,9 +258,8 @@ export class IngestionService {
       })
     }
 
-    const outcome = await this.publishOutcome(message, {
-      state: "processed",
-    })
+    const outcome: IngestionOutcome = { state: "processed" }
+    this.commitToAuditAsync(message, outcome)
 
     return this.toSyncResult({
       allowed: true,
@@ -310,7 +274,7 @@ export class IngestionService {
     timestamp: number
   }): Promise<FeatureVerificationResult> {
     const { customerId, featureSlug, projectId, timestamp } = params
-    const preparedContext = await this.prepareCustomerGrantContext({
+    const preparedContext = await this.prepareCustomerGrantContextForVerify({
       customerId,
       projectId,
       startAt: Math.max(0, timestamp - MAX_EVENT_AGE_MS),
@@ -476,7 +440,6 @@ export class IngestionService {
     projectId: string
   }): Promise<IngestionMessageProcessingResult[]> {
     const { customerId, projectId } = params
-    // important to process them in the same order by timestamp
     const messages = [...params.messages].sort(sortIngestionMessages)
 
     try {
@@ -486,42 +449,22 @@ export class IngestionService {
         projectId,
       })
 
-      if (preparedGroup.rejectionReason === "CUSTOMER_NOT_FOUND") {
-        const results: IngestionMessageProcessingResult[] = []
-
-        for (const message of preparedGroup.messages) {
-          await this.rejectMessageWithoutIdempotency({
-            customerId,
-            message,
-            projectId,
-            rejectionReason: preparedGroup.rejectionReason,
-          })
-
-          results.push(this.ackMessage(message))
-        }
-
-        return results
-      }
-
-      // once we are sure the customer exists and there are grants that can resolve the event,
-      // then we can call the DO
-      const results: IngestionMessageProcessingResult[] = []
-
-      for (const message of preparedGroup.messages) {
-        results.push(
-          await this.processMessage({
-            context: {
+      const outcomes =
+        preparedGroup.rejectionReason === "CUSTOMER_NOT_FOUND"
+          ? this.buildCustomerNotFoundOutcomes(preparedGroup.messages, {
+              customerId,
+              projectId,
+              rejectionReason: preparedGroup.rejectionReason,
+            })
+          : await this.processPreparedMessages(preparedGroup.messages, {
               candidateGrants: preparedGroup.candidateGrants,
               customerId,
-              message,
               projectId,
-            },
-            rejectionReason: preparedGroup.rejectionReason,
-          })
-        )
-      }
+              rejectionReason: preparedGroup.rejectionReason,
+            })
 
-      return results
+      await this.commitOutcomesToAudit(projectId, customerId, outcomes)
+      return this.mapOutcomesToAckResults(outcomes)
     } catch (error) {
       this.logger.error("raw ingestion queue processing failed", {
         projectId,
@@ -533,103 +476,18 @@ export class IngestionService {
     }
   }
 
-  /**
-   * Process one queued event for the customer after the batch-level grant lookup.
-   */
-  private async processMessage(
-    params: ProcessMessageParams
-  ): Promise<IngestionMessageProcessingResult> {
-    const { context, rejectionReason } = params
-    const { customerId, message, projectId } = context
-    const now = this.now()
-    const idempotencyKey = message.idempotencyKey
-    const logContext: MessageLogContext = {
-      projectId,
-      customerId,
-      eventId: message.id,
-      idempotencyKey,
-    }
-
-    const idempotencyStub = this.idempotencyClient.getIdempotencyStub({
-      projectId,
-      customerId,
-      idempotencyKey,
-    })
-
-    let claimedIdempotency = false
-
-    try {
-      const idempotency = await idempotencyStub.begin({
-        idempotencyKey,
-        now,
-      })
-
-      if (idempotency.decision === "duplicate") {
-        this.logger.debug("duplicated event", {
-          event: message,
-        })
-        return this.ackMessage(message)
-      }
-
-      if (idempotency.decision === "busy") {
-        this.logger.debug("idempotency busy", {
-          event: message,
-        })
-        return this.retryMessage(message, idempotency.retryAfterSeconds)
-      }
-
-      claimedIdempotency = true
-
-      // if all those validations are good then lets process the message
-      const outcome = await this.handleMessage({
-        context,
-        rejectionReason,
-      })
-
-      if (outcome.state === "rejected") {
-        this.logRejectedMessage({
-          customerId,
-          message,
-          projectId,
-          rejectionReason: outcome.rejectionReason,
-        })
-      }
-
-      await idempotencyStub.complete({
-        idempotencyKey,
-        now: this.now(),
-        result: JSON.stringify(outcome),
-      })
-
-      return this.ackMessage(message)
-    } catch (error) {
-      this.logger.error("raw ingestion message processing failed", {
-        ...logContext,
-        error,
-      })
-
-      if (claimedIdempotency) {
-        await this.abortClaim(idempotencyStub, idempotencyKey, logContext)
-      }
-
-      return this.retryMessage(message)
-    }
-  }
-
   private async handleMessage(params: HandleMessageParams): Promise<IngestionOutcome> {
     const { context, rejectionReason } = params
     const { customerId, message, projectId } = context
 
-    // we validate the rejection here because we need to check every idempotency key no matter what
-    // double counting is the worse
     if (rejectionReason) {
-      return this.rejectMessage(message, rejectionReason)
+      return { state: "rejected", rejectionReason }
     }
 
     const processableStatesResult = await this.resolveProcessableStates(context)
 
     if (processableStatesResult.err) {
-      return this.rejectMessage(message, processableStatesResult.err)
+      return { state: "rejected", rejectionReason: processableStatesResult.err }
     }
 
     await this.applyResolvedStates({
@@ -639,9 +497,185 @@ export class IngestionService {
       projectId,
     })
 
-    return this.publishOutcome(message, {
-      state: "processed",
+    return { state: "processed" }
+  }
+
+  private buildCustomerNotFoundOutcomes(
+    messages: IngestionQueueMessage[],
+    params: {
+      customerId: string
+      projectId: string
+      rejectionReason: "CUSTOMER_NOT_FOUND"
+    }
+  ): MessageOutcome[] {
+    return messages.map((message) => {
+      const outcome: IngestionOutcome = {
+        state: "rejected",
+        rejectionReason: params.rejectionReason,
+      }
+
+      this.logRejectedMessage({
+        customerId: params.customerId,
+        message,
+        projectId: params.projectId,
+        rejectionReason: outcome.rejectionReason,
+      })
+
+      return { message, outcome }
     })
+  }
+
+  private async processPreparedMessages(
+    messages: IngestionQueueMessage[],
+    params: {
+      candidateGrants: IngestionCandidateGrants
+      customerId: string
+      projectId: string
+      rejectionReason?: IngestionRejectionReason
+    }
+  ): Promise<MessageOutcome[]> {
+    const outcomes: MessageOutcome[] = []
+
+    for (const message of messages) {
+      const outcome = await this.handleMessage({
+        context: {
+          candidateGrants: params.candidateGrants,
+          customerId: params.customerId,
+          message,
+          projectId: params.projectId,
+        },
+        rejectionReason: params.rejectionReason,
+      })
+
+      if (outcome.state === "rejected") {
+        this.logRejectedMessage({
+          customerId: params.customerId,
+          message,
+          projectId: params.projectId,
+          rejectionReason: outcome.rejectionReason,
+        })
+      }
+
+      outcomes.push({ message, outcome })
+    }
+
+    return outcomes
+  }
+
+  private async commitOutcomesToAudit(
+    projectId: string,
+    customerId: string,
+    outcomes: MessageOutcome[]
+  ): Promise<void> {
+    const auditEntries = await this.buildAuditEntries(projectId, customerId, outcomes)
+    const auditEntriesByShard = this.bucketAuditEntriesByShard(auditEntries)
+    await this.flushAuditEntries(projectId, customerId, auditEntriesByShard)
+  }
+
+  private async buildAuditEntries(
+    projectId: string,
+    customerId: string,
+    outcomes: MessageOutcome[]
+  ): Promise<ShardedAuditEntry[]> {
+    return Promise.all(
+      outcomes.map(async ({ message, outcome }) => ({
+        entry: await this.buildAuditEntry(projectId, customerId, message, outcome),
+        shardIndex: selectIngestionAuditShardIndex(message.idempotencyKey),
+      }))
+    )
+  }
+
+  private async buildAuditEntry(
+    projectId: string,
+    customerId: string,
+    message: IngestionQueueMessage,
+    outcome: IngestionOutcome
+  ): Promise<IngestionAuditEntry> {
+    const handledAt = this.now()
+    const [canonicalAuditId, payloadHash] = await Promise.all([
+      computeCanonicalAuditId(projectId, customerId, message.idempotencyKey),
+      computePayloadHash(message),
+    ])
+
+    return {
+      idempotencyKey: message.idempotencyKey,
+      canonicalAuditId,
+      payloadHash,
+      status: outcome.state,
+      rejectionReason: outcome.rejectionReason,
+      resultJson: JSON.stringify(outcome),
+      auditPayloadJson: JSON.stringify(
+        buildAuditPayload(message, outcome, canonicalAuditId, payloadHash, handledAt)
+      ),
+      firstSeenAt: message.receivedAt,
+    }
+  }
+
+  private bucketAuditEntriesByShard(
+    auditEntries: ShardedAuditEntry[]
+  ): Map<number, IngestionAuditEntry[]> {
+    const auditEntriesByShard = new Map<number, IngestionAuditEntry[]>()
+
+    for (const { entry, shardIndex } of auditEntries) {
+      const existingEntries = auditEntriesByShard.get(shardIndex)
+
+      if (existingEntries) {
+        existingEntries.push(entry)
+        continue
+      }
+
+      auditEntriesByShard.set(shardIndex, [entry])
+    }
+
+    return auditEntriesByShard
+  }
+
+  private async flushAuditEntries(
+    projectId: string,
+    customerId: string,
+    auditEntriesByShard: Map<number, IngestionAuditEntry[]>
+  ): Promise<void> {
+    // Cloudflare Queues is at-least-once. Duplicate deliveries are expected here and
+    // tolerated because EntitlementWindowDO is the sole correctness boundary for usage.
+    const commitPromises = [...auditEntriesByShard.entries()].map(([shardIndex, entries]) =>
+      this.auditClient
+        .getAuditStub({
+          projectId,
+          customerId,
+          shardIndex,
+        })
+        .commit(entries)
+        .then((result) => {
+          if (result.conflicts > 0) {
+            this.logger.warn("audit payload conflicts detected", {
+              projectId,
+              customerId,
+              conflicts: result.conflicts,
+              shardIndex,
+            })
+          }
+        })
+        .catch((error) => {
+          this.logger.error("audit commit failed", {
+            projectId,
+            customerId,
+            shardIndex,
+            error,
+          })
+        })
+    )
+
+    await Promise.all(commitPromises)
+  }
+
+  private commitToAuditAsync(message: IngestionQueueMessage, outcome: IngestionOutcome): void {
+    this.waitUntil(
+      this.commitOutcomesToAudit(message.projectId, message.customerId, [{ message, outcome }])
+    )
+  }
+
+  private mapOutcomesToAckResults(outcomes: MessageOutcome[]): IngestionMessageProcessingResult[] {
+    return outcomes.map((outcome) => this.ackMessage(outcome.message))
   }
 
   private async resolveSyncFeatureState(params: {
@@ -662,13 +696,46 @@ export class IngestionService {
     return this.preparationService.prepareCustomerMessageGroup(params)
   }
 
-  private async prepareCustomerGrantContext(params: {
+  private async prepareCustomerGrantContextForVerify(params: {
     customerId: string
     endAt: number
     projectId: string
     startAt: number
   }): Promise<PreparedCustomerGrantContext> {
-    return this.preparationService.prepareCustomerGrantContext(params)
+    const bucket = Math.floor(params.endAt / VERIFY_GRANT_CONTEXT_CACHE_BUCKET_MS)
+    const cacheKey = `${params.projectId}:${params.customerId}:${bucket}`
+    const preparedContext = await cachedQuery({
+      cache: this.cache.ingestionPreparedGrantContext,
+      cacheKey,
+      load: () => this.preparationService.prepareCustomerGrantContext(params),
+      wrapLoadError: (error) =>
+        new FetchError({
+          message: `unable to prepare cached grant context for verify - ${error.message}`,
+          retry: false,
+          context: {
+            customerId: params.customerId,
+            projectId: params.projectId,
+            method: "prepareCustomerGrantContextForVerify",
+            url: "",
+            error: error.message,
+          },
+        }),
+    })
+
+    if (preparedContext.err) {
+      this.logger.warn(
+        "failed to use cached grant context for verify, falling back to direct load",
+        {
+          customerId: params.customerId,
+          projectId: params.projectId,
+          error: preparedContext.err.message,
+        }
+      )
+
+      return this.preparationService.prepareCustomerGrantContext(params)
+    }
+
+    return preparedContext.val
   }
 
   private ackMessage(message: IngestionQueueMessage): IngestionMessageProcessingResult {
@@ -691,58 +758,6 @@ export class IngestionService {
         retryAfterSeconds,
       },
     }
-  }
-
-  private async abortClaim(
-    idempotencyStub: IngestionIdempotencyController,
-    idempotencyKey: string,
-    logContext: MessageLogContext
-  ): Promise<void> {
-    await idempotencyStub.abort({ idempotencyKey }).catch((abortError) => {
-      this.logger.error("failed to release ingestion idempotency claim", {
-        ...logContext,
-        error: abortError,
-      })
-    })
-  }
-
-  private async publishOutcome(
-    message: IngestionQueueMessage,
-    outcome: IngestionOutcome
-  ): Promise<IngestionOutcome> {
-    await this.publishPipelineEvent({
-      handledAt: this.now(),
-      message,
-      outcome,
-    })
-
-    return outcome
-  }
-
-  private async rejectMessage(
-    message: IngestionQueueMessage,
-    rejectionReason: IngestionRejectionReason
-  ): Promise<IngestionOutcome> {
-    return this.publishOutcome(message, {
-      state: "rejected",
-      rejectionReason,
-    })
-  }
-
-  private async rejectMessageWithoutIdempotency(params: {
-    customerId: string
-    message: IngestionQueueMessage
-    projectId: string
-    rejectionReason: "CUSTOMER_NOT_FOUND"
-  }): Promise<void> {
-    const { customerId, message, projectId, rejectionReason } = params
-    const outcome = await this.rejectMessage(message, rejectionReason)
-    this.logRejectedMessage({
-      customerId,
-      message,
-      projectId,
-      rejectionReason: outcome.rejectionReason,
-    })
   }
 
   private async resolveProcessableStates(
@@ -770,7 +785,6 @@ export class IngestionService {
   ): Promise<EntitlementWindowApplyResult | null> {
     const { customerId, enforceLimit, message, projectId, state } = params
 
-    // This keeps counters stable across mid-cycle grant changes.
     const periodKey = computeResolvedStatePeriodKey(state, message.timestamp)
 
     if (!periodKey) {
@@ -792,7 +806,6 @@ export class IngestionService {
       streamId: state.streamId,
     })
 
-    // call the DO and apply the usage
     return stub.apply({
       event: {
         id: message.id,
@@ -810,7 +823,7 @@ export class IngestionService {
       limit: state.limit,
       overageStrategy: state.overageStrategy,
       enforceLimit,
-      now: message.receivedAt, // we avoid clock skews
+      now: message.receivedAt,
       periodEndAt,
     })
   }
@@ -840,13 +853,14 @@ export class IngestionService {
     rejectionReason: IngestionRejectionReason
   }): Promise<IngestionSyncResult> {
     const { customerId, message, messageText, projectId, rejectionReason } = params
-    const outcome = await this.rejectMessage(message, rejectionReason)
+    const outcome: IngestionOutcome = { state: "rejected", rejectionReason }
     this.logRejectedMessage({
       customerId,
       message,
       projectId,
       rejectionReason: outcome.rejectionReason,
     })
+    this.commitToAuditAsync(message, outcome)
 
     return this.toSyncResult({
       allowed: false,
@@ -868,30 +882,32 @@ export class IngestionService {
       state: outcome.state,
     }
   }
+}
 
-  private async publishPipelineEvent(params: {
-    handledAt: number
-    message: IngestionQueueMessage
-    outcome: IngestionOutcome
-  }): Promise<void> {
-    const pipelineEvent = parseLakehouseEvent("events", {
-      event_date: toEventDate(params.message.timestamp),
-      schema_version: EVENTS_SCHEMA_VERSION,
-      id: params.message.id,
-      project_id: params.message.projectId,
-      customer_id: params.message.customerId,
-      request_id: params.message.requestId,
-      idempotency_key: params.message.idempotencyKey,
-      slug: params.message.slug,
-      timestamp: params.message.timestamp,
-      received_at: params.message.receivedAt,
-      handled_at: params.handledAt,
-      state: params.outcome.state,
-      rejection_reason: params.outcome.rejectionReason,
-      properties: params.message.properties,
-    })
-
-    await this.pipelineEvents.send([pipelineEvent])
+function buildAuditPayload(
+  message: IngestionQueueMessage,
+  outcome: IngestionOutcome,
+  canonicalAuditId: string,
+  payloadHash: string,
+  handledAt: number
+): Record<string, unknown> {
+  return {
+    event_date: toEventDate(message.timestamp),
+    schema_version: EVENTS_SCHEMA_VERSION,
+    id: message.id,
+    project_id: message.projectId,
+    customer_id: message.customerId,
+    request_id: message.requestId,
+    idempotency_key: message.idempotencyKey,
+    slug: message.slug,
+    timestamp: message.timestamp,
+    received_at: message.receivedAt,
+    handled_at: handledAt,
+    state: outcome.state,
+    rejection_reason: outcome.rejectionReason,
+    properties: message.properties,
+    canonical_audit_id: canonicalAuditId,
+    payload_hash: payloadHash,
   }
 }
 

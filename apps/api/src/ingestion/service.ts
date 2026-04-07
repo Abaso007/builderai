@@ -1,4 +1,5 @@
 import { type AppLogger, createStandaloneRequestLogger } from "@unprice/observability"
+import type { Cache } from "@unprice/services/cache"
 import type { CustomerService } from "@unprice/services/customers"
 import type { GrantsManager } from "@unprice/services/entitlements"
 import {
@@ -7,28 +8,32 @@ import {
   IngestionService,
 } from "@unprice/services/ingestion"
 import type { Env } from "~/env"
-import { CloudflareEntitlementWindowClient, CloudflareIdempotencyClient } from "./clients"
+import { CloudflareAuditClient } from "./audit-client"
+import { CloudflareEntitlementWindowClient } from "./entitlement-clients"
 import { createQueueServices } from "./queue"
 
 export { IngestionService } from "@unprice/services/ingestion"
 
 type CreateIngestionServiceParams = {
+  cache: Pick<Cache, "ingestionPreparedGrantContext">
   customerService: CustomerService
-  env: Pick<Env, "APP_ENV" | "entitlementwindow" | "ingestionidempotency" | "PIPELINE_EVENTS">
+  env: Pick<Env, "APP_ENV" | "entitlementwindow" | "ingestionaudit">
   grantsManager: GrantsManager
   logger: AppLogger
   now?: () => number
+  waitUntil: (promise: Promise<unknown>) => void
 }
 
 export function createIngestionService(params: CreateIngestionServiceParams): IngestionService {
   return new IngestionService({
+    cache: params.cache,
     customerService: params.customerService,
     entitlementWindowClient: new CloudflareEntitlementWindowClient(params.env),
     grantsManager: params.grantsManager,
-    idempotencyClient: new CloudflareIdempotencyClient(params.env),
+    auditClient: new CloudflareAuditClient(params.env),
     logger: params.logger,
-    pipelineEvents: params.env.PIPELINE_EVENTS,
     now: params.now,
+    waitUntil: params.waitUntil,
   })
 }
 
@@ -62,10 +67,12 @@ export async function consumeIngestionBatch(
   })
 
   const service = createIngestionService({
+    cache: services.cache,
     customerService: services.customers,
     grantsManager: services.grantsManager,
     logger,
     env,
+    waitUntil: executionCtx.waitUntil.bind(executionCtx),
   })
 
   const consumer = new IngestionQueueConsumer({

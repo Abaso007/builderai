@@ -106,8 +106,8 @@
             "class_name": "EntitlementWindowDO"
           },
           {
-            "name": "ingestionidempotency",
-            "class_name": "IngestionIdempotencyDO"
+            "name": "ingestionaudit",
+            "class_name": "IngestionAuditDO"
           }
         ]
       },
@@ -122,7 +122,7 @@
         },
         {
           "tag": "v4",
-          "new_sqlite_classes": ["IngestionIdempotencyDO"]
+          "new_sqlite_classes": ["IngestionAuditDO"]
         }
       ]
     },
@@ -225,8 +225,8 @@
             "class_name": "EntitlementWindowDO"
           },
           {
-            "name": "ingestionidempotency",
-            "class_name": "IngestionIdempotencyDO"
+            "name": "ingestionaudit",
+            "class_name": "IngestionAuditDO"
           }
         ]
       },
@@ -241,7 +241,7 @@
         },
         {
           "tag": "v4",
-          "new_sqlite_classes": ["IngestionIdempotencyDO"]
+          "new_sqlite_classes": ["IngestionAuditDO"]
         }
       ]
     },
@@ -330,8 +330,8 @@
             "class_name": "EntitlementWindowDO"
           },
           {
-            "name": "ingestionidempotency",
-            "class_name": "IngestionIdempotencyDO"
+            "name": "ingestionaudit",
+            "class_name": "IngestionAuditDO"
           }
         ]
       },
@@ -352,7 +352,7 @@
         },
         {
           "tag": "v4",
-          "new_sqlite_classes": ["IngestionIdempotencyDO"]
+          "new_sqlite_classes": ["IngestionAuditDO"]
         }
       ]
     }

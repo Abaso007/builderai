@@ -13,8 +13,8 @@ describe("lakehouse events registry", () => {
 
     expect(schema.source).toBe("events")
     expect(schema.firstVersion).toBe(1)
-    expect(schema.currentVersion).toBe(1)
-    expect(getLakehouseSourceCurrentVersion("events")).toBe(1)
+    expect(schema.currentVersion).toBe(2)
+    expect(getLakehouseSourceCurrentVersion("events")).toBe(2)
     expect(schema.fields.some((field) => field.name === "schema_version" && field.required)).toBe(
       true
     )

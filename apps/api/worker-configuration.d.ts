@@ -34,7 +34,7 @@ declare namespace Cloudflare {
 		UNPRICE_API_URL: string;
 		projectdo: DurableObjectNamespace<import("./src/index").DurableObjectProject>;
 		entitlementwindow: DurableObjectNamespace<import("./src/index").EntitlementWindowDO>;
-		ingestionidempotency: DurableObjectNamespace<import("./src/index").IngestionIdempotencyDO>;
+		ingestionaudit: DurableObjectNamespace<import("./src/index").IngestionAuditDO>;
 		RL_FREE_1000_60s: RateLimit;
 		RL_FREE_6000_60s: RateLimit;
 		PIPELINE_EVENTS: import("cloudflare:pipelines").Pipeline<import("cloudflare:pipelines").PipelineRecord>;
@@ -68,7 +68,7 @@ declare namespace Cloudflare {
 		UNPRICE_API_URL: string;
 		projectdo: DurableObjectNamespace<import("./src/index").DurableObjectProject>;
 		entitlementwindow: DurableObjectNamespace<import("./src/index").EntitlementWindowDO>;
-		ingestionidempotency: DurableObjectNamespace<import("./src/index").IngestionIdempotencyDO>;
+		ingestionaudit: DurableObjectNamespace<import("./src/index").IngestionAuditDO>;
 		RL_FREE_1000_60s: RateLimit;
 		RL_FREE_6000_60s: RateLimit;
 		PIPELINE_EVENTS: import("cloudflare:pipelines").Pipeline<import("cloudflare:pipelines").PipelineRecord>;
@@ -102,7 +102,7 @@ declare namespace Cloudflare {
 		UNPRICE_API_URL: string;
 		projectdo: DurableObjectNamespace<import("./src/index").DurableObjectProject>;
 		entitlementwindow: DurableObjectNamespace<import("./src/index").EntitlementWindowDO>;
-		ingestionidempotency: DurableObjectNamespace<import("./src/index").IngestionIdempotencyDO>;
+		ingestionaudit: DurableObjectNamespace<import("./src/index").IngestionAuditDO>;
 		RL_FREE_1000_60s: RateLimit;
 		RL_FREE_6000_60s: RateLimit;
 		PIPELINE_EVENTS: import("cloudflare:pipelines").Pipeline<import("cloudflare:pipelines").PipelineRecord>;
@@ -136,7 +136,7 @@ declare namespace Cloudflare {
 		LAKEHOUSE_FILE_PLAN_BASE_URL?: "https://lakehouse.unprice.dev";
 		projectdo?: DurableObjectNamespace<import("./src/index").DurableObjectProject>;
 		entitlementwindow?: DurableObjectNamespace<import("./src/index").EntitlementWindowDO>;
-		ingestionidempotency?: DurableObjectNamespace<import("./src/index").IngestionIdempotencyDO>;
+		ingestionaudit?: DurableObjectNamespace<import("./src/index").IngestionAuditDO>;
 		RL_FREE_1000_60s?: RateLimit;
 		RL_FREE_6000_60s?: RateLimit;
 		PIPELINE_EVENTS?: import("cloudflare:pipelines").Pipeline<import("cloudflare:pipelines").PipelineRecord>;

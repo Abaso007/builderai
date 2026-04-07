@@ -183,10 +183,12 @@ export function init(): MiddlewareHandler<HonoEnv> {
     })
 
     const ingestion = createIngestionService({
+      cache,
       customerService: svcCtx.customers,
       grantsManager: svcCtx.grantsManager,
       logger,
       env: c.env,
+      waitUntil,
     })
 
     c.set("cache", cache)

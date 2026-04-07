@@ -6,7 +6,7 @@ import { env as envObservability } from "@unprice/observability/env"
 import { env as envServices } from "@unprice/services/env"
 import { z } from "zod"
 import type { EntitlementWindowDO } from "~/ingestion/EntitlementWindowDO"
-import type { IngestionIdempotencyDO } from "~/ingestion/IngestionIdempotencyDO"
+import type { IngestionAuditDO } from "~/ingestion/IngestionAuditDO"
 import type { DurableObjectProject } from "./project/do"
 
 export const cloudflareRatelimiter = z.custom<{
@@ -54,7 +54,7 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       entitlementwindow: z.custom<DurableObjectNamespace<EntitlementWindowDO>>(
         (ns) => typeof ns === "object"
       ),
-      ingestionidempotency: z.custom<DurableObjectNamespace<IngestionIdempotencyDO>>(
+      ingestionaudit: z.custom<DurableObjectNamespace<IngestionAuditDO>>(
         (ns) => typeof ns === "object"
       ),
       RL_FREE_1000_60s: cloudflareRatelimiter,

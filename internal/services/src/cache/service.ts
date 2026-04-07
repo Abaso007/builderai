@@ -162,6 +162,11 @@ export class CacheService {
       >(this.context, {
         ...defaultOpts,
       }),
+      ingestionPreparedGrantContext: new Namespace<
+        CacheNamespaces["ingestionPreparedGrantContext"]
+      >(this.context, {
+        ...defaultOpts,
+      }),
     })
 
     this.isInitialized = true

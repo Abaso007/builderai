@@ -1,28 +1,30 @@
 import type { AppLogger } from "@unprice/observability"
+import type { Cache } from "@unprice/services/cache"
 import type { CustomerService } from "@unprice/services/customers"
 import type { GrantsManager } from "@unprice/services/entitlements"
 import { describe, expect, it, vi } from "vitest"
-import { CloudflareEntitlementWindowClient, CloudflareIdempotencyClient } from "./clients"
+import { CloudflareAuditClient } from "./audit-client"
+import { CloudflareEntitlementWindowClient } from "./entitlement-clients"
 import { createIngestionService } from "./service"
 
 describe("createIngestionService", () => {
   it("builds the ingestion service with shared cloudflare clients", () => {
-    const pipelineEvents = {
-      send: vi.fn(),
-    }
-
     const env = {
       APP_ENV: "development",
       entitlementwindow: {
         getByName: vi.fn(),
       },
-      ingestionidempotency: {
+      ingestionaudit: {
         getByName: vi.fn(),
       },
-      PIPELINE_EVENTS: pipelineEvents,
     }
 
     const service = createIngestionService({
+      cache: {
+        ingestionPreparedGrantContext: {
+          swr: vi.fn(),
+        },
+      } as unknown as Pick<Cache, "ingestionPreparedGrantContext">,
       customerService: {} as CustomerService,
       grantsManager: {} as GrantsManager,
       logger: {
@@ -34,13 +36,11 @@ describe("createIngestionService", () => {
     })
 
     const rawService = service as unknown as {
+      auditClient: unknown
       entitlementWindowClient: unknown
-      idempotencyClient: unknown
-      pipelineEvents: unknown
     }
 
     expect(rawService.entitlementWindowClient).toBeInstanceOf(CloudflareEntitlementWindowClient)
-    expect(rawService.idempotencyClient).toBeInstanceOf(CloudflareIdempotencyClient)
-    expect(rawService.pipelineEvents).toBe(pipelineEvents)
+    expect(rawService.auditClient).toBeInstanceOf(CloudflareAuditClient)
   })
 })

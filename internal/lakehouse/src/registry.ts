@@ -69,7 +69,7 @@ export const lakehouseSourceSchemaRegistry = {
   events: {
     source: "events",
     firstVersion: 1,
-    currentVersion: 1,
+    currentVersion: 2,
     streamName: "lakehouse_events_stream",
     schemaFile: "events.json",
     sinkTable: "events",
@@ -189,6 +189,24 @@ export const lakehouseSourceSchemaRegistry = {
         addedInVersion: 1,
         defaultValue: {},
         description: "Raw event properties payload.",
+      },
+      {
+        name: "canonical_audit_id",
+        type: "string",
+        required: false,
+        addedInVersion: 2,
+        defaultValue: null,
+        description:
+          "Deterministic SHA-256 audit identifier for query-time deduplication across R2.",
+      },
+      {
+        name: "payload_hash",
+        type: "string",
+        required: false,
+        addedInVersion: 2,
+        defaultValue: null,
+        description:
+          "SHA-256 of stable business fields for conflict detection on idempotency key reuse.",
       },
     ],
   },

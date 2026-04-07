@@ -2,6 +2,7 @@ import type { MeterConfig, OverageStrategy } from "@unprice/db/validators"
 import { Err, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { vi } from "vitest"
+import type { Cache } from "../../cache/service"
 import type { CustomerService } from "../../customers"
 import {
   type GrantsManager,
@@ -9,8 +10,10 @@ import {
   type ResolvedFeatureStateAtTimestamp,
   deriveMeterKey,
 } from "../../entitlements"
+import type { IngestionAuditCommitResult, IngestionAuditEntry } from "../audit"
 import { IngestionQueueConsumer } from "../consumer"
 import type { IngestionQueueMessage } from "../message"
+import type { PreparedCustomerGrantContext } from "../preparation-service"
 import { IngestionService } from "../service"
 
 type LoggerStub = {
@@ -21,18 +24,6 @@ type LoggerStub = {
   error: ReturnType<typeof vi.fn>
   warn: ReturnType<typeof vi.fn>
 }
-
-type BeginResult =
-  | {
-      decision: "busy"
-      retryAfterSeconds?: number
-    }
-  | {
-      decision: "duplicate"
-    }
-  | {
-      decision: "process"
-    }
 
 type ApplyInput = {
   customerId: string
@@ -74,7 +65,7 @@ type EnforcementResult = {
 }
 
 type HarnessOptions = {
-  beginResult?: BeginResult
+  commitResult?: IngestionAuditCommitResult
   customer?: {
     projectId: string
   } | null
@@ -88,7 +79,7 @@ type HarnessOptions = {
   resolvedFeatureState?: ResolvedFeatureStateAtTimestamp
   resolvedFeatureStatesBySlug?: Record<string, ResolvedFeatureStateAtTimestamp>
   resolvedStates?: IngestionResolvedState[]
-  send?: ReturnType<typeof vi.fn>
+  now?: () => number
 }
 
 type MeterState = {
@@ -100,10 +91,18 @@ type MeterWindow = Map<string, MeterState>
 
 export function createServiceHarness(options: HarnessOptions = {}) {
   const meterWindowsByKey = new Map<string, MeterWindow>()
+  const verificationGrantContextCache = new Map<string, PreparedCustomerGrantContext>()
+  const verificationGrantContextLoads = new Map<
+    string,
+    Promise<{ err?: unknown; val?: PreparedCustomerGrantContext }>
+  >()
   const logger = createLoggerStub()
-  const send = options.send ?? vi.fn().mockResolvedValue(undefined)
+  const commit = vi
+    .fn<(entries: IngestionAuditEntry[]) => Promise<IngestionAuditCommitResult>>()
+    .mockResolvedValue(options.commitResult ?? { inserted: 1, duplicates: 0, conflicts: 0 })
   const apply = vi.fn<(input: ApplyInput) => Promise<ApplyResult>>()
   const getEnforcementState = vi.fn<(input: EnforcementInput) => Promise<EnforcementResult>>()
+  const waitUntil = vi.fn<(promise: Promise<unknown>) => void>()
 
   const getCustomer = vi
     .fn()
@@ -149,14 +148,47 @@ export function createServiceHarness(options: HarnessOptions = {}) {
     } as never)
   })
 
-  const begin = vi.fn().mockResolvedValue(options.beginResult ?? { decision: "process" as const })
-  const complete = vi.fn().mockResolvedValue(undefined)
-  const abort = vi.fn().mockResolvedValue(undefined)
-  const getIdempotencyStub = vi.fn().mockReturnValue({
-    begin,
-    complete,
-    abort,
+  const getAuditStub = vi.fn().mockReturnValue({
+    commit,
   })
+
+  const cache = {
+    ingestionPreparedGrantContext: {
+      swr: async (key: string, loader: (key: string) => Promise<PreparedCustomerGrantContext>) => {
+        if (verificationGrantContextCache.has(key)) {
+          return {
+            val: verificationGrantContextCache.get(key),
+          }
+        }
+
+        const existingLoad = verificationGrantContextLoads.get(key)
+        if (existingLoad) {
+          return existingLoad
+        }
+
+        const nextLoad = loader(key)
+          .then((value) => {
+            verificationGrantContextCache.set(key, value)
+            verificationGrantContextLoads.delete(key)
+
+            return {
+              val: value,
+            }
+          })
+          .catch((error) => {
+            verificationGrantContextLoads.delete(key)
+
+            return {
+              err: error,
+            }
+          })
+
+        verificationGrantContextLoads.set(key, nextLoad)
+
+        return nextLoad
+      },
+    },
+  } as unknown as Pick<Cache, "ingestionPreparedGrantContext">
 
   const getEntitlementWindowStub = vi.fn().mockImplementation((params) => {
     const windowKey = buildMeterWindowKey(params)
@@ -201,6 +233,7 @@ export function createServiceHarness(options: HarnessOptions = {}) {
   })
 
   const service = new IngestionService({
+    cache,
     customerService: {
       getCustomer,
     } as unknown as CustomerService,
@@ -212,13 +245,12 @@ export function createServiceHarness(options: HarnessOptions = {}) {
       resolveFeatureStateAtTimestamp,
       resolveIngestionStatesFromGrants,
     } as unknown as GrantsManager,
-    idempotencyClient: {
-      getIdempotencyStub,
+    auditClient: {
+      getAuditStub,
     },
     logger,
-    pipelineEvents: {
-      send,
-    },
+    now: options.now,
+    waitUntil,
   })
 
   const consumer = new IngestionQueueConsumer({
@@ -230,20 +262,19 @@ export function createServiceHarness(options: HarnessOptions = {}) {
     consumer,
     service,
     mocks: {
-      abort,
       apply,
-      begin,
-      complete,
+      commit,
       getCustomer,
       getEnforcementState,
       getEntitlementWindowStub,
       getGrantsForCustomer,
-      getIdempotencyStub,
+      getAuditStub,
       logger,
       meterWindowsByKey,
+      verificationGrantContextCache,
       resolveFeatureStateAtTimestamp,
       resolveIngestionStatesFromGrants,
-      send,
+      waitUntil,
     },
   }
 }
