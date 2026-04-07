@@ -1,8 +1,12 @@
 import { FetchError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { Cache } from "../cache/service"
-import type { CustomerService } from "../customers"
-import { type GrantsManager, type IngestionResolvedState, MAX_EVENT_AGE_MS } from "../entitlements"
+import {
+  type GrantsManager,
+  type IngestionResolvedState,
+  MAX_EVENT_AGE_MS,
+  UnPriceGrantError,
+} from "../entitlements"
 import { cachedQuery } from "../utils/cached-query"
 import {
   type IngestionAuditClient,
@@ -24,12 +28,20 @@ import {
   computeResolvedStatePeriodEndAt,
   computeResolvedStatePeriodKey,
 } from "./message"
-import {
-  type IngestionCandidateGrants,
-  IngestionPreparationService,
-  type PreparedCustomerGrantContext,
-  type PreparedCustomerMessageGroup,
-} from "./preparation-service"
+export type IngestionCandidateGrants = Parameters<
+  GrantsManager["resolveIngestionStatesFromGrants"]
+>[0]["grants"]
+
+export type PreparedCustomerMessageGroup = {
+  candidateGrants: IngestionCandidateGrants
+  messages: IngestionQueueMessage[]
+  rejectionReason?: IngestionRejectionReason
+}
+
+export type PreparedCustomerGrantContext = {
+  candidateGrants: IngestionCandidateGrants
+  rejectionReason?: IngestionRejectionReason
+}
 import { IngestionStateResolutionService } from "./state-resolution-service"
 
 type IngestionContext = {
@@ -120,12 +132,10 @@ type ShardedAuditEntry = {
   shardIndex: number
 }
 
-const VERIFY_GRANT_CONTEXT_CACHE_BUCKET_MS = 60_000
+const GRANT_CONTEXT_CACHE_BUCKET_MS = 300_000
 
 export class IngestionService {
-  private readonly preparationService: IngestionPreparationService
   private readonly stateResolutionService: IngestionStateResolutionService
-  private readonly customerService: CustomerService
   private readonly grantsManager: GrantsManager
   private readonly entitlementWindowClient: EntitlementWindowClient
   private readonly auditClient: IngestionAuditClient
@@ -136,7 +146,6 @@ export class IngestionService {
 
   constructor(opts: {
     cache: Pick<Cache, "ingestionPreparedGrantContext">
-    customerService: CustomerService
     entitlementWindowClient: EntitlementWindowClient
     grantsManager: GrantsManager
     auditClient: IngestionAuditClient
@@ -144,7 +153,6 @@ export class IngestionService {
     now?: () => number
     waitUntil: (promise: Promise<unknown>) => void
   }) {
-    this.customerService = opts.customerService
     this.entitlementWindowClient = opts.entitlementWindowClient
     this.auditClient = opts.auditClient
     this.cache = opts.cache
@@ -152,10 +160,6 @@ export class IngestionService {
     this.grantsManager = opts.grantsManager
     this.now = opts.now ?? (() => Date.now())
     this.waitUntil = opts.waitUntil
-    this.preparationService = new IngestionPreparationService({
-      customerService: this.customerService,
-      grantsManager: this.grantsManager,
-    })
     this.stateResolutionService = new IngestionStateResolutionService({
       grantsManager: this.grantsManager,
       logger: this.logger,
@@ -168,7 +172,7 @@ export class IngestionService {
   }): Promise<IngestionSyncResult> {
     const { featureSlug, message } = params
     const { customerId, projectId } = message
-    const preparedContext = await this.preparationService.prepareCustomerGrantContext({
+    const preparedContext = await this.prepareCustomerGrantContext({
       customerId,
       projectId,
       startAt: Math.max(0, message.timestamp - MAX_EVENT_AGE_MS),
@@ -274,7 +278,7 @@ export class IngestionService {
     timestamp: number
   }): Promise<FeatureVerificationResult> {
     const { customerId, featureSlug, projectId, timestamp } = params
-    const preparedContext = await this.prepareCustomerGrantContextForVerify({
+    const preparedContext = await this.prepareCustomerGrantContext({
       customerId,
       projectId,
       startAt: Math.max(0, timestamp - MAX_EVENT_AGE_MS),
@@ -693,49 +697,103 @@ export class IngestionService {
     messages: IngestionQueueMessage[]
     projectId: string
   }): Promise<PreparedCustomerMessageGroup> {
-    return this.preparationService.prepareCustomerMessageGroup(params)
+    const { customerId, messages, projectId } = params
+
+    const earliestMessage = messages[0]
+    const latestMessage = messages.at(-1)
+
+    if (!earliestMessage || !latestMessage) {
+      return {
+        messages,
+        candidateGrants: [],
+      }
+    }
+
+    const preparedContext = await this.prepareCustomerGrantContext({
+      customerId,
+      projectId,
+      startAt: Math.max(0, earliestMessage.timestamp - MAX_EVENT_AGE_MS),
+      endAt: latestMessage.timestamp,
+    })
+
+    return {
+      messages,
+      candidateGrants: preparedContext.candidateGrants,
+      rejectionReason: preparedContext.rejectionReason,
+    }
   }
 
-  private async prepareCustomerGrantContextForVerify(params: {
+  private async prepareCustomerGrantContext(params: {
     customerId: string
     endAt: number
     projectId: string
     startAt: number
   }): Promise<PreparedCustomerGrantContext> {
-    const bucket = Math.floor(params.endAt / VERIFY_GRANT_CONTEXT_CACHE_BUCKET_MS)
+    const bucket = Math.floor(params.endAt / GRANT_CONTEXT_CACHE_BUCKET_MS)
     const cacheKey = `${params.projectId}:${params.customerId}:${bucket}`
-    const preparedContext = await cachedQuery({
+
+    const cachedResult = await cachedQuery({
       cache: this.cache.ingestionPreparedGrantContext,
       cacheKey,
-      load: () => this.preparationService.prepareCustomerGrantContext(params),
+      load: () => this.loadCustomerGrantContext(params),
       wrapLoadError: (error) =>
         new FetchError({
-          message: `unable to prepare cached grant context for verify - ${error.message}`,
+          message: `unable to prepare cached grant context - ${error.message}`,
           retry: false,
           context: {
             customerId: params.customerId,
             projectId: params.projectId,
-            method: "prepareCustomerGrantContextForVerify",
+            method: "prepareCustomerGrantContext",
             url: "",
             error: error.message,
           },
         }),
     })
 
-    if (preparedContext.err) {
-      this.logger.warn(
-        "failed to use cached grant context for verify, falling back to direct load",
-        {
-          customerId: params.customerId,
-          projectId: params.projectId,
-          error: preparedContext.err.message,
-        }
-      )
+    if (cachedResult.err) {
+      this.logger.warn("failed to use cached grant context, falling back to direct load", {
+        customerId: params.customerId,
+        projectId: params.projectId,
+        error: cachedResult.err.message,
+      })
 
-      return this.preparationService.prepareCustomerGrantContext(params)
+      return this.loadCustomerGrantContext(params)
     }
 
-    return preparedContext.val
+    return cachedResult.val
+  }
+
+  private async loadCustomerGrantContext(params: {
+    customerId: string
+    endAt: number
+    projectId: string
+    startAt: number
+  }): Promise<PreparedCustomerGrantContext> {
+    const { customerId, endAt, projectId, startAt } = params
+
+    const { err, val } = await this.grantsManager.getGrantsForCustomer({
+      projectId,
+      customerId,
+      startAt,
+      endAt,
+    })
+
+    if (err) {
+      if (err instanceof UnPriceGrantError && err.code === "CUSTOMER_NOT_FOUND") {
+        return {
+          candidateGrants: [],
+          rejectionReason: "CUSTOMER_NOT_FOUND",
+        }
+      }
+      throw err
+    }
+
+    const candidateGrants = val.grants
+
+    return {
+      candidateGrants,
+      rejectionReason: hasUsageGrant(candidateGrants) ? undefined : "NO_MATCHING_ENTITLEMENT",
+    }
   }
 
   private ackMessage(message: IngestionQueueMessage): IngestionMessageProcessingResult {
@@ -917,4 +975,12 @@ function toEventDate(timestamp: number): string {
 
 function sortIngestionMessages(left: IngestionQueueMessage, right: IngestionQueueMessage): number {
   return left.timestamp - right.timestamp || left.idempotencyKey.localeCompare(right.idempotencyKey)
+}
+
+function hasUsageGrant(candidateGrants: IngestionCandidateGrants): boolean {
+  return candidateGrants.some(
+    (grant) =>
+      grant.featurePlanVersion.featureType === "usage" &&
+      Boolean(grant.featurePlanVersion.meterConfig)
+  )
 }

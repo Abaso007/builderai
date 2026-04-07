@@ -1,6 +1,5 @@
 import type { AppLogger } from "@unprice/observability"
 import type { Cache } from "@unprice/services/cache"
-import type { CustomerService } from "@unprice/services/customers"
 import type { GrantsManager } from "@unprice/services/entitlements"
 import { describe, expect, it, vi } from "vitest"
 import { CloudflareAuditClient } from "./audit-client"
@@ -25,7 +24,6 @@ describe("createIngestionService", () => {
           swr: vi.fn(),
         },
       } as unknown as Pick<Cache, "ingestionPreparedGrantContext">,
-      customerService: {} as CustomerService,
       grantsManager: {} as GrantsManager,
       logger: {
         warn: vi.fn(),
@@ -33,6 +31,9 @@ describe("createIngestionService", () => {
         debug: vi.fn(),
       } as unknown as AppLogger,
       env,
+      waitUntil: (_promise: Promise<unknown>): void => {
+        throw new Error("Function not implemented.")
+      },
     })
 
     const rawService = service as unknown as {

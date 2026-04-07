@@ -21,7 +21,7 @@ import type {
   Workspace,
   WorkspaceRole,
 } from "@unprice/db/validators"
-import type { PreparedCustomerGrantContext } from "../ingestion/preparation-service"
+import type { PreparedCustomerGrantContext } from "../ingestion/service"
 
 export type ProjectFeatureCache = {
   project: {

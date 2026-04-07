@@ -1,6 +1,5 @@
 import { type AppLogger, createStandaloneRequestLogger } from "@unprice/observability"
 import type { Cache } from "@unprice/services/cache"
-import type { CustomerService } from "@unprice/services/customers"
 import type { GrantsManager } from "@unprice/services/entitlements"
 import {
   IngestionQueueConsumer,
@@ -16,7 +15,6 @@ export { IngestionService } from "@unprice/services/ingestion"
 
 type CreateIngestionServiceParams = {
   cache: Pick<Cache, "ingestionPreparedGrantContext">
-  customerService: CustomerService
   env: Pick<Env, "APP_ENV" | "entitlementwindow" | "ingestionaudit">
   grantsManager: GrantsManager
   logger: AppLogger
@@ -27,7 +25,6 @@ type CreateIngestionServiceParams = {
 export function createIngestionService(params: CreateIngestionServiceParams): IngestionService {
   return new IngestionService({
     cache: params.cache,
-    customerService: params.customerService,
     entitlementWindowClient: new CloudflareEntitlementWindowClient(params.env),
     grantsManager: params.grantsManager,
     auditClient: new CloudflareAuditClient(params.env),
@@ -68,7 +65,6 @@ export async function consumeIngestionBatch(
 
   const service = createIngestionService({
     cache: services.cache,
-    customerService: services.customers,
     grantsManager: services.grantsManager,
     logger,
     env,

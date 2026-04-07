@@ -30,7 +30,7 @@ describe("IngestionService", () => {
 
     expect(malformed.ack).toHaveBeenCalledTimes(1)
     expect(malformed.retry).not.toHaveBeenCalled()
-    expect(mocks.getCustomer).not.toHaveBeenCalled()
+    expect(mocks.getGrantsForCustomer).not.toHaveBeenCalled()
     expect(mocks.commit).not.toHaveBeenCalled()
     expect(mocks.logger.error).toHaveBeenCalledWith(
       "dropping malformed ingestion queue message",
@@ -59,7 +59,6 @@ describe("IngestionService", () => {
     expect(duplicate.ack).toHaveBeenCalledTimes(1)
     expect(first.retry).not.toHaveBeenCalled()
     expect(duplicate.retry).not.toHaveBeenCalled()
-    expect(mocks.getCustomer).toHaveBeenCalledTimes(1)
     expect(mocks.getGrantsForCustomer).toHaveBeenCalledTimes(1)
     expect(mocks.commit).toHaveBeenCalledWith([
       expect.objectContaining({
@@ -83,8 +82,7 @@ describe("IngestionService", () => {
       messages: [message.message],
     } as unknown as IngestionQueueBatch)
 
-    expect(mocks.getCustomer).toHaveBeenCalledTimes(1)
-    expect(mocks.getGrantsForCustomer).not.toHaveBeenCalled()
+    expect(mocks.getGrantsForCustomer).toHaveBeenCalledTimes(1)
     expect(message.ack).toHaveBeenCalledTimes(1)
     expect(message.retry).not.toHaveBeenCalled()
     expect(mocks.commit).toHaveBeenCalledWith([
@@ -166,8 +164,8 @@ describe("IngestionService", () => {
       customer: null,
     })
 
-    // Override getCustomer to throw instead of returning a result
-    mocks.getCustomer.mockRejectedValue(new Error("unrecoverable DB error"))
+    // Override getGrantsForCustomer to throw instead of returning a result
+    mocks.getGrantsForCustomer.mockRejectedValue(new Error("unrecoverable DB error"))
 
     const message = createBatchMessage({
       id: "evt_processing_failure",
@@ -739,8 +737,8 @@ describe("IngestionService", () => {
     expect(maxFeature).toEqual(expect.objectContaining({ status: "usage", usage: 11 }))
     expect(latestFeature).toEqual(expect.objectContaining({ status: "usage", usage: 9 }))
     expect(sumTextFeature).toEqual(expect.objectContaining({ status: "usage", usage: 4.5 }))
-    expect(mocks.getCustomer).toHaveBeenCalledTimes(2)
-    expect(mocks.getGrantsForCustomer).toHaveBeenCalledTimes(2)
+    // batch ingest populates the shared cache; verify calls within the same bucket reuse it
+    expect(mocks.getGrantsForCustomer).toHaveBeenCalledTimes(1)
   })
 
   it("reloads grant context when verify crosses the in-memory cache bucket", async () => {
@@ -764,10 +762,9 @@ describe("IngestionService", () => {
       customerId: "cus_123",
       featureSlug: "api_calls",
       projectId: "proj_123",
-      timestamp: baseTimestamp + 60_000,
+      timestamp: baseTimestamp + 300_000,
     })
 
-    expect(mocks.getCustomer).toHaveBeenCalledTimes(2)
     expect(mocks.getGrantsForCustomer).toHaveBeenCalledTimes(2)
   })
 

@@ -6,7 +6,7 @@ import {
   computeResolvedStatePeriodKey,
   filterResolvedStatesWithValidAggregationPayload,
 } from "./message"
-import type { IngestionCandidateGrants } from "./preparation-service"
+import type { IngestionCandidateGrants } from "./service"
 
 type IngestionContext = {
   candidateGrants: IngestionCandidateGrants

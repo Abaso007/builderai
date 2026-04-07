@@ -1,20 +1,24 @@
 import { BaseError } from "@unprice/error"
 
 export class UnPriceGrantError extends BaseError<{
+  code?: string
   grantId?: string
   subjectId?: string
   subjectSource?: string
 }> {
   public readonly retry = false
   public readonly name = UnPriceGrantError.name
+  public readonly code?: string
 
   constructor({
     message,
+    code,
     grantId,
     subjectId,
     subjectSource,
   }: {
     message: string
+    code?: string
     grantId?: string
     subjectId?: string
     subjectSource?: string
@@ -22,11 +26,13 @@ export class UnPriceGrantError extends BaseError<{
     super({
       message,
       context: {
+        code,
         grantId,
         subjectId,
         subjectSource,
       },
     })
+    this.code = code
   }
 }
 

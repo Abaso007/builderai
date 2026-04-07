@@ -531,6 +531,7 @@ export class GrantsManager {
       return Err(
         new UnPriceGrantError({
           message: "No customer found for project",
+          code: "CUSTOMER_NOT_FOUND",
           subjectId: customerId,
         })
       )

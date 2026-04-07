@@ -3,17 +3,17 @@ import { Err, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { vi } from "vitest"
 import type { Cache } from "../../cache/service"
-import type { CustomerService } from "../../customers"
 import {
   type GrantsManager,
   type IngestionResolvedState,
   type ResolvedFeatureStateAtTimestamp,
+  UnPriceGrantError,
   deriveMeterKey,
 } from "../../entitlements"
 import type { IngestionAuditCommitResult, IngestionAuditEntry } from "../audit"
 import { IngestionQueueConsumer } from "../consumer"
 import type { IngestionQueueMessage } from "../message"
-import type { PreparedCustomerGrantContext } from "../preparation-service"
+import type { PreparedCustomerGrantContext } from "../service"
 import { IngestionService } from "../service"
 
 type LoggerStub = {
@@ -104,15 +104,18 @@ export function createServiceHarness(options: HarnessOptions = {}) {
   const getEnforcementState = vi.fn<(input: EnforcementInput) => Promise<EnforcementResult>>()
   const waitUntil = vi.fn<(promise: Promise<unknown>) => void>()
 
-  const getCustomer = vi
-    .fn()
-    .mockResolvedValue(
-      Ok((options.customer === undefined ? { projectId: "proj_123" } : options.customer) as never)
-    )
   const getGrantsForCustomer = vi.fn().mockResolvedValue(
-    Ok({
-      grants: options.grants ?? [],
-    } as never)
+    options.customer === null
+      ? Err(
+          new UnPriceGrantError({
+            message: "No customer found for project",
+            code: "CUSTOMER_NOT_FOUND",
+            subjectId: "cust_missing",
+          }) as never
+        )
+      : Ok({
+          grants: options.grants ?? [],
+        } as never)
   )
   const resolveIngestionStatesFromGrants = vi.fn().mockImplementation(async () => {
     if (options.resolveIngestionStatesError) {
@@ -234,9 +237,6 @@ export function createServiceHarness(options: HarnessOptions = {}) {
 
   const service = new IngestionService({
     cache,
-    customerService: {
-      getCustomer,
-    } as unknown as CustomerService,
     entitlementWindowClient: {
       getEntitlementWindowStub,
     },
@@ -264,7 +264,6 @@ export function createServiceHarness(options: HarnessOptions = {}) {
     mocks: {
       apply,
       commit,
-      getCustomer,
       getEnforcementState,
       getEntitlementWindowStub,
       getGrantsForCustomer,
