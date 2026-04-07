@@ -8,8 +8,8 @@ import { init } from "~/middleware/init"
 import serveEmojiFavicon from "stoker/middlewares/serve-emoji-favicon"
 
 export { DurableObjectProject } from "~/project/do"
-export { EntitlementWindowDO } from "~/ingestion/EntitlementWindowDO"
-export { IngestionAuditDO } from "~/ingestion/IngestionAuditDO"
+export { IngestionAuditDO } from "~/ingestion/audit/IngestionAuditDO"
+export { EntitlementWindowDO } from "~/ingestion/entitlements/EntitlementWindowDO"
 
 import { registerCreatePaymentMethodV1 } from "./routes/customer/createPaymentMethodV1"
 import { registerGetEntitlementsV1 } from "./routes/customer/getEntitlementsV1"

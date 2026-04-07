@@ -3,7 +3,12 @@ import { DurableObject } from "cloudflare:workers"
 import { parseLakehouseEvent } from "@unprice/lakehouse"
 import { type AppLogger, createStandaloneRequestLogger } from "@unprice/observability"
 import { MAX_EVENT_AGE_MS } from "@unprice/services/entitlements"
+import { and, asc, eq, isNull, lt, sql } from "drizzle-orm"
+import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
+import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import { apiDrain } from "~/observability"
+import { ingestionAuditTable, schema } from "./db/schema"
+import migrations from "./drizzle/migrations"
 
 const TABLE_NAME = "ingestion_audit"
 
@@ -30,14 +35,8 @@ type CommitResult = {
   inserted: number
 }
 
-type UnpublishedRow = {
-  audit_payload_json: string
-  canonical_audit_id: string
-  first_seen_at: number
-  idempotency_key: string
-}
-
 export class IngestionAuditDO extends DurableObject {
+  private readonly db: DrizzleSqliteDODatabase<typeof schema>
   private readonly ready: Promise<void>
   private readonly pipelineEvents: Pipeline
   private readonly logger: AppLogger
@@ -45,6 +44,7 @@ export class IngestionAuditDO extends DurableObject {
   constructor(state: DurableObjectState, env: Env) {
     super(state, env)
     this.pipelineEvents = env.PIPELINE_EVENTS!
+    this.db = drizzle(this.ctx.storage, { schema, logger: false })
 
     const requestId = this.ctx.id.toString()
     const { logger } = createStandaloneRequestLogger({ requestId }, { flush: apiDrain?.flush })
@@ -61,23 +61,7 @@ export class IngestionAuditDO extends DurableObject {
     })
 
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
-      this.ctx.storage.sql.exec(`
-        CREATE TABLE IF NOT EXISTS ${TABLE_NAME} (
-          idempotency_key    TEXT PRIMARY KEY,
-          canonical_audit_id TEXT NOT NULL UNIQUE,
-          payload_hash       TEXT NOT NULL,
-          status             TEXT NOT NULL,
-          rejection_reason   TEXT,
-          result_json        TEXT,
-          audit_payload_json TEXT NOT NULL,
-          first_seen_at      INTEGER NOT NULL,
-          published_at       INTEGER
-        )
-      `)
-      this.ctx.storage.sql.exec(`
-        CREATE INDEX IF NOT EXISTS idx_${TABLE_NAME}_unpublished
-        ON ${TABLE_NAME} (first_seen_at) WHERE published_at IS NULL
-      `)
+      await migrate(this.db, migrations)
     })
   }
 
@@ -93,15 +77,14 @@ export class IngestionAuditDO extends DurableObject {
     let conflicts = 0
 
     for (const entry of entries) {
-      const existing = this.ctx.storage.sql
-        .exec<{ payload_hash: string }>(
-          `SELECT payload_hash FROM ${TABLE_NAME} WHERE idempotency_key = ?`,
-          entry.idempotencyKey
-        )
-        .toArray()[0]
+      const existing = this.db
+        .select({ payloadHash: ingestionAuditTable.payloadHash })
+        .from(ingestionAuditTable)
+        .where(eq(ingestionAuditTable.idempotencyKey, entry.idempotencyKey))
+        .get()
 
       if (existing) {
-        if (existing.payload_hash === entry.payloadHash) {
+        if (existing.payloadHash === entry.payloadHash) {
           duplicates++
         } else {
           conflicts++
@@ -109,23 +92,23 @@ export class IngestionAuditDO extends DurableObject {
         continue
       }
 
-      this.ctx.storage.sql.exec(
-        `
-          INSERT INTO ${TABLE_NAME}
-            (idempotency_key, canonical_audit_id, payload_hash, status,
-             rejection_reason, result_json, audit_payload_json, first_seen_at, published_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
-          ON CONFLICT(idempotency_key) DO NOTHING
-        `,
-        entry.idempotencyKey,
-        entry.canonicalAuditId,
-        entry.payloadHash,
-        entry.status,
-        entry.rejectionReason ?? null,
-        entry.resultJson,
-        entry.auditPayloadJson,
-        entry.firstSeenAt
-      )
+      this.db
+        .insert(ingestionAuditTable)
+        .values({
+          idempotencyKey: entry.idempotencyKey,
+          canonicalAuditId: entry.canonicalAuditId,
+          payloadHash: entry.payloadHash,
+          status: entry.status,
+          rejectionReason: entry.rejectionReason ?? null,
+          resultJson: entry.resultJson,
+          auditPayloadJson: entry.auditPayloadJson,
+          firstSeenAt: entry.firstSeenAt,
+          publishedAt: null,
+        })
+        .onConflictDoNothing({
+          target: ingestionAuditTable.idempotencyKey,
+        })
+        .run()
 
       inserted++
     }
@@ -144,9 +127,11 @@ export class IngestionAuditDO extends DurableObject {
     this.cleanupExpiredRows()
     this.checkStuckRows()
 
-    const hasUnpublished = this.ctx.storage.sql
-      .exec<{ cnt: number }>(`SELECT COUNT(*) as cnt FROM ${TABLE_NAME} WHERE published_at IS NULL`)
-      .toArray()[0]
+    const hasUnpublished = this.db
+      .select({ cnt: sql<number>`count(*)` })
+      .from(ingestionAuditTable)
+      .where(isNull(ingestionAuditTable.publishedAt))
+      .get()
 
     if (hasUnpublished && hasUnpublished.cnt > 0) {
       if (published) {
@@ -158,18 +143,18 @@ export class IngestionAuditDO extends DurableObject {
   }
 
   private async publishUnpublishedRows(): Promise<boolean> {
-    const rows = this.ctx.storage.sql
-      .exec<UnpublishedRow>(
-        `
-          SELECT idempotency_key, canonical_audit_id, audit_payload_json, first_seen_at
-          FROM ${TABLE_NAME}
-          WHERE published_at IS NULL
-          ORDER BY first_seen_at ASC
-          LIMIT ?
-        `,
-        OUTBOX_BATCH_SIZE
-      )
-      .toArray()
+    const rows = this.db
+      .select({
+        idempotencyKey: ingestionAuditTable.idempotencyKey,
+        canonicalAuditId: ingestionAuditTable.canonicalAuditId,
+        auditPayloadJson: ingestionAuditTable.auditPayloadJson,
+        firstSeenAt: ingestionAuditTable.firstSeenAt,
+      })
+      .from(ingestionAuditTable)
+      .where(isNull(ingestionAuditTable.publishedAt))
+      .orderBy(asc(ingestionAuditTable.firstSeenAt))
+      .limit(OUTBOX_BATCH_SIZE)
+      .all()
 
     if (rows.length === 0) {
       return true
@@ -177,7 +162,7 @@ export class IngestionAuditDO extends DurableObject {
 
     try {
       const events = rows.map((row) => {
-        const payload = JSON.parse(row.audit_payload_json)
+        const payload = JSON.parse(row.auditPayloadJson)
         return parseLakehouseEvent("events", payload)
       })
 
@@ -185,11 +170,13 @@ export class IngestionAuditDO extends DurableObject {
 
       const now = Date.now()
       for (const row of rows) {
-        this.ctx.storage.sql.exec(
-          `UPDATE ${TABLE_NAME} SET published_at = ? WHERE idempotency_key = ?`,
-          now,
-          row.idempotency_key
-        )
+        this.db
+          .update(ingestionAuditTable)
+          .set({
+            publishedAt: now,
+          })
+          .where(eq(ingestionAuditTable.idempotencyKey, row.idempotencyKey))
+          .run()
       }
 
       return true
@@ -201,6 +188,8 @@ export class IngestionAuditDO extends DurableObject {
   private cleanupExpiredRows(): void {
     const cutoff = Date.now() - AUDIT_RETENTION_MS
 
+    // Drizzle doesn't expose a straightforward SQLite DELETE ... LIMIT helper.
+    // Keep this as raw SQL to preserve the bounded cleanup behavior.
     this.ctx.storage.sql.exec(
       `
         DELETE FROM ${TABLE_NAME}
@@ -216,15 +205,13 @@ export class IngestionAuditDO extends DurableObject {
   private checkStuckRows(): void {
     const threshold = Date.now() - STUCK_ROW_THRESHOLD_MS
 
-    const stuck = this.ctx.storage.sql
-      .exec<{ cnt: number }>(
-        `
-          SELECT COUNT(*) as cnt FROM ${TABLE_NAME}
-          WHERE published_at IS NULL AND first_seen_at < ?
-        `,
-        threshold
+    const stuck = this.db
+      .select({ cnt: sql<number>`count(*)` })
+      .from(ingestionAuditTable)
+      .where(
+        and(isNull(ingestionAuditTable.publishedAt), lt(ingestionAuditTable.firstSeenAt, threshold))
       )
-      .toArray()[0]
+      .get()
 
     if (stuck && stuck.cnt > 0) {
       this.logger.warn("audit rows unpublished for > 10 minutes", {

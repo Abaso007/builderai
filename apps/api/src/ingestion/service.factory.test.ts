@@ -2,8 +2,8 @@ import type { AppLogger } from "@unprice/observability"
 import type { Cache } from "@unprice/services/cache"
 import type { GrantsManager } from "@unprice/services/entitlements"
 import { describe, expect, it, vi } from "vitest"
-import { CloudflareAuditClient } from "./audit-client"
-import { CloudflareEntitlementWindowClient } from "./entitlement-clients"
+import { CloudflareAuditClient } from "./audit/client"
+import { CloudflareEntitlementWindowClient } from "./entitlements/client"
 import { createIngestionService } from "./service"
 
 describe("createIngestionService", () => {

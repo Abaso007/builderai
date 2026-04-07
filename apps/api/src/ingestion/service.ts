@@ -7,8 +7,8 @@ import {
   IngestionService,
 } from "@unprice/services/ingestion"
 import type { Env } from "~/env"
-import { CloudflareAuditClient } from "./audit-client"
-import { CloudflareEntitlementWindowClient } from "./entitlement-clients"
+import { CloudflareAuditClient } from "./audit/client"
+import { CloudflareEntitlementWindowClient } from "./entitlements/client"
 import { createQueueServices } from "./queue"
 
 export { IngestionService } from "@unprice/services/ingestion"

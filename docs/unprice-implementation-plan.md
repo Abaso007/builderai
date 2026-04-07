@@ -81,7 +81,7 @@ pnpm generate
 ## Architectural Rules For This Plan
 
 1. Extract shared logic before adding new behavior.
-2. Prefer dual-read and dual-write migrations over big-bang replacements.
+2. Do not worry about backward compatibility.
 3. Do not mark ledger entries settled until some existing runtime path can actually consume that settlement state.
 4. Do not introduce a second pricing implementation — reuse the pure functions in `@unprice/db/validators/subscriptions/prices.ts`. For real-time incremental rating, use the marginal approach (call `calculatePricePerFeature()` at `usage_before` and `usage_after`, take the delta). For batch/period-end rating, use the full waterfall. Both use the same underlying math.
 5. Keep new types near the service layer unless they are truly DB-facing types.

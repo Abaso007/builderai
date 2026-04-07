@@ -1,8 +1,3 @@
-import { defineConfig } from "drizzle-kit"
+import config from "./drizzle.ingestion.entitlements.config"
 
-export default defineConfig({
-  out: "./src/ingestion/drizzle",
-  schema: "./src/ingestion/schema.ts",
-  dialect: "sqlite",
-  driver: "durable-sqlite",
-})
+export default config

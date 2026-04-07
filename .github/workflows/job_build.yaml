@@ -27,6 +27,9 @@ jobs:
         env:
           NODE_ENV: test
 
+      - name: Validate ingestion durable object migrations
+        run: pnpm --filter api db:check:ingestion:migrations
+
       - name: Check formatting
         run: pnpm biome ci .
 
@@ -39,7 +42,6 @@ jobs:
           # fake database url
           DATABASE_URL: postgresql://postgresql:postgresql@localhost:5432/unprice
           NODE_ENV: test
-
 
 
 

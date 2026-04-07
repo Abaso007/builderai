@@ -5,8 +5,8 @@ import { env as envDb } from "@unprice/db/env"
 import { env as envObservability } from "@unprice/observability/env"
 import { env as envServices } from "@unprice/services/env"
 import { z } from "zod"
-import type { EntitlementWindowDO } from "~/ingestion/EntitlementWindowDO"
-import type { IngestionAuditDO } from "~/ingestion/IngestionAuditDO"
+import type { IngestionAuditDO } from "~/ingestion/audit/IngestionAuditDO"
+import type { EntitlementWindowDO } from "~/ingestion/entitlements/EntitlementWindowDO"
 import type { DurableObjectProject } from "./project/do"
 
 export const cloudflareRatelimiter = z.custom<{
