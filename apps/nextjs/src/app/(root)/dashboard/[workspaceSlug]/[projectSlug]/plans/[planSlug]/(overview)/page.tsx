@@ -2,8 +2,7 @@ import { CURRENCIES, STATUS_PLAN } from "@unprice/db/utils"
 import { Button } from "@unprice/ui/button"
 import { Separator } from "@unprice/ui/separator"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
-import { Typography } from "@unprice/ui/typography"
-import { Code, Plus } from "lucide-react"
+import { Code } from "lucide-react"
 import { notFound } from "next/navigation"
 import { Suspense } from "react"
 import { CodeApiSheet } from "~/components/code-api-sheet"
@@ -28,8 +27,9 @@ export default async function PlanPage({
 }) {
   const { planSlug, workspaceSlug, projectSlug } = params
   const baseUrl = `/${workspaceSlug}/${projectSlug}/plans/${planSlug}`
+  const { getVersionsBySlug } = api.plans
 
-  const { plan, project } = await api.plans.getVersionsBySlug({
+  const { plan, project } = await getVersionsBySlug({
     slug: planSlug,
   })
 
@@ -37,23 +37,44 @@ export default async function PlanPage({
     notFound()
   }
 
+  const planVersionIds = plan.versions.map((version) => version.id)
+  const latestVersion = plan.versions.find((version) => version.latest) ?? plan.versions[0]
+  const listPlanVersionsExampleParams =
+    planVersionIds.length > 0 && latestVersion
+      ? {
+          listPlanVersions: {
+            planVersionIds,
+            billingInterval: latestVersion.billingConfig.billingInterval,
+            currency: latestVersion.currency,
+            version: latestVersion.version,
+          },
+        }
+      : undefined
+
   return (
     <DashboardShell
       header={
         <HeaderTab
           title={plan.slug}
           id={plan.id}
-          description={plan.description}
+          description={
+            plan.description
+              ? `${plan.description} Customers stay on the plan version they bought until migrated.`
+              : "Customers stay on the plan version they bought until migrated."
+          }
           label={plan.active ? "active" : "inactive"}
           action={
-            <div className="flex items-center space-x-2 rounded-md">
-              <CodeApiSheet defaultMethod="listVersions">
-                <Button variant={"ghost"}>
+            <div className="flex items-center gap-2 rounded-md">
+              <CodeApiSheet
+                defaultMethod="listPlanVersions"
+                exampleParams={listPlanVersionsExampleParams}
+              >
+                <Button variant={"link"}>
                   <Code className="mr-2 h-4 w-4" />
                   API
                 </Button>
               </CodeApiSheet>
-              <div className="button-primary flex items-center space-x-1 rounded-md">
+              <div className="button-primary flex items-center gap-1 rounded-md">
                 <div className="sm:col-span-full">
                   <PlanVersionDialog
                     defaultValues={{
@@ -78,9 +99,7 @@ export default async function PlanPage({
                       isDefault: plan.defaultPlan ?? false,
                     }}
                   >
-                    <Button variant={"custom"}>
-                      <Plus className="mr-2 h-4 w-4" /> Version
-                    </Button>
+                    <Button variant={"custom"}>Create Version</Button>
                   </PlanVersionDialog>
                 </div>
 
@@ -102,12 +121,7 @@ export default async function PlanPage({
           </TabNavigationLink>
         </div>
       </TabNavigation>
-      <div className="mt-4">
-        <div className="flex flex-col px-1 py-4">
-          <Typography variant="p" affects="removePaddingMargin">
-            All versions of this plan
-          </Typography>
-        </div>
+      <div className="mt-4 flex flex-col gap-4">
         <Suspense
           fallback={
             <DataTableSkeleton
@@ -134,8 +148,17 @@ export default async function PlanPage({
           <DataTable
             columns={columns}
             data={plan.versions}
+            // provider/plan-type/currency are settings detail, not scan
+            // signal; the View menu opts them back in
+            initialColumnVisibility={{ paymentProvider: false, planType: false, currency: false }}
+            emptyState={{
+              title: "No versions",
+              description: "Create a draft plan version before assigning customers to this plan.",
+            }}
+            hidePaginationWhenEmpty
             filterOptions={{
               filterBy: "title",
+              filterPlaceholder: "Filter by title",
               filterColumns: true,
               filterDateRange: false,
               filterServerSide: false,

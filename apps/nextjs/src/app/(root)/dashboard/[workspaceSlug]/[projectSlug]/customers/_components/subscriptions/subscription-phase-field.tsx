@@ -1,11 +1,5 @@
 "use client"
-import {
-  type InsertSubscription,
-  type InsertSubscriptionPhase,
-  getTrialUnitLabel,
-} from "@unprice/db/validators"
-import { formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
-import { Badge } from "@unprice/ui/badge"
+import type { InsertSubscription, InsertSubscriptionPhase } from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
 import { FormDescription, FormLabel, FormMessage } from "@unprice/ui/form"
 import { Separator } from "@unprice/ui/separator"
@@ -15,12 +9,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { Typography } from "@unprice/ui/typography"
 import { cn } from "@unprice/ui/utils"
 import { motion } from "framer-motion"
-import { LayoutGrid, PencilIcon, TrashIcon, X } from "lucide-react"
-import { useEffect, useState } from "react"
+import { LayoutGrid } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { useState } from "react"
 import { type FieldErrors, type UseFormReturn, useFieldArray } from "react-hook-form"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { PropagationStopper } from "~/components/prevent-propagation"
-import { formatDate } from "~/lib/dates"
 import { useTRPC } from "~/trpc/client"
 import { SubscriptionPhaseForm } from "./subscription-phase-form"
 
@@ -28,6 +22,15 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { startTransition } from "react"
 import { toastAction } from "~/lib/toast"
+import { SubscriptionPhaseRow } from "./subscription-phase-row"
+import {
+  type SubscriptionPhaseFieldValue,
+  type SubscriptionPhaseFormMode,
+  type SubscriptionPhaseFormValue,
+  getPhaseSheetDescription,
+  getPhaseSheetTitle,
+  getPhaseTimingState,
+} from "./subscription-phase-types"
 
 export default function SubscriptionPhaseFormField({
   form,
@@ -46,6 +49,7 @@ export default function SubscriptionPhaseFormField({
   })
 
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [phaseFormMode, setPhaseFormMode] = useState<SubscriptionPhaseFormMode>("create")
 
   const selectedCustomer = form.watch("customerId")
 
@@ -61,11 +65,25 @@ export default function SubscriptionPhaseFormField({
     creditLinePolicy: "uncapped",
     creditLineAmount: null,
     trialUnits: 0,
-  } as InsertSubscriptionPhase
+  } as SubscriptionPhaseFormValue
 
-  const [selectedPhase, setSelectedPhase] = useState<InsertSubscriptionPhase>(defaultValuesPhase)
+  const router = useRouter()
+  const [selectedPhase, setSelectedPhase] = useState<SubscriptionPhaseFormValue>(defaultValuesPhase)
 
   const { errors } = form.formState
+  const now = Date.now()
+  const activePhase = fields.find(
+    (phase) => getPhaseTimingState(phase as SubscriptionPhaseFieldValue, now) === "active"
+  ) as SubscriptionPhaseFieldValue | undefined
+  const hasFuturePhase = fields.some(
+    (phase) => getPhaseTimingState(phase as SubscriptionPhaseFieldValue, now) === "future"
+  )
+  const lastPhase = fields.at(-1) as SubscriptionPhaseFieldValue | undefined
+  const lastPhaseTimingState = lastPhase ? getPhaseTimingState(lastPhase, now) : undefined
+  const canAddScheduledPhase = Boolean(subscriptionId && activePhase && !hasFuturePhase)
+  const canAddPhaseAfterFuture = Boolean(
+    subscriptionId && hasFuturePhase && lastPhaseTimingState === "future" && lastPhase?.endAt
+  )
 
   // this query is deduplicated from the parent component
   const { data: planVersions, isLoading: isPlanVersionsLoading } = useQuery(
@@ -79,15 +97,9 @@ export default function SubscriptionPhaseFormField({
     trpc.subscriptions.removePhase.mutationOptions({
       onSuccess: () => {
         toastAction("success")
-      },
-      onError: (error) => {
-        toastAction("error", error.message)
+        router.refresh()
       },
     })
-  )
-
-  const [isDelete, setConfirmDelete] = useState<Map<string, boolean>>(
-    new Map<string, boolean>(fields.map((item) => [item.id, false] as [string, boolean]))
   )
 
   const getErrorMessage = (
@@ -116,16 +128,76 @@ export default function SubscriptionPhaseFormField({
       : undefined
   }
 
-  useEffect(() => {
-    if (selectedCustomer) {
-      setSelectedPhase({
-        ...defaultValuesPhase,
-        customerId: selectedCustomer,
+  function openSchedulePhase() {
+    if (!selectedCustomer) {
+      form.setError("customerId", {
+        message: "You need to select a customer first",
       })
-
-      form.clearErrors("customerId")
+      return
     }
-  }, [selectedCustomer])
+
+    if (!subscriptionId || !activePhase) return
+
+    setSelectedPhase({
+      ...defaultValuesPhase,
+      id: subscriptionId,
+      projectId: form.getValues("projectId") ?? "",
+      customerId: selectedCustomer,
+      subscriptionId,
+      planVersionId: "",
+      currentPlanVersionId: activePhase.planVersionId,
+      config: [],
+      whenToChange: "end_of_cycle",
+      currentCycleEndAt: form.getValues("currentCycleEndAt") ?? Date.now(),
+      timezone,
+      startAt: form.getValues("currentCycleEndAt") ?? Date.now(),
+      paymentProvider: undefined,
+      paymentMethodRequired: false,
+      paymentMethodId: null,
+      creditLinePolicy: "uncapped",
+      creditLineAmount: null,
+      trialUnits: 0,
+    })
+    form.clearErrors("customerId")
+    setPhaseFormMode("schedule")
+    setDialogOpen(true)
+  }
+
+  function openCreatePhaseAfterLastFuture() {
+    if (!selectedCustomer) {
+      form.setError("customerId", {
+        message: "You need to select a customer first",
+      })
+      return
+    }
+
+    if (!lastPhase?.endAt) return
+
+    setSelectedPhase({
+      ...defaultValuesPhase,
+      customerId: selectedCustomer,
+      subscriptionId,
+      startAt: lastPhase.endAt + 1,
+    })
+    form.clearErrors("customerId")
+    setPhaseFormMode("create")
+    setDialogOpen(true)
+  }
+
+  // New subscription (no subscriptionId yet) with local phases: start the next phase right after
+  // the last one ends. Only reachable when the last phase already has an end date.
+  function openCreatePhaseAfterLast() {
+    const endAt = lastPhase?.endAt ?? Date.now()
+    const startAt = new Date(endAt).getTime() + 1
+
+    setSelectedPhase({
+      ...defaultValuesPhase,
+      customerId: selectedCustomer,
+      startAt,
+    })
+    setPhaseFormMode("create")
+    setDialogOpen(true)
+  }
 
   function onRemovePhase(phaseId: string, callback: () => void) {
     startTransition(() => {
@@ -158,8 +230,8 @@ export default function SubscriptionPhaseFormField({
         </FormLabel>
         <FormDescription>
           Each phase represents a different period of time for the subscription. You can add a trial
-          duration for every phase and configure the billing method. The subscription needs to have
-          at least one phase.
+          duration for every phase and configure the billing method. Use Add phase to create the
+          next scheduled phase without manually closing the current one.
         </FormDescription>
         {errors.phases && <FormMessage>{getErrorMessage(errors, "phases")}</FormMessage>}
       </div>
@@ -176,207 +248,68 @@ export default function SubscriptionPhaseFormField({
           {fields.length > 0 ? (
             <div className="flex w-full flex-col gap-4">
               {fields.map((phase, index) => {
-                const selectedPlanVersion = planVersions?.planVersions.find(
-                  (version) => version.id === phase.planVersionId
-                )
+                const phaseValue = phase as SubscriptionPhaseFieldValue
+                const selectedPlanVersion =
+                  planVersions?.planVersions.find(
+                    (version) => version.id === phaseValue.planVersionId
+                  ) ?? phaseValue.planVersion
 
-                const now = Date.now()
-                const isActive =
-                  phase.startAt < now && (phase.endAt ?? Number.POSITIVE_INFINITY) > now
+                const phaseTimingState = getPhaseTimingState(phaseValue, now)
 
                 if (!selectedPlanVersion) return null
 
-                const trialUnitsMessage = getTrialUnitLabel({
-                  billingInterval: selectedPlanVersion.billingConfig.billingInterval,
-                  units: phase.trialUnits,
-                })
-
                 return (
-                  <div key={phase.id} className="relative">
-                    <div
-                      className={cn(
-                        "flex w-full flex-col gap-2 rounded-md border border-dashed px-4 py-4",
-                        {
-                          "border-destructive": errors.phases?.[index],
-                        }
-                      )}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex flex-col gap-2">
-                          <Typography variant="h5">
-                            {index + 1}. {selectedPlanVersion.title} v{selectedPlanVersion.version}{" "}
-                            - {selectedPlanVersion.billingConfig.name}
-                            {phase.trialUnits && phase.trialUnits > 0 ? (
-                              <Badge className="ml-2">
-                                {phase.trialUnits} {trialUnitsMessage} trial
-                              </Badge>
-                            ) : (
-                              <Badge className="ml-2">no trial</Badge>
-                            )}
-                            {isActive && (
-                              <div className="mx-2 inline-flex items-center font-semibold text-info text-xs">
-                                <span className="flex h-2 w-2 rounded-full bg-info" />
-                                <span className="ml-1">{"active phase"}</span>
-                              </div>
-                            )}
-                            <Badge className="ml-2">
-                              {formatPhaseCreditLinePolicy(phase, selectedPlanVersion.currency)}
-                            </Badge>
-                          </Typography>
-                          <Typography variant="p" affects="removePaddingMargin">
-                            from {formatDate(phase.startAt, timezone, "MMM dd, yyyy")} to{" "}
-                            {phase.endAt
-                              ? formatDate(phase.endAt, timezone, "MMM dd, yyyy")
-                              : "forever"}
-                          </Typography>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            variant="ghost"
-                            size={"xs"}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              e.preventDefault()
-
-                              setSelectedPhase({
-                                ...phase,
-                                subscriptionId,
-                                customerId: selectedCustomer,
-                                paymentMethodRequired:
-                                  selectedPlanVersion.paymentMethodRequired ?? false,
-                                planVersionId: selectedPlanVersion.id,
-                                trialUnits: selectedPlanVersion.trialUnits,
-                                creditLinePolicy: phase.creditLinePolicy ?? "uncapped",
-                                creditLineAmount: phase.creditLineAmount ?? null,
-                              })
-                              setDialogOpen(true)
-                            }}
-                          >
-                            <PencilIcon className="size-3.5" />
-                          </Button>
-
-                          {fields.length > 1 && isDelete.get(phase._id) && (
-                            <div className="flex flex-row items-center">
-                              <Button
-                                className="px-0 text-destructive"
-                                variant="link"
-                                size="icon"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  e.preventDefault()
-
-                                  const phaseId = phase.id
-
-                                  if (!phaseId) return
-
-                                  onRemovePhase(phaseId, () => {
-                                    remove(index)
-                                    setConfirmDelete((prev) => new Map(prev.set(phase._id, false)))
-                                  })
-                                }}
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          )}
-
-                          {fields.length > 1 && !isDelete.get(phase._id) && (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  className="px-0 text-destructive"
-                                  variant="link"
-                                  size="icon"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    e.preventDefault()
-                                    setConfirmDelete((prev) => new Map(prev.set(phase._id, true)))
-
-                                    setTimeout(() => {
-                                      setConfirmDelete(
-                                        (prev) => new Map(prev.set(phase._id, false))
-                                      )
-                                    }, 2000)
-                                  }}
-                                >
-                                  <TrashIcon className="size-3.5" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <div className="max-w-[200px] text-sm">
-                                  Remove this phase from the subscription
-                                </div>
-                              </TooltipContent>
-                            </Tooltip>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    {/* Add connecting line between phases */}
-                    {index < fields.length - 1 && (
-                      <div className="-mb-4 absolute bottom-0 left-1/2 h-4 w-0.5 bg-border" />
-                    )}
-                  </div>
+                  <SubscriptionPhaseRow
+                    key={phaseValue.id || phaseValue._id}
+                    fieldsLength={fields.length}
+                    hasError={Boolean(errors.phases?.[index])}
+                    index={index}
+                    phase={phaseValue}
+                    phaseTimingState={phaseTimingState}
+                    removePending={removePhase.isPending}
+                    selectedPlanVersion={selectedPlanVersion}
+                    showConnector={index < fields.length - 1}
+                    timezone={timezone}
+                    onOpenPhase={(phaseToOpen, mode, planVersion) => {
+                      setSelectedPhase({
+                        ...phaseToOpen,
+                        subscriptionId,
+                        customerId: selectedCustomer,
+                        paymentMethodRequired: planVersion.paymentMethodRequired ?? false,
+                        planVersionId: planVersion.id,
+                        trialUnits: phaseToOpen.trialUnits ?? planVersion.trialUnits,
+                        creditLinePolicy: phaseToOpen.creditLinePolicy ?? "uncapped",
+                        creditLineAmount: phaseToOpen.creditLineAmount ?? null,
+                      })
+                      setPhaseFormMode(mode)
+                      setDialogOpen(true)
+                    }}
+                    onRemovePhase={(phaseId, phaseIndex) => {
+                      onRemovePhase(phaseId, () => {
+                        remove(phaseIndex)
+                      })
+                    }}
+                  />
                 )
               })}
 
               <div className="mt-6 flex justify-center">
-                {fields.length > 0 && !fields[fields.length - 1]?.endAt ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        size={"sm"}
-                        className="w-1/2 cursor-not-allowed opacity-50"
-                        aria-disabled
-                        tabIndex={-1}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          e.preventDefault()
-                        }}
-                      >
-                        Add phase
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent className="w-56">
-                      You can't add a new phase if the last phase is not ended. Add an end date to
-                      the last phase
-                    </TooltipContent>
-                  </Tooltip>
-                ) : (
-                  <Button
-                    size={"sm"}
-                    className="w-1/2"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      e.preventDefault()
-
-                      if (fields.length > 0) {
-                        const lastPhase = fields[fields.length - 1]
-                        const endAt = lastPhase?.endAt ?? Date.now()
-                        const startAt = new Date(endAt).getTime() + 1
-
-                        if (lastPhase) {
-                          setSelectedPhase({
-                            ...defaultValuesPhase,
-                            // add one day to the end date of the last phase
-                            startAt: startAt,
-                          })
-                        } else {
-                          setSelectedPhase({
-                            ...defaultValuesPhase,
-                            startAt: startAt,
-                          })
-                        }
-                      } else {
-                        setSelectedPhase(defaultValuesPhase)
-                      }
-
-                      setDialogOpen(true)
-                    }}
-                  >
-                    Add phase
-                  </Button>
-                )}
+                <AddPhaseButton
+                  action={getAddPhaseAction(
+                    {
+                      hasSubscription: Boolean(subscriptionId),
+                      canAddScheduledPhase,
+                      canAddPhaseAfterFuture,
+                      hasFuturePhase,
+                      lastPhaseHasEndAt: Boolean(lastPhase?.endAt),
+                    },
+                    {
+                      schedulePhase: openSchedulePhase,
+                      createPhaseAfterFuture: openCreatePhaseAfterLastFuture,
+                      createPhaseAfterLast: openCreatePhaseAfterLast,
+                    }
+                  )}
+                />
               </div>
             </div>
           ) : (
@@ -392,6 +325,7 @@ export default function SubscriptionPhaseFormField({
                 <EmptyPlaceholder.Action>
                   <Button
                     size={"sm"}
+                    variant="outline"
                     onClick={(e) => {
                       e.stopPropagation()
                       e.preventDefault()
@@ -403,6 +337,8 @@ export default function SubscriptionPhaseFormField({
                         return
                       }
 
+                      form.clearErrors("customerId")
+                      setPhaseFormMode("create")
                       setDialogOpen(true)
                     }}
                   >
@@ -419,8 +355,8 @@ export default function SubscriptionPhaseFormField({
         <Sheet open={dialogOpen} onOpenChange={setDialogOpen}>
           <SheetContent className="hide-scrollbar flex max-h-screen w-full flex-col space-y-4 overflow-y-scroll md:w-1/2 lg:w-[700px]">
             <SheetHeader>
-              <SheetTitle className="text-2xl">Subscription Form</SheetTitle>
-              <SheetDescription>Configure the subscription for the customer</SheetDescription>
+              <SheetTitle className="text-2xl">{getPhaseSheetTitle(phaseFormMode)}</SheetTitle>
+              <SheetDescription>{getPhaseSheetDescription(phaseFormMode)}</SheetDescription>
             </SheetHeader>
 
             <SubscriptionPhaseForm
@@ -428,6 +364,8 @@ export default function SubscriptionPhaseFormField({
                 ...selectedPhase,
                 customerId: selectedCustomer,
               }}
+              mode={phaseFormMode}
+              isReadOnly={phaseFormMode === "view"}
               onSubmit={(data) => {
                 if (data.id !== "") {
                   const index = fields.findIndex((phase) => phase.id === data.id)
@@ -449,17 +387,89 @@ export default function SubscriptionPhaseFormField({
   )
 }
 
-function formatPhaseCreditLinePolicy(
-  phase: Pick<InsertSubscriptionPhase, "creditLinePolicy" | "creditLineAmount">,
-  currency: string
-): string {
-  if ((phase.creditLinePolicy ?? "uncapped") === "uncapped") {
-    return "uncapped usage"
+type AddPhaseAction = { enabled: true; onClick: () => void } | { enabled: false; tooltip: string }
+
+// Pure decision for the single "Add phase" CTA. Replaces a nested-ternary tree; each branch
+// maps state -> whether the button is enabled and, if not, why (the tooltip copy).
+function getAddPhaseAction(
+  state: {
+    hasSubscription: boolean
+    canAddScheduledPhase: boolean
+    canAddPhaseAfterFuture: boolean
+    hasFuturePhase: boolean
+    lastPhaseHasEndAt: boolean
+  },
+  handlers: {
+    schedulePhase: () => void
+    createPhaseAfterFuture: () => void
+    createPhaseAfterLast: () => void
+  }
+): AddPhaseAction {
+  if (state.hasSubscription) {
+    if (state.canAddScheduledPhase || state.canAddPhaseAfterFuture) {
+      return {
+        enabled: true,
+        onClick: state.canAddPhaseAfterFuture
+          ? handlers.createPhaseAfterFuture
+          : handlers.schedulePhase,
+      }
+    }
+
+    return {
+      enabled: false,
+      tooltip: state.hasFuturePhase
+        ? "Edit the last future phase and add an end date before adding another phase."
+        : "Adding a phase requires an active phase.",
+    }
   }
 
-  if (phase.creditLineAmount === null || phase.creditLineAmount === undefined) {
-    return "derived usage cap"
+  // No subscription yet (creating a brand-new subscription with locally-added phases).
+  if (!state.lastPhaseHasEndAt) {
+    return {
+      enabled: false,
+      tooltip:
+        "You can't add a new phase if the last phase is not ended. Add an end date to the last phase",
+    }
   }
 
-  return `${formatMoney(toDecimal(fromLedgerMinor(phase.creditLineAmount, currency)), currency)} cap`
+  return { enabled: true, onClick: handlers.createPhaseAfterLast }
+}
+
+function AddPhaseButton({ action }: { action: AddPhaseAction }) {
+  if (action.enabled) {
+    return (
+      <Button
+        size={"sm"}
+        variant="outline"
+        onClick={(e) => {
+          e.stopPropagation()
+          e.preventDefault()
+          action.onClick()
+        }}
+      >
+        Add phase
+      </Button>
+    )
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          size={"sm"}
+          variant="outline"
+          className="cursor-not-allowed opacity-50"
+          aria-disabled
+          tabIndex={-1}
+          onClick={(e) => {
+            e.stopPropagation()
+            e.preventDefault()
+          }}
+        >
+          Add phase
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent className="w-64">{action.tooltip}</TooltipContent>
+    </Tooltip>
+  )
 }

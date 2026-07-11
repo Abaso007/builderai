@@ -19,23 +19,26 @@ export default async function WorkspaceMembersPage() {
       header={
         <HeaderTab
           title="Members Settings"
-          description="Manage your users for this workspace"
+          description="Invite and review team members who can operate this workspace."
           action={<InviteMemberDialog />}
         />
       }
     >
       <Tabs defaultValue="members" className="space-y-4">
-        <TabsList>
+        {/* page-level views use the underline vocabulary, matching the rest
+            of the dashboard */}
+        <TabsList variant="line">
           <TabsTrigger value="members">Members</TabsTrigger>
           <TabsTrigger value="invites">Invites</TabsTrigger>
         </TabsList>
         <TabsContent value="members" className="space-y-4">
           <DataTable
-            className="mt-10"
+            className="mt-4"
             columns={columnsMembers}
             data={members.members}
             filterOptions={{
               filterBy: "name",
+              filterPlaceholder: "Filter by name",
               filterColumns: true,
               filterDateRange: true,
             }}
@@ -44,11 +47,12 @@ export default async function WorkspaceMembersPage() {
 
         <TabsContent value="invites" className="space-y-4">
           <DataTable
-            className="mt-10"
+            className="mt-4"
             columns={columnsInvites}
             data={invites.invites}
             filterOptions={{
               filterBy: "email",
+              filterPlaceholder: "Filter by email",
               filterColumns: true,
               filterDateRange: true,
             }}

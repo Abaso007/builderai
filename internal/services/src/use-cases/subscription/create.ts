@@ -12,13 +12,13 @@ import { UnPriceSubscriptionError } from "../../subscriptions/errors"
 import { checkPaymentProviderAvailability } from "../payment-provider/availability"
 import { activateWalletIfSubscriptionIsActive } from "./activate-wallet-if-active"
 
-type CreateSubscriptionDeps = {
+export type CreateSubscriptionDeps = {
   services: Pick<ServiceContext, "customers" | "subscriptions" | "billing">
   db: Database
   logger: Logger
 }
 
-type CreateSubscriptionInput = {
+export type CreateSubscriptionInput = {
   input: InsertSubscription
   projectId: string
 }
@@ -52,6 +52,7 @@ export async function createSubscription(
     if (!version) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "PLAN_VERSION_NOT_FOUND",
           message: "Version not found. Please check the planVersionId",
         })
       )
@@ -69,6 +70,7 @@ export async function createSubscription(
     if (availability.err) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_OPERATION_FAILED",
           message: availability.err.message,
         })
       )
@@ -77,6 +79,7 @@ export async function createSubscription(
     if (!availability.val.available) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_OPERATION_FAILED",
           message: availability.val.message,
           context: {
             paymentProvider,
@@ -136,6 +139,7 @@ export async function createSubscription(
       Err(
         transactionError ??
           new UnPriceSubscriptionError({
+            code: "SUBSCRIPTION_OPERATION_FAILED",
             message: error instanceof Error ? error.message : String(error),
           })
       )
@@ -152,7 +156,12 @@ export async function createSubscription(
   })
 
   if (billingPeriodsResult.err) {
-    return Err(new UnPriceSubscriptionError({ message: billingPeriodsResult.err.message }))
+    return Err(
+      new UnPriceSubscriptionError({
+        code: "SUBSCRIPTION_OPERATION_FAILED",
+        message: billingPeriodsResult.err.message,
+      })
+    )
   }
 
   // Sub-create is a pure DB write up to here. Wallet activation only fires
@@ -161,13 +170,13 @@ export async function createSubscription(
   // the entitlement DO instead. Grants run through the state machine's
   // `activating` state so the same code path serves create and renewal.
   //
-  // - `trialing`        → trial grant is issued at trialing entry; no
+  // - `trialing`        -> trial grant is issued at trialing entry; no
   //                        ACTIVATE event needed.
-  // - `pending_payment` → payment provider webhook fires PAYMENT_SUCCESS
+  // - `pending_payment` -> payment provider webhook fires PAYMENT_SUCCESS
   //                        on first paid invoice/topup; that transition
   //                        runs through `activating` and issues grants.
   //
-  // Reservations are never opened here — EntitlementWindowDO opens them
+  // Reservations are never opened here: EntitlementWindowDO opens them
   // lazily on first priced usage event.
   const subscription = result.val
   // The activating XState actor parks failed activations in

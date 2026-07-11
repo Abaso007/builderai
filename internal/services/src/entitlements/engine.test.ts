@@ -15,6 +15,7 @@ import {
   validateEventTimestamp,
 } from "./domain"
 import { AsyncMeterAggregationEngine } from "./engine"
+import { computeMeterTransition } from "./meter-transition"
 
 class InMemoryStorageAdapter implements StorageAdapter, SyncStorageAdapter {
   private readonly store = new Map<string, unknown>()
@@ -300,7 +301,94 @@ describe("deriveMeterKey", () => {
   })
 })
 
+describe("computeMeterTransition", () => {
+  it("can intentionally defer timestamp validation without changing aggregation", () => {
+    const validationTimeMs = Date.UTC(2026, 2, 8, 10, 0, 0)
+    const meterConfig: MeterConfig = {
+      eventId: "meter_deferred_validation",
+      eventSlug: "purchase",
+      aggregationMethod: "sum",
+      aggregationField: "amount",
+    }
+    const event = createPurchaseEvent({
+      id: "evt_deferred_validation",
+      timestamp: validationTimeMs + 60_000,
+      amount: 3,
+    })
+
+    expect(computeMeterTransition({ currentState: null, event, meterConfig })?.fact).toMatchObject({
+      delta: 3,
+      valueAfter: 3,
+    })
+    expect(() =>
+      computeMeterTransition({ currentState: null, event, meterConfig, validationTimeMs })
+    ).toThrow(EventTimestampTooFarInFutureError)
+  })
+})
+
 describe("AsyncMeterAggregationEngine", () => {
+  it.each([
+    { aggregationMethod: "sum" as const, aggregationField: "amount", expectedDelta: 3 },
+    { aggregationMethod: "count" as const, aggregationField: undefined, expectedDelta: 1 },
+    { aggregationMethod: "max" as const, aggregationField: "amount", expectedDelta: 3 },
+    { aggregationMethod: "latest" as const, aggregationField: "amount", expectedDelta: 3 },
+  ])(
+    "uses the canonical $aggregationMethod transition for sync aggregation",
+    ({ aggregationField, aggregationMethod, expectedDelta }) => {
+      const now = Date.now()
+      const meterConfig: MeterConfig = {
+        eventId: `meter_${aggregationMethod}`,
+        eventSlug: "purchase",
+        aggregationMethod,
+        ...(aggregationField ? { aggregationField } : {}),
+      }
+      const event = createPurchaseEvent({
+        id: `evt_${aggregationMethod}`,
+        timestamp: now,
+        amount: 3,
+      })
+      const transition = computeMeterTransition({
+        currentState: null,
+        event,
+        meterConfig,
+        validationTimeMs: now,
+      })
+      const engine = new AsyncMeterAggregationEngine(
+        [meterConfig],
+        new InMemoryStorageAdapter(),
+        now
+      )
+
+      expect(transition?.fact).toMatchObject({
+        delta: expectedDelta,
+        meterKey: deriveMeterKey(meterConfig),
+      })
+      expect(engine.applyEventSync(event)).toEqual([transition?.fact])
+    }
+  )
+
+  it("shares exhaustive unsupported-method behavior with the canonical transition", () => {
+    const now = Date.now()
+    const meterConfig = {
+      eventId: "meter_unsupported",
+      eventSlug: "purchase",
+      aggregationMethod: "median",
+      aggregationField: "amount",
+    } as unknown as MeterConfig
+    const event = createPurchaseEvent({ id: "evt_unsupported", timestamp: now, amount: 3 })
+
+    expect(() =>
+      computeMeterTransition({ currentState: null, event, meterConfig, validationTimeMs: now })
+    ).toThrow("Unsupported aggregation method")
+    expect(() =>
+      new AsyncMeterAggregationEngine(
+        [meterConfig],
+        new InMemoryStorageAdapter(),
+        now
+      ).applyEventSync(event)
+    ).toThrow("Unsupported aggregation method")
+  })
+
   it("aggregates sum, count, max, and latest meters for matching events", async () => {
     const storage = new InMemoryStorageAdapter()
     const meterConfigs = createMeterConfigs()

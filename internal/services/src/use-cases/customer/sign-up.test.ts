@@ -101,7 +101,7 @@ describe("customer signUp payment provider guard", () => {
   })
 
   it("allows sandbox signup and stores capped credit line at ledger scale", async () => {
-    const expectedCreditLineAmount = toLedgerMinor(fromCurrencyMinor(1234, "USD"))
+    const expectedCreditLineAmount = toLedgerMinor(fromCurrencyMinor(10_000, "USD"))
     let insertCount = 0
     const tx = {
       insert: vi.fn(() => {
@@ -187,7 +187,7 @@ describe("customer signUp payment provider guard", () => {
           cancelUrl: "https://example.com/cancel",
           defaultCurrency: "USD",
           creditLinePolicy: "capped",
-          creditLineAmount: 1234,
+          creditLineAmountMinor: 10_000,
         } as never,
       }
     )

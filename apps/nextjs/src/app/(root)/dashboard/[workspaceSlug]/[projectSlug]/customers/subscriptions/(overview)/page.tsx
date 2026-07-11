@@ -1,8 +1,7 @@
 import { SUBSCRIPTION_STATUS } from "@unprice/db/utils"
 import { Button } from "@unprice/ui/button"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
-import { Typography } from "@unprice/ui/typography"
-import { Code, Plus } from "lucide-react"
+import { Code } from "lucide-react"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 import { CodeApiSheet } from "~/components/code-api-sheet"
@@ -37,20 +36,17 @@ export default async function PlanSubscriptionsPage({
       header={
         <HeaderTab
           title="Subscriptions"
-          description="Manages the subscriptions of your customers."
+          description="Connect customers to plan versions, billing periods, wallet policy, and invoice evidence."
           action={
             <div className="flex items-center gap-2">
               <CodeApiSheet defaultMethod="getSubscription">
-                <Button variant={"ghost"}>
+                <Button variant={"link"}>
                   <Code className="mr-2 h-4 w-4" />
                   API
                 </Button>
               </CodeApiSheet>
               <SuperLink href={`/${workspaceSlug}/${projectSlug}/customers/subscriptions/new`}>
-                <Button variant={"primary"}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Subscription
-                </Button>
+                <Button variant={"primary"}>Create Subscription</Button>
               </SuperLink>
             </div>
           }
@@ -65,27 +61,22 @@ export default async function PlanSubscriptionsPage({
           <TabNavigationLink asChild active>
             <SuperLink href={`${baseUrl}/subscriptions`}>Subscriptions</SuperLink>
           </TabNavigationLink>
+          <TabNavigationLink asChild>
+            <SuperLink href={`${baseUrl}/runs`}>Budgeted Runs</SuperLink>
+          </TabNavigationLink>
         </div>
       </TabNavigation>
-      <div className="mt-4">
-        <div className="flex flex-col px-1 py-4">
-          <Typography variant="p" affects="removePaddingMargin">
-            All active subscriptions
-          </Typography>
-        </div>
+      <div className="mt-4 flex flex-col gap-4">
         <Suspense
           fallback={
             <DataTableSkeleton
-              columnCount={12}
+              columnCount={9}
               rowCount={1}
               searchableColumnCount={1}
               filterableColumnCount={2}
               cellWidths={[
-                "10rem",
+                "4rem",
                 "40rem",
-                "12rem",
-                "12rem",
-                "12rem",
                 "12rem",
                 "12rem",
                 "12rem",
@@ -100,8 +91,24 @@ export default async function PlanSubscriptionsPage({
           <DataTable
             columns={columns}
             data={subscriptions}
+            initialColumnVisibility={{ timezone: false }}
+            emptyState={{
+              title: "No subscriptions",
+              description:
+                "Subscriptions appear after customers are assigned to published plan versions.",
+              action: (
+                <CodeApiSheet defaultMethod="signUpCustomer">
+                  <Button size="sm" variant="outline">
+                    <Code className="mr-2 size-4" />
+                    API
+                  </Button>
+                </CodeApiSheet>
+              ),
+            }}
+            hidePaginationWhenEmpty
             filterOptions={{
               filterBy: "customerId",
+              filterPlaceholder: "Filter by customer or plan",
               filterColumns: true,
               filterDateRange: true,
               filterServerSide: true,

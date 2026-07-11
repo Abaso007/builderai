@@ -1,4 +1,9 @@
-import type { Analytics, IngestionLiveRow, IngestionRecentEventRow } from "@unprice/analytics"
+import type {
+  Analytics,
+  IngestionFacetRow,
+  IngestionLiveRow,
+  IngestionRecentEventRow,
+} from "@unprice/analytics"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import { z } from "zod"
 import { aiEvidenceSchema } from "./ai-contracts"
@@ -18,18 +23,45 @@ export const getIngestionStatusCursorSchema = z.object({
   canonicalAuditId: z.string(),
 })
 
+const ingestionStates = ["processed", "rejected", "failed"] as const
+const ingestionStateSchema = z.enum(ingestionStates)
+const ingestionStatusFilterSchema = z
+  .object({
+    customerIds: z.array(z.string()).optional(),
+    eventSlugs: z.array(z.string()).optional(),
+    sourceIds: z.array(z.string()).optional(),
+    sourceTypes: z.array(z.string()).optional(),
+    rejectionReasons: z.array(z.string()).optional(),
+    states: z.array(ingestionStateSchema).optional(),
+    search: z.string().optional(),
+  })
+  .default({})
+
+const ingestionFacetOptionSchema = z.object({
+  value: z.string(),
+  count: z.number().int().nonnegative(),
+})
+
+const ingestionStatusFacetsSchema = z.object({
+  states: z.array(
+    z.object({
+      value: ingestionStateSchema,
+      count: z.number().int().nonnegative(),
+    })
+  ),
+  eventSlugs: z.array(ingestionFacetOptionSchema),
+  sourceTypes: z.array(ingestionFacetOptionSchema),
+  rejectionReasons: z.array(ingestionFacetOptionSchema),
+  customers: z.array(ingestionFacetOptionSchema),
+})
+
 export const getIngestionStatusInputSchema = z.object({
   projectId: z.string(),
   customerId: z.string().optional(),
   window: getIngestionStatusWindowSchema,
   cursor: getIngestionStatusCursorSchema.nullish(),
-  filter: z
-    .object({
-      sourceId: z.string().optional(),
-      eventSlug: z.string().optional(),
-      state: z.enum(["processed", "rejected", "failed"]).optional(),
-    })
-    .default({}),
+  filter: ingestionStatusFilterSchema,
+  includeFacets: z.boolean().default(false),
   limit: z.number().int().min(1).max(100).default(50),
 })
 
@@ -76,6 +108,12 @@ export const getIngestionStatusOutputSchema = z.object({
       eventSlug: z.string(),
       sourceType: z.string(),
       sourceId: z.string(),
+      ingestionMode: z.enum(["async", "sync", "run"]).nullable(),
+      runId: z.string().nullable(),
+      traceId: z.string().nullable(),
+      parentRunId: z.string().nullable(),
+      workloadType: z.enum(["agent", "workflow", "job", "tool", "custom"]).nullable(),
+      workloadId: z.string().nullable(),
       state: z.enum(["processed", "rejected", "failed"]),
       rejectionReason: z.string().nullable(),
       failureStage: z.string().nullable(),
@@ -87,6 +125,7 @@ export const getIngestionStatusOutputSchema = z.object({
       handledAt: z.number().int(),
     })
   ),
+  facets: ingestionStatusFacetsSchema,
   nextCursor: getIngestionStatusCursorSchema.nullable(),
   answer: z.string(),
   confidence: z.enum(["high", "medium", "low"]),
@@ -101,7 +140,7 @@ type IngestionStatusCursor = z.infer<typeof getIngestionStatusCursorSchema>
 
 export type GetIngestionStatusAnalytics = Pick<
   Analytics,
-  "getIngestionLive" | "getIngestionRejections" | "getIngestionRecent"
+  "getIngestionLive" | "getIngestionRejections" | "getIngestionRecent" | "getIngestionFacets"
 >
 
 export type GetIngestionStatusDeps = {
@@ -125,6 +164,14 @@ export async function getIngestionStatus(
   }
   const filterQuery = toTinybirdFilter(input.filter)
 
+  const facetsPromise = input.includeFacets
+    ? deps.analytics.getIngestionFacets({
+        ...baseWindowQuery,
+        ...filterQuery,
+        limit: 50,
+      })
+    : Promise.resolve({ data: [] as IngestionFacetRow[] })
+
   const analyticsResult = await wrapResult(
     Promise.all([
       deps.analytics.getIngestionLive({
@@ -142,6 +189,7 @@ export async function getIngestionStatus(
         ...toTinybirdCursor(input.cursor),
         limit: input.limit + 1,
       }),
+      facetsPromise,
     ]),
     (error) =>
       new FetchError({
@@ -160,10 +208,10 @@ export async function getIngestionStatus(
     return Err(analyticsResult.err)
   }
 
-  const [liveResponse, rejectionsResponse, recentResponse] = analyticsResult.val
+  const [liveResponse, rejectionsResponse, recentResponse, facetsResponse] = analyticsResult.val
   const live = (liveResponse.data ?? []).map(mapLiveRow)
   const rejections =
-    input.filter.state === "processed"
+    hasValues(input.filter.states) && !input.filter.states.includes("rejected")
       ? []
       : (rejectionsResponse.data ?? [])
           .filter((row) => matchesFilter({ ...row, state: "rejected" }, input.filter))
@@ -181,6 +229,7 @@ export async function getIngestionStatus(
     .filter((row) => matchesFilter(row, input.filter))
   const recentEvents = recentRows.slice(0, input.limit).map(mapRecentEventRow)
   const nextCursor = getNextCursor(recentRows, input.limit)
+  const facets = mapFacetRows(facetsResponse.data ?? [])
   const totals = deriveTotals({ live, rejections, recentEvents })
   const successRate = totals.total === 0 ? 0 : totals.processed / totals.total
   const latestHandledAt = getLatestHandledAt({ recentEvents, live, rejections })
@@ -201,6 +250,7 @@ export async function getIngestionStatus(
     live,
     rejections,
     recentEvents,
+    facets,
     nextCursor,
     answer: buildAnswer({
       projectId: input.projectId,
@@ -244,6 +294,12 @@ function mapRecentEventRow(
     eventSlug: row.event_slug,
     sourceType: row.source_type,
     sourceId: row.source_id,
+    ingestionMode: deriveIngestionMode(row),
+    runId: row.run_id ?? null,
+    traceId: row.trace_id ?? null,
+    parentRunId: row.parent_run_id ?? null,
+    workloadType: row.workload_type ?? null,
+    workloadId: row.workload_id ?? null,
     state: row.state,
     rejectionReason: row.rejection_reason,
     failureStage: row.failure_stage ?? null,
@@ -275,35 +331,201 @@ function getNextCursor(
   return lastVisibleRow ? toCursor(lastVisibleRow) : null
 }
 
-function matchesFilter(
-  row: { source_id: string; event_slug: string; state?: "processed" | "rejected" | "failed" },
-  filter: IngestionStatusFilter
-): boolean {
-  if (filter.sourceId && row.source_id !== filter.sourceId) {
+type FilterableIngestionRow = {
+  canonical_audit_id?: string
+  customer_id?: string
+  event_id?: string
+  event_slug?: string
+  source_id?: string
+  source_type?: string
+  ingestion_mode?: string | null
+  run_id?: string | null
+  trace_id?: string | null
+  parent_run_id?: string | null
+  workload_type?: string | null
+  workload_id?: string | null
+  rejection_reason?: string | null
+  state?: (typeof ingestionStates)[number]
+}
+
+function matchesFilter(row: FilterableIngestionRow, filter: IngestionStatusFilter): boolean {
+  if (
+    hasValues(filter.customerIds) &&
+    row.customer_id !== undefined &&
+    !filter.customerIds.includes(row.customer_id)
+  ) {
     return false
   }
 
-  if (filter.eventSlug && row.event_slug !== filter.eventSlug) {
+  if (
+    hasValues(filter.eventSlugs) &&
+    row.event_slug !== undefined &&
+    !filter.eventSlugs.includes(row.event_slug)
+  ) {
     return false
   }
 
-  if (filter.state && row.state && row.state !== filter.state) {
+  if (
+    hasValues(filter.sourceIds) &&
+    row.source_id !== undefined &&
+    !filter.sourceIds.includes(row.source_id)
+  ) {
+    return false
+  }
+
+  if (
+    hasValues(filter.sourceTypes) &&
+    row.source_type !== undefined &&
+    !filter.sourceTypes.includes(row.source_type)
+  ) {
+    return false
+  }
+
+  if (
+    hasValues(filter.rejectionReasons) &&
+    row.rejection_reason !== undefined &&
+    !filter.rejectionReasons.includes(row.rejection_reason ?? "")
+  ) {
+    return false
+  }
+
+  if (hasValues(filter.states) && row.state && !filter.states.includes(row.state)) {
+    return false
+  }
+
+  const search = filter.search?.trim().toLowerCase()
+  if (!search) {
+    return true
+  }
+
+  const searchableValues = [
+    row.event_id,
+    row.canonical_audit_id,
+    row.customer_id,
+    row.event_slug,
+    row.source_type,
+    row.source_id,
+    row.ingestion_mode ?? undefined,
+    row.run_id ?? undefined,
+    row.trace_id ?? undefined,
+    row.parent_run_id ?? undefined,
+    row.workload_type ?? undefined,
+    row.workload_id ?? undefined,
+    row.rejection_reason ?? undefined,
+  ].filter((value): value is string => typeof value === "string" && value.length > 0)
+
+  if (!searchableValues.some((value) => value.toLowerCase().includes(search))) {
     return false
   }
 
   return true
 }
 
-function toTinybirdFilter(filter: IngestionStatusFilter): {
-  source_id?: string
-  event_slug?: string
-  state?: "processed" | "rejected" | "failed"
-} {
-  return {
-    ...(filter.sourceId ? { source_id: filter.sourceId } : {}),
-    ...(filter.eventSlug ? { event_slug: filter.eventSlug } : {}),
-    ...(filter.state ? { state: filter.state } : {}),
+function deriveIngestionMode(row: IngestionRecentEventRow): "async" | "sync" | "run" | null {
+  if (row.run_id) {
+    return "run"
   }
+
+  return row.ingestion_mode ?? null
+}
+
+function toTinybirdFilter(filter: IngestionStatusFilter): {
+  filter_customer_ids?: string[]
+  event_slugs?: string[]
+  source_ids?: string[]
+  source_types?: string[]
+  rejection_reasons?: string[]
+  states?: (typeof ingestionStates)[number][]
+  search?: string
+} {
+  const customerIds = compactStringValues(filter.customerIds)
+  const eventSlugs = compactStringValues(filter.eventSlugs)
+  const sourceIds = compactStringValues(filter.sourceIds)
+  const sourceTypes = compactStringValues(filter.sourceTypes)
+  const rejectionReasons = compactStringValues(filter.rejectionReasons)
+  const search = filter.search?.trim()
+
+  return {
+    ...(customerIds ? { filter_customer_ids: customerIds } : {}),
+    ...(eventSlugs ? { event_slugs: eventSlugs } : {}),
+    ...(sourceIds ? { source_ids: sourceIds } : {}),
+    ...(sourceTypes ? { source_types: sourceTypes } : {}),
+    ...(rejectionReasons ? { rejection_reasons: rejectionReasons } : {}),
+    ...(hasValues(filter.states) ? { states: filter.states } : {}),
+    ...(search ? { search } : {}),
+  }
+}
+
+function mapFacetRows(rows: IngestionFacetRow[]): GetIngestionStatusOutput["facets"] {
+  const facets: GetIngestionStatusOutput["facets"] = {
+    states: [],
+    eventSlugs: [],
+    sourceTypes: [],
+    rejectionReasons: [],
+    customers: [],
+  }
+
+  for (const row of rows) {
+    if (!row.value) {
+      continue
+    }
+
+    const option = {
+      value: row.value,
+      count: row.event_count,
+    }
+
+    if (row.facet === "state") {
+      if (isIngestionState(row.value)) {
+        facets.states.push({
+          value: row.value,
+          count: row.event_count,
+        })
+      }
+      continue
+    }
+
+    if (row.facet === "event_slug") {
+      facets.eventSlugs.push(option)
+      continue
+    }
+
+    if (row.facet === "source_type") {
+      facets.sourceTypes.push(option)
+      continue
+    }
+
+    if (row.facet === "rejection_reason") {
+      facets.rejectionReasons.push(option)
+      continue
+    }
+
+    if (row.facet === "customer_id") {
+      facets.customers.push(option)
+    }
+  }
+
+  return facets
+}
+
+function compactStringValues(values: string[] | undefined): string[] | undefined {
+  if (!values) {
+    return undefined
+  }
+
+  const compacted = Array.from(
+    new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))
+  )
+
+  return compacted.length > 0 ? compacted : undefined
+}
+
+function hasValues<T>(values: T[] | undefined): values is T[] {
+  return Array.isArray(values) && values.length > 0
+}
+
+function isIngestionState(value: string): value is (typeof ingestionStates)[number] {
+  return ingestionStates.includes(value as (typeof ingestionStates)[number])
 }
 
 function toTinybirdCursor(cursor: IngestionStatusCursor | null | undefined): {
@@ -488,7 +710,7 @@ function buildNextActions({
     return [`Inspect rejected or failed events and fix the reported reasons${suffix}`]
   }
 
-  return ["No immediate action required."]
+  return []
 }
 
 function buildAnswer({

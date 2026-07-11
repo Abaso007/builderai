@@ -1,13 +1,19 @@
 import { TRPCError } from "@trpc/server"
-import { paymentProviderSchema, selectPaymentProviderConfigSchema } from "@unprice/db/validators"
+import { paymentProviderSchema, publicPaymentProviderConfigSchema } from "@unprice/db/validators"
 import { getProviderConnection } from "@unprice/services/use-cases"
 import { z } from "zod"
 
 import { protectedProjectProcedure } from "#trpc"
 
 export const getConnection = protectedProjectProcedure
-  .input(z.object({ paymentProvider: paymentProviderSchema }))
-  .output(z.object({ paymentProviderConfig: selectPaymentProviderConfigSchema.optional() }))
+  .input(
+    z.object({
+      paymentProvider: paymentProviderSchema,
+      workspaceSlug: z.string().optional(),
+      projectSlug: z.string().optional(),
+    })
+  )
+  .output(z.object({ paymentProviderConfig: publicPaymentProviderConfigSchema.optional() }))
   .mutation(async (opts) => {
     opts.ctx.verifyRole(["OWNER", "ADMIN", "MEMBER"])
 

@@ -1,11 +1,12 @@
 import { TRPCError } from "@trpc/server"
 import { z } from "zod"
+import { domainErrorToTrpcError } from "#domain-error"
 import { protectedProjectProcedure } from "#trpc"
 
 export const machine = protectedProjectProcedure
   .input(
     z.object({
-      event: z.enum(["invoice", "renew", "billing_period", "finalize_invoice", "collect_payment"]),
+      event: z.enum(["invoice", "renew", "finalize_invoice", "collect_payment"]),
       subscriptionId: z.string(),
       invoiceId: z.string().optional(),
     })
@@ -32,10 +33,7 @@ export const machine = protectedProjectProcedure
         })
 
         if (err) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: err.message,
-          })
+          throw domainErrorToTrpcError(err)
         }
 
         return {
@@ -59,10 +57,7 @@ export const machine = protectedProjectProcedure
         })
 
         if (err) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: err.message,
-          })
+          throw domainErrorToTrpcError(err)
         }
         return {
           providerInvoiceId: val.providerInvoiceId,
@@ -79,10 +74,7 @@ export const machine = protectedProjectProcedure
           now: Date.now(),
         })
         if (err) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: err.message,
-          })
+          throw domainErrorToTrpcError(err)
         }
         return {
           status: val.status,
@@ -97,33 +89,11 @@ export const machine = protectedProjectProcedure
         })
 
         if (err) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: err.message,
-          })
+          throw domainErrorToTrpcError(err)
         }
 
         return {
           status: val.status,
-        }
-      }
-
-      case "billing_period": {
-        const { err } = await billing.generateBillingPeriods({
-          subscriptionId: input.subscriptionId,
-          projectId,
-          now: Date.now(),
-        })
-
-        if (err) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: err.message,
-          })
-        }
-
-        return {
-          status: "success",
         }
       }
 

@@ -1,12 +1,12 @@
 import { FEATURE_SLUGS } from "@unprice/config"
 import {
   Activity,
-  Calculator,
   Key,
+  Layers3,
   LayoutDashboard,
   Link,
+  PanelTop,
   Settings,
-  Sticker,
   Users,
 } from "lucide-react"
 import type { DashboardRoute, Shortcut } from "~/types"
@@ -25,20 +25,19 @@ export const PROJECT_NAV: DashboardRoute[] = [
   },
   {
     name: "Plans",
-    icon: Calculator,
+    icon: Layers3,
     href: "/plans",
     disabled: false,
-    isNew: true,
     featureSlug: FEATURE_SLUGS.PLANS.SLUG,
   },
   {
     name: "Pages",
-    icon: Sticker,
+    icon: PanelTop,
     href: "/pages",
     featureSlug: FEATURE_SLUGS.PAGES.SLUG,
   },
   {
-    name: "Api Keys",
+    name: "API Keys",
     href: "/apikeys",
     icon: Key,
     featureSlug: FEATURE_SLUGS.API_KEYS.SLUG,
@@ -59,7 +58,7 @@ export const PROJECT_NAV: DashboardRoute[] = [
         href: "/settings/danger",
       },
       {
-        name: "Infrastructure",
+        name: "Payment providers",
         href: "/settings/payment",
       },
     ],
@@ -68,21 +67,21 @@ export const PROJECT_NAV: DashboardRoute[] = [
 
 export const PROJECT_SHORTCUTS: Shortcut[] = [
   {
-    name: "View Plans",
+    name: "View All Plans",
     href: "plans",
     icon: Link,
-    featureSlug: "plans",
+    featureSlug: FEATURE_SLUGS.PLANS.SLUG,
   },
   {
-    name: "Customer",
+    name: "New Subscription",
     href: "customers/subscriptions/new",
     icon: Link,
-    featureSlug: "customers",
+    featureSlug: FEATURE_SLUGS.CUSTOMERS.SLUG,
   },
   {
-    name: "Events",
-    href: "events",
+    name: "View Budgeted Runs",
+    href: "customers/runs",
     icon: Link,
-    featureSlug: "events",
+    featureSlug: FEATURE_SLUGS.CUSTOMERS.SLUG,
   },
 ]

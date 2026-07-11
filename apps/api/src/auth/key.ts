@@ -1,13 +1,13 @@
-import type { ApiKeyExtended } from "@unprice/db/validators"
+import type { ApiKeyExtended, Customer } from "@unprice/db/validators"
 import { SchemaError } from "@unprice/error"
 import { UnPriceApiKeyError } from "@unprice/services/apikey"
 import type { Context } from "hono"
 import { endTime, startTime } from "hono/timing"
-import { UnpriceApiError } from "~/errors"
+import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
 
 // verify is sensitive to latency
-const API_KEY_RATE_LIMIT_BYPASS_PATHS = new Set(["/v1/entitlements/verify"])
+const API_KEY_RATE_LIMIT_BYPASS_PATHS = new Set(["/v1/access/check"])
 const LIVE_API_KEY_PATTERN = /^unprice_live_[1-9A-HJ-NP-Za-km-z]{22}$/
 const LOCAL_DEV_API_KEY_PATTERN = /^unprice_dev_[A-Za-z0-9_-]+$/
 
@@ -21,6 +21,14 @@ export function isValidApiKeyShape(value: string, opts: { allowDevKey?: boolean 
     LIVE_API_KEY_PATTERN.test(value) ||
     (opts.allowDevKey === true && LOCAL_DEV_API_KEY_PATTERN.test(value))
   )
+}
+
+function normalizeRequestPath(path: string): string {
+  return path.endsWith("/") && path.length > 1 ? path.slice(0, -1) : path
+}
+
+export function shouldBypassApiKeyRateLimit(path: string): boolean {
+  return API_KEY_RATE_LIMIT_BYPASS_PATHS.has(normalizeRequestPath(path))
 }
 
 /**
@@ -51,9 +59,8 @@ export async function keyAuth(c: Context<HonoEnv>) {
   startTime(c, "verifyApiKey")
 
   const shouldAvoidRateLimit = c.env.APP_ENV === "development"
-  const requestPath =
-    c.req.path.endsWith("/") && c.req.path.length > 1 ? c.req.path.slice(0, -1) : c.req.path
-  const shouldBypassRateLimitPath = API_KEY_RATE_LIMIT_BYPASS_PATHS.has(requestPath)
+  const requestPath = normalizeRequestPath(c.req.path)
+  const shouldBypassRateLimitPath = shouldBypassApiKeyRateLimit(requestPath)
 
   const verifyRes = await apikey.verifyApiKey({ key: authorization })
 
@@ -236,7 +243,7 @@ export async function resolveContextProjectId(
 
     // Fallback: resolve Main Project via customer record when env is not set.
     const { customer } = c.get("services")
-    const { val } = await customer.getCustomer(customerId)
+    const { val } = await customer.getCustomerByIdAcrossProjects(customerId)
 
     if (val) {
       endTime(c, "resolveContextProjectId")
@@ -260,15 +267,72 @@ export async function resolveContextProjectId(
   return defaultProjectId
 }
 
+export type CustomerResolutionResult =
+  | { success: true; customerId: string }
+  | {
+      success: false
+      code: "customer_required" | "customer_forbidden"
+      message: string
+    }
+
+export function resolveCustomerIdForApiKey(input: {
+  explicitCustomerId?: string | null
+  defaultCustomerId?: string | null
+}): CustomerResolutionResult {
+  const explicitCustomerId = input.explicitCustomerId ?? null
+  const defaultCustomerId = input.defaultCustomerId ?? null
+
+  if (defaultCustomerId !== null) {
+    if (explicitCustomerId !== null && explicitCustomerId !== defaultCustomerId) {
+      return {
+        success: false,
+        code: "customer_forbidden",
+        message: "This API key is bound to a different customer",
+      }
+    }
+
+    return { success: true, customerId: defaultCustomerId }
+  }
+
+  if (explicitCustomerId === null) {
+    return {
+      success: false,
+      code: "customer_required",
+      message: "customerId is required when the API key has no default customer binding",
+    }
+  }
+
+  return { success: true, customerId: explicitCustomerId }
+}
+
+export function resolveCustomerIdForApiKeyOrThrow(input: {
+  explicitCustomerId?: string | null
+  defaultCustomerId?: string | null
+}): string {
+  const result = resolveCustomerIdForApiKey(input)
+
+  if (!result.success) {
+    throw new UnpriceApiError({
+      code: result.code === "customer_forbidden" ? "FORBIDDEN" : "BAD_REQUEST",
+      message: result.message,
+    })
+  }
+
+  return result.customerId
+}
+
 export function validateIsAllowedToAccessProject({
-  isMain,
   key,
   requestedProjectId,
 }: {
-  isMain: boolean
   key: ApiKeyExtended
   requestedProjectId: string
 }) {
+  // Canonical "is main" predicate: a project is treated as main when either the
+  // project itself or its workspace is flagged main. This is the single source of
+  // truth — callers no longer pass their own (and previously divergent) boolean.
+  const isMain = (key.project.isMain ?? false) || key.project.workspace.isMain
+
   if (isMain) {
     return requestedProjectId || key.projectId
   }
@@ -281,4 +345,44 @@ export function validateIsAllowedToAccessProject({
     code: "FORBIDDEN",
     message: "You are not allowed to access a different project.",
   })
+}
+
+/**
+ * Shared prologue for customer-scoped routes: authenticate the key, resolve the
+ * target customer id (explicit or the key's default binding), resolve+authorize
+ * the project, then load and existence-check the customer within that project.
+ *
+ * Replaces the 4-step block pasted across the wallet and payment-method routes.
+ * Throws UnpriceApiError (mapped) on any failure.
+ */
+export async function resolveOwnedCustomer(
+  c: Context<HonoEnv>,
+  input: { customerId?: string | null; projectId?: string | null }
+): Promise<{ key: ApiKeyExtended; customerId: string; projectId: string; customer: Customer }> {
+  const key = await keyAuth(c)
+
+  const customerId = resolveCustomerIdForApiKeyOrThrow({
+    explicitCustomerId: input.customerId,
+    defaultCustomerId: key.defaultCustomerId,
+  })
+
+  const projectId = validateIsAllowedToAccessProject({
+    key,
+    requestedProjectId: input.projectId ?? key.project.id ?? "",
+  })
+
+  const { val: customer, err } = await c.get("services").customer.getCustomerByIdInProject({
+    id: customerId,
+    projectId,
+  })
+
+  if (err) {
+    throw toUnpriceApiError(err)
+  }
+
+  if (!customer || customer.projectId !== projectId) {
+    throw new UnpriceApiError({ code: "NOT_FOUND", message: "Customer not found" })
+  }
+
+  return { key, customerId, projectId, customer }
 }

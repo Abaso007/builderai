@@ -1,7 +1,7 @@
 import { entitlementMeterFactSchemaV1 } from "@unprice/analytics"
 import { z } from "zod"
 import { INGESTION_FAILURE_STAGES } from "./interface"
-import type { IngestionQueueMessage } from "./message"
+import { type IngestionQueueMessage, ingestionModeSchema } from "./message"
 
 export const INGESTION_REPORTING_ENVELOPE_TARGET_BYTES = 96 * 1024
 
@@ -19,6 +19,22 @@ export const ingestionReportingAuditRecordSchema = z.object({
   sourceType: z.enum(["api_key", "system", "unknown"]),
   sourceId: z.string(),
   sourceName: z.string().nullable(),
+  runId: z.string().nullable().optional().default(null),
+  traceId: z.string().nullable().optional().default(null),
+  parentRunId: z.string().nullable().optional().default(null),
+  workloadType: z
+    .enum(["agent", "workflow", "job", "tool", "custom"])
+    .nullable()
+    .optional()
+    .default(null),
+  workloadId: z.string().nullable().optional().default(null),
+  ingestionMode: ingestionModeSchema.nullable().optional(),
+  // First-class event identity — previously reachable only by JSON-parsing the
+  // auditPayloadJson blob downstream. The record is now the single source and
+  // the snake_case payload is derived from it.
+  eventId: z.string(),
+  slug: z.string(),
+  timestamp: z.number(),
   status: z.enum(["processed", "rejected", "failed"]),
   rejectionReason: z.string().optional(),
   failureStage: z.enum(INGESTION_FAILURE_STAGES).nullable(),
@@ -39,6 +55,8 @@ export const ingestionReportingEnvelopeSchema = z.object({
   createdAt: z.number().int(),
   projectId: z.string(),
   customerId: z.string(),
+  /** Times this envelope has been re-driven from the reporting DLQ. */
+  redriveCount: z.number().int().min(0).optional().default(0),
   auditRecords: z.array(ingestionReportingAuditRecordSchema),
   meterFacts: z.array(entitlementMeterFactSchemaV1),
 })

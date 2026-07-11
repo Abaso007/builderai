@@ -16,6 +16,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@unprice/ui/dropdown-menu"
 
@@ -31,11 +33,13 @@ export function PlanActions({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant={"custom"}>
-            <span className="sr-only">Actions</span>
+            <span className="sr-only">More actions</span>
             <ChevronDown className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent className="w-44" align="end">
+          <DropdownMenuLabel>More actions</DropdownMenuLabel>
+          <DropdownMenuSeparator />
           <DialogTrigger asChild>
             <DropdownMenuItem>Edit plan</DropdownMenuItem>
           </DialogTrigger>
@@ -43,8 +47,11 @@ export function PlanActions({
       </DropdownMenu>
       <DialogContent className="max-h-screen overflow-y-scroll">
         <DialogHeader>
-          <DialogTitle>Plan Form</DialogTitle>
-          <DialogDescription>Modify the plan details below.</DialogDescription>
+          <DialogTitle>Edit plan</DialogTitle>
+          <DialogDescription>
+            Update the commercial package. Plan versions keep the versioned features, meters, and
+            billing behavior.
+          </DialogDescription>
         </DialogHeader>
         <PlanForm defaultValues={plan} />
       </DialogContent>

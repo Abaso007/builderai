@@ -138,6 +138,12 @@ export const subscriptionPhaseExtendedSchema = subscriptionPhaseSelectSchema.ext
   }),
 })
 
+export const subscriptionPhaseUpdateSchema = subscriptionPhaseSelectSchema.extend({
+  config: subscriptionItemsConfigSchema.optional(),
+  paymentMethodRequired: z.boolean().optional(),
+  customerId: z.string().optional(),
+})
+
 export const subscriptionPhaseInsertSchema = createInsertSchema(subscriptionPhases, {
   planVersionId: z.string().min(1, { message: "Plan version is required" }),
   paymentProvider: paymentProviderSchema,
@@ -280,6 +286,16 @@ export const subscriptionChangePlanSchema = subscriptionSelectSchema
     currentPlanVersionId: z.string(),
     config: subscriptionItemsConfigSchema.optional(),
     whenToChange: z.enum(["immediately", "end_of_cycle"]).optional(),
+    paymentProvider: paymentProviderSchema.optional(),
+    paymentMethodRequired: z.boolean().optional(),
+    paymentMethodId: z.string().nullable().optional(),
+    creditLinePolicy: creditLinePolicySchema.default("uncapped").optional(),
+    creditLineAmount: z.coerce.number().int().min(0).nullable().optional(),
+    trialUnits: z.coerce.number().int().min(0).optional(),
+    // When set, the target plan version must use this currency. Callers that
+    // resolve a billing currency (e.g. the workspace change-plan use case) push
+    // it here so plan-version currency validity lives in one owner: this use case.
+    expectedCurrency: z.string().optional(),
   })
 
 export const subscriptionPhaseCacheSchema = subscriptionPhaseSelectSchema.extend({
@@ -302,6 +318,7 @@ export type SubscriptionExtended = z.infer<typeof subscriptionExtendedSchema>
 export type InsertSubscriptionPhase = z.infer<typeof subscriptionPhaseInsertSchema>
 export type SubscriptionPhase = z.infer<typeof subscriptionPhaseSelectSchema>
 export type SubscriptionPhaseExtended = z.infer<typeof subscriptionPhaseExtendedSchema>
+export type UpdateSubscriptionPhase = z.infer<typeof subscriptionPhaseUpdateSchema>
 export type SubscriptionMetadata = z.infer<typeof subscriptionMetadataSchema>
 export type SubscriptionPhaseMetadata = z.infer<typeof subscriptionPhaseMetadataSchema>
 export type SubscriptionChangePlan = z.infer<typeof subscriptionChangePlanSchema>

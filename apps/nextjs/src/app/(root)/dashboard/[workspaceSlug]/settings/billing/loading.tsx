@@ -1,7 +1,5 @@
-import { Button } from "@unprice/ui/button"
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@unprice/ui/card"
 import { Skeleton } from "@unprice/ui/skeleton"
-import { PaymentMethodButton } from "~/components/forms/payment-method-form"
+import { UsageDashboardSkeleton } from "~/components/analytics/usage-dashboard-view"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 
@@ -10,73 +8,25 @@ export default function BillingPageLoading() {
     <DashboardShell
       header={
         <HeaderTab
-          title="Billing Settings"
-          description="Manage your payments for this workspace."
+          title="Billing & Usage"
+          description="Plan, payment, and usage evidence for this workspace."
+          action={<Skeleton className="h-9 w-56" />}
         />
       }
     >
-      <SubscriptionCardLoading />
-      <PaymentMethodCardLoading />
-      <UsageCardLoading />
-    </DashboardShell>
-  )
-}
-
-function SubscriptionCardLoading() {
-  return (
-    <Card className="animate-pulse">
-      <CardHeader>
-        <CardTitle>Subscription Info</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-4">
-          <div className="h-6 w-3/4 rounded bg-muted" />
-          <div className="space-y-2">
-            <div className="h-4 w-1/2 rounded bg-muted" />
-            <div className="h-4 w-2/3 rounded bg-muted" />
+      <div className="flex flex-col gap-6">
+        <section className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-5 w-44" />
+            <Skeleton className="h-4 w-[34rem] max-w-full" />
           </div>
-          <div className="h-20 rounded bg-muted" />
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-function PaymentMethodCardLoading() {
-  return (
-    <Card className="mt-4 animate-pulse">
-      <CardHeader>
-        <CardTitle>Default Payment Method</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <PaymentMethodButton
-          customerId="customer_id"
-          successUrl={""}
-          cancelUrl={""}
-          paymentProvider="stripe"
-        />
-      </CardContent>
-    </Card>
-  )
-}
-
-function UsageCardLoading() {
-  return (
-    <Card className="mt-4 animate-pulse">
-      <CardHeader>
-        <CardTitle>Subscription usage</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-4">
-          <div className="h-4 w-1/2 rounded bg-muted" />
-          <div className="h-20 rounded bg-muted" />
-        </div>
-      </CardContent>
-      <CardFooter>
-        <Button disabled className="w-full">
-          <Skeleton className="h-4 w-24" />
-        </Button>
-      </CardFooter>
-    </Card>
+          <div className="grid gap-4 lg:grid-cols-[0.95fr_1.55fr]">
+            <Skeleton className="h-[360px] rounded-md border border-border/60" />
+            <Skeleton className="h-[360px] rounded-md border border-border/60" />
+          </div>
+        </section>
+        <UsageDashboardSkeleton mode="customer" display={{ showCustomerSummary: false }} />
+      </div>
+    </DashboardShell>
   )
 }

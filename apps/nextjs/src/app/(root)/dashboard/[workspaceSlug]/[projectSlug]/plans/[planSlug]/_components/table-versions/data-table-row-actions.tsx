@@ -51,9 +51,9 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
     <Dialog onOpenChange={setIsOpenDialog} open={isOpenDialog}>
       <DropdownMenu onOpenChange={setIsOpen} open={isOpen}>
         <DropdownMenuTrigger asChild>
-          <Button aria-haspopup="true" size="icon" variant="ghost">
-            <MoreVertical className="h-4 w-4" />
-            <span className="sr-only">Toggle menu</span>
+          <Button variant="ghost" size="icon" className="size-8">
+            <MoreVertical className="size-4" aria-hidden="true" />
+            <span className="sr-only">Open row actions</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
@@ -77,24 +77,26 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
               planVersionId={version.id}
             />
           </DropdownMenuItem>
+          <DropdownMenuItem>
+            <SuperLink href={`${pathname}/${version.id}`}>Configure features</SuperLink>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
             <PlanVersionDeactivate
               onConfirmAction={() => setIsOpen(false)}
-              classNames="w-full relative flex cursor-pointer justify-start select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-background-bgHover hover:text-background-textContrast font-normal"
+              classNames="w-full relative flex cursor-pointer justify-start select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 text-danger-text focus:bg-danger-solid focus:text-danger-foreground font-normal hover:bg-danger-solid hover:text-danger-foreground"
               planVersionId={version.id}
             />
-          </DropdownMenuItem>
-
-          <DropdownMenuItem>
-            <SuperLink href={`${pathname}/${version.id}`}>Configure features</SuperLink>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
       <DialogContent className="max-h-screen overflow-y-scroll md:max-w-screen-md">
         <DialogHeader>
-          <DialogTitle>Plan Version Form</DialogTitle>
-          <DialogDescription>Modify the plan version details below.</DialogDescription>
+          <DialogTitle>Edit plan version</DialogTitle>
+          <DialogDescription>
+            Update the pricing, billing, and entitlement rules for customers pinned to this version.
+          </DialogDescription>
         </DialogHeader>
         <PlanVersionForm
           defaultValues={{

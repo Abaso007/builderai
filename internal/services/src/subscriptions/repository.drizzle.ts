@@ -1,5 +1,24 @@
-import { type Database, type SQL, and, count, eq, getTableColumns, inArray, sql } from "@unprice/db"
-import { customers, subscriptionItems, subscriptionPhases, subscriptions } from "@unprice/db/schema"
+import {
+  type Database,
+  type SQL,
+  and,
+  count,
+  eq,
+  getTableColumns,
+  gte,
+  inArray,
+  isNull,
+  lte,
+  or,
+  sql,
+} from "@unprice/db"
+import {
+  customers,
+  subscriptionItems,
+  subscriptionPhases,
+  subscriptions,
+  versions,
+} from "@unprice/db/schema"
 import { withDateFilters, withPagination } from "@unprice/db/utils"
 import type { Subscription, SubscriptionItem, SubscriptionPhase } from "@unprice/db/validators"
 
@@ -19,6 +38,7 @@ import type {
   ListSubscriptionsResult,
   PhaseForBilling,
   PhaseWithItemsAndSubscription,
+  ReplaceItemsForPhaseInput,
   SubscriptionFullData,
   SubscriptionMachineData,
   SubscriptionRepository,
@@ -254,6 +274,7 @@ export class DrizzleSubscriptionRepository implements SubscriptionRepository {
   ): Promise<ListSubscriptionsResult> {
     const columns = getTableColumns(subscriptions)
     const customerColumns = getTableColumns(customers)
+    const now = input.now ?? Date.now()
 
     const expressions = [eq(columns.projectId, input.projectId)]
 
@@ -262,6 +283,7 @@ export class DrizzleSubscriptionRepository implements SubscriptionRepository {
         .select({
           subscriptions: subscriptions,
           customer: customerColumns,
+          billingConfig: versions.billingConfig,
         })
         .from(subscriptions)
         .innerJoin(
@@ -269,6 +291,22 @@ export class DrizzleSubscriptionRepository implements SubscriptionRepository {
           and(
             eq(subscriptions.customerId, customers.id),
             eq(customers.projectId, subscriptions.projectId)
+          )
+        )
+        .leftJoin(
+          subscriptionPhases,
+          and(
+            eq(subscriptionPhases.subscriptionId, subscriptions.id),
+            eq(subscriptionPhases.projectId, subscriptions.projectId),
+            lte(subscriptionPhases.startAt, now),
+            or(isNull(subscriptionPhases.endAt), gte(subscriptionPhases.endAt, now))
+          )
+        )
+        .leftJoin(
+          versions,
+          and(
+            eq(versions.id, subscriptionPhases.planVersionId),
+            eq(versions.projectId, subscriptionPhases.projectId)
           )
         )
         .$dynamic()
@@ -307,6 +345,7 @@ export class DrizzleSubscriptionRepository implements SubscriptionRepository {
 
     const subscriptionsData = data.map((row) => ({
       ...row.subscriptions,
+      billingConfig: row.billingConfig ?? null,
       customer: row.customer,
     }))
 
@@ -430,6 +469,25 @@ export class DrizzleSubscriptionRepository implements SubscriptionRepository {
   // ── Items ──────────────────────────────────────────────────────────────────
 
   async insertItems(input: InsertItemsInput): Promise<SubscriptionItem[]> {
+    const rows = await this.db.insert(subscriptionItems).values(input.items).returning()
+
+    return rows as SubscriptionItem[]
+  }
+
+  async replaceItemsForPhase(input: ReplaceItemsForPhaseInput): Promise<SubscriptionItem[]> {
+    await this.db
+      .delete(subscriptionItems)
+      .where(
+        and(
+          eq(subscriptionItems.subscriptionPhaseId, input.phaseId),
+          eq(subscriptionItems.projectId, input.projectId)
+        )
+      )
+
+    if (input.items.length === 0) {
+      return []
+    }
+
     const rows = await this.db.insert(subscriptionItems).values(input.items).returning()
 
     return rows as SubscriptionItem[]

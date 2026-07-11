@@ -24,7 +24,7 @@ export const navItems = [
   {
     href: `${PRICING_DOMAIN}/`,
     title: "Pricing",
-    isMarketing: true,
+    isMarketing: false,
     isDashboard: false,
   },
 ] satisfies {
@@ -37,9 +37,10 @@ export const navItems = [
 
 export const siteConfig: SiteConfig = {
   name: "unprice",
-  description: "PriceOps infrastructure for SaaS. Stop hardcoding your revenue.",
+  description:
+    "Open-source customer money path for usage-based SaaS. Authorize customer spend before paid work runs.",
   links: {
-    twitter: "https://github.com/jhonsfran1165/unprice",
+    twitter: "https://x.com/jhosef90",
     github: "https://github.com/jhonsfran1165/unprice",
     dashboard: "/",
   },

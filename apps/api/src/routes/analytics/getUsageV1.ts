@@ -12,53 +12,68 @@ import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 import { z } from "zod"
-import { keyAuth } from "~/auth/key"
+import { keyAuth, resolveCustomerIdForApiKeyOrThrow } from "~/auth/key"
 import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { serializeError } from "~/errors/log"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 
 const tags = ["analytics"]
 
-export const route = createRoute({
-  path: "/v1/analytics/usage/get",
-  operationId: "analytics.usage.get",
-  summary: "get usage",
-  description: "Get usage for a customer in a given range",
-  method: "post",
-  tags,
-  request: {
-    body: jsonContentRequired(
-      z.object({
-        customer_id: z.string().optional().openapi({
-          description: "The customer ID if you want to get the usage for a specific customer",
-          example: "cus_1H7KQFLr7RepUyQBKdnvY",
-        }),
-        project_id: z
-          .string()
-          .openapi({
-            description: "The project ID (optional, only available for main projects)",
-            example: "project_1H7KQFLr7RepUyQBKdnvY",
-          })
-          .optional(),
-        range: analyticsIntervalSchema.openapi({
-          description: "The range of the usage, last hour, day, week or month",
-          example: "24h",
-        }),
-      }),
-      "Body of the request for the get usage"
-    ),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(
-      z.object({
-        usage: getUsageResponseSchema.array(),
-      }),
-      "The result of the get usage"
-    ),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/analytics/usage/get",
+      operationId: "analytics.usage.get",
+      summary: "get usage",
+      description: "Get usage for a customer in a given range",
+      method: "post",
+      tags,
+      request: {
+        body: jsonContentRequired(
+          z.object({
+            customer_id: z.string().optional().openapi({
+              description: "The customer ID if you want to get the usage for a specific customer",
+              example: "cus_1H7KQFLr7RepUyQBKdnvY",
+            }),
+            project_id: z
+              .string()
+              .openapi({
+                description: "The project ID (optional, only available for main projects)",
+                example: "project_1H7KQFLr7RepUyQBKdnvY",
+              })
+              .optional(),
+            range: analyticsIntervalSchema.openapi({
+              description: "The range of the usage, last hour, day, week or month",
+              example: "24h",
+            }),
+          }),
+          "Body of the request for the get usage"
+        ),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(
+          z.object({
+            usage: getUsageResponseSchema.array(),
+          }),
+          "The result of the get usage"
+        ),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "analytics",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["analytics", "usage", "get"],
+      },
+    }
+  )
+)
 
 export type GetAnalyticsUsageRequest = z.infer<
   (typeof route.request.body)["content"]["application/json"]["schema"]
@@ -97,13 +112,20 @@ function formatUsageResponse(
 
 export const registerGetAnalyticsUsageV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customer_id: customerId, range, project_id: projectId } = c.req.valid("json")
+    const { customer_id: inputCustomerId, range, project_id: projectId } = c.req.valid("json")
     const analytics = c.get("analytics")
     const cache = c.get("cache")
     const logger = c.get("logger")
 
     // validate the request
     const key = await keyAuth(c)
+    const customerId =
+      inputCustomerId || key.defaultCustomerId
+        ? resolveCustomerIdForApiKeyOrThrow({
+            explicitCustomerId: inputCustomerId,
+            defaultCustomerId: key.defaultCustomerId,
+          })
+        : undefined
 
     // start a new timer
     startTime(c, "getUsage")

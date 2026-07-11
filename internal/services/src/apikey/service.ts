@@ -1,10 +1,11 @@
 import type { Analytics } from "@unprice/analytics"
-import { hashStringSHA256, newId } from "@unprice/db/utils"
+import { hashStringSHA256, newApiKeySecret, newId } from "@unprice/db/utils"
 import type { ApiKey, ApiKeyExtended, SearchParamsDataTable } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, type SchemaError, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { Cache } from "@unprice/services/cache"
 import type { Metrics } from "@unprice/services/metrics"
+import { fromZonedTime, toZonedTime } from "date-fns-tz"
 
 import type { Database } from "@unprice/db"
 import { and, count, eq, getTableColumns, ilike, inArray, isNull } from "@unprice/db"
@@ -16,6 +17,20 @@ import { UnPriceApiKeyError } from "./errors"
 
 export type ApiKeyLimiter = {
   limit: (opts: { key: string }) => Promise<{ success: boolean }>
+}
+
+export const SDK_EXAMPLE_API_KEY_NAME = "SDK example key"
+
+function endOfCurrentDayMs(timezone = "UTC") {
+  try {
+    const endOfDay = toZonedTime(new Date(), timezone)
+    endOfDay.setHours(23, 59, 59, 999)
+    return fromZonedTime(endOfDay, timezone).getTime()
+  } catch {
+    const endOfDay = new Date()
+    endOfDay.setUTCHours(23, 59, 59, 999)
+    return endOfDay.getTime()
+  }
 }
 
 export class ApiKeysService {
@@ -130,7 +145,7 @@ export class ApiKeysService {
     expiresAt?: number | null
     defaultCustomerId?: string | null
   }): Promise<Result<ApiKey & { key: string }, FetchError>> {
-    const apiKey = newId("apikey_key")
+    const apiKey = newApiKeySecret()
     const apiKeyId = newId("apikey")
     const apiKeyHash = await hashStringSHA256(apiKey)
 
@@ -172,9 +187,87 @@ export class ApiKeysService {
       )
     }
 
+    this.waitUntil(this.cache.apiKeyByHash.remove(apiKeyHash))
+
     return Ok({
       ...(val as ApiKey),
       key: apiKey,
+    })
+  }
+
+  public async rollDefaultSdkExampleApiKey({
+    projectId,
+    isRoot,
+    timezone,
+  }: {
+    projectId: string
+    isRoot: boolean
+    timezone?: string
+  }): Promise<
+    Result<
+      ApiKey & { key: string; state: "created" | "rolled" },
+      SchemaError | FetchError | UnPriceApiKeyError
+    >
+  > {
+    const expiresAt = endOfCurrentDayMs(timezone)
+    const { val: existingKey, err: existingKeyErr } = await wrapResult(
+      this.db.query.apikeys.findFirst({
+        where: (apikey, { and, eq, isNull }) =>
+          and(
+            eq(apikey.projectId, projectId),
+            eq(apikey.name, SDK_EXAMPLE_API_KEY_NAME),
+            isNull(apikey.revokedAt)
+          ),
+        orderBy: (apikey, { desc }) => [desc(apikey.updatedAtM)],
+      }),
+      (error) =>
+        new FetchError({
+          message: `error finding default SDK example api key: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (existingKeyErr) {
+      this.logger.error(existingKeyErr, {
+        context: "error finding default SDK example api key",
+        projectId,
+      })
+      return Err(existingKeyErr)
+    }
+
+    if (!existingKey) {
+      const createdKey = await this.createApiKey({
+        projectId,
+        isRoot,
+        name: SDK_EXAMPLE_API_KEY_NAME,
+        expiresAt,
+        defaultCustomerId: null,
+      })
+
+      if (createdKey.err) {
+        return Err(createdKey.err)
+      }
+
+      return Ok({
+        ...createdKey.val,
+        state: "created",
+      })
+    }
+
+    const rolledKey = await this.rollApiKey({
+      keyHash: existingKey.hash,
+      projectId,
+      expiresAt,
+    })
+
+    if (rolledKey.err) {
+      return Err(rolledKey.err)
+    }
+
+    return Ok({
+      ...rolledKey.val,
+      key: rolledKey.val.newKey,
+      state: "rolled",
     })
   }
 
@@ -250,7 +343,7 @@ export class ApiKeysService {
     return hash
   }
 
-  private async getData(keyHash: string): Promise<ApiKeyExtended | null> {
+  private async getData(keyHash: string, projectId?: string): Promise<ApiKeyExtended | null> {
     const data = await this.db.query.apikeys
       .findFirst({
         with: {
@@ -287,7 +380,10 @@ export class ApiKeysService {
           hash: true,
           defaultCustomerId: true,
         },
-        where: (apikey, { eq }) => eq(apikey.hash, keyHash),
+        where: (apikey, { and, eq }) =>
+          projectId
+            ? and(eq(apikey.hash, keyHash), eq(apikey.projectId, projectId))
+            : eq(apikey.hash, keyHash),
       })
       .catch((e) => {
         this.logger.set({ error: toErrorContext(e) })
@@ -386,6 +482,7 @@ export class ApiKeysService {
   }): Promise<Result<ApiKeyExtended, UnPriceApiKeyError | FetchError | SchemaError>> {
     try {
       const { key } = req
+      let retriedWithoutCache = false
 
       const result = await this.getApiKey(
         {
@@ -399,6 +496,7 @@ export class ApiKeysService {
           context: `verify error, retrying without cache, ${err.message}`,
         })
 
+        retriedWithoutCache = true
         await this.cache.apiKeyByHash.remove(await this.hash(req.key))
         return await this.getApiKey(
           {
@@ -412,7 +510,9 @@ export class ApiKeysService {
 
       if (result.err) {
         this.logger.error(result.err, {
-          context: "Error verifying apikey after retrying without cache",
+          context: retriedWithoutCache
+            ? "Error verifying apikey after retrying without cache"
+            : "Error verifying apikey",
         })
 
         return result
@@ -474,8 +574,10 @@ export class ApiKeysService {
 
   public async rollApiKey(req: {
     keyHash: string
+    projectId: string
+    expiresAt?: number | null
   }): Promise<Result<ApiKey & { newKey: string }, SchemaError | FetchError | UnPriceApiKeyError>> {
-    const apiKey = await this.getData(req.keyHash)
+    const apiKey = await this.getData(req.keyHash, req.projectId)
 
     if (!apiKey) {
       return Err(
@@ -495,14 +597,22 @@ export class ApiKeysService {
       )
     }
 
-    const newKey = newId("apikey_key")
+    const newKey = newApiKeySecret()
     // generate hash of the key
     const apiKeyHash = await hashStringSHA256(newKey)
+    const updates: { updatedAtM: number; hash: string; expiresAt?: number | null } = {
+      updatedAtM: Date.now(),
+      hash: apiKeyHash,
+    }
+
+    if ("expiresAt" in req) {
+      updates.expiresAt = req.expiresAt
+    }
 
     const newApiKey = await this.db
       .update(apikeys)
-      .set({ updatedAtM: Date.now(), hash: apiKeyHash })
-      .where(eq(apikeys.id, apiKey.id))
+      .set(updates)
+      .where(and(eq(apikeys.id, apiKey.id), eq(apikeys.projectId, req.projectId)))
       .returning()
       .then((res) => res[0])
 

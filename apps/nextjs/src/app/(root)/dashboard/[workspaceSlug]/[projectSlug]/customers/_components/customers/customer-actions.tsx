@@ -1,6 +1,6 @@
 "use client"
 
-import { ChevronDown, Edit } from "lucide-react"
+import { ChevronDown } from "lucide-react"
 import { useParams } from "next/navigation"
 
 import type { RouterOutputs } from "@unprice/trpc/routes"
@@ -21,6 +21,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@unprice/ui/dropdown-menu"
+import { Separator } from "@unprice/ui/separator"
 import { SuperLink } from "~/components/super-link"
 import { CustomerForm } from "./customer-form"
 
@@ -34,17 +35,16 @@ export function CustomerActions({
     projectSlug: string
   }>()
 
-  const addSubscriptionHref = `/${workspaceSlug}/${projectSlug}/customers/subscriptions/new`
+  const addSubscriptionHref = `/${workspaceSlug}/${projectSlug}/customers/subscriptions/new?customerId=${customer.id}`
 
   return (
     <Dialog>
       <div className="button-primary flex items-center space-x-1 rounded-md">
         <DialogTrigger asChild>
-          <Button variant={"custom"}>
-            <Edit className="mr-2 h-4 w-4" />
-            Customer
-          </Button>
+          <Button variant={"custom"}>Edit Customer</Button>
         </DialogTrigger>
+
+        <Separator orientation="vertical" className="h-[20px] p-0" />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -62,10 +62,12 @@ export function CustomerActions({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <DialogContent className="max-h-[95vh] md:max-w-screen-md">
+      <DialogContent className="md:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Customer Form</DialogTitle>
-          <DialogDescription>Modify the customer details below.</DialogDescription>
+          <DialogTitle>Customer details</DialogTitle>
+          <DialogDescription>
+            Update the economic actor that holds subscriptions, wallet credits, runs, and invoices.
+          </DialogDescription>
         </DialogHeader>
         <CustomerForm defaultValues={customer} />
       </DialogContent>

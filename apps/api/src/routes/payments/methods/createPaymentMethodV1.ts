@@ -3,40 +3,77 @@ import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 import {
+  type PaymentProvider,
   createPaymentMethodResponseSchema,
   createPaymentMethodSchema,
 } from "@unprice/db/validators"
+import { UnPriceCustomerError } from "@unprice/services/customers"
 import type { z } from "zod"
-import { keyAuth } from "~/auth/key"
+import { resolveOwnedCustomer } from "~/auth/key"
 import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 
-const tags = ["payments"]
+const tags = ["paymentMethods"]
 
-export const route = createRoute({
-  path: "/v1/payments/methods/create",
-  operationId: "payments.methods.create",
-  summary: "create payment method",
-  description: "Create a payment method for a customer",
-  method: "post",
-  tags,
-  request: {
-    body: jsonContentRequired(
-      createPaymentMethodSchema.openapi({
-        description: "The customer create payment method request",
-      }),
-      "Body of the request"
-    ),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(
-      createPaymentMethodResponseSchema,
-      "The result of the customer create payment method"
-    ),
-    ...openApiErrorResponses,
-  },
-})
+function providerUnavailableMessage(provider: PaymentProvider): string {
+  const label = provider
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
+
+  return `Billing portal is unavailable because ${label} is disabled or not configured for this billing project.`
+}
+
+function toCreatePaymentMethodProviderError(error: unknown, provider: PaymentProvider) {
+  if (error instanceof UnPriceCustomerError && error.code === "PAYMENT_PROVIDER_CONFIG_NOT_FOUND") {
+    return new UnpriceApiError({
+      code: "PRECONDITION_FAILED",
+      message: providerUnavailableMessage(provider),
+    })
+  }
+
+  return toUnpriceApiError(error)
+}
+
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/payment-methods/create",
+      operationId: "paymentMethods.create",
+      summary: "create payment method",
+      description: "Create a payment method for a customer",
+      method: "post",
+      tags,
+      request: {
+        body: jsonContentRequired(
+          createPaymentMethodSchema.openapi({
+            description: "The customer create payment method request",
+          }),
+          "Body of the request"
+        ),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(
+          createPaymentMethodResponseSchema,
+          "The result of the customer create payment method"
+        ),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "configuration",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["paymentMethods", "create"],
+      },
+    }
+  )
+)
 
 export type CreatePaymentMethodRequest = z.infer<
   (typeof route.request.body)["content"]["application/json"]["schema"]
@@ -52,20 +89,7 @@ export const registerCreatePaymentMethodV1 = (app: App) =>
     const { customer } = c.get("services")
 
     // validate the request
-    await keyAuth(c)
-
-    const { err: customerDataErr, val: customerData } = await customer.getCustomer(customerId)
-
-    if (customerDataErr) {
-      throw toUnpriceApiError(customerDataErr)
-    }
-
-    if (!customerData) {
-      throw new UnpriceApiError({
-        code: "NOT_FOUND",
-        message: "Customer not found",
-      })
-    }
+    const { customer: customerData } = await resolveOwnedCustomer(c, { customerId })
 
     // get payment provider for the project
     const { err: paymentProviderErr, val: paymentProviderService } =
@@ -76,7 +100,7 @@ export const registerCreatePaymentMethodV1 = (app: App) =>
       })
 
     if (paymentProviderErr) {
-      throw toUnpriceApiError(paymentProviderErr)
+      throw toCreatePaymentMethodProviderError(paymentProviderErr, paymentProvider)
     }
 
     const { err, val } = await paymentProviderService.createSession({

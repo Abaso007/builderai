@@ -6,12 +6,15 @@ import { shouldEmitMetrics } from "@unprice/observability/env"
 import { ApiKeysService } from "@unprice/services/apikey"
 import { CacheService } from "@unprice/services/cache"
 import { createServiceContext } from "@unprice/services/context"
+import type { IngestionQueueMessage } from "@unprice/services/ingestion"
 import { LogdrainMetrics, NoopMetrics } from "@unprice/services/metrics"
 import type { MiddlewareHandler } from "hono"
 import type { HonoEnv } from "~/hono/env"
 import { apiMetricsLogger, createApiLogger } from "~/observability"
 
+import { CloudflareRawIngestionQueueClient } from "~/ingestion/raw-queue-client"
 import { createIngestionService } from "~/ingestion/service"
+import { resolveSampleRate } from "~/sampling"
 
 /**
  * These maps persist between worker executions and are used for caching
@@ -103,7 +106,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
           colo: stats.colo,
           country: stats.country,
           continent: stats.continent,
-          sampleRate: 1,
+          sampleRate: resolveSampleRate(c.env.METRICS_SAMPLE_RATE),
         })
       : new NoopMetrics()
 
@@ -195,10 +198,18 @@ export function init(): MiddlewareHandler<HonoEnv> {
     c.set("logger", logger)
     c.set("metrics", metrics)
     c.set("analytics", analytics)
+    c.set(
+      "rawIngestionQueue",
+      new CloudflareRawIngestionQueueClient({
+        logger,
+        queues: [c.env.QUEUE_SHARD_0 as Queue<IngestionQueueMessage>],
+      })
+    )
     c.set("db", db)
     c.set("waitUntil", waitUntil)
 
     c.set("services", {
+      budgetRuns: svcCtx.budgetRuns,
       subscription: svcCtx.subscriptions,
       entitlement: svcCtx.entitlements,
       ingestion,

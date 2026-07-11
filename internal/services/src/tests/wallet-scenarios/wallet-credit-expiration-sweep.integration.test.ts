@@ -158,6 +158,7 @@ describe("wallet credit expiration sweep DB lifecycle", () => {
       projectId,
       refillChunkAmount: 0,
       reservationId,
+      billingPeriodId: "bp_wallet_sweep",
       statementKey: "stmt_wallet_sweep",
     })
     expect(flush.err).toBeUndefined()
@@ -430,7 +431,7 @@ async function expectWalletState(
 ) {
   const state = await wallet.getWalletState({ projectId, customerId })
   expect(state.err).toBeUndefined()
-  expect(state.val?.balances).toEqual({
+  expect(state.val?.balances).toMatchObject({
     consumed: expected.consumed,
     granted: expected.granted,
     purchased: expected.purchased,

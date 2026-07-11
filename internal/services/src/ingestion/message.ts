@@ -9,6 +9,17 @@ export const ingestionSourceSchema = z.object({
   sourceName: z.string().nullable(),
 })
 
+export const ingestionRunContextSchema = z.object({
+  runId: z.string().min(1),
+  traceId: z.string().min(1).nullable().optional(),
+  parentRunId: z.string().min(1).nullable().optional(),
+  workloadType: z.enum(["agent", "workflow", "job", "tool", "custom"]).nullable().optional(),
+  workloadId: z.string().min(1).nullable().optional(),
+})
+
+export const ingestionModeSchema = z.enum(["async", "sync", "run"])
+export type IngestionMode = z.infer<typeof ingestionModeSchema>
+
 export const ingestionQueueMessageSchema = z.object({
   version: z.literal(1),
   workspaceId: z.string(),
@@ -22,9 +33,11 @@ export const ingestionQueueMessageSchema = z.object({
   timestamp: z.number(),
   properties: z.record(z.string(), z.unknown()),
   source: ingestionSourceSchema,
+  ingestionMode: ingestionModeSchema.optional().default("async"),
+  runContext: ingestionRunContextSchema.optional(),
 })
 
-export type IngestionQueueMessage = z.infer<typeof ingestionQueueMessageSchema>
+export type IngestionQueueMessage = z.input<typeof ingestionQueueMessageSchema>
 
 export type IngestionQueueRetryOptions = {
   delaySeconds?: number
@@ -75,6 +88,15 @@ export function buildIngestionWindowName(params: {
   return [params.appEnv, params.projectId, params.customerId, params.customerEntitlementId].join(
     ":"
   )
+}
+
+export function buildRunBudgetName(params: {
+  appEnv: string
+  customerId: string
+  projectId: string
+  runId: string
+}): string {
+  return [params.appEnv, params.projectId, params.customerId, params.runId].join(":")
 }
 
 export function isIngestionEntitlementActiveAt(

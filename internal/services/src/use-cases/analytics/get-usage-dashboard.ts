@@ -1,4 +1,5 @@
 import {
+  type FeatureUsagePeriodRow,
   type FeatureUsageTimeseriesRow,
   type Interval,
   type TopConsumerRow,
@@ -83,6 +84,12 @@ export type GetUsageDashboardAnalytics = {
     start?: number
     end?: number
   }): Promise<{ data?: FeatureUsageTimeseriesRow[] }>
+  getFeaturesUsagePeriod(params: {
+    project_id: string
+    customer_id?: string
+    start?: number
+    end?: number
+  }): Promise<{ data?: FeatureUsagePeriodRow[] }>
   getTopConsumers(params: {
     project_id: string
     start?: number
@@ -110,35 +117,59 @@ export async function getUsageDashboard(
   rawInput: GetUsageDashboardInput
 ): Promise<Result<GetUsageDashboardOutput, GetUsageDashboardFailure>> {
   const input = getUsageDashboardInputSchema.parse(rawInput)
-  const interval = prepareInterval(input.range)
   const generatedAt = deps.now?.() ?? Date.now()
+  const interval = prepareInterval(input.range, generatedAt)
+  const queryWindow = alignRollupWindow(interval)
+  const usageQuery = {
+    project_id: input.projectId,
+    ...(input.customerId ? { customer_id: input.customerId } : {}),
+    start: queryWindow.start,
+    end: queryWindow.end,
+  }
 
-  const timeseriesResult = await wrapResult(
-    deps.analytics.getFeaturesUsageTimeseries({
-      project_id: input.projectId,
-      ...(input.customerId ? { customer_id: input.customerId } : {}),
-      start: interval.start,
-      end: interval.end,
-    }),
-    (error) =>
-      new FetchError({
-        message: error.message,
-        retry: true,
-        context: {
-          url: "tinybird:v1_get_feature_usage_timeseries",
-          method: "GET",
-          projectId: input.projectId,
-          customerId: input.customerId,
-        },
-      })
-  )
+  const [timeseriesResult, periodResult] = await Promise.all([
+    wrapResult(
+      deps.analytics.getFeaturesUsageTimeseries(usageQuery),
+      (error) =>
+        new FetchError({
+          message: error.message,
+          retry: true,
+          context: {
+            url: "tinybird:v1_get_feature_usage_timeseries",
+            method: "GET",
+            projectId: input.projectId,
+            customerId: input.customerId,
+          },
+        })
+    ),
+    wrapResult(
+      deps.analytics.getFeaturesUsagePeriod(usageQuery),
+      (error) =>
+        new FetchError({
+          message: error.message,
+          retry: true,
+          context: {
+            url: "tinybird:v1_get_feature_usage_period",
+            method: "GET",
+            projectId: input.projectId,
+            customerId: input.customerId,
+          },
+        })
+    ),
+  ])
 
   if (timeseriesResult.err) {
     return Err(timeseriesResult.err)
   }
 
-  const denseTimeseries = buildDenseTimeseries(timeseriesResult.val.data ?? [])
-  const features = buildFeatureRows(denseTimeseries)
+  if (periodResult.err) {
+    return Err(periodResult.err)
+  }
+
+  const timeseriesRows = timeseriesResult.val.data ?? []
+  const periodRows = periodResult.val.data ?? []
+  const denseTimeseries = buildDenseTimeseries(timeseriesRows)
+  const features = buildFeatureRows(periodRows)
   const summary = buildSummary(features)
 
   let topConsumers: UsageDashboardTopConsumer[] = []
@@ -147,8 +178,8 @@ export async function getUsageDashboard(
     const topConsumersResult = await loadTopConsumers({
       deps,
       projectId: input.projectId,
-      start: interval.start,
-      end: interval.end,
+      start: queryWindow.start,
+      end: queryWindow.end,
       limit: input.topConsumersLimit,
     })
 
@@ -166,12 +197,35 @@ export async function getUsageDashboard(
     topConsumers,
     freshness: {
       generatedAt,
-      dataFrom: interval.start,
-      dataTo: interval.end,
+      dataFrom: queryWindow.start,
+      dataTo: queryWindow.end,
     },
   }
 
   return Ok(getUsageDashboardOutputSchema.parse(output))
+}
+
+function alignRollupWindow(interval: ReturnType<typeof prepareInterval>): {
+  start: number
+  end: number
+} {
+  return {
+    start:
+      interval.granularity === "hour" ? floorUtcHour(interval.start) : floorUtcDay(interval.start),
+    end: interval.end,
+  }
+}
+
+function floorUtcHour(timestamp: number): number {
+  const date = new Date(timestamp)
+  date.setUTCMinutes(0, 0, 0)
+  return date.getTime()
+}
+
+function floorUtcDay(timestamp: number): number {
+  const date = new Date(timestamp)
+  date.setUTCHours(0, 0, 0, 0)
+  return date.getTime()
 }
 
 export function emptyUsageDashboardOutput(
@@ -243,18 +297,37 @@ function buildDenseTimeseries(rows: FeatureUsageTimeseriesRow[]): UsageDashboard
   return denseRows
 }
 
-function buildFeatureRows(rows: UsageDashboardTimeseriesRow[]): UsageDashboardFeature[] {
-  const latestByFeature = new Map<string, UsageDashboardTimeseriesRow>()
+function buildFeatureRows(rawRows: FeatureUsagePeriodRow[]): UsageDashboardFeature[] {
+  const aggregates = new Map<
+    string,
+    { totalUsage: number; totalAmountAfter: number; currency: string }
+  >()
 
-  for (const row of rows) {
-    latestByFeature.set(row.featureSlug, row)
+  for (const row of rawRows) {
+    const existing = aggregates.get(row.feature_slug)
+    const usage = row.usage ?? row.value_after ?? 0
+    const amountAfter = row.amount_after ?? 0
+    const currency = row.currency ?? "USD"
+
+    if (existing) {
+      existing.totalUsage += usage
+      existing.totalAmountAfter += amountAfter
+      // Keep the most recent currency (last row wins since rows are date-ordered)
+      existing.currency = currency
+    } else {
+      aggregates.set(row.feature_slug, {
+        totalUsage: usage,
+        totalAmountAfter: amountAfter,
+        currency,
+      })
+    }
   }
 
-  return [...latestByFeature.values()]
-    .map((row) => ({
-      featureSlug: row.featureSlug,
-      usage: row.usage,
-      spending: row.spending,
+  return [...aggregates.entries()]
+    .map(([featureSlug, agg]) => ({
+      featureSlug,
+      usage: agg.totalUsage,
+      spending: formatLedgerMoney(agg.totalAmountAfter, agg.currency),
     }))
     .sort((a, b) => {
       if (b.usage !== a.usage) {

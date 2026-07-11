@@ -5,42 +5,64 @@ import { Button } from "@unprice/ui/button"
 import { Typography } from "@unprice/ui/typography"
 import { cn } from "@unprice/ui/utils"
 import { useParams, useRouter } from "next/navigation"
+import { useState } from "react"
 
 export function FinalStep({ className }: React.ComponentProps<"div">) {
-  const { updateContext, state } = useOnboarding()
+  const { next, state, updateContext } = useOnboarding()
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>()
+  const [isCompleting, setIsCompleting] = useState(false)
+
+  const flowData = state?.context?.flowData as
+    | {
+        done?: boolean
+        seededMetrics?: boolean
+        seedMetricsError?: string
+        project?: { slug: string }
+        customer?: { customerId?: string }
+        subscription?: { id?: string }
+      }
+    | undefined
+  const hasSeedEvidence = Boolean(flowData?.customer?.customerId && flowData?.subscription?.id)
+  const hasSeedFailure = flowData?.seededMetrics === false || Boolean(flowData?.seedMetricsError)
+  const completedFlow = Boolean(flowData?.done || state?.isCompleted)
+  const seededMetrics =
+    flowData?.seededMetrics === true || (!hasSeedFailure && (hasSeedEvidence || completedFlow))
 
   const router = useRouter()
   return (
     <div className={cn("flex flex-col", className)}>
       <div className="flex flex-col items-center gap-2 text-center">
         <Typography variant="h1" className="animate-title">
-          You're good to go
+          Ready to inspect
         </Typography>
         <Typography variant="p" className="mb-8 w-[640px] max-w-[90vw] animate-title delay-300!">
-          Your dashboard is now seeded with usage and verification metrics from a test customer.
-          Connect a payment provider when you are ready to charge real customers.
+          {seededMetrics
+            ? "Your Sandbox project now has published plans, a test customer, an active subscription, and budgeted run evidence ready to inspect."
+            : "Your Sandbox project is ready. Sample budgeted run evidence was not fully created, but you can still inspect the project and send usage when ready."}
         </Typography>
 
         <Button
           className="animate-button"
-          onClick={() => {
-            // clear the flow data
-            updateContext({
-              flowData: {
-                project: undefined,
-                customer: undefined,
-                subscription: undefined,
-                paymentProvider: undefined,
-                planVersionId: undefined,
-                apiKey: undefined,
-                templatePlansCreated: undefined,
-                seededMetrics: undefined,
-                done: true,
-              },
-            })
+          disabled={isCompleting}
+          onClick={async () => {
+            if (isCompleting) return
 
-            const projectSlug = state?.context?.flowData?.project?.slug
+            setIsCompleting(true)
+            const projectSlug = flowData?.project?.slug
+
+            try {
+              await updateContext({
+                flowData: {
+                  done: true,
+                  seededMetrics,
+                  seedMetricsError: seededMetrics ? undefined : flowData?.seedMetricsError,
+                },
+              })
+
+              await next()
+            } finally {
+              setIsCompleting(false)
+            }
 
             if (projectSlug) {
               router.push(`/${workspaceSlug}/${projectSlug}`)
@@ -51,7 +73,7 @@ export function FinalStep({ className }: React.ComponentProps<"div">) {
             router.refresh()
           }}
         >
-          Go to the app
+          {isCompleting ? "Opening project..." : "Inspect project overview"}
         </Button>
       </div>
     </div>

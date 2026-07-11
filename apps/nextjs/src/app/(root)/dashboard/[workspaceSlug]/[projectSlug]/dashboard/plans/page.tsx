@@ -20,13 +20,21 @@ export default async function DashboardPlans(props: {
   params: { workspaceSlug: string; projectSlug: string }
   searchParams: SearchParams
 }) {
+  const { projectSlug, workspaceSlug } = props.params
   const isPagesEnabled = await entitlementFlag(FEATURE_SLUGS.PAGES.SLUG)
 
   if (!isPagesEnabled) {
-    return <UpgradePlanError />
+    return (
+      <UpgradePlanError
+        workspaceSlug={workspaceSlug}
+        blockedFeatureSlug={FEATURE_SLUGS.PAGES.SLUG}
+        returnTo={`/${workspaceSlug}/${projectSlug}/dashboard/plans`}
+        title="Plan conversion analytics needs hosted pages"
+        description="Conversion evidence comes from hosted signup and pricing pages. Upgrade to create pages tied to published plan versions."
+      />
+    )
   }
 
-  const { projectSlug, workspaceSlug } = props.params
   const baseUrl = `/${workspaceSlug}/${projectSlug}`
   const filter = intervalParams(props.searchParams)
   const interval = prepareInterval(filter.intervalFilter)

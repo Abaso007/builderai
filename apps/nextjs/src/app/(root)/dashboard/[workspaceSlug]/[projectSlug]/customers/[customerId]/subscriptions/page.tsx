@@ -1,18 +1,9 @@
 import { SUBSCRIPTION_STATUS } from "@unprice/db/utils"
-import { Button } from "@unprice/ui/button"
-import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
-import { Typography } from "@unprice/ui/typography"
-import { Code } from "lucide-react"
 import { notFound } from "next/navigation"
 import { Suspense } from "react"
-import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DataTable } from "~/components/data-table/data-table"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
-import { DashboardShell } from "~/components/layout/dashboard-shell"
-import HeaderTab from "~/components/layout/header-tab"
-import { SuperLink } from "~/components/super-link"
 import { api } from "~/trpc/server"
-import { CustomerActions } from "../../_components/customers/customer-actions"
 import { columns } from "../../_components/subscriptions/table-subscriptions/columns"
 
 export default async function CustomerPage({
@@ -24,8 +15,7 @@ export default async function CustomerPage({
     customerId: string
   }
 }) {
-  const { workspaceSlug, projectSlug, customerId } = params
-  const baseUrl = `/${workspaceSlug}/${projectSlug}/customers/${customerId}`
+  const { customerId } = params
 
   const { customer } = await api.customers.getSubscriptions({
     customerId,
@@ -36,86 +26,58 @@ export default async function CustomerPage({
   }
 
   return (
-    <DashboardShell
-      header={
-        <HeaderTab
-          title={customer.email}
-          description={customer.description}
-          label={customer.active ? "active" : "inactive"}
-          id={customer.id}
-          action={
-            <div className="flex items-center gap-2">
-              <CodeApiSheet defaultMethod="getEntitlements">
-                <Button variant={"ghost"}>
-                  <Code className="mr-2 h-4 w-4" />
-                  API
-                </Button>
-              </CodeApiSheet>
-              <CustomerActions customer={customer} />
-            </div>
-          }
-        />
-      }
-    >
-      <TabNavigation>
-        <div className="flex items-center">
-          <TabNavigationLink asChild>
-            <SuperLink href={`${baseUrl}`}>Overview</SuperLink>
-          </TabNavigationLink>
-          <TabNavigationLink asChild active>
-            <SuperLink href={`${baseUrl}/subscriptions`}>Subscriptions</SuperLink>
-          </TabNavigationLink>
-          <TabNavigationLink asChild>
-            <SuperLink href={`${baseUrl}/invoices`}>Invoices</SuperLink>
-          </TabNavigationLink>
-        </div>
-      </TabNavigation>
-      <div className="mt-4">
-        <div className="flex flex-col px-1 py-4">
-          <Typography variant="p" affects="removePaddingMargin">
-            All subscriptions of this customer
-          </Typography>
-        </div>
-        <Suspense
-          fallback={
-            <DataTableSkeleton
-              columnCount={11}
-              searchableColumnCount={1}
-              filterableColumnCount={2}
-              cellWidths={[
-                "10rem",
-                "40rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "8rem",
-              ]}
-            />
-          }
-        >
-          <DataTable
-            columns={columns}
-            data={customer.subscriptions}
-            filterOptions={{
-              filterBy: "customerId",
-              filterColumns: true,
-              filterDateRange: true,
-              filterServerSide: false,
-              filterSelectors: {
-                status: SUBSCRIPTION_STATUS.map((value) => ({
-                  value: value,
-                  label: value,
-                })),
-              },
-            }}
+    <div className="mt-4 flex flex-col gap-4">
+      <p className="text-muted-foreground text-sm">
+        Subscriptions pin this customer to plan versions and create billing periods, wallet policy,
+        and invoice evidence.
+      </p>
+      <Suspense
+        fallback={
+          <DataTableSkeleton
+            columnCount={9}
+            searchableColumnCount={1}
+            filterableColumnCount={2}
+            cellWidths={[
+              "4rem",
+              "40rem",
+              "12rem",
+              "12rem",
+              "12rem",
+              "12rem",
+              "12rem",
+              "12rem",
+              "8rem",
+            ]}
           />
-        </Suspense>
-      </div>
-    </DashboardShell>
+        }
+      >
+        <DataTable
+          columns={columns}
+          data={customer.subscriptions}
+          // the page is already scoped to one customer: hide the customer
+          // column and low-signal metadata by default
+          initialColumnVisibility={{ customerId: false, timezone: false }}
+          emptyState={{
+            title: "No subscriptions",
+            description:
+              "Subscriptions appear after this customer is assigned to a published plan version.",
+          }}
+          hidePaginationWhenEmpty
+          filterOptions={{
+            filterBy: "customerId",
+            filterPlaceholder: "Filter by plan",
+            filterColumns: true,
+            filterDateRange: true,
+            filterServerSide: false,
+            filterSelectors: {
+              status: SUBSCRIPTION_STATUS.map((value) => ({
+                value: value,
+                label: value,
+              })),
+            },
+          }}
+        />
+      </Suspense>
+    </div>
   )
 }

@@ -1,5 +1,5 @@
 ---
-title: "Get"
+title: "Get wallet"
 description: "Get wallet balances and active credits for a customer"
 ---
 
@@ -65,7 +65,7 @@ console.log(result);
 To inspect one credit from the `credits` array:
 
 ```ts
-const { result, error } = await unprice.wallet.creditBalance({
+const { result, error } = await unprice.walletCredits.balance({
   customerId: "cus_1234567890",
   walletId: "wcr_123"
 });

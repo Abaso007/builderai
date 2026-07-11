@@ -54,6 +54,8 @@ export function WorkspaceSwitcher({
     return <WorkspaceSwitcherSkeleton />
   }
 
+  const activePlanSlug = activeWorkspace.currentPlanSlug ?? "free"
+
   return (
     <Popover open={switcherOpen} onOpenChange={setSwitcherOpen}>
       <PopoverTrigger asChild>
@@ -79,16 +81,16 @@ export function WorkspaceSwitcher({
           </Avatar>
           <span className="truncate font-semibold">
             {activeWorkspace.name}
-            <Badge
-              className={cn("ml-2 font-mono font-normal", {
-                "border-destructive": activeWorkspace.isMain,
-              })}
-              variant={activeWorkspace.isMain ? "destructive" : "outline"}
-            >
-              {activeWorkspace.isInternal
-                ? `${activeWorkspace.plan} - INTERNAL`
-                : activeWorkspace.plan}
+            {/* the plan chip stays quiet; internal state is a small marker,
+                not a red box shouting on every screen */}
+            <Badge className="ml-2 font-mono font-normal" variant="outline">
+              {activePlanSlug.toUpperCase()}
             </Badge>
+            {activeWorkspace.isInternal && (
+              <span className="ml-1.5 font-mono font-normal text-[10px] text-danger-text uppercase">
+                internal
+              </span>
+            )}
           </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
@@ -195,10 +197,10 @@ export function WorkspaceSwitcher({
                   <TooltipContent align="start" side="bottom" sideOffset={10} alignOffset={-5}>
                     <div className="flex max-w-[200px] flex-col gap-4 py-2">
                       <Typography variant="p" className="text-center">
-                        {"This feature is not available on your current plan"}
+                        Additional workspaces are not available on this plan.
                       </Typography>
                       <Button variant="primary" size="sm" className="mx-auto w-2/3">
-                        Upgrade
+                        Upgrade plan
                       </Button>
                     </div>
                   </TooltipContent>

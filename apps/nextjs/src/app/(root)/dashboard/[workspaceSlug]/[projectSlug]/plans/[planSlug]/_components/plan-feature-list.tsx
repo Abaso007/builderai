@@ -78,7 +78,7 @@ export function PlanFeatureList({ planVersion }: PlanFeatureListProps) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-[70px] items-center justify-between space-x-1 px-4 py-2">
-        <Typography variant="h4">Features on this version</Typography>
+        <Typography variant="h4">Plan-version features</Typography>
       </div>
       <Separator />
       <div className="bg-background/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -86,13 +86,16 @@ export function PlanFeatureList({ planVersion }: PlanFeatureListProps) {
           <Search className="absolute top-2.5 left-2 h-4 w-4 text-muted-foreground" />
           <Input
             type="search"
-            placeholder="Search feature in plan"
+            placeholder="Search attached features"
             className="pl-8"
             onChange={(e) => setFilter(e.target.value)}
           />
         </div>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-2 p-4 pt-1">
+      <div
+        data-feature-scroll
+        className="hide-scrollbar flex max-h-[60vh] min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain p-4 pt-1 lg:max-h-none"
+      >
         <DroppableContainer id={"planVersionFeaturesList"}>
           <SortableContext
             items={featuresList.map((feature) => feature.featureId)}
@@ -105,8 +108,8 @@ export function PlanFeatureList({ planVersion }: PlanFeatureListProps) {
                 </EmptyPlaceholder.Icon>
                 <EmptyPlaceholder.Title>No features yet</EmptyPlaceholder.Title>
                 <EmptyPlaceholder.Description>
-                  Pick a feature from the library on the left and click <strong>Add</strong> to
-                  attach it to this plan version.
+                  Pick a feature from the library, then configure its meter, entitlement, and
+                  billing behavior for this plan version.
                 </EmptyPlaceholder.Description>
               </EmptyPlaceholder>
             ) : (

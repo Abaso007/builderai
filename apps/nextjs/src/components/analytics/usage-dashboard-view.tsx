@@ -3,23 +3,22 @@
 import { nFormatter } from "@unprice/db/utils"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
+import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { cn } from "@unprice/ui/utils"
-import {
-  BarChart3,
-  CalendarRange,
-  Coins,
-  Layers3,
-  ReceiptText,
-  TriangleAlert,
-  Users,
-} from "lucide-react"
+import { BarChart3, Code, Coins, Layers3, ReceiptText, TriangleAlert, Users } from "lucide-react"
 import dynamic from "next/dynamic"
-import { type ReactNode, useMemo } from "react"
+import { useMemo } from "react"
+import { EvidenceMetricStrip, EvidenceMetricTile } from "~/components/analytics/evidence-panel"
+import { FreshnessIndicator } from "~/components/analytics/freshness-indicator"
 import { IntervalFilter } from "~/components/analytics/interval-filter"
+import { CodeApiSheet } from "~/components/code-api-sheet"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
+import { SectionIntro } from "~/components/layout/section-intro"
+import type { SDKExampleParams } from "~/components/sdk-snippets/sdk-examples"
 import { SuperLink } from "~/components/super-link"
+import { ProgressBar } from "./progress"
 import { type UsageChartPoint, buildUsageChartConfig } from "./usage-chart-config"
 
 const UsageAreaChart = dynamic(
@@ -37,27 +36,56 @@ const UsageAreaChart = dynamic(
 
 type UsageDashboardData = RouterOutputs["analytics"]["getUsageDashboard"]
 type UsageDashboardFeature = UsageDashboardData["features"][number]
+type UsageDashboardMode = "project" | "customer"
 
-export function UsageDashboardSkeleton() {
+export function UsageDashboardSkeleton({
+  mode = "project",
+  display = {
+    showCustomerSummary: mode === "customer",
+    showHeaderControls: true,
+  },
+}: {
+  mode?: UsageDashboardMode
+  display?: {
+    showCustomerSummary?: boolean
+    showHeaderControls?: boolean
+  }
+} = {}) {
+  const { showCustomerSummary = mode === "customer", showHeaderControls = true } = display
+
   return (
-    <Card className="overflow-hidden border-muted/60">
-      <CardHeader>
-        <CardTitle>Usage Dashboard</CardTitle>
-        <CardDescription>Loading usage metrics...</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6 pt-4 pb-6">
-        <div className="grid gap-3 md:grid-cols-4">
-          {["features", "usage", "spend", "context"].map((item) => (
-            <div key={`usage-dashboard-skeleton-${item}`} className="rounded-lg border p-4">
-              <Skeleton className="h-4 w-28" />
-              <Skeleton className="mt-3 h-8 w-20" />
-            </div>
-          ))}
+    <section className="flex flex-col gap-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-5 w-52" />
+          <Skeleton className="h-4 w-96 max-w-full" />
         </div>
-        <Skeleton className="h-[220px] w-full rounded-lg" />
-        <Skeleton className="h-[160px] w-full rounded-lg" />
-      </CardContent>
-    </Card>
+        {showHeaderControls && (
+          <div className="flex flex-col items-start gap-3 md:items-end">
+            {mode === "customer" && <Skeleton className="h-9 w-36 rounded-md" />}
+            <Skeleton className="h-4 w-48" />
+          </div>
+        )}
+      </div>
+      {showCustomerSummary && (
+        <EvidenceMetricStrip className="md:grid-cols-4">
+          {["features", "usage", "ledger", "invoices"].map((metric) => (
+            <Skeleton key={metric} className="h-[104px] rounded-none" />
+          ))}
+        </EvidenceMetricStrip>
+      )}
+      {mode === "project" ? (
+        <>
+          <Skeleton className="h-[252px] w-full rounded-lg border border-border/60" />
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Skeleton className="h-[190px] w-full rounded-lg border border-border/60" />
+            <Skeleton className="h-[320px] w-full rounded-lg border border-border/60" />
+          </div>
+        </>
+      ) : (
+        <Skeleton className="h-[520px] w-full rounded-lg border border-border/60" />
+      )}
+    </section>
   )
 }
 
@@ -69,15 +97,37 @@ export function UsageDashboardView({
   isFetching,
   invoiceCount,
   customerHref,
+  usageExampleParams,
+  display = {
+    showCustomerSummary: mode === "customer",
+    showHeaderControls: true,
+    showEmptyStateActions: true,
+  },
+  title,
+  subjectLabel,
 }: {
   data: UsageDashboardData
   intervalLabel: string
   dateFormat: string
-  mode: "project" | "customer"
+  mode: UsageDashboardMode
   isFetching: boolean
   invoiceCount?: number
   customerHref?: (customerId: string) => string
+  usageExampleParams?: SDKExampleParams
+  title?: string
+  subjectLabel?: string
+  display?: {
+    showCustomerSummary?: boolean
+    showHeaderControls?: boolean
+    showEmptyStateActions?: boolean
+  }
 }) {
+  const {
+    showCustomerSummary = mode === "customer",
+    showHeaderControls = true,
+    showEmptyStateActions = true,
+  } = display
+
   // Hooks must be called unconditionally (before any early return)
   const chart = useMemo(
     () => buildChartData(data.timeseries, dateFormat),
@@ -90,68 +140,89 @@ export function UsageDashboardView({
   }
 
   if (data.features.length === 0 && data.timeseries.length === 0) {
-    return <UsageDashboardEmptyState intervalLabel={intervalLabel} mode={mode} />
+    return (
+      <UsageDashboardEmptyState
+        intervalLabel={intervalLabel}
+        mode={mode}
+        usageExampleParams={usageExampleParams}
+        generatedAt={data.freshness.generatedAt}
+        isFetching={isFetching}
+        showHeaderControls={showHeaderControls}
+        title={title}
+        subjectLabel={subjectLabel}
+        showActions={showEmptyStateActions}
+      />
+    )
   }
 
-  const maxFeatureUsage = data.features[0]?.usage ?? 1
+  const featureLog =
+    mode === "project" ? (
+      <UsageFeatureTable
+        features={data.features}
+        maxFeatureUsage={data.features[0]?.usage ?? 1}
+        featureCount={data.summary.featureCount}
+        totalLatestUsage={data.summary.totalLatestUsage}
+        spending={data.summary.spending}
+        showSummaryStats
+      />
+    ) : null
+  const topConsumers =
+    mode === "project" && data.topConsumers.length > 0 && customerHref ? (
+      <TopConsumersTable consumers={data.topConsumers} customerHref={customerHref} />
+    ) : null
 
   return (
-    <Card className="overflow-hidden border-muted/60">
+    <section className="relative flex flex-col gap-4">
       <div
         className={cn(
-          "pointer-events-none h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent transition-opacity duration-300",
+          "-top-2 pointer-events-none absolute inset-x-0 h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent transition-opacity duration-300",
           isFetching ? "opacity-100" : "opacity-0"
         )}
       />
-      <CardHeader>
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1.5">
-            <CardTitle>{mode === "customer" ? "Customer usage" : "Usage Dashboard"}</CardTitle>
-            <CardDescription>
-              Usage for this {mode === "customer" ? "customer" : "project"} in the {intervalLabel}.
-            </CardDescription>
-          </div>
-          {mode === "customer" && <IntervalFilter />}
-        </div>
-      </CardHeader>
-      <CardContent
+      <UsageEvidenceHeader
+        generatedAt={data.freshness.generatedAt}
+        intervalLabel={intervalLabel}
+        isFetching={isFetching}
+        mode={mode}
+        showControls={showHeaderControls}
+        title={title}
+        subjectLabel={subjectLabel}
+      />
+      <div
         className={cn(
-          "space-y-6 pb-6 transition-opacity duration-300 motion-reduce:transition-none",
+          "flex flex-col gap-6 transition-opacity duration-300 motion-reduce:transition-none",
           isFetching ? "opacity-90" : "opacity-100"
         )}
       >
-        <div className="grid gap-3 md:grid-cols-4">
-          <MetricCard
-            label="Features with usage"
-            icon={<Layers3 className="h-4 w-4 text-muted-foreground" />}
-            value={String(data.summary.featureCount)}
-          />
-          <MetricCard
-            label="Total latest usage"
-            icon={<BarChart3 className="h-4 w-4 text-muted-foreground" />}
-            value={nFormatter(data.summary.totalLatestUsage, { digits: 1 })}
-          />
-          <MetricCard
-            label="Consumed amount"
-            icon={<Coins className="h-4 w-4 text-muted-foreground" />}
-            value={formatSpendingSummary(data.summary.spending)}
-            truncate
-          />
-          {mode === "customer" ? (
-            <MetricCard
-              label="Number of invoices"
+        {mode === "customer" && showCustomerSummary && (
+          <EvidenceMetricStrip className="md:grid-cols-4">
+            <EvidenceMetricTile
+              label="Features reporting"
+              icon={<Layers3 className="h-4 w-4 text-muted-foreground" />}
+              value={String(data.summary.featureCount)}
+              helper="Feature slugs with usage in this interval"
+            />
+            <EvidenceMetricTile
+              label="Latest usage total"
+              icon={<BarChart3 className="h-4 w-4 text-muted-foreground" />}
+              value={nFormatter(data.summary.totalLatestUsage, { digits: 1 })}
+              helper="Latest cumulative usage across reporting features"
+            />
+            <EvidenceMetricTile
+              label="Ledger consumed"
+              icon={<Coins className="h-4 w-4 text-muted-foreground" />}
+              value={formatSpendingSummary(data.summary.spending)}
+              helper="Display amount from ledger-scale usage spend"
+              valueClassName="truncate text-xl"
+            />
+            <EvidenceMetricTile
+              label="Invoices"
               icon={<ReceiptText className="h-4 w-4 text-muted-foreground" />}
               value={String(invoiceCount ?? 0)}
+              helper="Invoices connected to this customer"
             />
-          ) : (
-            <MetricCard
-              label="Selected interval"
-              icon={<CalendarRange className="h-4 w-4 text-muted-foreground" />}
-              value={intervalLabel}
-              capitalize
-            />
-          )}
-        </div>
+          </EvidenceMetricStrip>
+        )}
 
         {chart.data.length > 0 && (
           <UsageAreaChart
@@ -162,66 +233,106 @@ export function UsageDashboardView({
           />
         )}
 
-        <UsageFeatureTable features={data.features} maxFeatureUsage={maxFeatureUsage} />
-
-        {mode === "project" && data.topConsumers.length > 0 && customerHref && (
-          <TopConsumersTable consumers={data.topConsumers} customerHref={customerHref} />
-        )}
-      </CardContent>
-    </Card>
+        {topConsumers && featureLog ? (
+          <div className="grid items-start gap-4 xl:grid-cols-2">
+            {featureLog}
+            {topConsumers}
+          </div>
+        ) : null}
+        {!topConsumers && featureLog ? featureLog : null}
+      </div>
+    </section>
   )
 }
 
-function MetricCard({
-  label,
-  icon,
-  value,
-  truncate = false,
-  capitalize = false,
+function UsageEvidenceHeader({
+  intervalLabel,
+  mode,
+  generatedAt,
+  isFetching,
+  showControls,
+  title: titleOverride,
+  subjectLabel,
 }: {
-  label: string
-  icon: ReactNode
-  value: string
-  truncate?: boolean
-  capitalize?: boolean
+  intervalLabel: string
+  mode: "project" | "customer"
+  generatedAt: number
+  isFetching: boolean
+  showControls: boolean
+  title?: string
+  subjectLabel?: string
 }) {
+  const subject = subjectLabel ?? (mode === "customer" ? "customer" : "project")
+  const title =
+    titleOverride ?? (mode === "customer" ? "Customer usage evidence" : "Usage and spend evidence")
+  const description = `Latest feature usage and ledger display amounts for this ${subject} in the ${intervalLabel}.`
+
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-muted-foreground text-sm">{label}</p>
-        {icon}
-      </div>
-      <p
-        className={cn(
-          "mt-1 font-semibold text-2xl text-foreground",
-          truncate && "truncate text-xl",
-          capitalize && "text-base capitalize"
-        )}
-      >
-        {value}
-      </p>
-    </div>
+    <SectionIntro
+      title={title}
+      description={description}
+      className="px-0 py-0"
+      actions={
+        showControls ? (
+          <div className="flex flex-col items-start gap-6 md:items-end">
+            {mode === "customer" && <IntervalFilter />}
+            <FreshnessIndicator
+              generatedAt={generatedAt}
+              isFetching={isFetching}
+              className="md:justify-end"
+            />
+          </div>
+        ) : null
+      }
+    />
   )
 }
 
 function UsageFeatureTable({
   features,
   maxFeatureUsage,
+  featureCount,
+  totalLatestUsage,
+  spending,
+  showSummaryStats,
 }: {
   features: UsageDashboardFeature[]
   maxFeatureUsage: number
+  featureCount: number
+  totalLatestUsage: number
+  spending: UsageDashboardData["summary"]["spending"]
+  showSummaryStats: boolean
 }) {
   return (
     <div className="overflow-hidden rounded-md border border-border/60">
+      <div className="flex flex-col gap-3 border-border/60 border-b bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-start gap-2">
+          <BarChart3 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <div className="min-w-0">
+            <p className="font-medium text-sm">Feature log</p>
+            <p className="text-muted-foreground text-xs">
+              {featureCount} {featureCount === 1 ? "feature slug" : "feature slugs"} reporting in
+              this interval
+            </p>
+          </div>
+        </div>
+        {showSummaryStats && (
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <UsageEvidenceStat
+              label="Total usage"
+              value={nFormatter(totalLatestUsage, { digits: 1 })}
+            />
+            <UsageEvidenceStat label="Ledger used" value={formatSpendingSummary(spending)} />
+          </div>
+        )}
+      </div>
       <div className="grid grid-cols-[minmax(0,1fr)_6rem_7rem] items-center gap-4 bg-muted/40 px-4 py-2.5">
-        <p className="text-muted-foreground text-xs uppercase">Feature</p>
-        <p className="text-right text-muted-foreground text-xs uppercase">Usage</p>
-        <p className="text-right text-muted-foreground text-xs uppercase">Consumed</p>
+        <p className="text-muted-foreground text-xs uppercase">Feature slug</p>
+        <p className="text-right text-muted-foreground text-xs uppercase">Latest usage</p>
+        <p className="text-right text-muted-foreground text-xs uppercase">Ledger used</p>
       </div>
       <div className="divide-y divide-border">
         {features.map((feature) => {
-          const usagePercent = maxFeatureUsage > 0 ? (feature.usage / maxFeatureUsage) * 100 : 0
-
           return (
             <div
               key={feature.featureSlug}
@@ -229,15 +340,10 @@ function UsageFeatureTable({
             >
               <div className="flex min-w-0 flex-col gap-1.5">
                 <div className="flex items-center gap-2">
-                  <BarChart3 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <BarChart3 className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate font-medium text-sm">{feature.featureSlug}</span>
                 </div>
-                <progress
-                  value={Math.round(usagePercent)}
-                  max={100}
-                  aria-label={`${feature.featureSlug} usage`}
-                  className="h-1.5 w-full appearance-none overflow-hidden rounded-full bg-muted/60 [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-primary-border [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-transparent [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-primary-border [&::-webkit-progress-value]:transition-all"
-                />
+                <ProgressBar value={feature.usage} max={maxFeatureUsage} className="h-1.5 w-full" />
               </div>
               <Badge variant="outline" className="justify-self-end font-mono text-xs tabular-nums">
                 {nFormatter(feature.usage, { digits: 1 })}
@@ -253,6 +359,15 @@ function UsageFeatureTable({
   )
 }
 
+function UsageEvidenceStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline gap-1.5 rounded-md bg-muted/50 px-2 py-1">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="max-w-[11rem] truncate font-mono text-foreground tabular-nums">{value}</span>
+    </div>
+  )
+}
+
 function TopConsumersTable({
   consumers,
   customerHref,
@@ -262,11 +377,20 @@ function TopConsumersTable({
 }) {
   return (
     <div className="overflow-hidden rounded-md border border-border/60">
+      <div className="border-border/60 border-b bg-card px-4 py-3">
+        <div className="flex min-w-0 items-start gap-2">
+          <Users className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <div className="min-w-0">
+            <p className="font-medium text-sm">Top customers</p>
+            <p className="text-muted-foreground text-xs">Ranked by ledger spend</p>
+          </div>
+        </div>
+      </div>
       <div className="grid grid-cols-[auto_minmax(0,1fr)_6rem_7rem] items-center gap-3 bg-muted/40 px-4 py-2.5">
-        <Users className="h-3.5 w-3.5 text-muted-foreground" />
-        <p className="text-muted-foreground text-xs uppercase">Top consumers</p>
+        <p className="text-muted-foreground text-xs uppercase">#</p>
+        <p className="text-muted-foreground text-xs uppercase">Customer</p>
         <p className="text-right text-muted-foreground text-xs uppercase">Usage</p>
-        <p className="text-right text-muted-foreground text-xs uppercase">Consumed</p>
+        <p className="text-right text-muted-foreground text-xs uppercase">Ledger used</p>
       </div>
       <div className="divide-y divide-border">
         {consumers.map((consumer, index) => (
@@ -299,15 +423,15 @@ function UsageDashboardErrorState({ error }: { error: string }) {
   return (
     <Card className="border-muted/60">
       <CardHeader>
-        <CardTitle>Usage Dashboard</CardTitle>
-        <CardDescription>Usage analytics could not be loaded right now.</CardDescription>
+        <CardTitle>Usage evidence</CardTitle>
+        <CardDescription>Usage and ledger display amounts could not be loaded.</CardDescription>
       </CardHeader>
       <CardContent className="pt-4 pb-6">
         <EmptyPlaceholder className="min-h-[220px]">
           <EmptyPlaceholder.Icon>
             <TriangleAlert className="h-8 w-8 opacity-60" />
           </EmptyPlaceholder.Icon>
-          <EmptyPlaceholder.Title>Unable to load usage</EmptyPlaceholder.Title>
+          <EmptyPlaceholder.Title>Unable to load usage evidence</EmptyPlaceholder.Title>
           <EmptyPlaceholder.Description>{error}</EmptyPlaceholder.Description>
         </EmptyPlaceholder>
       </CardContent>
@@ -318,35 +442,71 @@ function UsageDashboardErrorState({ error }: { error: string }) {
 function UsageDashboardEmptyState({
   intervalLabel,
   mode,
+  usageExampleParams,
+  generatedAt,
+  isFetching,
+  showHeaderControls,
+  title,
+  subjectLabel,
+  showActions,
 }: {
   intervalLabel: string
   mode: "project" | "customer"
+  usageExampleParams?: SDKExampleParams
+  generatedAt: number
+  isFetching: boolean
+  showHeaderControls: boolean
+  title?: string
+  subjectLabel?: string
+  showActions: boolean
 }) {
   return (
-    <Card className="border-muted/60">
-      <CardHeader>
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1.5">
-            <CardTitle>{mode === "customer" ? "Customer usage" : "Usage Dashboard"}</CardTitle>
-            <CardDescription>
-              Usage for this {mode === "customer" ? "customer" : "project"} in the {intervalLabel}.
-            </CardDescription>
-          </div>
-          {mode === "customer" && <IntervalFilter />}
-        </div>
-      </CardHeader>
-      <CardContent className="py-4">
-        <EmptyPlaceholder className="min-h-[220px] transition-opacity duration-300">
-          <EmptyPlaceholder.Icon>
-            <BarChart3 className="h-8 w-8 opacity-40 motion-safe:animate-pulse" />
-          </EmptyPlaceholder.Icon>
-          <EmptyPlaceholder.Title>No usage data yet</EmptyPlaceholder.Title>
-          <EmptyPlaceholder.Description>
-            Usage appears here once feature consumption is reported.
-          </EmptyPlaceholder.Description>
-        </EmptyPlaceholder>
-      </CardContent>
-    </Card>
+    <section className="flex flex-col gap-4">
+      <UsageEvidenceHeader
+        generatedAt={generatedAt}
+        intervalLabel={intervalLabel}
+        isFetching={isFetching}
+        mode={mode}
+        showControls={showHeaderControls}
+        title={title}
+        subjectLabel={subjectLabel}
+      />
+      <Card className="border-muted/60">
+        <CardContent className="py-6">
+          <EmptyPlaceholder className="min-h-[520px] transition-opacity duration-300">
+            <EmptyPlaceholder.Icon>
+              <BarChart3 className="h-8 w-8" />
+            </EmptyPlaceholder.Icon>
+            <EmptyPlaceholder.Title>No usage evidence yet</EmptyPlaceholder.Title>
+            <EmptyPlaceholder.Description>
+              Usage evidence appears after your app records usage events for metered features. Newly
+              reported usage might take some minutes to appear.
+            </EmptyPlaceholder.Description>
+            {showActions && (
+              <EmptyPlaceholder.Action>
+                <UsageExampleActions exampleParams={usageExampleParams} />
+              </EmptyPlaceholder.Action>
+            )}
+          </EmptyPlaceholder>
+        </CardContent>
+      </Card>
+    </section>
+  )
+}
+
+function UsageExampleActions({ exampleParams }: { exampleParams?: SDKExampleParams }) {
+  // one CTA: the sheet itself offers sync (consume) and async (record) methods
+  return (
+    <CodeApiSheet
+      defaultMethod="consumeUsage"
+      methods={["consumeUsage", "recordUsage"]}
+      exampleParams={exampleParams}
+    >
+      <Button size="sm" variant="primary">
+        <Code className="mr-2 size-4" />
+        Send a test event
+      </Button>
+    </CodeApiSheet>
   )
 }
 
@@ -362,9 +522,14 @@ function buildChartData(
 
     const point =
       pointsByDate.get(row.date) ??
-      ({ date: row.date, dateLabel: formatDateLabel(row.date, dateFormat) } as UsageChartPoint)
+      ({
+        date: row.date,
+        dateLabel: formatDateLabel(row.date, dateFormat),
+        spendingByFeature: {},
+      } as UsageChartPoint)
 
     point[row.featureSlug] = row.usage
+    point.spendingByFeature[row.featureSlug] = row.spending.displayAmount
     pointsByDate.set(row.date, point)
   }
 

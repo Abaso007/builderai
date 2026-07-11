@@ -53,7 +53,7 @@ export function ProjectForm(props: {
       onSuccess: async (data) => {
         const { project: newProject } = data
 
-        toastAction("success")
+        toastAction("updated", "Project saved")
 
         // invalidate the projects query
         await queryClient.invalidateQueries({
@@ -75,7 +75,7 @@ export function ProjectForm(props: {
       onSuccess: async (data) => {
         const { project: newProject } = data
 
-        toastAction("success")
+        toastAction("saved", "Project created")
 
         // invalidate the projects query
         await queryClient.invalidateQueries({
@@ -171,7 +171,11 @@ export function ProjectForm(props: {
                   Default currency for all plans and features. You can override this for each plan
                   and feature.
                 </FormDescription>
-                <Select onValueChange={field.onChange} value={field.value ?? ""}>
+                <Select
+                  onValueChange={field.onChange}
+                  value={field.value ?? ""}
+                  disabled={editMode}
+                >
                   <FormControl>
                     <SelectTrigger>
                       <SelectValue placeholder="Select a currency" />
@@ -190,7 +194,7 @@ export function ProjectForm(props: {
             )}
           />
 
-          <TimeZoneFormField form={form} />
+          <TimeZoneFormField form={form} isDisabled={editMode} />
         </div>
 
         <div className="flex justify-end space-x-4 pt-8">
@@ -198,7 +202,7 @@ export function ProjectForm(props: {
             onClick={() => form.handleSubmit(onSubmit)()}
             isDisabled={form.formState.isSubmitting}
             isSubmitting={form.formState.isSubmitting}
-            label={editMode ? "Update" : "Create"}
+            label={editMode ? "Save project" : "Create project"}
           />
         </div>
       </form>

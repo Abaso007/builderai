@@ -77,6 +77,7 @@ export const insertPaymentProviderConfigSchema = createInsertSchema(paymentProvi
   })
   .extend({
     projectSlug: z.string().optional(),
+    workspaceSlug: z.string().optional(),
   })
   .partial({
     projectId: true,
@@ -92,5 +93,13 @@ export const selectPaymentProviderConfigSchema = createSelectSchema(paymentProvi
   connectionData: paymentProviderConnectionDataSchema.optional(),
 })
 
+export const publicPaymentProviderConfigSchema = selectPaymentProviderConfigSchema.omit({
+  key: true,
+  keyIv: true,
+  webhookSecret: true,
+  webhookSecretIv: true,
+})
+
 export type InsertPaymentProviderConfig = z.infer<typeof insertPaymentProviderConfigSchema>
 export type PaymentProviderConfig = z.infer<typeof selectPaymentProviderConfigSchema>
+export type PublicPaymentProviderConfig = z.infer<typeof publicPaymentProviderConfigSchema>

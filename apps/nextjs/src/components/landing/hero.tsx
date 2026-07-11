@@ -1,151 +1,72 @@
-"use client"
-
 import { APP_DOMAIN } from "@unprice/config"
-import { Button, buttonVariants } from "@unprice/ui/button"
-import { ChevronRight, GitHub } from "@unprice/ui/icons"
-import { m } from "framer-motion"
-import { useTheme } from "next-themes"
-import Link from "next/link"
+import { buttonVariants } from "@unprice/ui/button"
+import { ArrowRight } from "lucide-react"
+import { Link } from "next-view-transitions"
 import Balancer from "react-wrap-balancer"
-import { useMounted } from "~/hooks/use-mounted"
-import { HeroVideoDialog } from "./hero-video"
-import { WordRotate } from "./text-effects"
+import { MoneyPath } from "./money-path"
 
-const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: {
-      staggerChildren: 0.2,
-      delayChildren: 0.1,
-    },
-  },
-}
+// The first viewport is the product truth: one request, one decision, both
+// outcomes. Copy on the left states the wedge; the money path on the right
+// shows it. The only motion is the request dot walking the path.
 
-const itemVariants = {
-  hidden: { opacity: 0, y: 20 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    transition: {
-      type: "spring",
-      stiffness: 100,
-      damping: 20,
-    },
-  },
-}
-
-const heroImageVariants = {
-  hidden: { opacity: 0, scale: 0.95 },
-  visible: {
-    opacity: 1,
-    scale: 1,
-    transition: {
-      type: "spring",
-      stiffness: 100,
-      damping: 20,
-      delay: 0.6,
-    },
-  },
-}
+const heroFacts = [
+  { label: "License", value: "AGPL-3.0 open source" },
+  { label: "Access", value: "Free during early access" },
+  { label: "Payments", value: "Your Stripe account" },
+  { label: "Custody", value: "Funds stay with you" },
+]
 
 export default function Hero() {
-  const { theme } = useTheme()
-  const isMounted = useMounted()
-
   return (
-    <m.section
+    <section
       aria-labelledby="hero-title"
-      className="mt-20 flex min-h-screen flex-col items-center justify-center text-center"
-      variants={containerVariants}
-      initial="hidden"
-      animate="visible"
+      className="ledger-dots mx-auto w-full max-w-6xl px-6 pt-12 pb-16 sm:pt-16 sm:pb-20 lg:pt-20"
     >
-      <m.h1
-        id="hero-title"
-        className="inline-block bg-clip-text p-2 font-bold text-4xl text-background-textContrast tracking-tighter sm:text-6xl md:text-7xl"
-        variants={itemVariants}
-      >
-        <Balancer>
-          Your product is smart,
-          <br /> but your pricing is{" "}
-          {isMounted && (
-            <WordRotate
-              className="italic"
-              words={["hardcoded", "brittle", "static", "manual"]}
-              shadowColor={theme === "dark" ? "white" : "black"}
-            />
-          )}
-        </Balancer>
-      </m.h1>
-      <m.p
-        className="mx-auto mt-6 max-w-2xl px-6 text-background-text text-lg"
-        variants={itemVariants}
-      >
-        <br />
-        <br />
-        <b>The PriceOps Infrastructure for SaaS.</b> Decouple your pricing logic from your codebase.
-        By treating pricing as infrastructure, you eliminate the engineering bottleneck preventing
-        revenue growth.
-        <br />
-        <br />
-        Test pricing models in minutes, not months. Ship usage-based, tiered, or hybrid models with
-        a single integration. As you deploy Unprice, you’ll notice how quickly "billing tickets"
-        disappear from your backlog.
-        <br />
-        <br />
-        <span className="text-sm italic opacity-70">
-          We integrate with billing engines like Stripe and Paddle. Unprice makes them
-          swappable—change providers without touching code.
-        </span>
-      </m.p>
-      <m.div
-        className="my-14 flex w-full flex-col justify-center gap-3 px-6 align-middle sm:flex-row"
-        variants={itemVariants}
-      >
-        <Link href={`${APP_DOMAIN}`} className={buttonVariants({ variant: "primary" })}>
-          Start pricing
-          <ChevronRight className="ml-1 h-4 w-4" />
-        </Link>
-        <Button asChild variant="link">
-          <Link
-            href="https://github.com/jhonsfran1165/unprice"
-            className="text-background-textContrast"
-            target="_blank"
-          >
-            <span className="mr-1 flex size-6 items-center justify-center rounded-full transition-all">
-              <GitHub aria-hidden="true" className="size-5 shrink-0 text-background-textContrast" />
-            </span>
-            <span>Star on GitHub</span>
-          </Link>
-        </Button>
-      </m.div>
-      <m.div
-        className="relative mx-auto my-20 h-fit w-full max-w-6xl px-6"
-        variants={heroImageVariants}
-      >
-        <div className="relative">
-          <HeroVideoDialog
-            className="block dark:hidden"
-            animationStyle="from-center"
-            videoSrc="https://www.youtube.com/embed/vAirXo6FJDs"
-            thumbnailSrc="/unprice-light.png"
-            thumbnailAlt="Hero Video"
-          />
-          <HeroVideoDialog
-            className="hidden dark:block"
-            animationStyle="from-center"
-            videoSrc="https://www.youtube.com/embed/vAirXo6FJDs"
-            thumbnailSrc="/unprice-dark.png"
-            thumbnailAlt="Hero Video"
-          />
+      <div className="grid items-center gap-10 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:gap-14 xl:grid-cols-[minmax(0,28rem)_minmax(0,1fr)]">
+        <div className="flex flex-col items-start">
+          {/* Two-tone emphasis: the setup in text, the payoff in ink. The
+              operative clause carries the sentence — emphasis by precision,
+              not decoration. */}
+          <h1 id="hero-title" className="font-primary text-background-textContrast text-display-1">
+            <Balancer>
+              <span className="text-background-text">Authorize customer spend</span> before paid
+              work runs.
+            </Balancer>
+          </h1>
+          {/* Compression rule (strategic/positioning-and-messaging.md): one loss-framed
+              sentence plus the category frame. The enumeration lives below the
+              fold as state — the problem trace and the money-path stations. */}
+          <p className="mt-5 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
+            Sell credits and usage-based plans without eating over-budget customer work. Unprice is
+            the open-source customer money path for usage-based SaaS.
+          </p>
+
+          <div className="mt-8 flex flex-wrap items-center gap-3">
+            <Link
+              href={`${APP_DOMAIN}`}
+              className={buttonVariants({ variant: "primary", className: "gap-1.5" })}
+            >
+              Start with one paid action
+              <ArrowRight aria-hidden className="size-3.5" />
+            </Link>
+          </div>
+
+          <dl className="mt-10 grid w-full max-w-xl grid-cols-2 gap-x-6 gap-y-4 border-background-border border-t pt-5">
+            {heroFacts.map((fact) => (
+              <div key={fact.label} className="min-w-0">
+                <dt className="text-background-text text-xs leading-5">{fact.label}</dt>
+                <dd className="mt-0.5 font-medium text-background-textContrast text-sm leading-5">
+                  {fact.value}
+                </dd>
+              </div>
+            ))}
+          </dl>
         </div>
 
-        <div
-          className="-bottom-20 -mx-10 absolute inset-x-0 h-2/4 bg-gradient-to-t from-background-base via-background-base to-transparent lg:h-1/4"
-          aria-hidden="true"
-        />
-      </m.div>
-    </m.section>
+        <div className="rounded-lg border border-background-border bg-surface-panel p-4 shadow-raised sm:p-6">
+          <MoneyPath />
+        </div>
+      </div>
+    </section>
   )
 }

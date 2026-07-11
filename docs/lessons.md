@@ -1,0 +1,724 @@
+# Lessons
+
+Durable repo memory for repeatable rules, failure modes, commands, and test
+patterns. Keep it cheap to load and useful.
+
+## How To Use
+
+- Read before non-trivial code, test, docs, migration, billing, or architecture work.
+- If you need to run the project, always use bin/startup dev
+- use ripgrep when available instead of grep. rg
+- New lessons must be dated, repo-specific, and short: 1-3 bullets per entry.
+- Use "When X, do Y; watch Z". Include files or commands only when they prevent repeats.
+- Update an existing section instead of adding duplicate narrative.
+- Do not record secrets, customer data, or one-off local noise.
+- Architecture rule changes need an ADR link.
+- You need to use nvm use to install the proper node version of the project
+- 2026-06-30: The repo pins `pnpm@10.28.0`; if the Codex runtime resolves `pnpm` to 11.x,
+  use the pinned/Corepack pnpm instead. pnpm 11 ignores the root `pnpm` config, can report
+  lockfile config mismatch, and may purge `node_modules` before tests run.
+- 2026-07-03: In Codex, prefer targeted `corepack pnpm --filter <pkg> typecheck` over the
+  root `pnpm typecheck` turbo path; the root path can invoke the runtime pnpm during package
+  tasks and try to reinstall dependencies.
+- 2026-07-05: Destructive project deletion depends on project-owned FKs cascading. When adding an
+  explicit FK from a project-owned table to `unprice_projects`, include `ON DELETE CASCADE` or
+  `ProjectService.deleteProjectRecord` can fail after child rows exist.
+- Before adding a helper, utility, or repeated row shape, search the repo for an established
+  pattern first; reuse or extract the canonical path instead of duplicating logic.
+- Before running the app, always check if it's already running on locahost:3000 for landing or app.locaholst:300 for dashboard.
+- Whenever you are gonna work with the front end, please load the shadcn skill. And keep and follow the patterns for empty states, components, etc.
+- 2026-07-06: Mintlify dev can throw `No docs config` after hot-adding or editing docs pages even
+  when `mint validate` passes; restart `apps/docs` dev preview from the docs root before treating it
+  as a config bug.
+
+## CI And GitHub Actions
+
+- 2026-07-11: Node 24 GitHub Actions workflows should use `actions/checkout@v5`,
+  `actions/setup-node@v5`, `actions/cache@v5`, and `pnpm/action-setup@v4.4.0`; older action
+  majors trigger GitHub's forced Node 24 compatibility warning.
+- 2026-07-04: `job_build.yaml` requests `pull-requests: write` and `statuses: write`; callers
+  that set workflow-level `permissions` must grant those scopes on the reusable-workflow job.
+- 2026-07-11: `neondatabase/schema-diff-action@v1` does not accept `username`; pass only its
+  supported `database` input because the action resolves the branch role itself.
+- 2026-07-11: Jobs schedule tests must reset the chained query's `limit` mock between cases;
+  `clearAllMocks()` preserves queued `mockResolvedValueOnce` results and can leak period rows.
+
+## Cloudflare, API, And Ingestion
+
+- 2026-07-08: `EntitlementWindowDO` is a thin Cloudflare adapter; entitlement window business logic
+  lives in `apps/api/src/ingestion/entitlements/processor.ts` behind the backend-neutral ports in
+  `ports.ts` (state store + `atomically` boundary, scheduler, runtime, wallet provider, clock).
+  Put new entitlement behavior in the processor, keep SQLite specifics in
+  `entitlement-window-store.ts`, and check `processor.test.ts` for the in-memory store contract a
+  future Redis backend must satisfy; do not reintroduce storage or wallet calls into the DO class
+  or a hand-rolled Drizzle/SQLite interpreter into behavioral tests.
+- 2026-07-11: When splitting `EntitlementWindowProcessor` lifecycle collaborators, keep operation
+  instrumentation at the processor boundary and pass close/flush callbacks into collaborators so
+  nested `alarm`, `close_reservation`, and `flush_refill` telemetry remains unchanged.
+- 2026-07-11: Keep entitlement pricing helpers store-free: pass readonly meter/grant snapshots,
+  return next/touched grant states, and let processor transactions own all state reads and writes.
+- 2026-07-11: Meter transition semantics belong in `@unprice/services/entitlements`; engine writes
+  and entitlement cost projections must share the canonical pure transition. Timestamp validation
+  stays caller-selected: single-event wallet bootstrap defers it to apply, batch/sync uses ambient
+  `Date.now()`, and async uses its injected clock.
+
+- 2026-06-06: EntitlementWindowDO SQLite columns need the schema, contract snapshot, SQL migration,
+  `drizzle/migrations.js`, and `drizzle/meta/_journal.json` updated together; otherwise existing
+  DOs can type-check but fail at runtime on missing columns. Never create migrations manually, always use pnpm run db:check:ingestion:migrations for the api.
+- 2026-06-06: `bin/startup.dev` builds/deploys analytics with `tb --local`; use
+  `TB_VERSION_WARNING=0 tb --local --output=json info | jq -r ".local.token"` for the app token,
+  because `tb --local token copy "workspace admin token"` can return a static token rejected by
+  Tinybird Local API requests.
+- 2026-06-06: Local dev startup must override `DATABASE_READ1_URL` and `DATABASE_READ2_URL`
+  alongside `DATABASE_URL`; `apps/api/dev.sh` regenerates `.dev.vars` from non-empty parent env
+  values and otherwise preserves stale preview read-replica secrets.
+- 2026-05-09: Removing a Durable Object class needs `deleted_classes` in the affected
+  `apps/api/wrangler.jsonc env.*` migration.
+- 2026-05-08: `entitlement/verify` stays compact: decision fields only, no internal
+  entitlement metadata.
+- 2026-05-17: `entitlement/verify` is read-only for wallet reservations; use apply/alarm paths
+  for reservation close and release.
+- 2026-05-08: `/v1/usage/get` returns raw usage/spend from Tinybird; Hono formats display money.
+- 2026-05-08: Keep Tinybird response parsers tolerant during endpoint rollouts; old cloud
+  shapes can lag local code.
+- 2026-05-31: Tinybird `AggregateFunction` state migrations that change `argMax` version type
+  cannot direct-`CAST` old states; `FORWARD_QUERY` must `finalizeAggregation` the old value and
+  `initializeAggregation('argMaxState', value, new_version)` for the new state.
+- 2026-06-23: Tinybird deploy can reject rollup backfills when a modified raw datasource has a
+  shorter TTL than existing materialized targets; preserve history with `FORWARD_QUERY` on the
+  rollup datasources instead of shortening their TTLs.
+- 2026-06-30: When Tinybird endpoints, datasources, materializations, or fixtures change, add or
+  update the matching `internal/analytics/tests/*.yaml` coverage and run `tb build` plus
+  `tb test run` so existing endpoint expectations still pass.
+- 2026-07-01: Tinybird endpoints that `UNION ALL` per-group buckets need a final outer
+  `ORDER BY`; subquery order only limits each bucket and does not make the combined output stable.
+- 2026-05-08: `entitlement_meter_facts` needs no synthetic `id`; use `amount` for event spend
+  and `amount_after` for cumulative spend.
+- 2026-05-08: Sync ingest idempotency must re-enter entitlement apply replay, not synthesize a
+  duplicate from audit `exists`.
+- 2026-05-08: API wallet-empty messages should use configured meter/event slugs, not derived
+  storage keys.
+- 2026-05-09: `/v1/events/ingest/sync` must await durable reporting enqueue; `waitUntil`
+  alone is not durable enough for ingestion evidence.
+- 2026-05-09: Audit payload drift is asynchronous evidence, not a sync-ingest `409`; group
+  `canonicalAuditId` and count distinct `payloadHash` values in the audit lake.
+- 2026-05-09: Keep sync ingest on the low-latency auth path with `Server-Timing`; do not add the
+  API-key rate-limit binding.
+- 2026-05-09: Persist final wallet flush intent before external wallet I/O so recovery replays
+  final flushes as final.
+- 2026-05-09: Serialize native `Error` objects before `evlog.log.error`; Cloudflare/Axiom can
+  otherwise store `{}`.
+- 2026-06-13: When logging caught failures with `Logger.error`, pass the caught `Error` as the
+  first argument and put the operation name in fields; string-first error logs make evlog create a
+  wrapper error whose stack hides the real cause.
+- 2026-06-13: Ingestion status fields are end-to-end contracts; when adding a customer-visible
+  field, update the reporting envelope, Tinybird datasource/endpoints/fixtures, analytics
+  validators, service use cases, API tests, and dashboard row/detail types together.
+- 2026-05-17: Axiom-bound logs should normalize known camelCase aliases in
+  `@unprice/observability`; keep business fields snake_case to avoid duplicate columns.
+- 2026-05-18: Keep `request.*` and `business.*` as the canonical Axiom shape; evlog may use
+  top-level summary fields for sampling, but strip exact duplicates in the observability drain.
+- 2026-05-18: Axiom events should classify normal wide events with `type: log`; reserve
+  `type: metric` for `LogdrainMetrics` payloads.
+- 2026-05-18: In `APP_ENV=development`, do not attach a custom drain; let evlog's built-in
+  pretty development logger handle console output.
+- 2026-06-12: When `openlogs tail <service>` has no registered command stream, inspect the raw
+  per-service files directly under `.openlogs`, for example `.api.<timestamp>.raw.log` and
+  `.nextjs.<timestamp>.raw.log`. Also you can use openlogs tail -n 100 to get the latest logs.
+- 2026-05-18: API Axiom drain flushes should be batched through scheduled `waitUntil`;
+  reserve immediate flushes for errors, thrown DO operations, and slow requests.
+- 2026-06-08: EntitlementWindowDO batch diagnostics that must be queried in Axiom need a
+  first-class drain event; constructor-scoped DO logger entries can be absent from top-level
+  Axiom rows, leaving only the outer `runDoOperation` wrapper fields.
+- 2026-05-18: HTTP tRPC inside Next.js should enrich the enclosing Next wide event
+  instead of emitting a second event; only standalone/RSC tRPC contexts should emit
+  their own batched procedure event.
+- 2026-06-05: `cloudflare/wrangler-action` fails before deploy when a listed secret is
+  empty; build the secret list dynamically for optional Worker secrets such as
+  `DATABASE_READ1_URL` and `DATABASE_READ2_URL`.
+- 2026-05-25: Public API route allowlists must run before `init()` so scanner 404s do not
+  construct cache, DB, service, or log-drain context.
+- 2026-05-08: Test DO eviction/recovery with a new DO instance over the same fake storage.
+- 2026-05-11: For usage concurrency, test `EntitlementWindowDO` replay and reporting enqueue
+  retry paths, not only the service adapter.
+- 2026-07-04: API Durable Object tests are integration-style under root Turbo concurrency; keep
+  `apps/api/vitest.config.ts` on a 15s `testTimeout` instead of relying on Vitest's 5s default.
+- 2026-07-05: RunBudgetDO tests should cache the mocked DO module import in `beforeAll`; per-spec
+  `vi.resetModules()` makes Vite transform/import startup count against individual test timeouts
+  and can flake under Turbo contention.
+- 2026-07-10: Parse EntitlementWindow meter facts once at the RunBudget pricing-port boundary;
+  require each fact's non-empty entitlement ID to match the request, derive invoice context from
+  the typed fact timestamp, and take spend-bucket currency from the run.
+- 2026-07-11: Keep RunBudget state-machine and bucket behavior in `processor.ts`, all Durable
+  SQLite access in `run-budget-store.ts`, and construct the injected wallet service graph once per
+  external operation so Neon request-scoped resources never cross Worker requests.
+- 2026-07-11: Durable SQLite atomic store callbacks must execute synchronous Drizzle `.run()`
+  statements inside `db.transaction`; async callbacks can leave earlier writes committed when a
+  later statement fails.
+- 2026-07-11: RunBudget wallet captures must atomically persist a run-monotonic sequence and an
+  immutable `[range_start_amount, target_amount)` before wallet I/O; abandoned targets advance the
+  logical range cursor but only successful captures advance `flushed_amount`.
+- 2026-07-11: RunBudget alarms must flush captureable bucket spend even before an intent exists;
+  persist quantity ranges on the intent too, and seal nullable legacy quantity snapshots before
+  retries or cumulative bucket updates so wallet payload hashes cannot drift.
+- 2026-05-08: Tiny-tools usage discovery reads `featurePlanVersion.meterConfig` from
+  `entitlements.get`; `verify` is only for the decision.
+- 2026-05-11: Tier/package entitlements are static quantity limits from subscription grants; do
+  not add meters for them unless the product explicitly needs separate snapshot usage.
+- 2026-05-15: API load tests should use `tooling/k6/baseline.js` with one `PROJECT_ID`, one
+  `CUSTOMER_ID`, and `EVENTS=1000`; it discovers meters through `entitlements.get`, sends async
+  usage grouped by event slug, samples verification with `VERIFY_EVERY`, and runs one final
+  verification without signup/payment flows.
+- 2026-05-17: Async raw ingestion supports one event fanning out to multiple active usage
+  entitlements with the same `eventSlug`; keep same-slug meter tests at the service layer so
+  payload-compatible meters stay processed together.
+- 2026-05-17: Async ingestion should batch entitlement-window RPCs by customer entitlement in
+  chunks of 100; DO alarm cleanup should use indexed bounded probes/deletes, not `count(*)` scans
+  over outbox, audit, or idempotency tables.
+- 2026-05-17: EntitlementWindowDO apply/verify hot paths should read only active
+  `grant_windows` bucket keys; full-table grant-window scans multiply storage rows read under
+  load.
+- 2026-05-30: EntitlementWindowDO no longer uses a local fact outbox; post-apply commits must
+  still schedule lifecycle alarms so wallet final flush, idempotency cleanup, and retention wakeups
+  continue.
+- 2026-05-31: Ingestion hot paths enqueue append-only reporting envelopes after
+  `EntitlementWindowDO` apply; do not reintroduce `IngestionAuditDO.exists` or
+  `IngestionAuditDO.commit` into sync or async request handling.
+- 2026-05-31: `IngestionAuditDO` is retired; keep only the `deleted_classes` migration marker
+  in `apps/api/wrangler.jsonc`, and use reporting envelopes for audit/Pipeline/Tinybird delivery.
+- 2026-06-05: Customer-visible ingestion analytics should project from reporting envelopes in
+  the reporting consumer; avoid parallel service-level status writes that can split evidence.
+- 2026-06-05: Lakehouse registry fields with `required: false` and `defaultValue: null` should
+  parse explicit `null`, because reporting payloads send nullable optional columns.
+- 2026-07-01: R2 Pipeline audit records are parsed through the lakehouse registry before send; when
+  reporting payloads gain customer-visible fields, update `internal/lakehouse/src/registry.ts` and
+  `apps/api/scripts/schemas/events.json` together or the fields are stripped before R2.
+- 2026-05-17: Async ingestion in-flight result correlation must use per-message keys; keep
+  `idempotencyKey` only for audit/dedupe identity.
+- 2026-06-10: EntitlementWindowDO batch wallet retries must discard in-memory staged plans before
+  awaiting wallet I/O; reread SQLite and retry optimized so reservation fixes do not turn into
+  per-event sequential writes.
+- 2026-06-12: EntitlementWindowDO batch wallet growth readiness must compare reservation runway
+  against staged batch headroom, not only the current event cost; post-refill wallet-empty denials
+  must be staged before mutating the optimized batch draft.
+- 2026-06-12: EntitlementWindowDO optimized batch wallet growth that hits
+  `maxOutstandingAmount` is exhausted headroom; stage `WALLET_EMPTY` for that event instead of
+  throwing so async ingestion can ack the rest of the customer batch.
+- 2026-06-13: EntitlementWindowDO optimized batch lazy bootstrap should only throw the
+  bootstrap-retry signal for positive projected cost; zero-cost staged events must stay on the
+  compact local commit path without opening a wallet reservation.
+- 2026-06-13: Raw ingestion and reporting queues must not share a DLQ; replay should be an
+  authenticated admin/UI workflow, not a local operator script.
+- 2026-06-13: Dashboard-to-API workflows should use the `@unprice/api` SDK path; avoid bespoke
+  internal fetches for public API operations such as ingestion replay.
+- 2026-06-13: Dashboard-to-API project overrides should pass `project_id` through the public SDK
+  body and use `validateIsAllowedToAccessProject`; do not add parallel internal auth headers when
+  API-key admin/root access already models the permission.
+- 2026-06-13: k6 ingestion-failure testing should create real UI-visible failed rows through the
+  non-production `/v1/events/ingest` failure-test header; keep the marker in `requestId` so
+  frontend replay can replace it before requeueing.
+- 2026-06-13: Ingestion replay uses Tinybird failed rows as the recovery index and `payload_json`
+  as the immediate replay source; R2 remains write-once audit storage.
+- 2026-07-05: `unprice_ingestion_events` keeps 60 days in Tinybird for operator visibility, but
+  replay remains bounded by the 30-day ingestion event-age window unless idempotency retention is
+  widened too.
+- 2026-06-12: Ingestion event table pagination should use a composite Tinybird cursor
+  (`handled_at`, `canonical_audit_id`); `handled_at` alone can skip rows when many events share a
+  timestamp.
+- 2026-06-19: RunBudgetDO and EntitlementWindowDO names must include `APP_ENV`; copied data across
+  environments can otherwise route to the same Durable Object name for the same project/customer id.
+- 2026-07-11: Subscription phase scheduling must normalize stale `currentCycleEndAt` values to a future boundary; otherwise `updatePhase` clamps the old end to `now` and `createPhase` reports a false overlap.
+- 2026-07-11: Subscription creation must return a conflict when a customer already has an active subscription; explain the one-subscription invariant and direct callers to update the existing subscription.
+- 2026-07-11: Subscription creation checks customer activity before duplicate-subscription handling; map inactive customers to a visible precondition instead of `SUBSCRIPTION_OPERATION_FAILED`, which becomes a generic internal error.
+
+## Next.js And Dashboard
+
+- 2026-07-11: Keep an explicit `/dashboard/page.tsx` terminal route because the root dashboard layout
+  has parallel slots but no content page; its parent layout already supplies `force-dynamic`, so do
+  not duplicate the segment flag on the page.
+- 2026-07-04: Onboarding step navigation must stay sequential even in development; avoid dev-only
+  `goToStep` bypasses or "continue anyway" buttons that advance after an incomplete step.
+- 2026-07-04: OnboardJS `updateContext` is async and persists before notifying state; await it
+  before enabling or performing step navigation that depends on newly written `flowData`.
+- 2026-07-05: OnboardJS flows with a visible final step must still call `next()` from that step so
+  `onFlowComplete` persists the completed state; do not clear evidence flags before completion.
+- 2026-07-04: tRPC router procedure keys cannot use reserved object names such as `apply`;
+  expose plan-template creation as `planVersions.applyTemplate` and keep client calls aligned.
+- 2026-07-04: Theme-sensitive visuals should use `resolvedTheme` from `next-themes`, not
+  `theme`; `theme` can be `"system"` while the rendered UI needs the actual light/dark palette.
+- 2026-07-09: `.ledger-dots` is a background utility; keep its pseudo-element isolated and behind
+  content instead of raising each child panel or text layer.
+- 2026-07-04: Workspace signup should omit `planVersionId` when no pricing/session plan is
+  selected; sending an empty string blocks the customer signup default-plan resolver.
+- 2026-07-04: Dashboard header full logos should use the `Logo` size prop, not Tailwind
+  `size-*` width/height classes; fixed-size wrappers can make the SVG mark flex-shrink away while
+  the wordmark remains visible.
+- 2026-07-04: Centered ghost cards in dashboard forms need `w-full` alongside `max-w-*`; otherwise
+  conditional form sections can make the flex item shrink-wrap different content widths.
+- 2026-07-05: Subscription phase history actions should derive from phase timing (`past`,
+  `active`, `future`); render historical rows from embedded phase data and only allow removal for
+  future phases.
+- 2026-07-05: Subscription phase scheduling belongs in `SubscriptionPhaseForm` as a form mode, not
+  a separate change-plan dialog; keep view/create/schedule in one sheet so provider, trial, usage
+  credit policy, payment method, and config stay visible together. The user-facing entry point is
+  still Add phase, not a separate row-level schedule action.
+- 2026-07-05: Future subscription phases are editable scheduled work. Use the edit sheet for safe
+  future-phase updates, keep active/past phase commercial fields locked, validate `endAt >= startAt`,
+  and only append another future phase after the current last future phase has an end date.
+- 2026-07-05: Workspace self-serve plan changes must reject subscriptions with a future phase; only
+  internal subscription phase editing should modify scheduled phase timelines.
+- 2026-07-05: tRPC redacts all 5xx messages in `error-format.ts`; map expected domain `Result`
+  errors to `BAD_REQUEST`, `PRECONDITION_FAILED`, or another 4xx code in the adapter when the
+  message should be customer-visible.
+- 2026-07-05: In the Next.js tRPC client, generate `unprice-request-id` with a lazy `headers`
+  function; a shared header object reuses one request id across unrelated mutations.
+- 2026-07-05: Dashboard tRPC mutation failures should use the global MutationCache toast in
+  `apps/nextjs/src/trpc/shared.ts`; local `onError` handlers should keep rollback/state side
+  effects only, or they create duplicate error toasts.
+- 2026-07-05: Project danger-page mutations should pass the route `workspaceSlug` and `projectSlug`;
+  `protectedProjectProcedure` falls back to workspace/project cookies when inputs are absent.
+- 2026-07-03: Customer detail header actions are rendered by
+  `apps/nextjs/src/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/customers/[customerId]/layout.tsx`
+  for every tab; for tab-specific header buttons, keep the header data load in the layout and put
+  `useSelectedLayoutSegments` branching in a small client action child.
+- 2026-07-03: Dashboard breadcrumbs are rendered by the `@breadcrumbs` parallel route, so they
+  only see URL/search params. For entity-context crumbs, pass context in the URL/search params or
+  resolve it inside `apps/nextjs/src/app/(root)/dashboard/@breadcrumbs/[...all]/page.tsx`.
+- 2026-07-03: Customer current-access usage is a per-feature entitlement-period view, not the
+  last-30-days evidence view; compute/query each active usage entitlement by its current grant
+  `period_key` and keep the UI on realtime polling so reset-specific windows update in place.
+- 2026-07-10: Usage dashboard Tinybird reads query bucketed rollups; floor rolling interval
+  starts to the rollup bucket boundary before sending `start/end`, or first-bucket usage can be
+  hidden while entitlement `period_key` reads still show it.
+- 2026-07-03: Workspace billing overview is self-reflective customer reporting; resolve
+  `workspace.unPriceCustomerId` to the customer owning project before calling customer
+  current-access, wallet, or usage-dashboard queries.
+- 2026-07-05: Workspace/project selector plan badges should use active subscription
+  `planSlug`/current-access state; do not reintroduce a workspace-owned plan display column.
+- 2026-07-03: Dialog forms rendered from inside another React form can still bubble submit events
+  through the React tree even when Radix portals the dialog content; stop propagation on the dialog
+  form submit when the inner action must not save the parent form.
+- 2026-06-30: Customer current-access entitlement usage should query Tinybird with computed grant
+  `period_key` values; exact subscription `start/end` windows can drop hourly rollup buckets and
+  hide fresh usage for short entitlement periods.
+- 2026-06-13: Public `generateStaticParams` paths must not call session helpers or live database
+  queries; return `[]` for dynamic ISR routes so `next build` does not depend on request scope or
+  preview database reachability.
+
+## Billing, Wallets, And Invoices
+
+- 2026-07-04: `dayOfCreation` is a plan/reset config shorthand; subscription phases store the
+  numeric anchor resolved with `getAnchor`, and subscription period windows must preserve
+  `subscription_phases.start_at_m`.
+- 2026-07-04: Project payment-provider mutations should pass the route `workspaceSlug` and
+  `projectSlug`; Stripe provider `active` must stay false unless the managed connection status is
+  `active`.
+- 2026-07-04: Workspace billing portal actions must use the active subscription phase
+  `paymentProvider`; map provider config failures to provider-agnostic billing portal messages.
+  Also pass the URL `workspaceSlug` into workspace-scoped mutations so `protectedWorkspaceProcedure`
+  does not fall back to a stale active workspace.
+- 2026-07-01: Billing periods generated for subscription phases must never start before
+  `subscription_phases.start_at_m`; `statement_key`, pay-in-advance `invoiceAt`, and proration
+  all derive from that service start, so rounding down can merge phase-change invoices.
+- 2026-06-22: Customer wallet dashboards should distinguish ledger balances from usable display
+  balances; expired-by-time wallet credits can remain in ledger until the sweep runs, so UI
+  availability must derive from non-expired credits and show credit status explicitly.
+- 2026-06-22: Per-credit wallet consumption should come from
+  `entitlement_reservation_funding_legs.captured_amount` grouped by `wallet_credit_id`; do not
+  infer it from issued minus usable balance, because expired unused credits would look consumed.
+- 2026-06-22: Positive wallet `captureReservationUsage` calls must carry billing period and
+  statement context; otherwise `customer.*.consumed` can gain non-invoice-backed
+  `wallet_capture_usage` ledger rows.
+- 2026-06-22: Invoice-visible wallet captures must also carry
+  `feature_plan_version_item_id`; `billPeriod` uses it with `billing_period_id` to avoid
+  re-rating already captured capped-wallet usage.
+- 2026-06-22: Budget runs do not create separate "run" invoice lines; run sync events report
+  meter facts that bill through the subscribed usage features, so inspect feature-period invoices
+  and ledger metadata when reconciling run charges.
+- 2026-06-22: External-reservation entitlement applies must roll back meter/grant writes before
+  caching `RUN_BUDGET_EXCEEDED`; only accepted run events should advance usage state.
+- 2026-06-13: Dashboard-initiated provider return URLs should resolve from
+  `window.location.origin` at submit/click time; `APP_DOMAIN` is only safe for canonical host links
+  and can point at localhost when public env defaults leak into preview/prod bundles.
+- 2026-06-08: Sandbox payment-provider invoice methods should return an empty hosted invoice URL;
+  the dashboard must keep sandbox invoice viewing inside Unprice instead of opening placeholder
+  external origins.
+- 2026-06-08: Project creation must seed an active managed sandbox payment-provider config in the
+  same transaction; plan-version publish should log provider validation failures with normalized
+  error context before returning `payment_provider_error`.
+- 2026-06-08: Invoice finalization collectability should use the provider/display
+  currency-minor amount; if a tiny positive ledger-scale total rounds to zero,
+  skip provider work and void the invoice.
+- 2026-06-08: Usage plan-version features should persist an explicit reset cadence;
+  when reset follows billing, derive and store it from feature `billingConfig` while keeping
+  `metadata.resetCadenceOverride=false`, so rating/explainability read the same period keys.
+- 2026-06-08: Project dashboard revenue should use invoice-visible ledger credits into
+  `customer.*.consumed`; do not estimate it from plan prices or raw payment/top-up funding
+  accounts.
+- 2026-06-07: Customer-facing invoice money should quantize ledger-scale amounts through
+  `toCurrencyMinor` before display; keep sub-cent precision internal.
+- 2026-06-15: After invoice money is quantized to currency minor units, render fixed currency
+  minor digits in invoice UI; otherwise `3.60 EUR` appears as `3,6 €` and looks inconsistent with
+  analytics cards.
+- 2026-06-07: Provider invoice items must allocate currency-minor rounding from the
+  ledger-summed invoice header total; do not independently round each line and let
+  provider totals drift.
+- 2026-06-06: Invoice headers store `grossAmount`, `amountDue`, `amountPaid`, and
+  `amountIncluded`; ledger lines remain the invoice source of truth, and
+  collectability comes from settlement metadata derived from wallet funding legs.
+- 2026-06-06: Plan publish should set `paymentMethodRequired` from any non-zero
+  `charge_automatically` feature price path, not flat price alone; `createPhase`
+  resolves the provider default before inserting a required payment method.
+- 2026-06-07: `createPhase` status decisions must use the resolved/stamped
+  `paymentMethodIdToUse`; sandbox defaults can be discovered during phase creation and should
+  not park direct signup in `pending_payment`.
+- 2026-06-07: Wallet-backed usage invoices should project wallet capture ledger lines; do not
+  re-rate capped wallet captures through Tinybird during BILL or they can zero/duplicate invoices.
+- 2026-06-07: Wallet capture ledger metadata must include `feature_slug` and `quantity`; invoice
+  read models should consume ledger-projected descriptions/quantities instead of looking up usage
+  feature labels from billing periods.
+- 2026-06-07: Subscription phase edits must persist `paymentMethodId` in `updatePhase`; the
+  Next.js phase form should not reset a selected payment method from plan-version defaults.
+- 2026-06-07: Transaction-backed phase creation must materialize billing periods after the outer
+  transaction commits and before wallet activation; async `waitUntil` period generation can race
+  immediate usage ingestion and leave EntitlementWindowDO without invoice context.
+- 2026-06-12: Subscription machine activation already runs under the subscription lock during
+  renewals; call billing-period materialization with `lock: false` from that actor, or
+  `generateBillingPeriods` will reacquire the same lock and park the subscription in
+  `pending_activation`. Ingestion catch-up must retry `activateWallet` for subscriptions already
+  parked there instead of fanning out to EntitlementWindowDO with stale billing context.
+- 2026-06-12: Ingestion catch-up must materialize per-item billing periods for active/trialing
+  subscriptions even when the subscription cycle is not due for renewal; usage feature cadences can
+  be shorter than the subscription cycle and still need invoice context before DO fanout.
+- 2026-07-03: Sync usage consume must catch up and reload billing-period context before
+  EntitlementWindowDO fanout; if invoice context is still missing for a capped entitlement, return a
+  `LATE_EVENT_CLOSED_PERIOD` rejection instead of letting wallet bootstrap throw a generic 500.
+- 2026-07-03: tRPC subscription machine adapters must map expected lifecycle refusals like early
+  renew, invalid invoice action, and `SUBSCRIPTION_BUSY` to non-500 errors; `INTERNAL_SERVER_ERROR`
+  is masked to "Internal server error" in the dashboard.
+- 2026-06-07: When signup or provider-completion use cases materialize billing periods, wire
+  `billing` through API route service bags and `apps/api/src/hono/env.ts`; missing adapter wiring
+  can return signup `success=false` with a hidden `generateBillingPeriods` error.
+- 2026-06-06: `explainCharge` treats invoice rows as grouped buckets: use ledger totals for the
+  line amount, query Tinybird by period key when available, and fall back to the billing window
+  when the key cannot be derived.
+- 2026-06-06: Draft plan-version billing changes should cascade feature billing/reset cadences
+  unless `metadata.billingCadenceOverride` or `metadata.resetCadenceOverride` is true; missing
+  override flags mean the feature follows the plan. Usage feature billing may be shorter or longer
+  than plan billing; only reset cadence must be less than or equal to feature billing cadence.
+- 2026-05-06: `pay_in_advance` moves fixed fees to period start only; usage actuals invoice at
+  period end.
+- 2026-05-06: Billing-period rating requires active entitlement grants; no grants intentionally
+  means no charges.
+- 2026-05-06: Zero-total periods still need local invoices; read models merge ledger-backed and
+  zero-cost synthetic lines.
+- 2026-05-06: Resolve `resetAnchor: "dayOfCreation"` from entitlement effective date before
+  monthly cycle/proration math.
+- 2026-05-06: Validate invoice `status` and `dueAt` before loading the subscription machine.
+- 2026-05-06: Direct free, zero-amount, and sandbox provisioning must not depend on payment
+  webhooks.
+- 2026-05-06: If signup returns `200` but stays `pending_activation`, inspect wallet activation
+  and `openlogs` before payment webhooks.
+- 2026-05-06: Project funding accounts must exist before customer wallet movements:
+  `topup`, `promo`, `plan_credit`, `manual`, and `credit_line`.
+- 2026-05-06: Wallet balances are state buckets; use ledger entries or `issued_amount` for grant
+  history.
+- 2026-05-06: Wallet bigint amounts are ledger-scale minor units; pgledger views are decimals.
+- 2026-05-06: `creditLineAmount` is period usage allowance, not plan fee or creditworthiness.
+- 2026-05-17: Public signup `creditLineAmountMinor` is currency minor units; convert to
+  ledger-scale before saving subscription phases or customer sessions.
+- 2026-05-06: Arrears plans can derive allowance from finite priced usage limits; unlimited paid
+  usage needs explicit allowance or balance.
+- 2026-05-06: Reserve wallet funds only for positive projected cost; zero-cost usage bypasses
+  reservation after entitlement verification.
+- 2026-05-08: Public wallet reads expose display money plus `ledger_amount`; avoid raw accounting
+  buckets on the public surface.
+- 2026-05-08: Capped subscription usage is wallet-backed; keep wallet assertions in
+  `tooling/tiny-tools/plan-wallet.ts`.
+- 2026-05-08: `allocation_amount` is reservation runway, not consumed usage; keep DO id metadata
+  for traceability.
+- 2026-05-08: On finite limit reached, close active wallet reservations through the reservation
+  close helper.
+- 2026-05-08: Treat `WALLET_EMPTY` as possibly DO-local underfunding; flush+refill once before
+  denying.
+- 2026-05-17: Lazy reservation bootstrap should return `WALLET_EMPTY` only from zero allocation;
+  wallet service errors stay retryable infrastructure failures.
+- 2026-05-17: Reserve ledger source ids must be reservation-scoped; keep period-scoped DO keys as
+  trace metadata only so same-period re-bootstrap cannot replay old reserve transfers.
+- 2026-05-17: EntitlementWindowDO inactivity final-flush uses 1h in production/test and 60s in
+  `NODE_ENV=development`; ledger freshness flushes use 10m in deployed envs.
+- 2026-05-18: EntitlementWindowDO alarm scheduling should use flush cadence only when
+  `consumedAmount > flushedAmount`; fully flushed live reservations should wake on lifecycle
+  deadlines, not stale `lastFlushedAt`.
+- 2026-06-08: EntitlementWindowDO time-based wallet flushes with `pendingRefillAmount=0` are
+  capture-only; do not call reservation extension for a zero-amount refill or alarms can keep
+  retrying flush/refill work.
+- 2026-06-08: Wallet capture usage transfers are statement-keyed; capped-wallet statement tests
+  should assert transfer source types, not raw pgledger debit/credit entry counts.
+- 2026-06-08: API error mapping must treat `UnPriceWalletError("WALLET_LEDGER_FAILED")` as an
+  infrastructure 500; only `WALLET_EMPTY` is a business ingestion denial.
+- 2026-06-09: EntitlementWindowDO apply logs must keep wallet-empty denial fields and wallet
+  service error fields mutually exclusive; stale `error_message` values in Axiom can misclassify
+  operational underfunding as ledger failure.
+- 2026-05-17: Reservation release and grant expiration are separate financial events: release
+  restores unused reserved funds to customer buckets; only grant expiration returns available
+  grant balance to platform funding.
+- 2026-05-08: Prefer `/v1/wallet/balance`; keep `/v1/wallet` as compatibility and credit balance
+  reads under `/v1/wallet/credits/{walletId}/balance`.
+- 2026-05-08: Saved subscription phase `creditLinePolicy` and `creditLineAmount` are immutable.
+- 2026-05-08: Fractional meter deltas price against integer tiers; unmatched quantities return
+  calculation errors.
+- 2026-05-08: Pass scaled quantities to Dinero for fractional usage; raw JS decimals can throw or
+  mis-price.
+- 2026-05-07: Day/week/month/year billing starts at the beginning of the UTC day; minute billing
+  stays timestamp-exact.
+- 2026-05-11: `billPeriod` concurrency tests should assert persisted invoices, periods, ledger
+  idempotency, and pgledger entries.
+- 2026-05-11: BILL rollback tests should fail the second `LedgerGateway.createTransfer` to prove
+  transaction rollback.
+- 2026-05-11: A stamped `invoicePaymentProviderId` is not proof of provider finalization; retries
+  must reload and finish provider work.
+- 2026-05-11: Draft invoice finalization must reread while holding the subscription lock.
+- 2026-05-11: If local invoice update fails after provider work, retry from the stamped provider
+  invoice without duplicating items.
+- 2026-05-11: Subscription machine locks use wall-clock time plus heartbeat `extend()`, not
+  billing-window `context.now`.
+- 2026-05-09: `wallet_only` skips BILL/SETTLE; test it as wallet-only, not as capped arrears.
+- 2026-05-09: Capped usage that should invoice at period end should use `pay_in_arrear` plus
+  capped credit-line policy.
+- 2026-05-09: Money-path plans should stay service-only first: golden cases, properties, stateful
+  models, scenario DSL, and ledger invariants.
+- 2026-05-11: Provider invoice 404/error on stamped id should clear the id and fall through to
+  create.
+- 2026-05-11: Provider invoice item orphan detection can warn only; the provider interface has no
+  delete-item method.
+- 2026-05-11: `withLockedMachine` mocks must pass `assertLockHeld` as the second `run` arg.
+- 2026-05-11: Reference billing model has no grant expiry; add expiry support before expiry
+  golden cases.
+
+### 2026-06-12: Queued usage ingestion may catch up subscription renewals, but entitlement context stays read-only.
+
+- Billing-period generation and wallet grant issuance belong to the subscription lifecycle. If queued ingestion sees subscription-backed usage past the funded billing window, call the subscription machine under its existing lock, then reload entitlement context before fanout.
+- Do not add billing-period writes to `internal/services/src/ingestion/entitlement-context.ts`; that loader reads/caches entitlements and billing contexts only.
+
+Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardrails.md).
+
+## API SDK And Public Contracts
+
+- 2026-06-21: Tooling that calls `unprice.analytics.usage.get` should consume the public SDK row
+  shape (`usage` plus formatted `spending`), not raw analytics/lake fields such as `value_after`
+  or `amount_after`.
+- 2026-06-21: k6 scripts should follow the generated public SDK operation paths, for example
+  `access.entitlements.list`, `access.check`, `usage.record`, `usage.consume`, and
+  `runs.{start,consume,end,get}`; old product paths can return 404 after API contract updates.
+- 2026-06-20: Public Hono routes must use `defineEndpointContract`; for `audience: "public"`,
+  SDK-exposed operations must set `sdk.path` and `operationId` must equal
+  `sdk.path.join(".")` so OpenAPI, docs, and `@unprice/api` resources generate from one
+  product operation. Public routes that should not generate SDK methods must set `sdk: false`.
+- 2026-06-20: Internal and provider-callback API routes must set `audience: "internal"` or
+  `audience: "callback"` plus `sdk: false` and must not be exposed through generated SDK
+  resources.
+- 2026-06-20: Run `pnpm --filter @unprice/api generate` with the API dev server running before
+  SDK contract work is complete; it updates `apps/docs/openapi.json`,
+  `packages/api/src/openapi.d.ts`, and `packages/api/src/generated/sdk-resources.ts` together.
+- 2026-05-08: Public Hono routes callable from `@unprice/api` need SDK-shaped `operationId`s.
+- 2026-05-08: Align first OpenAPI tag and first `/v1` path segment with the SDK namespace.
+- 2026-05-08: Keep SDK resource methods as one-object calls grouped by product concepts.
+- 2026-05-08: Payment methods live under `/v1/payments/methods/*`; provider callbacks/webhooks
+  under `/v1/payments/providers/*`.
+- 2026-05-06: Tiny-tools fake customer tests should use real feature slugs and expect
+  `customer_not_found`, not `feature_missing`.
+- 2026-05-06: Validate local provisioning with signup E2E before usage E2E:
+  `UNPRICE_TOKEN=unprice_dev_1234567890 pnpm --filter @unprice/tiny-tools e2e:signup:local`.
+- 2026-07-01: Tiny-tools signup against localhost authenticates only against the API database in
+  `apps/api/.dev.vars`; preview/prod API keys must be recreated or seeded into local
+  `unprice_apikeys`, and plan slugs should be treated as lower-case slugs.
+
+## Payment Providers And Stripe
+
+- 2026-05-11: New payment provider adapters must pass the reusable provider contract suite before
+  relying on service billing integration tests.
+- 2026-05-07: Use Stripe `invoice.paid` as the canonical success signal; do not process both
+  `invoice.payment_succeeded` and `invoice.paid`.
+- 2026-05-11: Stripe Connect readiness UI should read `connectionData.requirements.errors` and
+  due fields; `disabledReason` alone is too generic for failed verification.
+- 2026-05-07: Stripe Connect webhooks should reject unsupported event types after signature
+  verification and before account lookup/persistence.
+- 2026-05-07: For Connect Standard accounts, pass owner email on create but do not update
+  `account.email` on reused accounts.
+- 2026-05-11: Stripe invoice line fixtures must be Stripe-shaped: lowercase currency and
+  `price.product` as string or expanded object.
+- 2026-05-11: Signed webhook tests should use real Stripe SDK signature verification; mock only
+  outbound API calls.
+- 2026-05-11: Async paid-invoice lifecycle integration tests should return `open` from
+  `collectPayment`, then deliver a paid webhook.
+- 2026-05-11: DB-backed webhook retry tests can proxy the real `WalletService` and fail only the
+  first `settleReceivable` call, preserving real ledger writes on replay.
+- 2026-05-11: `SubscriptionMachine` should not re-persist its restored initial status when it
+  matches the DB row; that async write can race and overwrite a later transition.
+- 2026-05-11: A DB-backed cancellation golden should assert both sides: the earned period still
+  invoices, and no billing periods or invoices exist with `cycle_start_at_m >= canceled_at`.
+- 2026-05-11: Do not keep invoice-time credit application paths in code or fixtures. Wallet
+  credits drain through reservation/flush, and manual credits use `WalletService.adjust`.
+- 2026-05-11: Wallet top-up webhooks settle only after provider normalization maps the checkout
+  completion to `payment.succeeded` with `metadata.kind = "wallet_topup"`.
+- 2026-05-11: Ledger account seeding must lock per account name before pgledger create; account
+  names are not database-unique, so first-use wallet operations need DB-backed concurrency tests.
+- 2026-05-11: Wallet credit expiration belongs in the services use-case layer; the Trigger
+  schedule should call that seam, and the sweep must stamp fully drained expired credits without
+  posting a zero-amount ledger transfer.
+
+## UI And Dashboard
+- Tailwind v3 + Radix var tokens: opacity modifiers like bg-success-bg/40 don't reliably apply alpha (tokens are var(--…) strings). For emphasis ramps use Radix steps: bg → bgHover → bgActive.
+- 2026-06-13: `@unprice/ui/checkbox` wraps Radix Checkbox and renders a button; do not nest it
+  inside another button in filter rows or table actions, because React/Next will hydration-fail on
+  invalid button descendants.
+- 2026-06-13: Dashboard near-realtime queries with a default relative window must advance the
+  query input timestamp on each poll; refetching a frozen `{ from, to }` window only reloads old
+  data.
+- 2026-06-15: Customer-visible relative usage dashboards should poll on the same 30s cadence as
+  the analytics SWR freshness window and display payload `freshness.generatedAt`; keep Tinybird
+  throttling in the tRPC cache instead of bypassing it from the UI.
+- 2026-06-15: Usage dashboard money must reconcile after currency-minor rounding; header totals,
+  feature rows, and top consumers should share the same rounded allocation source instead of each
+  independently rounding raw ledger-scale amounts.
+- 2026-06-12: Dashboard client components that use `useSuspenseQuery` for protected tRPC data
+  must have matching RSC `trpc/server` prefetches; otherwise server render can fall back to the
+  app React Query HTTP link without browser cookies and log `User not found in session`.
+- 2026-05-07: After provider payment-method setup, bypass `customerPaymentMethods` cache and poll
+  before showing an empty state.
+- 2026-05-07: Keep subscription creation drafts open while provider setup runs; refetch with
+  `skipCache` and auto-select the first method.
+- 2026-06-13: When commits fail with react-doctor errors, run `pnpm run doctor`, read the full
+  diagnostics directory it outputs, and fix each rule's root cause.
+  Do not suppress rules. Common fixes: move hooks before early returns (rules-of-hooks), derive
+  state instead of syncing via useEffect (no-derived-state), hoist `new Intl.*` to module scope
+  (js-hoist-intl), use `next/dynamic` for heavy chart libs (prefer-dynamic-import), replace
+  `[...arr].sort()` with in-place sort or `.toSorted()` (js-tosorted-immutable), combine
+  `.filter().map()` chains into `for...of` loops (js-combine-iterations), destructure
+  `useQuery`/`useInfiniteQuery` results (query-destructure-result), and split 300+ line components
+  (no-giant-component).
+- 2026-06-13: Every `next/dynamic` or `React.lazy()` component must include a `loading` fallback
+  that matches the component's layout dimensions (e.g., a `<Skeleton>` with the same height/width).
+  Without it, the page content shifts when the chunk arrives, causing visible flicker. Follow the
+  same pattern as `ThemeToggle` in `src/components/layout/footer.tsx`.
+- 2026-06-15: Use `EmptyPlaceholder` with `isLoading` prop for loading states instead of inline
+  spinners; use `EmptyPlaceholder` with Icon/Title/Description for empty states. This keeps the UI
+  consistent across tables, charts, and panels. The component lives in
+  `apps/nextjs/src/components/empty-placeholder.tsx` and accepts `isLoading` to show a centered
+  `LoadingAnimation`.
+- 2026-06-15: Whenever you are using link component, prefer the superlink component if the link is inside the dashboard.
+  The superlink component disables the auto fetch of next.js, allowing to reduce unnecesary load.
+
+## Tests, Tooling, And Docs
+
+- 2026-06-22: `millionco/react-doctor@v2` passes `--scope` during PR scans; keep its
+  `version` input on `react-doctor` 0.5.x or newer. The repo now pins Node 24.17.0, so keep the
+  root `doctor` script and the action on the same Node 24 toolchain. Keep the root script on the
+  installed `react-doctor` binary so pnpm owns native optional dependencies.
+- 2026-05-23: `pnpm --filter <package> test <path>` resolves test filters from the package
+  directory; use package-relative paths such as `src/ingestion/...`, not repo-root paths.
+- 2026-05-09: For `docs/plans/**`, use
+  `pnpm biome check --no-errors-on-unmatched docs/plans/<file>.md` plus `git diff --check`.
+- 2026-05-09: `docs/plans/**` is gitignored; inspect with `git status --ignored` or force-add
+  when reporting plan-only work.
+- 2026-05-09: Integration tests should import migration helpers from `@unprice/db/migrate`, not
+  `internal/db/src/migrate.ts`.
+- 2026-05-09: Keep `*.integration.test.ts` out of normal service unit config; use
+  `test:integration`.
+- 2026-05-09: Serialize service integration tests that share `unprice_test`: one worker,
+  `maxConcurrency: 1`, and matching script flags.
+- 2026-05-09: Focused integration scripts are useful when DB state must remain for `psql`
+  inspection.
+- 2026-05-09: Wallet reservation callers with event time should pass `effectiveAt`.
+- 2026-05-17: EntitlementWindowDO non-final flush retries must reuse persisted
+  `pending_refill_amount`; do not recompute adaptive refill size for an existing
+  `pending_flush_seq`.
+- 2026-05-29: EntitlementWindowDO async compaction must commit idempotency results and
+  fact outbox intent in the same durable SQLite transaction; never advance replay seals
+  without recoverable priced facts.
+- 2026-05-29: Compact-only ingestion DOs use batch tables as the replay source:
+  `idempotency_key_batches`, `meter_facts_outbox_batches`, and `ingestion_audit_batches`.
+  Do not reintroduce per-event DO tables or a DB-backed meter storage adapter.
+- 2026-05-29: Async ingestion must not ack when audit DO commit fails after entitlement apply;
+  throw so the queue retries against entitlement idempotency instead of losing audit intent.
+- 2026-05-17: EntitlementWindowDO wallet retries must persist the whole ledger intent
+  (`pending_flush_seq`, `pending_flush_amount`, refill/final flags); one ledger idempotency
+  key must never replay with a recomputed financial payload.
+- 2026-05-10: Billing properties stay replayable with `UNPRICE_PROPERTY_SEED` and tunable with
+  `UNPRICE_PROPERTY_RUNS`.
+- 2026-05-10: Keep DB-backed properties separate from pure/fake-service properties.
+- 2026-05-10: Service property fixtures should satisfy full validator shapes; avoid partial casts.
+- 2026-05-11: DB billing properties must encode seeded tier contracts explicitly, not infer from
+  one golden usage value.
+- 2026-05-11: Capped wallet DB properties reserve/flush actual usage cost and assert consumed
+  bucket plus remaining credit balance.
+- 2026-05-11: `pay_in_advance` DB properties assert period-start fixed and period-end usage
+  statements separately.
+- 2026-05-11: Lock tests need real owner-token behavior; fake DB locks must verify `ownerToken`
+  on extend.
+- 2026-05-11: Stateful reference-model tests should apply generated commands one at a time and
+  assert invariants after every step.
+- 2026-05-11: `computeProratedRefundAmount` tests need `tx.query.invoices.findFirst`, plus
+  `phaseStartAt`, `billingAnchor`, and `billingConfig`.
+- 2026-05-11: Mock `calculateProration` through `@unprice/db/validators`.
+- 2026-05-11: `LedgerGateway.getInvoiceLines` returns `Result<InvoiceLine[]>`; mocks return a
+  flat array in `.val`.
+- 2026-05-11: Fake `InvoiceLine.amount` as Dinero-like `{ toJSON: () => ({ amount }) }`.
+- 2026-05-11: `transitionInvoiceStatus` treats current `"failed"` as `already_applied` for
+  `payment_reversed`.
+- 2026-05-11: `getInvoiceStatementLines` orders ledger-backed lines before synthetic zero lines.
+- 2026-05-11: Raw SQL bigint millisecond columns can return strings; normalize with `Number(...)`
+  before timestamp assertions.
+- 2026-05-11: Subscription phase entitlements/grants preserve exact phase timestamps, but billing
+  period materialization can normalize sub-day starts to the UTC day boundary; assert those
+  invariants separately.
+- 2026-05-11: Future subscription phases should not receive entitlements/grants until the phase is
+  activated/synced at its start boundary.
+- 2026-05-11: DB-backed integration files that install or initialize pgledger should run through the
+  serialized integration script; launching them concurrently can race Postgres extension setup.
+- 2026-05-11: Prefer Drizzle table inserts/updates for DB-backed test fixtures; use raw SQL only
+  for DB-native behavior or pgledger views so schema drift fails at typecheck.
+- 2026-05-11: The billing schema has no `hour` interval; model hourly cadence as
+  `billingInterval: "minute"` with `billingIntervalCount: 60`.
+- 2026-05-11: Deterministic DB fixture ids must stay within the shared cuid column length
+  (`varchar(36)`); Drizzle catches shape drift, but length constraints still fail at runtime.
+- 2026-06-08: Durable Object diagnostics that must be queried in Axiom should go through
+  `createDoLogger` as first-class drain events; request-scoped wrapper rows alone can hide inner
+  fields such as `mode`, fallback `reason`, and `error`.
+- 2026-06-15: Usage analytics that must reconcile with invoices should aggregate latest
+  `amount_after`/`value_after` per `customer_entitlement_id + grant_id + period_key`, then sum to
+  the visible feature. Rank latest facts by a DO-owned `fact_sequence`; treat customer
+  `idempotency_key` as dedupe identity and legacy fallback only.
+- 2026-06-15: Agent-run budget reservations use `ownerType="agent_run"` / `ownerId=runId`;
+  entitlement-window reservations keep `ownerType="entitlement_window"` / `ownerId=entitlementId`.
+  Active reservation dedupe stays owner-period scoped so both systems coexist on the same wallet.
+- 2026-07-09: RunBudgetDO may cache dynamic module imports, but `createConnection({ singleton:
+  false })`, `WalletService`, `LedgerGateway`, and database proxies must be constructed per external
+  wallet operation/invocation and never retained across Worker/DO requests; Neon WebSocket I/O is
+  request-scoped.
+- 2026-06-19: Run sync events must resolve entitlements before delegating to RunBudgetDO; the
+  `applyRunSyncEvent` use case uses `RunEntitlementResolver` (backed by the SWR-cached
+  `IngestionEntitlementContextLoader` + `IngestionEntitlementRouter` + subscription catch-up) to
+  validate that the customer has an active entitlement and billing-period invoice context for the
+  `featureSlug`/`eventSlug`, then passes real `entitlement` + `grants` through the DO contract to
+  `EntitlementWindowDO`. The DO is addressed using the standard naming scheme
+  (`${appEnv}:${projectId}:${customerId}:${customerEntitlementId}`) so it shares state with the
+  normal ingestion path.
+- 2026-06-22: Invoice-time wallet reservation flushing must include both EntitlementWindowDO and
+  RunBudgetDO pending capture buckets for the statement key before invoice totals are projected.
+- 2026-06-22: Ingestion billing-period context should expose only `pending` periods; allowing
+  `invoiced` periods lets late events create wallet ledger captures after the invoice is frozen.
+- 2026-07-04: Browser/onboarding usage callers should use `POST /v1/usage/record` for async
+  evidence and `POST /v1/usage/consume` for synchronous checks; `/v1/events/ingest*` is stale.
+- 2026-07-04: Onboarding evidence setup should call the generated API SDK from a backend
+  use case exposed through tRPC; do not hardcode public API `fetch` URLs in onboarding UI.
+- 2026-07-04: For scheduled future subscription phases, pass request `now` into
+  `subscriptions.createPhase`; passing the future `startAt` makes the service activate the phase
+  immediately and can update subscription state before the effective boundary.
+- 2026-07-05: When running `apps/nextjs` with `SKIP_ENV_VALIDATION=true`, set
+  `NEXT_PUBLIC_APP_DOMAIN` explicitly to the dev host/port; otherwise middleware can treat
+  localhost requests as customer-site routes.
+- 2026-07-05: Before starting any frontend/dev server, check whether the app is already running
+  on its normal port; if a server is running, use it instead of starting another one, and ask the
+  user before launching an additional server.

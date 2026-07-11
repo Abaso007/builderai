@@ -15,6 +15,7 @@ import type { Logger } from "@unprice/logs"
 import type { CacheNamespaces, CustomerCache, CustomersProjectCache } from "../cache"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
+import { UnPricePaymentProviderError } from "../payment-provider/errors"
 import type { PaymentProviderResolver } from "../payment-provider/resolver"
 import type { PaymentProviderService } from "../payment-provider/service"
 import { cachedQuery } from "../utils/cached-query"
@@ -257,12 +258,12 @@ export class CustomerService {
   }
 
   /**
-   * Gets the customer data from the database
+   * Gets customer data across projects. Prefer getCustomerByIdInProject for tenant-scoped calls.
    * @param customerId - Customer id
    * @param opts - Options
    * @returns Customer data
    */
-  public async getCustomer(
+  public async getCustomerByIdAcrossProjects(
     customerId: string,
     opts?: {
       skipCache: boolean
@@ -500,13 +501,16 @@ export class CustomerService {
     const { projectId, customerId, externalId } = opts
 
     if (customerId) {
-      const { err, val } = await this.getCustomer(customerId)
+      const { err, val } = await this.getCustomerByIdInProject({
+        id: customerId,
+        projectId,
+      })
 
       if (err) {
         return Err(err)
       }
 
-      if (!val || val.projectId !== projectId) {
+      if (!val) {
         return Err(
           new UnPriceCustomerError({
             code: "CUSTOMER_NOT_FOUND",
@@ -626,6 +630,13 @@ export class CustomerService {
               phases: {
                 where: (table, { and, gte, lte, isNull, or }) =>
                   and(lte(table.startAt, now), or(isNull(table.endAt), gte(table.endAt, now))),
+                with: {
+                  planVersion: {
+                    columns: {
+                      billingConfig: true,
+                    },
+                  },
+                },
                 orderBy: (table, { desc }) => [desc(table.startAt)],
                 limit: 1,
               },
@@ -655,7 +666,17 @@ export class CustomerService {
       return Err(err)
     }
 
-    return Ok(val ?? null)
+    if (!val) {
+      return Ok(null)
+    }
+
+    return Ok({
+      ...val,
+      subscriptions: val.subscriptions.map((subscription) => ({
+        ...subscription,
+        billingConfig: subscription.phases[0]?.planVersion?.billingConfig ?? null,
+      })),
+    })
   }
 
   public async getCustomerInvoices({
@@ -1214,7 +1235,7 @@ export class CustomerService {
         paymentMethodId: string | null
         requiredPaymentMethod: boolean
       },
-      FetchError | UnPriceCustomerError
+      FetchError | UnPriceCustomerError | UnPricePaymentProviderError
     >
   > {
     // If payment method is not required or no provider, return early
@@ -1239,6 +1260,12 @@ export class CustomerService {
       await paymentProviderService.getDefaultPaymentMethodId()
 
     if (paymentMethodErr) {
+      // Preserve the provider error so its stable `code` (e.g. MISSING_PAYMENT_METHOD)
+      // survives to callers, who branch on the code rather than the message.
+      if (paymentMethodErr instanceof UnPricePaymentProviderError) {
+        return Err(paymentMethodErr)
+      }
+
       return Err(
         new FetchError({
           message: paymentMethodErr.message,
@@ -1249,9 +1276,9 @@ export class CustomerService {
 
     if (requiredPaymentMethod && !paymentMethodId?.paymentMethodId) {
       return Err(
-        new FetchError({
+        new UnPricePaymentProviderError({
+          code: "MISSING_PAYMENT_METHOD",
           message: "Required payment method not found",
-          retry: false,
         })
       )
     }

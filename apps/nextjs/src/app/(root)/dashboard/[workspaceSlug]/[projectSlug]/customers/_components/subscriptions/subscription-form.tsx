@@ -2,20 +2,16 @@
 import type { InsertSubscription, Subscription, SubscriptionItem } from "@unprice/db/validators"
 import { subscriptionInsertSchema } from "@unprice/db/validators"
 import { Form } from "@unprice/ui/form"
-import { Typography } from "@unprice/ui/typography"
 import { AlertCircle } from "lucide-react"
 import { useParams, useRouter } from "next/navigation"
 import { useEffect } from "react"
 import type { z } from "zod"
-import { CopyButton } from "~/components/copy-button"
 import TimeZoneFormField from "~/components/forms/timezone-field"
 import { SubmitButton } from "~/components/submit-button"
-import { formatDate } from "~/lib/dates"
-import { toast, toastAction } from "~/lib/toast"
+import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
 import CustomerFormField from "./customer-field"
-import { SubscriptionCancelButton } from "./subscription-cancel-button"
 import SubscriptionPhaseFormField from "./subscription-phase-field"
 
 import { useMutation, useQuery } from "@tanstack/react-query"
@@ -42,14 +38,11 @@ export function SubscriptionForm({
     trpc.subscriptions.create.mutationOptions({
       onSuccess: ({ subscription }) => {
         form.reset(subscription)
-        toastAction("saved")
+        toastAction("saved", "Subscription created")
         setDialogOpen?.(false)
         router.refresh()
 
         router.push(`/${workspaceSlug}/${projectSlug}/customers/subscriptions/${subscription.id}`)
-      },
-      onError: (error) => {
-        toast.error(error.message)
       },
     })
   )
@@ -111,42 +104,18 @@ export function SubscriptionForm({
           </Alert>
         )}
 
-        {isEdit && (
-          <>
-            <div className="flex items-start gap-2">
-              <div className="flex flex-col items-start gap-2">
-                <Typography variant="h6">Subscription ID</Typography>
-                <Typography variant="p" affects="removePaddingMargin">
-                  {defaultValues.id}
-                </Typography>
-              </div>
-              <CopyButton value={defaultValues.id ?? ""} className="size-4" />
-            </div>
-            <div className="flex flex-col items-start gap-2">
-              <Typography variant="h6">Current Billing Cycle</Typography>
-              <Typography variant="p" affects="removePaddingMargin">
-                {formatDate(
-                  defaultValues.currentCycleStartAt!,
-                  defaultValues.timezone,
-                  "MMM dd, yyyy HH:mm"
-                )}{" "}
-                {" -> "}
-                {formatDate(
-                  defaultValues.currentCycleEndAt!,
-                  defaultValues.timezone,
-                  "MMM dd, yyyy HH:mm"
-                )}
-              </Typography>
-            </div>
-          </>
-        )}
-
         <div className="space-y-8">
-          <Separator className="my-4" />
+          {/* on an existing subscription these facts are immutable and live
+              in the read view above; the form only edits what can change */}
+          {!isEdit && (
+            <>
+              <Separator className="my-4" />
 
-          <CustomerFormField form={form} isDisabled={isEdit} />
+              <CustomerFormField form={form} isDisabled={false} />
 
-          <TimeZoneFormField form={form} isDisabled={isEdit} />
+              <TimeZoneFormField form={form} isDisabled={false} />
+            </>
+          )}
 
           <SubscriptionPhaseFormField
             form={form}
@@ -155,21 +124,21 @@ export function SubscriptionForm({
             subscriptionId={defaultValues.id ?? ""}
             timezone={defaultValues.timezone ?? selectedCustomer?.timezone ?? ""}
           />
+
+          {!isEdit && <Separator className="my-4" />}
         </div>
 
-        <div className="mt-8 flex justify-end gap-4">
-          {isEdit && !isInactive && <SubscriptionCancelButton subscriptionId={defaultValues.id!} />}
-
-          {!isEdit && !isInactive && (
+        {!isEdit && !isInactive && (
+          <div className="flex justify-end gap-4">
             <SubmitButton
               form="subscription-form"
               onClick={() => form.handleSubmit(onSubmitForm)()}
               isSubmitting={form.formState.isSubmitting}
               isDisabled={form.formState.isSubmitting}
-              label={"Create Subscription"}
+              label="Create subscription"
             />
-          )}
-        </div>
+          </div>
+        )}
       </form>
     </Form>
   )

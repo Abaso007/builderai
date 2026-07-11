@@ -14,6 +14,8 @@ import {
   featureUsagePeriodRowSchema,
   featureUsageTimeseriesRowSchema,
   ingestionEventSchemaV1,
+  ingestionFacetRowSchema,
+  ingestionFacetsQuerySchema,
   ingestionLiveQuerySchema,
   ingestionLiveRowSchema,
   ingestionRecentEventRowSchema,
@@ -99,6 +101,7 @@ export class Analytics {
       pipe: "v1_get_session_event",
       parameters: z.object({
         session_id: z.string(),
+        project_id: z.string(),
         action: z.literal("plan_click"),
         interval_days: z.number().optional(),
       }),
@@ -390,6 +393,19 @@ export class Analytics {
       pipe: "v1_get_ingestion_recent",
       parameters: ingestionRecentQuerySchema,
       data: ingestionRecentEventRowSchema,
+      opts: {
+        cache: "no-store",
+        retries: 3,
+        timeout: 5000,
+      },
+    })
+  }
+
+  public get getIngestionFacets() {
+    return this.readClient.buildPipe({
+      pipe: "v1_get_ingestion_facets",
+      parameters: ingestionFacetsQuerySchema,
+      data: ingestionFacetRowSchema,
       opts: {
         cache: "no-store",
         retries: 3,

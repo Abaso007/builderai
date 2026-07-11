@@ -5,6 +5,7 @@ import {
   IngestionReportingConsumer,
   chunkIngestionEventsForTinybird,
   chunkMeterFactsForTinybird,
+  consumeIngestionReportingDlqBatch,
 } from "./consumer"
 
 const TEST_NOW = Date.UTC(2026, 2, 20, 12, 0, 0)
@@ -58,6 +59,12 @@ describe("IngestionReportingConsumer", () => {
         source_type: "api_key",
         source_id: "key_123",
         source_name: null,
+        run_id: null,
+        trace_id: null,
+        parent_run_id: null,
+        workload_type: null,
+        workload_id: null,
+        ingestion_mode: null,
         event_slug: "usage.recorded",
         idempotency_key: "idem_123",
         state: "processed",
@@ -74,6 +81,40 @@ describe("IngestionReportingConsumer", () => {
       },
     ])
     expect(ack).toHaveBeenCalledTimes(1)
+  })
+
+  it("acks malformed envelopes and still publishes valid siblings", async () => {
+    const malformedAck = vi.fn()
+    const malformedRetry = vi.fn()
+    const validAck = vi.fn()
+    const auditRecord = createAuditRecord()
+    const logger = createLogger()
+    const publishAuditRecords = vi.fn().mockResolvedValue(undefined)
+    const consumer = new IngestionReportingConsumer({
+      ingestIngestionEvents: vi.fn().mockResolvedValue({ quarantined_rows: 0, successful_rows: 1 }),
+      ingestMeterFacts: vi.fn().mockResolvedValue({ quarantined_rows: 0, successful_rows: 0 }),
+      logger: logger as never,
+      publishAuditRecords,
+    })
+
+    await consumer.consumeBatch({
+      messages: [
+        { ack: malformedAck, body: { kind: "renamed.reporting.v1" }, retry: malformedRetry },
+        {
+          ack: validAck,
+          body: createEnvelope({ auditRecords: [auditRecord] }),
+          retry: vi.fn(),
+        },
+      ],
+    })
+
+    expect(logger.error).toHaveBeenCalledWith("dropping malformed reporting queue message", {
+      errors: expect.any(Array),
+    })
+    expect(malformedAck).toHaveBeenCalledOnce()
+    expect(malformedRetry).not.toHaveBeenCalled()
+    expect(publishAuditRecords).toHaveBeenCalledWith([auditRecord])
+    expect(validAck).toHaveBeenCalledOnce()
   })
 
   it("chunks a large fact list into multiple Tinybird writes", async () => {
@@ -186,6 +227,53 @@ describe("IngestionReportingConsumer", () => {
         failure_message: "EntitlementWindowBatchReservationBootstrapRequired",
         replayable: true,
         payload_json: payloadJson,
+      }),
+    ])
+  })
+
+  it("publishes run attribution to Tinybird ingestion status rows", async () => {
+    const ingestIngestionEvents = vi
+      .fn()
+      .mockResolvedValue({ successful_rows: 1, quarantined_rows: 0 })
+    const ingestMeterFacts = vi.fn().mockResolvedValue({ successful_rows: 0, quarantined_rows: 0 })
+    const consumer = new IngestionReportingConsumer({
+      ingestIngestionEvents,
+      ingestMeterFacts,
+      publishAuditRecords: vi.fn().mockResolvedValue(undefined),
+      logger: createLogger() as never,
+    })
+
+    await consumer.consumeBatch({
+      messages: [
+        {
+          body: createEnvelope({
+            auditRecords: [
+              createAuditRecord({
+                runId: "brun_001",
+                traceId: "trace_001",
+                parentRunId: "brun_parent_001",
+                workloadType: "agent",
+                workloadId: "research-assistant",
+              }),
+            ],
+            meterFacts: [],
+          }),
+          ack: vi.fn(),
+          retry: vi.fn(),
+        },
+      ],
+    })
+
+    expect(ingestIngestionEvents).toHaveBeenCalledWith([
+      expect.objectContaining({
+        run_id: "brun_001",
+        trace_id: "trace_001",
+        parent_run_id: "brun_parent_001",
+        workload_type: "agent",
+        workload_id: "research-assistant",
+        ingestion_mode: "run",
+        payload_json: null,
+        replayable: false,
       }),
     ])
   })
@@ -535,6 +623,33 @@ describe("IngestionReportingConsumer", () => {
   })
 })
 
+describe("consumeIngestionReportingDlqBatch", () => {
+  it("re-drives through the reporting queue before acknowledging and schedules drain flush", async () => {
+    const envelope = createEnvelope({ redriveCount: 1 })
+    const send = vi.fn().mockResolvedValue(undefined)
+    const ack = vi.fn()
+    const retry = vi.fn()
+    const flush = vi.fn().mockResolvedValue(undefined)
+    const waitUntil = vi.fn()
+
+    await consumeIngestionReportingDlqBatch(
+      { messages: [{ ack, body: envelope, retry }] },
+      { INGESTION_REPORTING_QUEUE: { send } } as never,
+      { waitUntil } as never,
+      { flush }
+    )
+
+    expect(send).toHaveBeenCalledWith(createEnvelope({ redriveCount: 2 }), {
+      delaySeconds: 120,
+    })
+    expect(send.mock.invocationCallOrder[0]).toBeLessThan(ack.mock.invocationCallOrder[0] ?? 0)
+    expect(ack).toHaveBeenCalledOnce()
+    expect(retry).not.toHaveBeenCalled()
+    expect(flush).toHaveBeenCalledOnce()
+    expect(waitUntil).toHaveBeenCalledWith(expect.any(Promise))
+  })
+})
+
 function createEnvelope(
   overrides: Partial<IngestionReportingEnvelope> = {}
 ): IngestionReportingEnvelope {
@@ -544,6 +659,7 @@ function createEnvelope(
     createdAt: TEST_NOW,
     projectId: "proj_123",
     customerId: "cus_123",
+    redriveCount: 0,
     auditRecords: [],
     meterFacts: [],
     ...overrides,
@@ -565,6 +681,15 @@ function createAuditRecord(
     sourceType: "api_key",
     sourceId: "key_123",
     sourceName: null,
+    runId: null,
+    traceId: null,
+    parentRunId: null,
+    workloadType: null,
+    workloadId: null,
+    ingestionMode: null,
+    eventId: "evt_123",
+    slug: "usage.recorded",
+    timestamp: TEST_NOW,
     status: "processed",
     failureStage: null,
     failureReason: null,
@@ -585,6 +710,12 @@ function createAuditRecord(
       source_type: "api_key",
       source_id: "key_123",
       source_name: null,
+      run_id: null,
+      trace_id: null,
+      parent_run_id: null,
+      workload_type: null,
+      workload_id: null,
+      ingestion_mode: null,
       request_id: "req_123",
       idempotency_key: "idem_123",
       slug: "usage.recorded",
@@ -627,6 +758,12 @@ function createAuditPayloadJson(input: {
     source_type: "api_key",
     source_id: "key_123",
     source_name: null,
+    run_id: null,
+    trace_id: null,
+    parent_run_id: null,
+    workload_type: null,
+    workload_id: null,
+    ingestion_mode: null,
     request_id: "req_123",
     idempotency_key: "idem_123",
     slug: input.slug,
@@ -660,6 +797,12 @@ function createIngestionEvent(
     source_type: "api_key",
     source_id: "key_123",
     source_name: null,
+    run_id: null,
+    trace_id: null,
+    parent_run_id: null,
+    workload_type: null,
+    workload_id: null,
+    ingestion_mode: null,
     event_slug: "usage.recorded",
     idempotency_key: "idem_123",
     state: "processed",
@@ -691,6 +834,11 @@ function createMeterFact(
     source_type: "api_key",
     source_id: "key_123",
     source_name: null,
+    run_id: null,
+    trace_id: null,
+    parent_run_id: null,
+    workload_type: null,
+    workload_id: null,
     customer_entitlement_id: "ce_123",
     feature_slug: "api_calls",
     period_key: "2026-03",

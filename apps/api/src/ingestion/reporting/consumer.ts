@@ -1,12 +1,12 @@
 import { Analytics, type AnalyticsIngestionEvent, ingestionEventSchemaV1 } from "@unprice/analytics"
 import type { Logger } from "@unprice/logs"
-import { createStandaloneRequestLogger } from "@unprice/observability"
 import {
   type IngestionReportingEnvelope,
+  ReportingDlqConsumer,
   ingestionReportingEnvelopeSchema,
 } from "@unprice/services/ingestion"
-import { z } from "zod"
 import type { Env } from "~/env"
+import { runQueueConsumerEntrypoint } from "../queue-entrypoint"
 import { type AuditRecordPublisher, createAuditRecordPublisher } from "./audit-record-publisher"
 import {
   type MeterFactIngest,
@@ -20,15 +20,9 @@ const TINYBIRD_MAX_INGESTION_EVENTS_PER_REQUEST = 5_000
 const TINYBIRD_MAX_INGESTION_EVENT_NDJSON_BYTES_PER_REQUEST = 5 * 1024 * 1024
 const textEncoder = new TextEncoder()
 
-const auditPayloadForIngestionEventSchema = z.object({
-  id: z.string(),
-  slug: z.string(),
-  timestamp: z.number().int(),
-})
-
 export type IngestionReportingQueueBatchMessage = {
   ack: () => void
-  body: IngestionReportingEnvelope
+  body: unknown
   retry: (options?: { delaySeconds?: number }) => void
 }
 
@@ -59,9 +53,23 @@ export class IngestionReportingConsumer {
   }
 
   public async consumeBatch(batch: IngestionReportingQueueBatch): Promise<void> {
-    const envelopes = batch.messages.map((message) =>
-      ingestionReportingEnvelopeSchema.parse(message.body)
-    )
+    const validMessages = batch.messages.flatMap((message) => {
+      const parsed = ingestionReportingEnvelopeSchema.safeParse(message.body)
+      if (!parsed.success) {
+        this.logger.error("dropping malformed reporting queue message", {
+          errors: parsed.error.issues,
+        })
+        message.ack()
+        return []
+      }
+
+      return [{ envelope: parsed.data, message }]
+    })
+    if (validMessages.length === 0) {
+      return
+    }
+
+    const envelopes = validMessages.map(({ envelope }) => envelope)
 
     const auditRecords = envelopes.flatMap((envelope) => envelope.auditRecords)
     const meterFacts = envelopes.flatMap((envelope) => envelope.meterFacts)
@@ -74,7 +82,7 @@ export class IngestionReportingConsumer {
     await publishMeterFactChunks(tinybirdChunks, this.ingestMeterFacts)
     await publishIngestionEventChunks(ingestionEventChunks, this.ingestIngestionEvents)
 
-    for (const message of batch.messages) {
+    for (const { message } of validMessages) {
       message.ack()
     }
 
@@ -130,47 +138,55 @@ export async function consumeIngestionReportingQueueBatch(
   executionCtx: ExecutionContext,
   drain?: { flush: () => Promise<void> }
 ): Promise<void> {
-  const batchRequestId = `reporting-queue:${Date.now()}`
-  const startedAt = Date.now()
-  const { logger, requestLogger } = createStandaloneRequestLogger(
-    { requestId: batchRequestId },
-    { flush: drain?.flush }
-  )
-
-  logger.set({
-    service: "ingestion_reporting_queue",
-    request: {
-      id: batchRequestId,
-      timestamp: new Date(startedAt).toISOString(),
+  await runQueueConsumerEntrypoint(
+    {
+      executionCtx,
+      drain,
+      requestIdPrefix: "reporting-queue",
+      service: "ingestion_reporting_queue",
       path: "/queues/ingestion-reporting/consume",
+      operation: "consume_reporting_batch",
+      onError: (logger) => {
+        logger.warn("ingestion reporting queue batch will retry", {
+          reporting_envelope_count: batch.messages.length,
+          reporting_retry_count: batch.messages.length,
+        })
+      },
     },
-    cloud: { platform: "cloudflare" },
-    business: { operation: "consume_reporting_batch" },
-  })
-
-  let thrown: unknown
-
-  try {
-    await consumeIngestionReportingBatch(batch, env, logger)
-  } catch (error) {
-    thrown = error
-    logger.warn("ingestion reporting queue batch will retry", {
-      reporting_envelope_count: batch.messages.length,
-      reporting_retry_count: batch.messages.length,
-    })
-    logger.error(error instanceof Error ? error : new Error(String(error)))
-    throw error
-  } finally {
-    const duration = Math.max(0, Date.now() - startedAt)
-    const status = thrown ? 500 : 200
-
-    requestLogger.set({ status, duration, request: { status, duration } })
-    requestLogger.emit({ status, duration, request: { status, duration } })
-
-    if (drain) {
-      executionCtx.waitUntil(drain.flush())
+    async (logger) => {
+      await consumeIngestionReportingBatch(batch, env, logger)
     }
-  }
+  )
+}
+
+export async function consumeIngestionReportingDlqBatch(
+  batch: IngestionReportingQueueBatch,
+  env: Env,
+  executionCtx: ExecutionContext,
+  drain?: { flush: () => Promise<void> }
+): Promise<void> {
+  await runQueueConsumerEntrypoint(
+    {
+      executionCtx,
+      drain,
+      requestIdPrefix: "reporting-dlq",
+      service: "ingestion_reporting_dlq",
+      path: "/queues/ingestion-reporting-dlq/consume",
+      operation: "consume_reporting_dlq_batch",
+    },
+    async (logger) => {
+      const consumer = new ReportingDlqConsumer({
+        logger,
+        redrive: async (envelope, options) => {
+          await (env.INGESTION_REPORTING_QUEUE as Queue<IngestionReportingEnvelope>).send(
+            envelope,
+            options
+          )
+        },
+      })
+      await consumer.consumeBatch(batch)
+    }
+  )
 }
 
 export function chunkIngestionEventsForTinybird(
@@ -244,10 +260,8 @@ async function publishIngestionEventChunks(
 function buildIngestionEvent(
   record: IngestionReportingEnvelope["auditRecords"][number]
 ): AnalyticsIngestionEvent {
-  const payload = auditPayloadForIngestionEventSchema.parse(JSON.parse(record.auditPayloadJson))
-
   return {
-    event_id: payload.id,
+    event_id: record.eventId,
     canonical_audit_id: record.canonicalAuditId,
     payload_hash: record.payloadHash,
     workspace_id: record.workspaceId,
@@ -258,7 +272,13 @@ function buildIngestionEvent(
     source_type: record.sourceType,
     source_id: record.sourceId,
     source_name: record.sourceName,
-    event_slug: payload.slug,
+    run_id: record.runId,
+    trace_id: record.traceId,
+    parent_run_id: record.parentRunId,
+    workload_type: record.workloadType,
+    workload_id: record.workloadId,
+    ingestion_mode: record.runId ? "run" : (record.ingestionMode ?? null),
+    event_slug: record.slug,
     idempotency_key: record.idempotencyKey,
     state: record.status,
     rejection_reason: record.rejectionReason ?? null,
@@ -267,7 +287,7 @@ function buildIngestionEvent(
     failure_message: record.failureMessage ?? null,
     replayable: record.replayable ?? false,
     payload_json: record.payloadJson ?? null,
-    timestamp: payload.timestamp,
+    timestamp: record.timestamp,
     received_at: record.firstSeenAt,
     handled_at: record.handledAt,
     created_at: Date.now(),

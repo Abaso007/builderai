@@ -1,0 +1,34 @@
+"use client"
+
+import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
+import { usePathname } from "next/navigation"
+import { SuperLink } from "~/components/super-link"
+
+const tabs = [
+  { label: "Overview", href: "" },
+  { label: "Wallet & Credits", href: "/wallet" },
+  { label: "Budgeted Runs", href: "/runs" },
+  { label: "Subscriptions", href: "/subscriptions" },
+  { label: "Invoices", href: "/invoices" },
+] as const
+
+export function CustomerTabs({ baseUrl }: { baseUrl: string }) {
+  const pathname = usePathname()
+
+  return (
+    <TabNavigation>
+      <div className="hide-scrollbar flex min-w-0 items-center overflow-x-auto">
+        {tabs.map((tab) => {
+          const href = `${baseUrl}${tab.href}`
+          const active = tab.href === "" ? pathname === baseUrl : pathname.startsWith(href)
+
+          return (
+            <TabNavigationLink key={tab.label} asChild active={active}>
+              <SuperLink href={href}>{tab.label}</SuperLink>
+            </TabNavigationLink>
+          )
+        })}
+      </div>
+    </TabNavigation>
+  )
+}

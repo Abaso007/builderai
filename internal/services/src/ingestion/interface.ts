@@ -14,11 +14,16 @@ export const INGESTION_REJECTION_REASONS = [
   "LIMIT_EXCEEDED",
   "LATE_EVENT_CLOSED_PERIOD",
   "NO_MATCHING_ENTITLEMENT",
+  "RUN_BUDGET_EXCEEDED",
   "UNROUTABLE_EVENT",
   "WALLET_EMPTY",
 ] as const
 
 export type IngestionRejectionReason = (typeof INGESTION_REJECTION_REASONS)[number]
+
+export const INGESTION_IDEMPOTENCY_STATUSES = ["new", "already_reported"] as const
+
+export type IngestionIdempotencyStatus = (typeof INGESTION_IDEMPOTENCY_STATUSES)[number]
 
 export const INGESTION_FAILURE_STAGES = [
   "raw_ingestion",
@@ -46,9 +51,10 @@ export type IngestionOutcome =
 
 export type IngestionSyncResult = {
   allowed: boolean
+  state: "processed" | "rejected"
+  idempotencyStatus: IngestionIdempotencyStatus
   message?: string
   rejectionReason?: IngestionRejectionReason
-  state: "processed" | "rejected"
 }
 
 export type IngestionMessageDisposition =

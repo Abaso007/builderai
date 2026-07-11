@@ -9,7 +9,6 @@ import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 import { api } from "~/trpc/server"
-import { PlanVersionPublish } from "../../_components/plan-version-actions"
 import { BannerInactiveVersion, BannerPublishedVersion } from "./_components/banner"
 import { PlanVersionHeaderActions } from "./_components/plan-version-header-actions"
 import { VersionContextStrip } from "./_components/version-context-strip"
@@ -23,9 +22,10 @@ export default async function PlanVersionLayout(props: {
     planVersionId: string
   }
 }) {
+  const { getVersionsBySlug } = api.plans
   const [{ planVersion }, { plan }] = await Promise.all([
     api.planVersions.getById({ id: props.params.planVersionId }),
-    api.plans.getVersionsBySlug({ slug: props.params.planSlug }),
+    getVersionsBySlug({ slug: props.params.planSlug }),
   ])
 
   if (!planVersion) {
@@ -37,9 +37,19 @@ export default async function PlanVersionLayout(props: {
   const headerLabel = !active ? "inactive" : status
   const description = planVersion.description ?? planVersion.plan.description ?? undefined
   const baseHref = `/${props.params.workspaceSlug}/${props.params.projectSlug}/plans/${props.params.planSlug}`
+  const listPlanVersionsExampleParams = {
+    listPlanVersions: {
+      planVersionIds: [planVersion.id],
+      billingInterval: planVersion.billingConfig.billingInterval,
+      currency: planVersion.currency,
+      version: planVersion.version,
+      featureSlugs: planVersion.planFeatures.map((planFeature) => planFeature.feature.slug),
+    },
+  }
 
   return (
     <DashboardShell
+      fullHeight
       header={
         <div className="flex w-full flex-col gap-3">
           <HeaderTab
@@ -49,15 +59,15 @@ export default async function PlanVersionLayout(props: {
             label={headerLabel}
             action={
               <div className="flex items-center gap-2">
-                <CodeApiSheet defaultMethod="listVersions">
-                  <Button variant={"ghost"}>
+                <CodeApiSheet
+                  defaultMethod="listPlanVersions"
+                  exampleParams={listPlanVersionsExampleParams}
+                >
+                  <Button variant={"link"}>
                     <Code className="mr-2 h-4 w-4" />
                     API
                   </Button>
                 </CodeApiSheet>
-                {status === "draft" && (
-                  <PlanVersionPublish planVersionId={props.params.planVersionId} />
-                )}
                 <PlanVersionHeaderActions
                   planVersionId={planVersion.id}
                   status={status}
@@ -74,7 +84,7 @@ export default async function PlanVersionLayout(props: {
         </div>
       }
     >
-      <div className="flex w-full flex-col justify-center gap-4">
+      <div className="flex w-full flex-col justify-center gap-4 lg:min-h-0 lg:flex-1">
         {!active ? (
           <BannerInactiveVersion />
         ) : status === "published" ? (

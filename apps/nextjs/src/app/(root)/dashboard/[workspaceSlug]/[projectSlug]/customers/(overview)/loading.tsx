@@ -1,12 +1,11 @@
 import { Button } from "@unprice/ui/button"
-import { Plus } from "lucide-react"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
+import { SectionIntro } from "~/components/layout/section-intro"
 import { CustomerDialog } from "../_components/customers/customer-dialog"
 
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
-import { Typography } from "@unprice/ui/typography"
 
 import { SuperLink } from "~/components/super-link"
 
@@ -16,13 +15,10 @@ export default function Loading() {
       header={
         <HeaderTab
           title="Customers"
-          description="Manage your customers, add new customers, update plans and more."
+          description="Customers are the economic actors that hold subscriptions, wallet credits, invoices, and budgeted runs."
           action={
             <CustomerDialog>
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                Customer
-              </Button>
+              <Button>Create Customer</Button>
             </CustomerDialog>
           }
         />
@@ -36,14 +32,16 @@ export default function Loading() {
           <TabNavigationLink asChild>
             <SuperLink href={"#"}>Subscriptions</SuperLink>
           </TabNavigationLink>
+          <TabNavigationLink asChild>
+            <SuperLink href={"#"}>Budgeted Runs</SuperLink>
+          </TabNavigationLink>
         </div>
       </TabNavigation>
       <div className="mt-4">
-        <div className="flex flex-col px-1 py-4">
-          <Typography variant="p" affects="removePaddingMargin">
-            All customers for this project
-          </Typography>
-        </div>
+        <SectionIntro
+          title="Customer money state"
+          description="Inspect which customers can be billed, which ones are active, and where to follow subscriptions, wallets, invoices, and runs."
+        />
         <DataTableSkeleton
           columnCount={8}
           showDateFilterOptions={true}

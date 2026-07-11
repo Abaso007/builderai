@@ -8,8 +8,8 @@ export default function Loading() {
     <DashboardShell
       header={
         <HeaderTab
-          title="Api Keys"
-          description="All the apis of the system"
+          title="API Keys"
+          description="Create project API keys and bind a default customer for request-path calls."
           action={<NewApiKeyDialog />}
         />
       }

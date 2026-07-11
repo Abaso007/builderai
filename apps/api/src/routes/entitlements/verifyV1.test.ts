@@ -10,10 +10,15 @@ const authMocks = vi.hoisted(() => ({
   resolveContextProjectId: vi.fn(),
 }))
 
-vi.mock("~/auth/key", () => ({
-  keyAuth: authMocks.keyAuth,
-  resolveContextProjectId: authMocks.resolveContextProjectId,
-}))
+vi.mock("~/auth/key", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("~/auth/key")>()
+
+  return {
+    ...actual,
+    keyAuth: authMocks.keyAuth,
+    resolveContextProjectId: authMocks.resolveContextProjectId,
+  }
+})
 
 import { registerVerifyV1 } from "./verifyV1"
 
@@ -180,7 +185,7 @@ function createTestApp(
 }
 
 function buildRequest(body: Record<string, unknown>) {
-  return new Request("https://example.com/v1/entitlements/verify", {
+  return new Request("https://example.com/v1/access/check", {
     method: "POST",
     headers: {
       authorization: "Bearer sk_test",

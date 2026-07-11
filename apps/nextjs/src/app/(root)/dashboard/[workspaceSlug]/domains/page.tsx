@@ -17,11 +17,20 @@ import DomainConfiguration from "./_components/domain-configuration"
 import { DomainDialog } from "./_components/domain-dialog"
 import { VerifyDomainButton } from "./_components/domain-verify-button"
 
-export default async function PageDomains() {
+export default async function PageDomains(props: {
+  params: { workspaceSlug: string }
+}) {
+  const { workspaceSlug } = props.params
   const isDomainsEnabled = await entitlementFlag(FEATURE_SLUGS.DOMAINS.SLUG)
 
   if (!isDomainsEnabled) {
-    return <UpgradePlanError />
+    return (
+      <UpgradePlanError
+        workspaceSlug={workspaceSlug}
+        blockedFeatureSlug={FEATURE_SLUGS.DOMAINS.SLUG}
+        returnTo={`/${workspaceSlug}/domains`}
+      />
+    )
   }
 
   const { domains } = await api.domains.getAllByActiveWorkspace()
@@ -31,10 +40,10 @@ export default async function PageDomains() {
       header={
         <HeaderTab
           title="Domains"
-          description="Manage your domains and their verification status."
+          description="Verify custom domains before they can serve project pages."
           action={
             <DomainDialog>
-              <Button>Provision Domain</Button>
+              <Button>Provision domain</Button>
             </DomainDialog>
           }
         />
@@ -47,13 +56,13 @@ export default async function PageDomains() {
               <EmptyPlaceholder.Icon>
                 <Globe className="h-8 w-8" />
               </EmptyPlaceholder.Icon>
-              <EmptyPlaceholder.Title>No domains</EmptyPlaceholder.Title>
+              <EmptyPlaceholder.Title>No domains yet</EmptyPlaceholder.Title>
               <EmptyPlaceholder.Description>
-                There are no domains for the workspace.
+                Domains will appear after you provision and verify a custom hostname.
               </EmptyPlaceholder.Description>
               <EmptyPlaceholder.Action>
                 <DomainDialog>
-                  <Button size={"sm"}>Create Domain</Button>
+                  <Button size={"sm"}>Provision domain</Button>
                 </DomainDialog>
               </EmptyPlaceholder.Action>
             </EmptyPlaceholder>
@@ -97,7 +106,7 @@ const DomainCard = ({
           <div className="flex flex-row items-center justify-between space-x-2">
             <VerifyDomainButton domain={domain.name} />
             <DomainDialog defaultValues={domain}>
-              <Button variant={"default"}>Edit Domain</Button>
+              <Button variant={"default"}>Edit domain</Button>
             </DomainDialog>
           </div>
         </div>

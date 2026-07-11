@@ -1,115 +1,134 @@
-"use client"
-import { APP_DOMAIN } from "@unprice/config"
-import { buttonVariants } from "@unprice/ui/button"
-import { m, useInView } from "framer-motion"
-import { BarChart, Check, ChevronRight, Code, Settings } from "lucide-react"
-import { Link } from "next-view-transitions"
-import { useRef } from "react"
-import { SDKDemo } from "./sdk-examples"
+import { API_DOMAIN } from "@unprice/config"
+import { cn, focusRing } from "@unprice/ui/utils"
+import { ArrowRight } from "lucide-react"
+import { CodeEditor } from "./code-editor"
+import CopyToClipboard from "./copy-to-clipboard"
+import { SectionShell } from "./station"
+import { StationHeader } from "./station-header"
 
-const features = [
-  {
-    name: "Configure",
-    description: "Create and manage your plans, features, and tiers from the Dashboard.",
-    icon: Settings,
-  },
-  {
-    name: "Use SDK",
-    description: "Use our SDK in your project. Start incrementally.",
-    icon: Code,
-  },
-  {
-    name: "Verify and report",
-    description: "Verify and report on your feature usage, billing, signals and more.",
-    icon: Check,
-  },
-  {
-    name: "Data and Insights",
-    description: "Get insights into your users and their behavior from data.",
-    icon: BarChart,
-  },
-]
+// Developer proof: the first integration shown whole — two calls, honestly.
+// customers.signUp runs once at the builder's own signup and returns the
+// customerId; access.check guards every request after that. One snippet, no
+// tabs, no framework switcher — the full SDK surface belongs to the docs;
+// the escalation story (shadow → enforce) lives in adoption.
+
+const API_BASE_URL = API_DOMAIN.replace(/\/$/, "")
+
+const CHECK_ACCESS_SNIPPET = `import { Unprice } from "@unprice/api"
+
+const unprice = new Unprice({
+  token: process.env.UNPRICE_TOKEN,
+  baseUrl: "${API_BASE_URL}",
+})
+
+// Once, at your own signup: subscribe the customer to a
+// plan. Unprice provisions the subscription and its
+// entitlements, then returns the id you store.
+const { result: signup } = await unprice.customers.signUp({
+  name: "Acme Inc.",
+  email: "buyer@acme.com",
+  planSlug: "pro",
+  externalId: "user_123", // your id for this customer
+  successUrl: "https://your-app.com/welcome",
+  cancelUrl: "https://your-app.com/pricing",
+})
+
+// Every request after that: check before the paid
+// action runs.
+const { result, error } = await unprice.access.check({
+  customerId: signup.customerId,
+  featureSlug: "tokens",
+})
+
+if (error) {
+  console.error(error.message)
+  return
+}
+
+if (!result.allowed) {
+  // Denied in the request path — no cost was ever created.
+  throw new Error("Denied before paid usage ran")
+}
+
+// Allowed: run the paid action. The same decision
+// explains the invoice line later.
+`
 
 export default function CodeExample() {
-  const sectionRef = useRef(null)
-  const isInView = useInView(sectionRef, { once: true, margin: "-100px" })
-
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.2,
-        delayChildren: 0.3,
-      },
-    },
-  }
-
-  const itemVariants = {
-    hidden: { opacity: 0, y: 20 },
-    visible: {
-      opacity: 1,
-      y: 0,
-      transition: {
-        duration: 0.3,
-        ease: "easeOut",
-      },
-    },
-  }
-
   return (
-    <m.section
-      ref={sectionRef}
-      initial="hidden"
-      animate={isInView ? "visible" : "hidden"}
-      variants={containerVariants}
-      aria-labelledby="code-example-title"
-      className="mx-auto w-full max-w-6xl px-6 py-16"
-    >
-      <m.h2
-        variants={itemVariants}
-        id="features-title"
-        className="mt-2 inline-block bg-clip-text py-2 font-bold text-4xl text-background-textContrast tracking-tighter sm:text-6xl md:text-6xl"
-      >
-        Built by developers, <br /> for developers
-      </m.h2>
-      <m.div variants={itemVariants} className="mt-6 text-justify text-lg">
-        The biggest constraint to iterate on pricing is the engineering effort and the risk of
-        losing customers. Unprice solves those two issues and gives you the developer experience to
-        implement once and forget about it. Pricing logic belongs to business teams, not backlogs.
-        <br />
-        <br />
-        When pricing changes don't require deployments, revenue experiments become as routine as
-        feature flags. Your code stays clean. Your business moves fast.
-        <br />
-        <br />
-        <div className="flex justify-end">
-          <Link href={`${APP_DOMAIN}`} className={buttonVariants({ variant: "primary" })}>
-            {" "}
-            Start pricing
-            <ChevronRight className="ml-1 h-4 w-4" />
-          </Link>
-        </div>
-      </m.div>
+    <SectionShell labelledBy="code-example-title">
+      <div className="flex flex-col items-start">
+        <StationHeader
+          index="03"
+          label="First integration"
+          fact="signUp once · check per request"
+        />
+        <h2
+          id="code-example-title"
+          className="mt-6 max-w-xl font-primary text-background-textContrast text-display-3"
+        >
+          The first integration is two calls.
+        </h2>
+        <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
+          Define one plan version, then sign up one customer against it —{" "}
+          <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[13px] text-background-textContrast">
+            customers.signUp
+          </code>{" "}
+          runs once, at your own signup, and returns the customerId you store. After that,{" "}
+          <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[13px] text-background-textContrast">
+            access.check
+          </code>{" "}
+          guards the paid action on every request, next to the code you already trust. Nothing has
+          to block production traffic on day one.
+        </p>
+      </div>
 
-      <m.div variants={itemVariants}>
-        <SDKDemo />
-      </m.div>
-      <m.dl variants={containerVariants} className="mt-24 grid grid-cols-4 gap-10">
-        {features.map((item) => (
-          <m.div
-            key={item.name}
-            variants={itemVariants}
-            className="col-span-full sm:col-span-2 lg:col-span-1"
-          >
-            <div className="flex items-center gap-2 align-middle text-primary-text">
-              <item.icon aria-hidden="true" className="size-6" />
-              <dt className="font-semibold">{item.name}</dt>
+      <figure
+        aria-label="The complete first integration: create the Unprice client, sign up one customer to a plan at your own signup and store the returned customerId, then call access.check for that customer and feature on every request — stop on the denied branch before any cost exists, and run the paid action on allow."
+        className="mt-12 max-w-3xl"
+      >
+        <div className="rounded-lg border border-background-border bg-surface-panel shadow-ambient">
+          <div className="flex items-center justify-between gap-4 border-background-border border-b px-4 py-2 sm:px-5">
+            <span className="font-mono text-background-text text-xs uppercase tracking-widest">
+              signUp → check
+            </span>
+            <div className="flex items-center gap-3">
+              <span className="hidden font-mono text-[10px] text-background-text sm:inline">
+                TypeScript SDK · the whole first integration
+              </span>
+              <CopyToClipboard code={CHECK_ACCESS_SNIPPET} variant="ghost" className="size-7" />
             </div>
-            <dd className="mt-2 text-background-text leading-7">{item.description}</dd>
-          </m.div>
-        ))}
-      </m.dl>
-    </m.section>
+          </div>
+          <div className="overflow-x-auto px-4 py-4 sm:px-5">
+            <CodeEditor codeBlock={CHECK_ACCESS_SNIPPET} language="typescript" />
+          </div>
+        </div>
+        <figcaption className="mt-5 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-background-border border-t pt-3 text-background-text text-xs leading-6">
+          <span>
+            Both calls shown; the plan version comes from the dashboard. The rest of the money path
+            —{" "}
+            <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[11px] text-background-textContrast">
+              usage.consume
+            </code>
+            , budgeted runs, invoice evidence — lives in the docs.
+          </span>
+          <a
+            href="https://docs.unprice.dev"
+            target="_blank"
+            rel="noreferrer"
+            className={cn(
+              "group inline-flex items-center gap-1.5 rounded-sm font-medium text-background-textContrast",
+              focusRing
+            )}
+          >
+            Explore the request-path SDK
+            <ArrowRight
+              aria-hidden
+              className="size-3 transition-transform duration-quick ease-out-quad group-hover:translate-x-0.5"
+            />
+          </a>
+        </figcaption>
+      </figure>
+    </SectionShell>
   )
 }

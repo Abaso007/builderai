@@ -278,6 +278,7 @@ describe("IngestionService entitlement routing", () => {
 
     expect(result).toEqual({
       allowed: false,
+      idempotencyStatus: "new",
       message: "Wallet empty for meter api_calls (reservation res_123)",
       rejectionReason: "WALLET_EMPTY",
       state: "rejected",
@@ -395,6 +396,7 @@ describe("IngestionService entitlement routing", () => {
 
     expect(retry).toEqual({
       allowed: true,
+      idempotencyStatus: "new",
       state: "processed",
     })
     expect(apply).toHaveBeenCalledTimes(2)
@@ -433,6 +435,7 @@ describe("IngestionService entitlement routing", () => {
 
     expect(result).toEqual({
       allowed: true,
+      idempotencyStatus: "new",
       state: "processed",
     })
     expect(send).toHaveBeenCalledTimes(1)
@@ -1416,10 +1419,14 @@ describe("IngestionService entitlement routing", () => {
         grants: [
           {
             allowanceUnits: 7,
+            cadenceEffectiveAt: Date.UTC(2026, 2, 1),
+            cadenceExpiresAt: null,
+            currencyCode: "USD",
             effectiveAt: Date.UTC(2026, 2, 1),
             expiresAt: null,
             grantId: `grant_${featureType}`,
             priority: 10,
+            resetConfig: null,
           },
         ],
         meterConfig: null,
@@ -1555,13 +1562,23 @@ describe("IngestionService entitlement routing", () => {
 
   it("records late closed-period DO denials as rejected queue outcomes", async () => {
     const entitlement = createEntitlement()
-    const apply = vi.fn().mockResolvedValue({
-      allowed: false,
-      deniedReason: "LATE_EVENT_CLOSED_PERIOD",
-      message: "closed period",
-    })
+    const applyBatch = vi
+      .fn()
+      .mockImplementation(
+        (input: { events: { correlationKey: string; idempotencyKey: string }[] }) =>
+          Promise.resolve({
+            results: input.events.map((event) => ({
+              allowed: false,
+              correlationKey: event.correlationKey,
+              deniedReason: "LATE_EVENT_CLOSED_PERIOD",
+              idempotencyKey: event.idempotencyKey,
+              message: "closed period",
+            })),
+          })
+      )
     const getEntitlementWindowStub = vi.fn().mockReturnValue({
-      apply,
+      apply: vi.fn(),
+      applyBatch,
       getEnforcementState: vi.fn(),
     })
     const send = vi.fn().mockResolvedValue(undefined)
@@ -1699,6 +1716,7 @@ function createReportingEnvelope(
     createdAt: SERVICE_NOW,
     projectId: "proj_123",
     customerId: "cus_123",
+    redriveCount: 0,
     auditRecords: [],
     meterFacts: [],
     ...overrides,
@@ -1720,6 +1738,14 @@ function createReportingAuditRecord(
     sourceType: "api_key",
     sourceId: "key_123",
     sourceName: null,
+    runId: null,
+    traceId: null,
+    parentRunId: null,
+    workloadType: null,
+    workloadId: null,
+    eventId: "evt_123",
+    slug: "usage.recorded",
+    timestamp: SERVICE_NOW,
     status: "processed",
     failureStage: null,
     failureReason: null,
@@ -1747,6 +1773,11 @@ function createReportingMeterFact(
     source_type: "api_key",
     source_id: "key_123",
     source_name: null,
+    run_id: null,
+    trace_id: null,
+    parent_run_id: null,
+    workload_type: null,
+    workload_id: null,
     customer_entitlement_id: "ce_123",
     feature_slug: "api_calls",
     period_key: "2026-03",
@@ -1770,10 +1801,20 @@ function createReportingMeterFact(
   }
 }
 
+function createBillingPeriod() {
+  return {
+    billingPeriodId: "bp_123",
+    cycleEndAt: SERVICE_NOW + 86_400_000,
+    cycleStartAt: SERVICE_NOW - 86_400_000,
+    featurePlanVersionItemId: "item_123",
+    statementKey: "stmt_123",
+  }
+}
+
 function createEntitlement(overrides: Partial<IngestionEntitlement> = {}): IngestionEntitlement {
   return {
-    billingPeriods: [],
-    creditLinePolicy: "capped",
+    billingPeriods: [createBillingPeriod()],
+    creditLinePolicy: "uncapped",
     customerEntitlementId: "ce_123",
     customerId: "cus_123",
     effectiveAt: Date.UTC(2026, 2, 1),
@@ -1872,10 +1913,14 @@ function toGrantRecords(entitlement: IngestionEntitlement) {
       : [
           {
             allowanceUnits: 100,
+            cadenceEffectiveAt: entitlement.effectiveAt,
+            cadenceExpiresAt: entitlement.expiresAt,
+            currencyCode: "USD",
             effectiveAt: entitlement.effectiveAt,
             expiresAt: entitlement.expiresAt,
             grantId: `${entitlement.customerEntitlementId}_grant`,
             priority: 10,
+            resetConfig: null,
           },
         ]
 

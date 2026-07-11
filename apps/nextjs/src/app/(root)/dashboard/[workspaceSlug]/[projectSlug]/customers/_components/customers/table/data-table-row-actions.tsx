@@ -40,28 +40,30 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
     <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className="h-8 w-8 p-0 data-[state=open]:bg-accent">
-            <span className="sr-only">Open menu</span>
-            <MoreHorizontal className="h-4 w-4" />
+          <Button variant="ghost" size="icon" className="size-8 data-[state=open]:bg-accent">
+            <MoreHorizontal className="size-4" aria-hidden="true" />
+            <span className="sr-only">Open row actions</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuLabel>Actions</DropdownMenuLabel>
+          <DropdownMenuLabel>More actions</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DialogTrigger asChild>
             <DropdownMenuItem>Edit Customer</DropdownMenuItem>
           </DialogTrigger>
           <DialogTrigger asChild>
             <DropdownMenuItem>
-              <SuperLink href={baseUrl}>Manage</SuperLink>
+              <SuperLink href={baseUrl}>Open customer</SuperLink>
             </DropdownMenuItem>
           </DialogTrigger>
         </DropdownMenuContent>
       </DropdownMenu>
-      <DialogContent className="max-h-[95vh] md:max-w-screen-md">
+      <DialogContent className="md:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Customer Form</DialogTitle>
-          <DialogDescription>Modify the customer details below.</DialogDescription>
+          <DialogTitle>Customer details</DialogTitle>
+          <DialogDescription>
+            Update the economic actor that holds subscriptions, wallet credits, runs, and invoices.
+          </DialogDescription>
         </DialogHeader>
         <CustomerForm defaultValues={customer} setDialogOpen={setDialogOpen} />
       </DialogContent>

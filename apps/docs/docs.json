@@ -7,7 +7,7 @@
     "light": "#ffc53d",
     "dark": "#ffc53d"
   },
-  "favicon": "/favicon.ico",
+  "favicon": "/favicon.svg",
   "api": {
     "playground": {
       "display": "interactive"
@@ -21,12 +21,14 @@
           {
             "group": "Introduction",
             "icon": "home",
+            "root": "index",
             "pages": [
-              "index",
+              "concepts/how-unprice-works",
               {
                 "group": "Quickstart",
                 "pages": [
                   "quickstart/onboarding-plan",
+                  "quickstart/choose-operation",
                   "quickstart/onboarding-customer",
                   "quickstart/onboarding-entitlements"
                 ]
@@ -98,73 +100,58 @@
         "tab": "SDKs",
         "groups": [
           {
-            "group": "Official Libraries",
-            "icon": "code",
+            "group": "TypeScript SDK",
             "pages": [
+              "libraries/ts/sdk/overview",
               {
-                "group": "@unprice/api",
+                "group": "Customers",
+                "pages": ["libraries/ts/sdk/customers/signup"]
+              },
+              {
+                "group": "Access",
                 "pages": [
-                  "libraries/ts/sdk/overview",
-                  {
-                    "group": "Customers",
-                    "pages": ["libraries/ts/sdk/customers/signup"]
-                  },
-                  {
-                    "group": "Access",
-                    "pages": ["libraries/ts/sdk/access/update"]
-                  },
-                  {
-                    "group": "Entitlements",
-                    "pages": [
-                      "libraries/ts/sdk/entitlements/get",
-                      "libraries/ts/sdk/entitlements/verify"
-                    ]
-                  },
-                  {
-                    "group": "Events",
-                    "pages": [
-                      "libraries/ts/sdk/events/ingest",
-                      "libraries/ts/sdk/events/ingest-sync"
-                    ]
-                  },
-                  {
-                    "group": "Features",
-                    "pages": ["libraries/ts/sdk/features/list"]
-                  },
-                  {
-                    "group": "Invoices",
-                    "pages": ["libraries/ts/sdk/invoices/get"]
-                  },
-                  {
-                    "group": "Payments",
-                    "pages": [
-                      "libraries/ts/sdk/payments/list-methods",
-                      "libraries/ts/sdk/payments/create-method"
-                    ]
-                  },
-                  {
-                    "group": "Plans",
-                    "pages": [
-                      "libraries/ts/sdk/plans/get-version",
-                      "libraries/ts/sdk/plans/list-versions"
-                    ]
-                  },
-                  {
-                    "group": "Realtime",
-                    "pages": ["libraries/ts/sdk/realtime/create-ticket"]
-                  },
-                  {
-                    "group": "Subscriptions",
-                    "pages": ["libraries/ts/sdk/subscriptions/get"]
-                  },
-                  {
-                    "group": "Usage",
-                    "pages": ["libraries/ts/sdk/usage/get"]
-                  },
-                  {
-                    "group": "Wallet",
-                    "pages": ["libraries/ts/sdk/wallet/get"]
-                  }
+                  "libraries/ts/sdk/access/check",
+                  "libraries/ts/sdk/access/list-entitlements",
+                  "libraries/ts/sdk/access/update"
+                ]
+              },
+              {
+                "group": "Usage",
+                "pages": [
+                  "libraries/ts/sdk/usage/consume",
+                  "libraries/ts/sdk/usage/record",
+                  "libraries/ts/sdk/usage/get"
+                ]
+              },
+              {
+                "group": "Budgeted runs",
+                "pages": [
+                  "libraries/ts/sdk/runs/start",
+                  "libraries/ts/sdk/runs/consume",
+                  "libraries/ts/sdk/runs/end",
+                  "libraries/ts/sdk/runs/get"
+                ]
+              },
+              {
+                "group": "Plans",
+                "pages": [
+                  "libraries/ts/sdk/plan-versions/list",
+                  "libraries/ts/sdk/plan-versions/get"
+                ]
+              },
+              {
+                "group": "Payments",
+                "pages": [
+                  "libraries/ts/sdk/payment-methods/list",
+                  "libraries/ts/sdk/payment-methods/create",
+                  "libraries/ts/sdk/wallet/get"
+                ]
+              },
+              {
+                "group": "Events",
+                "pages": [
+                  "libraries/ts/sdk/ingestion-events/status",
+                  "libraries/ts/sdk/ingestion-events/replay"
                 ]
               }
             ]
@@ -193,8 +180,8 @@
     }
   },
   "logo": {
-    "light": "/logo/light.png",
-    "dark": "/logo/dark.png"
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
   },
   "navbar": {
     "links": [

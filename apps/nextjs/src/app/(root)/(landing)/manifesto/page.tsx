@@ -1,29 +1,52 @@
 import type { Metadata } from "next"
 import dynamic from "next/dynamic"
-import HeroManifest from "~/components/landing/hero-manifest"
-import { LazyMotionWrapper } from "~/components/landing/lazy-motion-wrapper"
+import ManifestoHero from "~/components/landing/manifesto-hero"
 
-const Belief = dynamic(() => import("~/components/landing/belief"))
-const PillarsPriceOps = dynamic(() => import("~/components/landing/pillarsAMI"))
-const MainfestoCopy = dynamic(() => import("~/components/landing/mainfesto-copy"))
+const MechanismSection = dynamic(() =>
+  import("~/components/landing/mechanism").then((mod) => mod.MechanismSection)
+)
+const ManifestoPriceOps = dynamic(() => import("~/components/landing/manifesto-priceops"))
+const ManifestoOwnership = dynamic(() => import("~/components/landing/manifesto-ownership"))
+const ManifestoBelief = dynamic(() => import("~/components/landing/manifesto-belief"))
+
+const description =
+  "Pricing is a runtime decision. Why the customer money path belongs in the request path, in the open — and why it should be yours."
+
+// The manifesto ships its own social card: the generic landing card sells the
+// product frame; this page's card must carry the manifesto's own line.
+const ogImage = `/og?title=${encodeURIComponent("The Unprice manifesto")}&description=${encodeURIComponent(
+  "Pricing is a runtime decision. The customer money path belongs in the request path, in the open — and it should be yours."
+)}`
 
 export const metadata: Metadata = {
   title: "Manifesto",
-  description: "Our vision for the future of pricing and revenue infrastructure.",
+  description,
+  openGraph: {
+    type: "article",
+    url: "https://unprice.dev/manifesto",
+    title: "The Unprice manifesto",
+    description,
+    images: [{ url: ogImage, width: 1200, height: 630, alt: "The Unprice manifesto" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "The Unprice manifesto",
+    description,
+    images: [{ url: ogImage, width: 1200, height: 630, alt: "The Unprice manifesto" }],
+  },
+  alternates: {
+    canonical: "https://unprice.dev/manifesto",
+  },
 }
 
 export default function Manifesto() {
   return (
-    <LazyMotionWrapper>
-      <main className="flex flex-col overflow-hidden pb-28">
-        <HeroManifest />
-
-        <div className="mx-auto flex w-full max-w-4xl flex-col overflow-hidden px-3">
-          <MainfestoCopy />
-          <PillarsPriceOps />
-          <Belief />
-        </div>
-      </main>
-    </LazyMotionWrapper>
+    <main className="flex flex-col overflow-hidden">
+      <ManifestoHero />
+      <MechanismSection />
+      <ManifestoPriceOps />
+      <ManifestoOwnership />
+      <ManifestoBelief />
+    </main>
   )
 }

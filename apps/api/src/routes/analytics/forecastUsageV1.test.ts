@@ -8,9 +8,14 @@ const authMocks = vi.hoisted(() => ({
   keyAuth: vi.fn(),
 }))
 
-vi.mock("~/auth/key", () => ({
-  keyAuth: authMocks.keyAuth,
-}))
+vi.mock("~/auth/key", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("~/auth/key")>()
+
+  return {
+    ...actual,
+    keyAuth: authMocks.keyAuth,
+  }
+})
 
 import { registerForecastUsageV1 } from "./forecastUsageV1"
 
@@ -244,7 +249,7 @@ function createTestApp({
 }
 
 function buildRequest(body: Record<string, unknown>) {
-  return new Request("https://example.com/v1/analytics/forecast-usage", {
+  return new Request("https://example.com/v1/analytics/usage/forecast", {
     method: "POST",
     headers: {
       authorization: "Bearer sk_test",

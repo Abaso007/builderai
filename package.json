@@ -1,29 +1,13 @@
 {
   "name": "unprice",
+  "description": "Open-source customer money path for usage-based SaaS — authorize customer spend before paid work runs.",
   "private": true,
   "engines": {
-    "node": "20.x"
+    "node": "24.x"
   },
   "workspaces": ["apps/*", "packages/*"],
   "engineStrict": true,
   "packageManager": "pnpm@10.28.0",
-  "pnpm": {
-    "overrides": {
-      "date-fns": "^3.3.1"
-    },
-    "packageExtensions": {
-      "@hookform/resolvers": {
-        "peerDependencies": {
-          "zod": ">=3.0.0"
-        }
-      },
-      "react-virtual": {
-        "peerDependencies": {
-          "react": ">=16.6.3"
-        }
-      }
-    }
-  },
   "scripts": {
     "build": "turbo run build",
     "clean": "git clean -xdf node_modules dist .next && rm -rf node_modules",
@@ -35,6 +19,9 @@
     "wh": "pnpm dlx webhookthing@latest",
     "knip": "knip --use-tsconfig-files --include files,dependencies",
     "test": "cross-env SKIP_ENV_VALIDATION=1 NODE_ENV=test turbo run test",
+    "test:workers": "cross-env SKIP_ENV_VALIDATION=1 NODE_ENV=test turbo run test:workers",
+    "test:ingestion": "pnpm --filter @unprice/services test src/ingestion && pnpm --filter api test src/ingestion src/routes/events && pnpm --filter api test:workers",
+    "audit:high": "node tooling/scripts/audit-high.mjs",
     "fmt:fix": "pnpm biome format . --write && pnpm biome check .  --write --unsafe ",
     "fmt": "pnpm biome format . && pnpm biome check .",
     "validate": "pnpm typecheck && pnpm manypkg check && pnpm fmt:fix",
@@ -44,19 +31,20 @@
     "release": "pnpm build && pnpm changeset publish",
     "prepare": "husky",
     "preinstall": "npx only-allow pnpm",
-    "doctor": "npx react-doctor@0.4.0"
+    "doctor": "react-doctor . --scope changed --blocking error --no-score"
   },
   "dependencies": {
     "@biomejs/biome": "1.9.4",
     "@changesets/cli": "^2.27.7",
     "@manypkg/cli": "^0.21.2",
     "@turbo/gen": "^1.12.4",
-    "@types/node": "20.11.24",
+    "@types/node": "24.13.2",
     "cross-env": "^7.0.3",
     "cz-conventional-changelog": "^3.3.0",
     "husky": "^9.1.4",
     "knip": "^5.17.4",
     "lint-staged": "^15.2.9",
+    "react-doctor": "0.5.8",
     "turbo": "2.3.3",
     "typescript": "^5.3.3"
   },

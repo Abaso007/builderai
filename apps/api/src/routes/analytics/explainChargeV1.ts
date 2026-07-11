@@ -9,10 +9,15 @@ import {
 } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
-import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
+import {
+  keyAuth,
+  resolveCustomerIdForApiKeyOrThrow,
+  validateIsAllowedToAccessProject,
+} from "~/auth/key"
 import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["analytics"]
@@ -77,30 +82,47 @@ export const explainChargeApiResponseSchema = z.object({
   }),
 })
 
-export const route = createRoute({
-  path: "/v1/analytics/explain-charge",
-  operationId: "analytics.explainCharge",
-  summary: "explain charge",
-  description: "Explain one invoice line using ledger metadata and rated meter facts.",
-  method: "post",
-  tags,
-  request: {
-    body: jsonContentRequired(
-      z.object({
-        project_id: z.string().optional(),
-        invoice_id: z.string(),
-        entry_id: z.string(),
-        limit: z.number().int().min(1).max(500).optional().default(100),
-        offset: z.number().int().min(0).optional().default(0),
-      }),
-      "Explain charge request"
-    ),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(explainChargeApiResponseSchema, "Explain charge response"),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/analytics/charges/explain",
+      operationId: "analytics.charges.explain",
+      summary: "explain charge",
+      description: "Explain one invoice line using ledger metadata and rated meter facts.",
+      method: "post",
+      tags,
+      request: {
+        body: jsonContentRequired(
+          z.object({
+            project_id: z.string().optional(),
+            invoice_id: z.string(),
+            entry_id: z.string(),
+            limit: z.number().int().min(1).max(500).optional().default(100),
+            offset: z.number().int().min(0).optional().default(0),
+          }),
+          "Explain charge request"
+        ),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(
+          explainChargeApiResponseSchema,
+          "Explain charge response"
+        ),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "analytics",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["analytics", "charges", "explain"],
+      },
+    }
+  )
+)
 
 export type ExplainChargeApiRequest = z.infer<
   (typeof route.request.body)["content"]["application/json"]["schema"]
@@ -121,7 +143,6 @@ export const registerExplainChargeV1 = (app: App) =>
     const key = await keyAuth(c)
     const { ledger } = c.get("services")
     const projectId = validateIsAllowedToAccessProject({
-      isMain: (key.project.isMain ?? false) || key.project.workspace.isMain,
       key,
       requestedProjectId: requestedProjectId ?? key.projectId,
     })
@@ -144,6 +165,11 @@ export const registerExplainChargeV1 = (app: App) =>
     if (result.err) {
       throw explainChargeErrorToApiError(result.err)
     }
+
+    resolveCustomerIdForApiKeyOrThrow({
+      explicitCustomerId: result.val.invoice.customerId,
+      defaultCustomerId: key.defaultCustomerId,
+    })
 
     const response: ExplainChargeApiResponse = {
       invoice: {
@@ -290,7 +316,7 @@ function buildWarnings(result: ExplainChargeOutput): string[] {
 function buildNextActions(result: ExplainChargeOutput): string[] {
   if (result.summary.eventCount === 0) {
     if (isBillingPeriodScopedLine(result)) {
-      return ["No immediate action required."]
+      return []
     }
 
     return ["Verify the billing period, feature slug, and period key for this invoice line."]
@@ -300,7 +326,7 @@ function buildNextActions(result: ExplainChargeOutput): string[] {
     return ["Request the next page to inspect the remaining rated meter facts."]
   }
 
-  return ["No immediate action required."]
+  return []
 }
 
 function isBillingPeriodScopedLine(result: ExplainChargeOutput): boolean {

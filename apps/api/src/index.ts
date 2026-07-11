@@ -1,3 +1,4 @@
+import { CORS_ALLOW_HEADERS, CORS_ALLOW_METHODS, getAllowedCorsOrigin } from "@unprice/config"
 import { log } from "evlog"
 import { partyserverMiddleware } from "hono-party"
 import { cors } from "hono/cors"
@@ -9,6 +10,7 @@ import serveEmojiFavicon from "stoker/middlewares/serve-emoji-favicon"
 
 export { DurableObjectProject } from "~/project/do"
 export { EntitlementWindowDO } from "~/ingestion/entitlements/EntitlementWindowDO"
+export { RunBudgetDO } from "~/ingestion/run-budget/RunBudgetDO"
 
 import { registerUpdateACLV1 } from "./routes/access/updateACLV1"
 import { registerExplainChargeV1 } from "./routes/analytics/explainChargeV1"
@@ -32,20 +34,24 @@ import { registerProviderStripeConnectWebhookV1 } from "./routes/payments/provid
 import { registerProviderWebhookV1 } from "./routes/payments/providers/providerWebhookV1"
 import { registerGetPlanVersionV1 } from "./routes/plans/getPlanVersionV1"
 import { registerListPlanVersionsV1 } from "./routes/plans/listPlanVersionsV1"
+import { registerApplyRunSyncEventV1 } from "./routes/runs/applyRunSyncEventV1"
+import { registerEndRunV1 } from "./routes/runs/endRunV1"
+import { registerGetRunV1 } from "./routes/runs/getRunV1"
+import { registerStartRunV1 } from "./routes/runs/startRunV1"
 import { registerGetSubscriptionV1 } from "./routes/subscriptions/getSubscriptionV1"
 
 import { env } from "cloudflare:workers"
-import {
-  type IngestionQueueMessage,
-  type IngestionReportingEnvelope,
-  ingestionQueueMessageSchema,
-  ingestionReportingEnvelopeSchema,
-} from "@unprice/services/ingestion"
+import type { IngestionQueueMessage, IngestionReportingEnvelope } from "@unprice/services/ingestion"
 import { timing } from "hono/timing"
 import { verifyRealtimeTicket } from "~/auth/ticket"
 import { serializeError } from "~/errors/log"
-import { consumeIngestionReportingQueueBatch } from "~/ingestion/reporting/consumer"
-import { consumeIngestionBatch } from "~/ingestion/service"
+import { dispatchIngestionQueueBatch } from "~/ingestion/queue-routing"
+import {
+  consumeIngestionReportingDlqBatch,
+  consumeIngestionReportingQueueBatch,
+} from "~/ingestion/reporting/consumer"
+import { consumeIngestionBatch, consumeIngestionDlqBatch } from "~/ingestion/service"
+import { internalKeyAuth } from "~/middleware/internal-key"
 import { knownRoute } from "~/middleware/known-route"
 import { obs } from "~/middleware/obs"
 import { apiDrain, apiEvlog } from "~/observability"
@@ -60,7 +66,14 @@ app.use(
   knownRoute(() => app.routes)
 )
 app.use(serveEmojiFavicon("◎"))
-app.use("*", cors())
+app.use(
+  "*",
+  cors({
+    allowHeaders: [...CORS_ALLOW_HEADERS],
+    allowMethods: [...CORS_ALLOW_METHODS],
+    origin: (origin) => getAllowedCorsOrigin(origin) ?? undefined,
+  })
+)
 app.use("*", apiEvlog)
 app.use("*", init())
 app.use("*", obs())
@@ -102,9 +115,10 @@ app.use(
         }
 
         try {
+          const runtimeEnv = createRuntimeEnv(env as unknown as Record<string, unknown>)
           const payload = await verifyRealtimeTicket({
             token: ticket,
-            secret: env.AUTH_SECRET,
+            secret: runtimeEnv.REALTIME_TICKET_SECRET,
           })
 
           if (!payload.customerId.startsWith("cus_")) {
@@ -139,8 +153,17 @@ app.use(
   })
 )
 
+// Internal routes require an internal or main project key
+app.use("/v1/internal/*", internalKeyAuth())
+
 // Access routes
 registerUpdateACLV1(app)
+
+// Run routes
+registerStartRunV1(app)
+registerApplyRunSyncEventV1(app)
+registerEndRunV1(app)
+registerGetRunV1(app)
 
 // Billing routes
 registerFlushReservationsForInvoicingV1(app)
@@ -225,7 +248,35 @@ const handler = {
   ) => {
     try {
       const parsedEnv = createRuntimeEnv(env as unknown as Record<string, unknown>)
-      await dispatchIngestionQueueBatch(batch, parsedEnv, executionCtx)
+      await dispatchIngestionQueueBatch(batch, {
+        consumers: {
+          raw: (queueBatch) =>
+            consumeIngestionBatch(queueBatch, parsedEnv, executionCtx, apiDrain ?? undefined),
+          raw_dlq: (queueBatch) =>
+            consumeIngestionDlqBatch(queueBatch, parsedEnv, executionCtx, apiDrain ?? undefined),
+          reporting: (queueBatch) =>
+            consumeIngestionReportingQueueBatch(
+              queueBatch,
+              parsedEnv,
+              executionCtx,
+              apiDrain ?? undefined
+            ),
+          reporting_dlq: (queueBatch) =>
+            consumeIngestionReportingDlqBatch(
+              queueBatch,
+              parsedEnv,
+              executionCtx,
+              apiDrain ?? undefined
+            ),
+        },
+        onUnknownQueue: ({ queue }) => {
+          log.error({
+            code: "UNKNOWN_INGESTION_QUEUE",
+            message: "retrying messages from unknown ingestion queue",
+            queue,
+          })
+        },
+      })
     } catch (error) {
       const serializedError = serializeError(error)
 
@@ -243,77 +294,5 @@ const handler = {
     }
   },
 } satisfies ExportedHandler<Env, IngestionQueueMessage | IngestionReportingEnvelope>
-
-async function dispatchIngestionQueueBatch(
-  batch: MessageBatch<IngestionQueueMessage | IngestionReportingEnvelope>,
-  env: Env,
-  executionCtx: ExecutionContext
-): Promise<void> {
-  const rawMessages: Message<IngestionQueueMessage>[] = []
-  const reportingMessages: Message<IngestionReportingEnvelope>[] = []
-
-  for (const message of batch.messages) {
-    const reportingMessage = ingestionReportingEnvelopeSchema.safeParse(message.body)
-    if (reportingMessage.success) {
-      reportingMessages.push(withParsedBody(message, reportingMessage.data))
-      continue
-    }
-
-    const rawMessage = ingestionQueueMessageSchema.safeParse(message.body)
-    if (rawMessage.success) {
-      rawMessages.push(withParsedBody(message, rawMessage.data))
-      continue
-    }
-
-    log.error({
-      code: "MALFORMED_INGESTION_QUEUE_MESSAGE",
-      message: "dropping malformed ingestion queue message",
-      queue: batch.queue,
-      reporting_errors: reportingMessage.error.issues,
-      raw_errors: rawMessage.error.issues,
-    })
-    message.ack()
-  }
-
-  if (rawMessages.length > 0) {
-    await consumeIngestionBatch(
-      withMessages(batch, rawMessages),
-      env,
-      executionCtx,
-      apiDrain ?? undefined
-    )
-  }
-
-  if (reportingMessages.length > 0) {
-    await consumeIngestionReportingQueueBatch(
-      withMessages(batch, reportingMessages),
-      env,
-      executionCtx,
-      apiDrain ?? undefined
-    )
-  }
-}
-
-function withParsedBody<T>(
-  message: Message<IngestionQueueMessage | IngestionReportingEnvelope>,
-  body: T
-): Message<T> {
-  return {
-    ...message,
-    ack: message.ack.bind(message),
-    body,
-    retry: message.retry.bind(message),
-  } as Message<T>
-}
-
-function withMessages<T>(
-  batch: MessageBatch<IngestionQueueMessage | IngestionReportingEnvelope>,
-  messages: Message<T>[]
-): MessageBatch<T> {
-  return {
-    ...batch,
-    messages,
-  } as MessageBatch<T>
-}
 
 export default handler

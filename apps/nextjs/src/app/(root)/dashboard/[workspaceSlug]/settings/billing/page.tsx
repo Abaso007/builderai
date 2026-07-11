@@ -1,107 +1,143 @@
 import { getSession } from "@unprice/auth/server-rsc"
 import { Alert, AlertDescription, AlertTitle } from "@unprice/ui/alert"
+import { Button } from "@unprice/ui/button"
 import { AlertCircle } from "lucide-react"
+import type { SearchParams } from "nuqs/server"
+import type { ReactNode } from "react"
+import { PaymentMethodButton } from "~/components/forms/payment-method-form"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
-import { api } from "~/trpc/server"
-import { UsageDashboard } from "./_components/usage-dashboard"
+import { SuperLink } from "~/components/super-link"
+import { intervalParams } from "~/lib/searchParams"
+import { HydrateClient, api } from "~/trpc/server"
+import { WorkspaceBillingOverview } from "./_components/workspace-billing-overview"
 
-export default async function BillingPage({ params }: { params: { workspaceSlug: string } }) {
+export const dynamic = "force-dynamic"
+
+export default async function BillingPage({
+  params,
+  searchParams,
+}: {
+  params: { workspaceSlug: string }
+  searchParams: SearchParams
+}) {
   const { workspaceSlug } = params
   const session = await getSession()
-  const atw = session?.user.workspaces.find((w) => w.slug === workspaceSlug)
+  const atw = session?.user.workspaces.find((workspace) => workspace.slug === workspaceSlug)
   const isMainWorkspace = atw?.isMain
   const customerId = atw?.unPriceCustomerId ?? ""
+  const filter = await intervalParams(searchParams)
 
   if (isMainWorkspace) {
     return (
-      <DashboardShell
-        header={
-          <HeaderTab
-            title="Scale & Usage"
-            description="Observe the growth and value metrics of this workspace."
-          />
-        }
-      >
+      <BillingShell>
         <Alert variant="info">
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>Main Workspace</AlertTitle>
           <AlertDescription>
-            This is the main workspace, where your foundation is established. No further billing
-            management is required here.
+            This is the main workspace. No billing customer context is required here.
           </AlertDescription>
         </Alert>
-      </DashboardShell>
+      </BillingShell>
     )
   }
 
+  if (!customerId) {
+    return (
+      <BillingShell>
+        <Alert variant="info">
+          <AlertTitle>No billing customer context</AlertTitle>
+          <AlertDescription>
+            This workspace has no billing customer configured yet.
+          </AlertDescription>
+        </Alert>
+      </BillingShell>
+    )
+  }
+
+  return <WorkspaceBillingCard workspaceSlug={workspaceSlug} range={filter.intervalFilter} />
+}
+
+function BillingShell({
+  action,
+  children,
+}: {
+  action?: ReactNode
+  children: ReactNode
+}) {
   return (
     <DashboardShell
       header={
         <HeaderTab
-          title="Scale & Usage"
-          description="Observe and manage your workspace value flows."
+          title="Billing & Usage"
+          description="Plan, payment, and usage evidence for this workspace."
+          action={action}
         />
       }
     >
-      <UsageCard customerId={customerId} workspaceSlug={workspaceSlug} />
+      {children}
     </DashboardShell>
   )
 }
 
-async function UsageCard({
-  customerId,
+async function WorkspaceBillingCard({
   workspaceSlug,
-}: { customerId: string; workspaceSlug: string }) {
-  if (!customerId) {
-    return (
-      <Alert variant="info">
-        <AlertTitle>No Customer Context</AlertTitle>
-        <AlertDescription>This workspace has no billing customer configured yet.</AlertDescription>
-      </Alert>
-    )
-  }
-
+  range,
+}: {
+  workspaceSlug: string
+  range: Awaited<ReturnType<typeof intervalParams>>["intervalFilter"]
+}) {
   try {
-    const usageData = await api.analytics.getUsage({
-      customerId: customerId,
-      range: "30d",
+    const overview = await api.workspaces.getBillingOverview({
+      workspaceSlug,
+      range,
     })
 
-    if (usageData.error) {
-      return (
-        <Alert variant="info">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Error fetching usage data</AlertTitle>
-          <AlertDescription>{usageData.error}</AlertDescription>
-        </Alert>
-      )
-    }
-
-    if (!usageData.usage || usageData.usage.length === 0) {
-      return (
-        <Alert variant="info">
-          <AlertTitle>No Usage Data</AlertTitle>
-          <AlertDescription>No usage was reported in the last 30 days.</AlertDescription>
-        </Alert>
-      )
-    }
-
     return (
-      <UsageDashboard
-        usageRows={usageData.usage}
-        customerId={customerId}
-        workspaceSlug={workspaceSlug}
-      />
+      <BillingShell
+        action={
+          overview.paymentProvider ? (
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+              <PaymentMethodButton
+                customerId={overview.customerId}
+                successUrl={`/${workspaceSlug}/settings/billing`}
+                cancelUrl={`/${workspaceSlug}/settings/billing`}
+                paymentProvider={overview.paymentProvider}
+                workspaceSlug={workspaceSlug}
+                variant="link"
+                size="default"
+                hasPaymentMethods
+              />
+              <Button asChild>
+                <SuperLink href={`/${workspaceSlug}/settings/billing/change-plan`}>
+                  Change plan
+                </SuperLink>
+              </Button>
+            </div>
+          ) : null
+        }
+      >
+        <HydrateClient>
+          <WorkspaceBillingOverview
+            initialOverview={overview}
+            initialRange={range}
+            workspaceSlug={workspaceSlug}
+          />
+        </HydrateClient>
+      </BillingShell>
     )
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unexpected error while loading usage"
+    const message =
+      error instanceof Error ? error.message : "Unexpected error while loading workspace billing"
+
     return (
-      <Alert variant="info">
-        <AlertCircle className="h-4 w-4" />
-        <AlertTitle>Error fetching usage data</AlertTitle>
-        <AlertDescription>{message}</AlertDescription>
-      </Alert>
+      <BillingShell>
+        <Alert variant="info">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Workspace billing could not be loaded</AlertTitle>
+          <AlertDescription>{message}</AlertDescription>
+        </Alert>
+      </BillingShell>
     )
   }
 }

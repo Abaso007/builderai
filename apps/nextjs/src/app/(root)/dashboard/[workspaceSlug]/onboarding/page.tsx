@@ -10,18 +10,21 @@ export default async function OnboardingPage(props: {
   const { workspaceSlug } = props.params
   const session = await getSession()
   const onboardingCompleted = session?.user?.onboardingCompleted ?? false
+  const isDevelopment = process.env.NODE_ENV === "development"
 
-  if (onboardingCompleted) {
+  if (onboardingCompleted && !isDevelopment) {
     return redirect(`/${workspaceSlug}`)
   }
 
+  // the hero and the money-path stepper center together as one group; a
+  // stepper pinned to the bottom of an empty viewport reads as detached
   return (
-    <div className="mx-auto flex h-[calc(100vh-8rem)] w-full max-w-screen-lg flex-col items-center">
+    <div className="mx-auto flex min-h-[calc(100vh-8rem)] w-full max-w-screen-lg flex-col items-center justify-center gap-14 px-4 py-10">
       <OnboardingWrapper>
-        <div className="flex h-full w-full flex-col items-center justify-center overflow-x-hidden py-12">
+        <div className="flex w-full flex-col items-center overflow-x-hidden">
           <OnboardingUI />
         </div>
-        <div className="flex h-12 w-full shrink-0 items-center justify-center">
+        <div className="flex w-full shrink-0 items-center justify-center">
           <StepNavigator />
         </div>
       </OnboardingWrapper>

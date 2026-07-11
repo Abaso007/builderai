@@ -65,11 +65,10 @@ export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) 
         )
         toastAction("saved")
       },
-      onError: (error) => {
+      onError: () => {
         // rollback: drop entries that haven't been persisted (no id)
         setPlanFeaturesList((features) => features.filter((f) => Boolean(f.id)))
         setActiveFeature((current) => (current && !current.id ? null : current))
-        toastAction("error", error.message)
       },
     })
   )
@@ -147,7 +146,7 @@ export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) 
           <Search className="absolute top-2.5 left-2 h-4 w-4 text-muted-foreground" />
           <Input
             type="search"
-            placeholder="Search feature"
+            placeholder="Search features"
             className="pl-8"
             onChange={(e) => {
               setFilter(e.target.value)
@@ -155,8 +154,13 @@ export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) 
           />
         </div>
       </div>
-      <ScrollArea className="pb-4 lg:h-[750px]">
-        <div className="flex flex-col gap-2 px-4 pt-1 lg:h-[730px]">
+      {/* the pane owns the height: bounded on mobile, flexes to the
+          workbench grid on lg */}
+      <ScrollArea
+        hideScrollBar
+        className="max-h-[45vh] min-h-0 flex-1 pb-4 lg:max-h-none [&_[data-radix-scroll-area-viewport]]:overscroll-contain"
+      >
+        <div className="flex min-h-[200px] flex-col gap-2 px-4 pt-1">
           {isFetching && (
             <div className="flex h-full items-center justify-center">
               <LoadingAnimation className="size-6" />
@@ -168,7 +172,9 @@ export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) 
                 <FileStack className="h-8 w-8" />
               </EmptyPlaceholder.Icon>
               <EmptyPlaceholder.Title>No features found</EmptyPlaceholder.Title>
-              <EmptyPlaceholder.Description>Create feature</EmptyPlaceholder.Description>
+              <EmptyPlaceholder.Description>
+                No library features match your search.
+              </EmptyPlaceholder.Description>
               <EmptyPlaceholder.Action>
                 <FeatureDialog
                   defaultValues={{
@@ -177,7 +183,9 @@ export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) 
                     description: "",
                   }}
                 >
-                  <Button size={"sm"}>Create feature</Button>
+                  <Button size={"sm"} variant={"default"}>
+                    Create feature
+                  </Button>
                 </FeatureDialog>
               </EmptyPlaceholder.Action>
             </EmptyPlaceholder>

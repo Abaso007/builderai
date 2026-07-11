@@ -14,10 +14,11 @@ import {
   DropdownMenuTrigger,
 } from "@unprice/ui/dropdown-menu"
 import { MoreVertical } from "lucide-react"
-import { useRouter } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
 import { startTransition, useState } from "react"
 import { z } from "zod"
 import { PropagationStopper } from "~/components/prevent-propagation"
+import { SuperLink } from "~/components/super-link"
 import { toast } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
 interface DataTableRowActionsProps<TData> {
@@ -32,6 +33,11 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
   const invoice = schemaSubscriptionInvoice.parse(row.original)
   const [open, setOpen] = useState(false)
 
+  const { workspaceSlug, projectSlug, customerId } = useParams<{
+    workspaceSlug: string
+    projectSlug: string
+    customerId: string
+  }>()
   const router = useRouter()
   const trpc = useTRPC()
   const subscriptionId = invoice.subscriptionId
@@ -89,14 +95,21 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
     <PropagationStopper>
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
-          <Button aria-haspopup="true" size="icon" variant="ghost">
-            <MoreVertical className="h-4 w-4" />
-            <span className="sr-only">Toggle menu</span>
+          <Button variant="ghost" size="icon" className="size-8">
+            <MoreVertical className="size-4" aria-hidden="true" />
+            <span className="sr-only">Open row actions</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuLabel>Actions</DropdownMenuLabel>
           <DropdownMenuSeparator />
+          <DropdownMenuItem asChild>
+            <SuperLink
+              href={`/${workspaceSlug}/${projectSlug}/customers/${customerId}/invoices/${invoiceId}`}
+            >
+              Explain charge
+            </SuperLink>
+          </DropdownMenuItem>
           <DropdownMenuItem
             onClick={(e) => {
               e.preventDefault()

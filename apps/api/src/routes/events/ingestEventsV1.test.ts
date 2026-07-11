@@ -1,6 +1,6 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
 import { INGESTION_MAX_EVENT_AGE_MS } from "@unprice/services/entitlements"
-import type { IngestionQueueMessage } from "@unprice/services/ingestion"
+import type { IngestionQueueMessage, RawIngestionQueueClient } from "@unprice/services/ingestion"
 import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { UnpriceApiError } from "~/errors"
@@ -15,21 +15,27 @@ const authMocks = vi.hoisted(() => ({
   resolveContextProjectId: vi.fn(),
 }))
 
-vi.mock("~/auth/key", () => ({
-  keyAuth: authMocks.keyAuth,
-  resolveContextProjectId: authMocks.resolveContextProjectId,
-}))
+vi.mock("~/auth/key", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("~/auth/key")>()
+  return {
+    ...actual,
+    keyAuth: authMocks.keyAuth,
+    resolveContextProjectId: authMocks.resolveContextProjectId,
+  }
+})
 
 import type { Logger } from "@unprice/logs"
 import type { ExecutionContext } from "hono"
 import {
   INGESTION_TEST_FAILURE_HEADER,
   INGESTION_TEST_FAILURE_RAW_PROCESSING_VALUE,
+  RAW_EVENT_MAX_BODY_BYTES,
+  RAW_EVENT_MAX_PROPERTIES_BYTES,
+  RAW_EVENT_MAX_PROPERTY_DEPTH,
+  RAW_EVENT_MAX_PROPERTY_KEYS,
   generateEventId,
   registerIngestEventsV1,
   resolveIngestionMessageRequestId,
-  safeSendToQueue,
-  selectQueueShardIndex,
 } from "./ingestEventsV1"
 
 const requestBody = {
@@ -46,7 +52,7 @@ const requestBody = {
 const verifiedKey = {
   id: "key_123",
   projectId: "proj_123",
-  defaultCustomerId: "cus_default_123",
+  defaultCustomerId: "cus_123",
   project: {
     id: "proj_123",
     workspaceId: "ws_123",
@@ -71,53 +77,8 @@ afterEach(() => {
 })
 
 describe("ingestEventsV1 helpers", () => {
-  it("selects the same shard for the same customer", () => {
-    expect(selectQueueShardIndex("cus_123")).toBe(selectQueueShardIndex("cus_123"))
-  })
-
   it("generates a stable ulid-like event id shape", () => {
     expect(generateEventId(requestBody.timestamp)).toBe("evt_01ARYZ6S41TSV4RRFFQ69G5FAV")
-  })
-
-  it("retries queue send and throws when all attempts fail", async () => {
-    const queue: Pick<Queue<IngestionQueueMessage>, "send"> = {
-      send: vi.fn().mockRejectedValue(new Error("queue down")),
-    }
-    const logger: Pick<Logger, "error" | "warn"> = {
-      error: vi.fn(),
-      warn: vi.fn(),
-    }
-
-    await expect(
-      safeSendToQueue({
-        logger,
-        queue: queue as Queue<IngestionQueueMessage>,
-        message: {
-          version: 1,
-          workspaceId: "ws_123",
-          projectId: "proj_123",
-          customerId: "cus_123",
-          requestId: "req_123",
-          receivedAt: Date.now(),
-          idempotencyKey: "idem_123",
-          id: "evt_123",
-          slug: "tokens_used",
-          timestamp: Date.now(),
-          properties: {},
-          source: {
-            environment: "development",
-            apiKeyId: "key_123",
-            sourceType: "api_key",
-            sourceId: "key_123",
-            sourceName: null,
-          },
-        },
-      })
-    ).rejects.toBeInstanceOf(UnpriceApiError)
-
-    expect(queue.send).toHaveBeenCalledTimes(3)
-    expect(logger.warn).toHaveBeenCalledTimes(3)
-    expect(logger.error).toHaveBeenCalledTimes(1)
   })
 
   it("marks non-production failure-test request ids", () => {
@@ -142,11 +103,11 @@ describe("ingestEventsV1 helpers", () => {
 })
 
 describe("ingestEventsV1 route", () => {
-  it("returns 202 and enqueues on the selected shard when allowed", async () => {
+  it("returns 202 and enqueues when allowed", async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(requestBody.timestamp))
 
-    const { app, env, executionCtx } = createTestApp()
+    const { app, env, executionCtx, sentMessages } = createTestApp()
 
     const response = await app.fetch(
       buildRequest({
@@ -158,12 +119,8 @@ describe("ingestEventsV1 route", () => {
     )
     expect(response.status).toBe(202)
 
-    const selectedQueue =
-      selectQueueShardIndex(requestBody.customerId) === 0 ? env.QUEUE_SHARD_0 : env.QUEUE_SHARD_1
-    const otherQueue = selectedQueue === env.QUEUE_SHARD_0 ? env.QUEUE_SHARD_1 : env.QUEUE_SHARD_0
-
-    expect(selectedQueue.send).toHaveBeenCalledTimes(1)
-    expect(selectedQueue.send).toHaveBeenCalledWith(
+    expect(sentMessages).toHaveLength(1)
+    expect(sentMessages[0]).toEqual(
       expect.objectContaining({
         idempotencyKey: requestBody.idempotencyKey,
         projectId: "proj_123",
@@ -179,14 +136,13 @@ describe("ingestEventsV1 route", () => {
         },
       })
     )
-    expect(otherQueue.send).not.toHaveBeenCalled()
   })
 
   it("marks accepted non-production messages for raw processing failure tests", async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(requestBody.timestamp))
 
-    const { app, env, executionCtx } = createTestApp()
+    const { app, env, executionCtx, sentMessages } = createTestApp()
 
     const response = await app.fetch(
       buildRequest(
@@ -203,10 +159,7 @@ describe("ingestEventsV1 route", () => {
     )
     expect(response.status).toBe(202)
 
-    const selectedQueue =
-      selectQueueShardIndex(requestBody.customerId) === 0 ? env.QUEUE_SHARD_0 : env.QUEUE_SHARD_1
-
-    expect(selectedQueue.send).toHaveBeenCalledWith(
+    expect(sentMessages[0]).toEqual(
       expect.objectContaining({
         requestId: "test:raw_ingestion_queue_processing_failed:req_123",
       })
@@ -217,7 +170,7 @@ describe("ingestEventsV1 route", () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(requestBody.timestamp))
 
-    const { app, env, executionCtx } = createTestApp()
+    const { app, env, executionCtx, sentMessages } = createTestApp()
 
     const response = await app.fetch(
       buildRequest({
@@ -229,10 +182,7 @@ describe("ingestEventsV1 route", () => {
     )
     expect(response.status).toBe(202)
 
-    const selectedQueue =
-      selectQueueShardIndex(requestBody.customerId) === 0 ? env.QUEUE_SHARD_0 : env.QUEUE_SHARD_1
-
-    expect(selectedQueue.send).toHaveBeenCalledWith(
+    expect(sentMessages[0]).toEqual(
       expect.objectContaining({
         timestamp: requestBody.timestamp,
       })
@@ -252,6 +202,125 @@ describe("ingestEventsV1 route", () => {
     )
 
     expect(response.status).toBe(400)
+  })
+
+  it("returns 413 and skips auth when Content-Length exceeds the raw event body limit", async () => {
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest(requestBody, {
+        "content-length": String(RAW_EVENT_MAX_BODY_BYTES + 1),
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(413)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        code: "PAYLOAD_TOO_LARGE",
+      })
+    )
+    expect(authMocks.keyAuth).not.toHaveBeenCalled()
+  })
+
+  it("returns 413 and skips auth when the raw body exceeds the limit without Content-Length", async () => {
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      new Request("https://example.com/v1/usage/record", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sk_test",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          ...requestBody,
+          padding: "x".repeat(RAW_EVENT_MAX_BODY_BYTES),
+        }),
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(413)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        code: "PAYLOAD_TOO_LARGE",
+      })
+    )
+    expect(authMocks.keyAuth).not.toHaveBeenCalled()
+  })
+
+  it("returns 413 and skips auth when properties exceed the serialized size limit", async () => {
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        properties: {
+          body: "x".repeat(RAW_EVENT_MAX_PROPERTIES_BYTES),
+        },
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(413)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        code: "PAYLOAD_TOO_LARGE",
+        message: `Event properties must be ${RAW_EVENT_MAX_PROPERTIES_BYTES} bytes or less`,
+      })
+    )
+    expect(authMocks.keyAuth).not.toHaveBeenCalled()
+  })
+
+  it("returns 413 and skips auth when properties contain too many keys", async () => {
+    const { app, env, executionCtx } = createTestApp()
+    const properties = Object.fromEntries(
+      Array.from({ length: RAW_EVENT_MAX_PROPERTY_KEYS + 1 }, (_, index) => [`key_${index}`, index])
+    )
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        properties,
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(413)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        code: "PAYLOAD_TOO_LARGE",
+        message: `Event properties must contain ${RAW_EVENT_MAX_PROPERTY_KEYS} keys or fewer`,
+      })
+    )
+    expect(authMocks.keyAuth).not.toHaveBeenCalled()
+  })
+
+  it("returns 413 and skips auth when properties are nested too deeply", async () => {
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        properties: createNestedProperties(RAW_EVENT_MAX_PROPERTY_DEPTH + 1),
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(413)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        code: "PAYLOAD_TOO_LARGE",
+        message: `Event properties must be nested ${RAW_EVENT_MAX_PROPERTY_DEPTH} levels or fewer`,
+      })
+    )
+    expect(authMocks.keyAuth).not.toHaveBeenCalled()
   })
 
   it("returns 400 when the raw event timestamp is too far in the future", async () => {
@@ -314,7 +383,7 @@ describe("ingestEventsV1 route", () => {
     vi.setSystemTime(new Date(requestBody.timestamp))
     authMocks.resolveContextProjectId.mockResolvedValue("proj_resolved_456")
 
-    const { app, env, executionCtx } = createTestApp()
+    const { app, env, executionCtx, sentMessages } = createTestApp()
 
     const response = await app.fetch(
       buildRequest({
@@ -326,10 +395,7 @@ describe("ingestEventsV1 route", () => {
     )
     expect(response.status).toBe(202)
 
-    const selectedQueue =
-      selectQueueShardIndex(requestBody.customerId) === 0 ? env.QUEUE_SHARD_0 : env.QUEUE_SHARD_1
-
-    expect(selectedQueue.send).toHaveBeenCalledWith(
+    expect(sentMessages[0]).toEqual(
       expect.objectContaining({
         projectId: "proj_resolved_456",
       })
@@ -340,7 +406,7 @@ describe("ingestEventsV1 route", () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(requestBody.timestamp))
 
-    const { app, env, executionCtx } = createTestApp()
+    const { app, env, executionCtx, sentMessages } = createTestApp()
 
     const response = await app.fetch(
       buildRequest({
@@ -352,10 +418,7 @@ describe("ingestEventsV1 route", () => {
     )
     expect(response.status).toBe(202)
 
-    const selectedQueue =
-      selectQueueShardIndex(requestBody.customerId) === 0 ? env.QUEUE_SHARD_0 : env.QUEUE_SHARD_1
-
-    expect(selectedQueue.send).toHaveBeenCalledWith(
+    expect(sentMessages[0]).toEqual(
       expect.objectContaining({
         idempotencyKey: requestBody.idempotencyKey,
         id: "evt_01ARYZ6S41TSV4RRFFQ69G5FAV",
@@ -367,7 +430,7 @@ describe("ingestEventsV1 route", () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(requestBody.timestamp))
 
-    const { app, env, executionCtx } = createTestApp()
+    const { app, env, executionCtx, sentMessages } = createTestApp()
 
     const response = await app.fetch(
       buildRequest({
@@ -379,19 +442,14 @@ describe("ingestEventsV1 route", () => {
     )
     expect(response.status).toBe(202)
 
-    const selectedQueue =
-      selectQueueShardIndex(verifiedKey.defaultCustomerId) === 0
-        ? env.QUEUE_SHARD_0
-        : env.QUEUE_SHARD_1
-
-    expect(selectedQueue.send).toHaveBeenCalledWith(
+    expect(sentMessages[0]).toEqual(
       expect.objectContaining({
         customerId: verifiedKey.defaultCustomerId,
       })
     )
   })
 
-  it("uses explicit customerId from body even when key has a different default", async () => {
+  it("returns 403 when explicit customerId differs from the customer-bound API key", async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(requestBody.timestamp))
 
@@ -405,14 +463,11 @@ describe("ingestEventsV1 route", () => {
       env,
       executionCtx
     )
-    expect(response.status).toBe(202)
-
-    const selectedQueue =
-      selectQueueShardIndex("cus_explicit_999") === 0 ? env.QUEUE_SHARD_0 : env.QUEUE_SHARD_1
-
-    expect(selectedQueue.send).toHaveBeenCalledWith(
+    expect(response.status).toBe(403)
+    await expect(response.json()).resolves.toEqual(
       expect.objectContaining({
-        customerId: "cus_explicit_999",
+        code: "FORBIDDEN",
+        message: "This API key is bound to a different customer",
       })
     )
   })
@@ -446,9 +501,8 @@ describe("ingestEventsV1 route", () => {
   })
 
   it("does not return 202 when queue send fails permanently after retries", async () => {
-    const { app, env, executionCtx } = createTestApp()
-    env.QUEUE_SHARD_0.send = vi.fn().mockRejectedValue(new Error("queue down"))
-    env.QUEUE_SHARD_1.send = vi.fn().mockRejectedValue(new Error("queue down"))
+    const { app, env, executionCtx, rawIngestionQueue } = createTestApp()
+    rawIngestionQueue.send.mockRejectedValue(new Error("queue down"))
 
     const response = await app.fetch(
       buildRequest({
@@ -459,16 +513,14 @@ describe("ingestEventsV1 route", () => {
       executionCtx
     )
 
-    expect(response.status).toBe(400)
+    expect(response.status).toBe(500)
     await expect(response.json()).resolves.toEqual(
       expect.objectContaining({
         code: "INTERNAL_SERVER_ERROR",
       })
     )
 
-    const selectedQueue =
-      selectQueueShardIndex(requestBody.customerId) === 0 ? env.QUEUE_SHARD_0 : env.QUEUE_SHARD_1
-    expect(selectedQueue.send).toHaveBeenCalledTimes(3)
+    expect(rawIngestionQueue.send).toHaveBeenCalledOnce()
   })
 })
 
@@ -476,13 +528,18 @@ function createTestApp() {
   const app = new OpenAPIHono<HonoEnv>()
   const waitUntilPromises: Promise<unknown>[] = []
   const logger = createRouteLogger()
+  const sentMessages: IngestionQueueMessage[] = []
+  const rawIngestionQueue = {
+    send: vi.fn<RawIngestionQueueClient["send"]>(async (message) => {
+      sentMessages.push(message)
+    }),
+  }
 
   app.use(timing())
 
   app.onError((error, c) => {
     if (error instanceof UnpriceApiError) {
-      const status = error.code === "RATE_LIMITED" ? 429 : 400
-      return c.json({ code: error.code, message: error.message }, status)
+      return c.json({ code: error.code, message: error.message }, error.status)
     }
 
     throw error
@@ -492,6 +549,7 @@ function createTestApp() {
     c.set("requestId", "req_123")
     c.set("requestStartedAt", Date.now())
     c.set("logger", logger as Logger)
+    c.set("rawIngestionQueue", rawIngestionQueue)
     c.set("services", {
       logger,
     })
@@ -505,12 +563,6 @@ function createTestApp() {
     APP_ENV: "development",
     NODE_ENV: "test",
     MAIN_PROJECT_ID: undefined,
-    QUEUE_SHARD_0: {
-      send: vi.fn().mockResolvedValue(undefined),
-    },
-    QUEUE_SHARD_1: {
-      send: vi.fn().mockResolvedValue(undefined),
-    },
   }
 
   const executionCtx = {
@@ -520,14 +572,14 @@ function createTestApp() {
     },
   } as unknown as ExecutionContext
 
-  return { app, env, executionCtx, logger, waitUntilPromises }
+  return { app, env, executionCtx, logger, rawIngestionQueue, sentMessages, waitUntilPromises }
 }
 
 function buildRequest(
   body: Record<string, unknown> = requestBody,
   headers: Record<string, string> = {}
 ) {
-  return new Request("https://example.com/v1/events/ingest", {
+  return new Request("https://example.com/v1/usage/record", {
     method: "POST",
     headers: {
       authorization: "Bearer sk_test",
@@ -544,4 +596,14 @@ function createRouteLogger(): Pick<Logger, "error" | "warn" | "set"> {
     warn: vi.fn(),
     set: vi.fn(),
   }
+}
+
+function createNestedProperties(depth: number): Record<string, unknown> {
+  let value: Record<string, unknown> = { value: 1 }
+
+  for (let index = 0; index < depth; index++) {
+    value = { nested: value }
+  }
+
+  return value
 }

@@ -43,6 +43,7 @@ export async function buildIngestionReportingEnvelope(params: {
     createdAt: now(),
     projectId,
     customerId,
+    redriveCount: 0,
     auditRecords,
     meterFacts: outcomes.flatMap((outcome) => outcome.meterFacts ?? []),
   }
@@ -62,8 +63,12 @@ export async function buildIngestionReportingAuditRecord(params: {
     computePayloadHash(message),
   ])
   const failed = outcome.state === "failed"
-  const payloadJson = failed ? serializeReplayPayload(message) : null
-  return {
+  const runContext = getMessageRunContext(message)
+
+  // Single outcome -> record projection. Everything the downstream row needs
+  // (including replay payload, computed once) lives on the record; the
+  // snake_case audit payload is derived from it rather than re-reading message.
+  const record: Omit<IngestionReportingAuditRecord, "auditPayloadJson"> = {
     idempotencyKey: message.idempotencyKey,
     canonicalAuditId,
     payloadHash,
@@ -75,51 +80,70 @@ export async function buildIngestionReportingAuditRecord(params: {
     sourceType: message.source.sourceType,
     sourceId: message.source.sourceId,
     sourceName: message.source.sourceName,
+    runId: runContext.runId,
+    traceId: runContext.traceId,
+    parentRunId: runContext.parentRunId,
+    workloadType: runContext.workloadType,
+    workloadId: runContext.workloadId,
+    ingestionMode: getMessageIngestionMode(message),
+    eventId: message.id,
+    slug: message.slug,
+    timestamp: message.timestamp,
     status: outcome.state,
     rejectionReason: outcome.state === "rejected" ? outcome.rejectionReason : undefined,
     failureStage: failed ? outcome.failureStage : null,
     failureReason: failed ? outcome.failureReason : null,
     failureMessage: failed ? (outcome.failureMessage ?? null) : null,
     replayable: failed ? outcome.replayable : false,
-    payloadJson,
-    auditPayloadJson: JSON.stringify(
-      buildIngestionAuditPayload(message, outcome, canonicalAuditId, payloadHash, handledAt)
-    ),
+    payloadJson: failed ? serializeReplayPayload(message) : null,
     firstSeenAt: message.receivedAt,
     handledAt,
+  }
+
+  return {
+    ...record,
+    auditPayloadJson: JSON.stringify(buildIngestionAuditPayload(record, message)),
   }
 }
 
 export function buildIngestionAuditPayload(
-  message: IngestionQueueMessage,
-  outcome: IngestionOutcome,
-  canonicalAuditId: string,
-  payloadHash: string,
-  handledAt: number
+  record: Omit<IngestionReportingAuditRecord, "auditPayloadJson">,
+  message: Pick<IngestionQueueMessage, "properties" | "requestId">
 ): Record<string, unknown> {
   return {
-    event_date: toEventDate(message.timestamp),
+    event_date: toEventDate(record.timestamp),
     schema_version: EVENTS_SCHEMA_VERSION,
-    id: message.id,
-    workspace_id: message.workspaceId,
-    project_id: message.projectId,
-    customer_id: message.customerId,
-    environment: message.source.environment,
-    api_key_id: message.source.apiKeyId,
-    source_type: message.source.sourceType,
-    source_id: message.source.sourceId,
-    source_name: message.source.sourceName,
+    id: record.eventId,
+    workspace_id: record.workspaceId,
+    project_id: record.projectId,
+    customer_id: record.customerId,
+    environment: record.environment,
+    api_key_id: record.apiKeyId,
+    source_type: record.sourceType,
+    source_id: record.sourceId,
+    source_name: record.sourceName,
+    run_id: record.runId,
+    trace_id: record.traceId,
+    parent_run_id: record.parentRunId,
+    workload_type: record.workloadType,
+    workload_id: record.workloadId,
+    ingestion_mode: record.ingestionMode,
     request_id: message.requestId,
-    idempotency_key: message.idempotencyKey,
-    slug: message.slug,
-    timestamp: message.timestamp,
-    received_at: message.receivedAt,
-    handled_at: handledAt,
-    state: outcome.state,
-    rejection_reason: outcome.state === "rejected" ? outcome.rejectionReason : undefined,
+    idempotency_key: record.idempotencyKey,
+    slug: record.slug,
+    timestamp: record.timestamp,
+    received_at: record.firstSeenAt,
+    handled_at: record.handledAt,
+    state: record.status,
+    rejection_reason: record.status === "rejected" ? record.rejectionReason : undefined,
+    failure_stage: record.failureStage,
+    failure_reason: record.failureReason,
+    failure_message: record.failureMessage,
+    replayable: record.replayable,
+    payload_json: record.payloadJson,
     properties: message.properties,
-    canonical_audit_id: canonicalAuditId,
-    payload_hash: payloadHash,
+    canonical_audit_id: record.canonicalAuditId,
+    payload_hash: record.payloadHash,
   }
 }
 
@@ -137,4 +161,30 @@ async function buildReportingEnvelopeId(
 
 function toEventDate(timestamp: number): string {
   return new Date(timestamp).toISOString().slice(0, 10)
+}
+
+function getMessageRunContext(message: IngestionQueueMessage): {
+  runId: string | null
+  traceId: string | null
+  parentRunId: string | null
+  workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
+  workloadId: string | null
+} {
+  const runContext = message.runContext ?? null
+
+  return {
+    runId: runContext?.runId ?? null,
+    traceId: runContext?.traceId ?? null,
+    parentRunId: runContext?.parentRunId ?? null,
+    workloadType: runContext?.workloadType ?? null,
+    workloadId: runContext?.workloadId ?? null,
+  }
+}
+
+function getMessageIngestionMode(message: IngestionQueueMessage): "async" | "sync" | "run" {
+  if (message.runContext?.runId) {
+    return "run"
+  }
+
+  return message.ingestionMode ?? "async"
 }

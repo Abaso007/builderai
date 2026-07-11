@@ -1,3 +1,4 @@
+import { Lock } from "lucide-react"
 import { Fragment } from "react"
 import { entitlementFlag } from "~/lib/flags"
 import type { DashboardRoute, Shortcut } from "~/types"
@@ -46,7 +47,9 @@ export async function Sidebar({
 
       const isActive = await entitlementFlag(route.featureSlug)
 
-      return isActive ? route : null // Return the route if active, otherwise null
+      // gated features stay discoverable: the route renders locked and the
+      // page behind it explains the upgrade path
+      return isActive ? route : { ...route, locked: true }
     })
   )
 
@@ -68,9 +71,9 @@ export async function Sidebar({
   return (
     <Fragment>
       {/* sidebar (lg+) */}
-      <nav className="top-0 z-40 hidden h-screen gap-2 lg:inset-y-0 lg:z-50 lg:flex lg:w-64 lg:flex-col">
+      <nav className="top-0 z-40 hidden h-screen gap-2 lg:inset-y-0 lg:z-50 lg:flex lg:w-56 lg:flex-col">
         <aside className="flex grow flex-col gap-y-6 overflow-y-auto border-r p-4">
-          <Logo />
+          <Logo className="pl-1" size="md" />
           <nav aria-label="core navigation links" className="flex flex-1 flex-col space-y-10">
             <ul className="space-y-1">
               {filteredActiveRoutes.map((item) => (
@@ -84,6 +87,12 @@ export async function Sidebar({
                   >
                     <item.icon className="size-4 shrink-0" aria-hidden="true" />
                     {item.name}
+                    {item.locked && (
+                      <Lock
+                        className="ml-auto size-3 shrink-0 text-muted-foreground"
+                        aria-label="Requires a plan upgrade"
+                      />
+                    )}
                   </Tab>
 
                   {item?.sidebar && (
@@ -103,7 +112,7 @@ export async function Sidebar({
                 </li>
               ))}
             </ul>
-            <div>
+            <div className="space-y-2">
               <span className="font-medium text-background-solid text-xs leading-6">Shortcuts</span>
               <ul aria-label="shortcuts" className="space-y-0.5">
                 {filteredShortcuts.map((item) => (
@@ -123,8 +132,8 @@ export async function Sidebar({
         </aside>
       </nav>
       {/* top navbar (xs-lg) */}
-      <div className="sticky top-0 z-40 flex h-16 shrink-0 items-center justify-between border-b px-2 shadow-sm sm:gap-x-6 sm:px-4 lg:hidden">
-        <Logo />
+      <div className="sticky top-0 z-40 flex h-16 w-full shrink-0 items-center justify-between border-b px-2 shadow-sm sm:gap-x-6 sm:px-4 lg:hidden">
+        <Logo size="md" />
         <div className="flex items-center gap-1 sm:gap-2">
           <UserProfileMobile />
           <MobileSidebar>
@@ -144,6 +153,12 @@ export async function Sidebar({
                     >
                       <item.icon className="size-4 shrink-0" aria-hidden="true" />
                       {item.name}
+                      {item.locked && (
+                        <Lock
+                          className="ml-auto size-3 shrink-0 text-muted-foreground"
+                          aria-label="Requires a plan upgrade"
+                        />
+                      )}
                     </Tab>
 
                     {item?.sidebar && (

@@ -1,7 +1,6 @@
-import { type Database, and, eq, gt, inArray, lte, ne } from "@unprice/db"
+import { type Database, and, eq, gt, inArray, lte } from "@unprice/db"
 import { billingPeriods } from "@unprice/db/schema"
 import type {
-  BillingConfig,
   ConfigFeatureVersionType,
   CreditLinePolicy,
   CustomerEntitlementExtended,
@@ -12,7 +11,11 @@ import type {
 } from "@unprice/db/validators"
 import { FetchError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { INGESTION_MAX_EVENT_AGE_MS } from "../entitlements"
+import {
+  INGESTION_MAX_EVENT_AGE_MS,
+  extractCurrencyCodeFromFeatureConfig,
+  toGrantResetConfigFromBillingConfig,
+} from "../entitlements"
 import type { EntitlementService } from "../entitlements/service"
 import { cachedQuery } from "../utils/cached-query"
 import type { IngestionRejectionReason } from "./interface"
@@ -20,10 +23,14 @@ import type { IngestionQueueMessage } from "./message"
 
 export type IngestionGrant = {
   allowanceUnits: number | null
+  cadenceEffectiveAt: number
+  cadenceExpiresAt: number | null
+  currencyCode: string
   effectiveAt: number
   expiresAt: number | null
   grantId: string
   priority: number
+  resetConfig: ResetConfig | null
 }
 
 export type IngestionBillingPeriodContext = {
@@ -76,6 +83,7 @@ export type CustomerGrantContextReader = {
   prepareCustomerGrantContext(
     params: CustomerGrantContextWindow & {
       customerId: string
+      includeBillingPeriods?: boolean
       projectId: string
     }
   ): Promise<PreparedCustomerGrantContext>
@@ -155,9 +163,11 @@ export class IngestionEntitlementContextLoader {
   public async prepareCustomerGrantContext(params: {
     customerId: string
     endAt: number
+    includeBillingPeriods?: boolean
     projectId: string
     startAt: number
   }): Promise<PreparedCustomerGrantContext> {
+    const includeBillingPeriods = params.includeBillingPeriods ?? true
     const bucket = Math.floor(params.endAt / GRANT_CONTEXT_CACHE_BUCKET_MS)
     const cacheKey = `${params.projectId}:${params.customerId}:${bucket}`
 
@@ -186,13 +196,13 @@ export class IngestionEntitlementContextLoader {
         error: cachedResult.err.message,
       })
 
-      return this.withFreshBillingPeriodContexts(
-        await this.loadCustomerEntitlementContext(params),
-        params
-      )
+      const direct = await this.loadCustomerEntitlementContext(params)
+      return includeBillingPeriods ? this.withFreshBillingPeriodContexts(direct, params) : direct
     }
 
-    return this.withFreshBillingPeriodContexts(cachedResult.val, params)
+    return includeBillingPeriods
+      ? this.withFreshBillingPeriodContexts(cachedResult.val, params)
+      : cachedResult.val
   }
 
   private async loadCustomerEntitlementContext(params: {
@@ -305,7 +315,7 @@ export class IngestionEntitlementContextLoader {
           eq(billingPeriods.projectId, params.projectId),
           eq(billingPeriods.customerId, params.customerId),
           inArray(billingPeriods.subscriptionItemId, subscriptionItemIds),
-          ne(billingPeriods.status, "voided"),
+          eq(billingPeriods.status, "pending"),
           lte(billingPeriods.cycleStartAt, params.endAt),
           gt(billingPeriods.cycleEndAt, params.startAt)
         )
@@ -332,10 +342,25 @@ export function resolveCustomerGrantContextWindow(params: {
   }
 }
 
+export function hasBillingPeriodCoveringEvent(
+  entitlement: Pick<IngestionEntitlement, "billingPeriods">,
+  eventAt: number
+): boolean {
+  return entitlement.billingPeriods.some(
+    (period) => period.cycleStartAt <= eventAt && eventAt < period.cycleEndAt
+  )
+}
+
 export function toIngestionEntitlement(
   entitlement: CustomerEntitlementExtended,
   options: { billingPeriods?: IngestionBillingPeriodContext[] } = {}
 ): IngestionEntitlement {
+  const resetConfig =
+    entitlement.featurePlanVersion.resetConfig ??
+    toGrantResetConfigFromBillingConfig(entitlement.featurePlanVersion.billingConfig)
+  const currencyCode =
+    extractCurrencyCodeFromFeatureConfig(entitlement.featurePlanVersion.config) ?? "USD"
+
   return {
     billingPeriods: options.billingPeriods ?? [],
     creditLinePolicy: entitlement.subscriptionPhase?.creditLinePolicy ?? "uncapped",
@@ -349,17 +374,19 @@ export function toIngestionEntitlement(
     featureType: entitlement.featurePlanVersion.featureType,
     grants: (entitlement.grants ?? []).map((grant) => ({
       allowanceUnits: grant.allowanceUnits,
+      cadenceEffectiveAt: entitlement.effectiveAt,
+      cadenceExpiresAt: entitlement.expiresAt,
+      currencyCode,
       effectiveAt: grant.effectiveAt,
       expiresAt: grant.expiresAt,
       grantId: grant.id,
       priority: grant.priority,
+      resetConfig,
     })),
     meterConfig: entitlement.featurePlanVersion.meterConfig ?? null,
     overageStrategy: entitlement.overageStrategy,
     projectId: entitlement.projectId,
-    resetConfig:
-      entitlement.featurePlanVersion.resetConfig ??
-      toResetConfigFromBillingConfig(entitlement.featurePlanVersion.billingConfig),
+    resetConfig,
     subscriptionId: entitlement.subscriptionId,
     subscriptionItemId: entitlement.subscriptionItemId,
   }
@@ -367,14 +394,4 @@ export function toIngestionEntitlement(
 
 function isUsageEntitlement(entitlement: IngestionEntitlement): boolean {
   return entitlement.featureType === "usage" && Boolean(entitlement.meterConfig)
-}
-
-function toResetConfigFromBillingConfig(billingConfig: BillingConfig): ResetConfig {
-  return {
-    name: billingConfig.name,
-    resetInterval: billingConfig.billingInterval,
-    resetIntervalCount: billingConfig.billingIntervalCount,
-    planType: billingConfig.planType,
-    resetAnchor: "dayOfCreation",
-  }
 }

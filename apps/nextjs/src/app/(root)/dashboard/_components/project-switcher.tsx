@@ -1,7 +1,6 @@
 "use client"
 
 import { useSuspenseQuery } from "@tanstack/react-query"
-import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
 import {
   Command,
@@ -64,16 +63,13 @@ export function ProjectSwitcher() {
         >
           <span className="truncate font-semibold">
             {activeProject.name}
-            <Badge
-              className={cn("ml-2 font-normal", {
-                "border-destructive": activeProject.isMain,
-              })}
-              variant={activeProject.isInternal ? "destructive" : "outline"}
-            >
-              {activeProject.isInternal
-                ? `${activeWorkspace.plan} - INTERNAL`
-                : activeWorkspace.plan}
-            </Badge>
+            {/* the plan chip lives on the workspace switcher; the project
+                only marks project-specific state, quietly */}
+            {activeProject.isInternal && (
+              <span className="ml-1.5 font-mono font-normal text-[10px] text-danger-text uppercase">
+                internal
+              </span>
+            )}
           </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>

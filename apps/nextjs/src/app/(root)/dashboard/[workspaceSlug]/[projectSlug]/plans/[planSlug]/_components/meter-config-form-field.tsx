@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { type FormEvent, useEffect, useMemo, useState } from "react"
 import type { UseFormReturn } from "react-hook-form"
 import { useFieldArray } from "react-hook-form"
 import { z } from "zod"
@@ -126,6 +126,7 @@ function EventFormDialog({
   suggestedProperty,
   onSaved,
   isDisabled,
+  isPlanVersionLocked,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -134,6 +135,7 @@ function EventFormDialog({
   suggestedProperty?: string
   onSaved: (event: Event) => Promise<void> | void
   isDisabled?: boolean
+  isPlanVersionLocked?: boolean
 }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
@@ -158,6 +160,8 @@ function EventFormDialog({
   }, [event?.id, form, open, suggestedProperty])
 
   const isPending = createEvent.isPending || updateEvent.isPending
+  const isCreateDisabled = Boolean(isDisabled && mode === "create")
+  const isExistingEventMetadataLocked = Boolean(isPlanVersionLocked && mode === "edit")
 
   const onSubmit = async (data: EventFormValues) => {
     const availableProperties = toAvailableProperties(data.availableProperties)
@@ -184,11 +188,18 @@ function EventFormDialog({
     onOpenChange(false)
   }
 
+  const handleFormSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.stopPropagation()
+    void form.handleSubmit(onSubmit)(event)
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[620px]">
         <DialogHeader className="space-y-2">
-          <DialogTitle>{mode === "create" ? "Create event" : "Edit event"}</DialogTitle>
+          <DialogTitle>
+            {mode === "create" ? "Create event" : isPlanVersionLocked ? "View event" : "Edit event"}
+          </DialogTitle>
           <DialogDescription>
             Events are reusable across features. Add the SDK slug once, then list any numeric
             payload fields you may want to aggregate later.
@@ -196,7 +207,7 @@ function EventFormDialog({
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+          <form onSubmit={handleFormSubmit} className="space-y-6">
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField
                 control={form.control}
@@ -209,7 +220,7 @@ function EventFormDialog({
                       <Input
                         {...field}
                         placeholder="AI completion"
-                        disabled={isDisabled || isPending}
+                        disabled={isCreateDisabled || isExistingEventMetadataLocked || isPending}
                         onChange={(e) => {
                           field.onChange(e)
 
@@ -236,7 +247,7 @@ function EventFormDialog({
                         {...field}
                         className="font-mono"
                         placeholder="ai_completion"
-                        disabled={isDisabled || isPending || mode === "edit"}
+                        disabled={isCreateDisabled || isPending || mode === "edit"}
                       />
                     </FormControl>
                     <FormMessage />
@@ -260,7 +271,7 @@ function EventFormDialog({
                   size="sm"
                   variant="outline"
                   className="shrink-0"
-                  disabled={isDisabled || isPending}
+                  disabled={isCreateDisabled || isPending}
                   onClick={() => append({ value: "" })}
                 >
                   <Plus className="mr-2 size-3.5" />
@@ -285,7 +296,7 @@ function EventFormDialog({
                                   {...field}
                                   className="font-mono"
                                   placeholder="input_tokens"
-                                  disabled={isDisabled || isPending || isImmutableProperty}
+                                  disabled={isCreateDisabled || isPending || isImmutableProperty}
                                 />
                               </FormControl>
                               <FormMessage />
@@ -297,7 +308,7 @@ function EventFormDialog({
                           variant="ghost"
                           size="icon"
                           className="mt-0.5 shrink-0"
-                          disabled={isDisabled || isPending || isImmutableProperty}
+                          disabled={isCreateDisabled || isPending || isImmutableProperty}
                           onClick={() => remove(index)}
                         >
                           <XCircle className="size-4" />
@@ -322,7 +333,7 @@ function EventFormDialog({
             <DialogFooter className="pt-2">
               <SubmitButton
                 isSubmitting={form.formState.isSubmitting}
-                isDisabled={isDisabled || isPending}
+                isDisabled={isCreateDisabled || isPending}
                 label={mode === "create" ? "Create event" : "Save event"}
               />
             </DialogFooter>
@@ -422,6 +433,10 @@ export function MeterConfigFormField({
   }
 
   const handleEventSaved = async (event: Event) => {
+    if (isDisabled) {
+      return
+    }
+
     setMeterConfigValue({
       event,
       aggregationMethod: selectedAggregationMethod,
@@ -497,14 +512,13 @@ export function MeterConfigFormField({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    disabled={isDisabled}
                     onClick={() => {
                       setEventDialogMode("edit")
                       setIsEventDialogOpen(true)
                     }}
                   >
                     <Pencil className="mr-1.5 size-3" />
-                    Edit event
+                    {isDisabled ? "View event" : "Edit event"}
                   </Button>
                 )}
               </div>
@@ -564,7 +578,7 @@ export function MeterConfigFormField({
                 >
                   <Command>
                     {shouldShowEventSearch ? (
-                      <CommandInput className="h-9 py-2 text-sm" placeholder="Search events..." />
+                      <CommandInput className="h-9 py-2 text-sm" placeholder="Search events" />
                     ) : null}
                     <CommandList className="overflow-hidden">
                       <CommandEmpty>No events found.</CommandEmpty>
@@ -756,7 +770,6 @@ export function MeterConfigFormField({
                           type="button"
                           variant="ghost"
                           size="sm"
-                          disabled={isDisabled}
                           className="h-auto px-0 text-xs"
                           onClick={() => {
                             setEventDialogMode("edit")
@@ -764,7 +777,7 @@ export function MeterConfigFormField({
                           }}
                         >
                           <Pencil className="mr-1.5 size-3.5" />
-                          Edit event
+                          {isDisabled ? "View event" : "Edit event"}
                         </Button>
                       </div>
                     </div>
@@ -786,6 +799,7 @@ export function MeterConfigFormField({
         suggestedProperty={suggestedProperty}
         onSaved={handleEventSaved}
         isDisabled={isDisabled}
+        isPlanVersionLocked={isDisabled}
       />
     </>
   )

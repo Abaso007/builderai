@@ -38,10 +38,14 @@ describe("IngestionEntitlementContextLoader", () => {
       grants: [
         {
           allowanceUnits: null,
+          cadenceEffectiveAt: TEST_NOW - 1_000,
+          cadenceExpiresAt: null,
+          currencyCode: "USD",
           effectiveAt: TEST_NOW - 1_000,
           expiresAt: TEST_NOW + 1_000,
           grantId: "grant_unlimited",
           priority: 20,
+          resetConfig: null,
         },
       ],
     })
@@ -65,8 +69,20 @@ describe("IngestionEntitlementContextLoader", () => {
       grants: [
         {
           allowanceUnits: null,
+          cadenceEffectiveAt: entitlement.effectiveAt,
+          cadenceExpiresAt: entitlement.expiresAt,
+          currencyCode: "USD",
+          effectiveAt: TEST_NOW - 1_000,
+          expiresAt: TEST_NOW + 1_000,
           grantId: "grant_unlimited",
           priority: 20,
+          resetConfig: {
+            name: "monthly",
+            resetAnchor: "dayOfCreation",
+            resetInterval: "month",
+            resetIntervalCount: 1,
+            planType: "recurring",
+          },
         },
       ],
       subscriptionId: "sub_123",
@@ -107,6 +123,77 @@ describe("IngestionEntitlementContextLoader", () => {
       ],
     })
     expect(getCustomerEntitlementsForCustomer).not.toHaveBeenCalled()
+  })
+
+  it("returns a cached context without loading billing periods when they are excluded", async () => {
+    const select = vi.fn()
+    const cachedContext = {
+      candidateEntitlements: [createEntitlement({ subscriptionItemId: "si_cached" })],
+    }
+    const getCustomerEntitlementsForCustomer = vi.fn()
+    const loader = createLoader({
+      cache: {
+        ingestionPreparedGrantContext: {
+          swr: vi.fn().mockResolvedValue({ val: cachedContext }),
+        },
+      },
+      db: { select },
+      entitlementService: {
+        getCustomerEntitlementsForCustomer,
+        customerExists: vi.fn(),
+      },
+    })
+
+    const context = await loader.prepareCustomerGrantContext({
+      customerId: "cus_123",
+      projectId: "proj_123",
+      startAt: 0,
+      endAt: 1_000,
+      includeBillingPeriods: false,
+    })
+
+    expect(context).toBe(cachedContext)
+    expect(getCustomerEntitlementsForCustomer).not.toHaveBeenCalled()
+    expect(select).not.toHaveBeenCalled()
+    for (const candidateEntitlement of context.candidateEntitlements) {
+      expect(candidateEntitlement.billingPeriods).toEqual([])
+    }
+  })
+
+  it("falls back to direct context without loading billing periods when they are excluded", async () => {
+    const select = vi.fn()
+    const entitlement = createEntitlement({ subscriptionItemId: "si_direct" })
+    const entitlementRecord = createCustomerEntitlementRecord(entitlement)
+    const getCustomerEntitlementsForCustomer = vi
+      .fn()
+      .mockResolvedValue(Ok([entitlementRecord] as never))
+    const loader = createLoader({
+      cache: {
+        ingestionPreparedGrantContext: {
+          swr: vi.fn().mockResolvedValue({ err: new Error("cache unavailable") }),
+        },
+      },
+      db: { select },
+      entitlementService: {
+        getCustomerEntitlementsForCustomer,
+        customerExists: vi.fn(),
+      },
+    })
+
+    const context = await loader.prepareCustomerGrantContext({
+      customerId: "cus_123",
+      projectId: "proj_123",
+      startAt: 0,
+      endAt: 1_000,
+      includeBillingPeriods: false,
+    })
+
+    expect(context).toEqual({
+      candidateEntitlements: [toIngestionEntitlement(entitlementRecord as never)],
+      rejectionReason: undefined,
+    })
+    expect(getCustomerEntitlementsForCustomer).toHaveBeenCalledTimes(1)
+    expect(select).not.toHaveBeenCalled()
   })
 
   it("falls back to direct entitlement load when the cache returns an error", async () => {
@@ -212,12 +299,14 @@ describe("IngestionEntitlementContextLoader", () => {
 function createLoader(
   overrides: {
     cache?: unknown
+    db?: unknown
     entitlementService?: unknown
     logger?: ReturnType<typeof createLogger>
   } = {}
 ) {
   return new IngestionEntitlementContextLoader({
     cache: overrides.cache ?? createCache(),
+    db: overrides.db,
     entitlementService:
       overrides.entitlementService ??
       ({

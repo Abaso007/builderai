@@ -4,6 +4,7 @@ import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { UnpriceApiError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
+import { internalKeyAuth } from "~/middleware/internal-key"
 
 const authMocks = vi.hoisted(() => ({
   keyAuth: vi.fn(),
@@ -23,16 +24,46 @@ vi.mock("~/ingestion/entitlements/client", () => ({
   },
 }))
 
+const runBudgetMocks = vi.hoisted(() => ({
+  getByName: vi.fn(),
+}))
+
 import { registerFlushReservationsForInvoicingV1 } from "./flushReservationsForInvoicingV1"
 
+// The flush endpoint lives under /v1/internal/* and is only ever called by our own billing
+// service, so the default verified key here represents an internal project.
 const verifiedKey = {
   id: "key_123",
   projectId: "proj_123",
   project: {
     id: "proj_123",
     workspaceId: "ws_123",
+    isInternal: true,
+    isMain: false,
+    workspace: { unPriceCustomerId: null },
+  },
+}
+
+const tenantKey = {
+  id: "key_tenant",
+  projectId: "proj_tenant",
+  project: {
+    id: "proj_tenant",
+    workspaceId: "ws_tenant",
     isInternal: false,
     isMain: false,
+    workspace: { unPriceCustomerId: null },
+  },
+}
+
+const mainKey = {
+  id: "key_main",
+  projectId: "proj_main",
+  project: {
+    id: "proj_main",
+    workspaceId: "ws_main",
+    isInternal: false,
+    isMain: true,
     workspace: { unPriceCustomerId: null },
   },
 }
@@ -46,6 +77,53 @@ afterEach(() => {
 })
 
 describe("flushReservationsForInvoicingV1 route", () => {
+  it("rejects a tenant key with 403", async () => {
+    authMocks.keyAuth.mockResolvedValueOnce(tenantKey)
+
+    const { app, env, executionCtx } = createTestApp({
+      billingPeriods: [{ id: "bp_123" }],
+      entitlements: [{ id: "ce_123", subscriptionId: "sub_123", subscriptionPhaseId: "phase_123" }],
+    })
+
+    const response = await app.fetch(
+      buildRequest({
+        customerId: "cus_123",
+        subscriptionId: "sub_123",
+        subscriptionPhaseId: "phase_123",
+        statementKey: "stmt_123",
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(403)
+  })
+
+  it("allows a main-project key with 200", async () => {
+    authMocks.keyAuth.mockResolvedValue(mainKey)
+    windowMocks.getEntitlementWindowStub.mockReturnValue({
+      flushReservationForInvoicing: vi.fn().mockResolvedValue({ ok: true, outcome: "flushed" }),
+    })
+
+    const { app, env, executionCtx } = createTestApp({
+      billingPeriods: [{ id: "bp_123" }],
+      entitlements: [{ id: "ce_123", subscriptionId: "sub_123", subscriptionPhaseId: "phase_123" }],
+    })
+
+    const response = await app.fetch(
+      buildRequest({
+        customerId: "cus_123",
+        subscriptionId: "sub_123",
+        subscriptionPhaseId: "phase_123",
+        statementKey: "stmt_123",
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+  })
+
   it("flushes reservation windows for an invoice statement", async () => {
     const flushSpy = vi.fn().mockResolvedValue({ ok: true, outcome: "flushed" })
     windowMocks.getEntitlementWindowStub.mockReturnValue({
@@ -181,10 +259,48 @@ describe("flushReservationsForInvoicingV1 route", () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ ok: true, flushed: 0, skipped: 1 })
   })
+
+  it("flushes matching run-budget captures before invoice materialization", async () => {
+    const flushCapturesForInvoicing = vi
+      .fn()
+      .mockResolvedValue({ ok: true, flushed: 2, skipped: 0 })
+    Object.defineProperty(flushCapturesForInvoicing, "call", {
+      value: vi.fn(() => {
+        throw new Error('Could not serialize object of type "DurableObject"')
+      }),
+    })
+    runBudgetMocks.getByName.mockReturnValue({ flushCapturesForInvoicing })
+
+    const { app, env, executionCtx } = createTestApp({
+      billingPeriods: [{ cycleStartAt: 1_778_000_000_000, id: "bp_123" }],
+      budgetRuns: [{ id: "brun_123" }],
+      entitlements: [],
+    })
+
+    const response = await app.fetch(
+      buildRequest({
+        customerId: "cus_123",
+        subscriptionId: "sub_123",
+        subscriptionPhaseId: "phase_123",
+        statementKey: "stmt_123",
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ ok: true, flushed: 2, skipped: 0 })
+    expect(runBudgetMocks.getByName).toHaveBeenCalledWith("development:proj_123:cus_123:brun_123")
+    expect(flushCapturesForInvoicing).toHaveBeenCalledWith({
+      statementKey: "stmt_123",
+      billingPeriodIds: ["bp_123"],
+    })
+  })
 })
 
 function createTestApp(options: {
-  billingPeriods: Array<{ id: string }>
+  billingPeriods: Array<{ cycleStartAt?: number; id: string }>
+  budgetRuns?: Array<{ id: string }>
   entitlements: Array<{ id: string; subscriptionId: string; subscriptionPhaseId: string }>
 }) {
   const app = new OpenAPIHono<HonoEnv>()
@@ -200,7 +316,9 @@ function createTestApp(options: {
             ? 500
             : error.code === "RATE_LIMITED"
               ? 429
-              : 400
+              : error.code === "FORBIDDEN"
+                ? 403
+                : 400
       return c.json({ code: error.code, message: error.message }, status)
     }
     throw error
@@ -212,7 +330,14 @@ function createTestApp(options: {
     c.set("db", {
       query: {
         billingPeriods: {
-          findMany: vi.fn().mockResolvedValue(options.billingPeriods),
+          findMany: vi
+            .fn()
+            .mockResolvedValue(
+              options.billingPeriods.map((period) => ({ cycleStartAt: 0, ...period }))
+            ),
+        },
+        budgetRuns: {
+          findMany: vi.fn().mockResolvedValue(options.budgetRuns ?? []),
         },
       },
     })
@@ -227,11 +352,14 @@ function createTestApp(options: {
     await next()
   })
 
+  app.use("/v1/internal/*", internalKeyAuth())
+
   registerFlushReservationsForInvoicingV1(app)
 
   const env = {
     APP_ENV: "development",
     entitlementwindow: {},
+    runbudget: { getByName: runBudgetMocks.getByName },
   }
 
   const executionCtx = {
@@ -243,7 +371,7 @@ function createTestApp(options: {
 }
 
 function buildRequest(body: Record<string, unknown>) {
-  return new Request("https://example.com/v1/billing/reservations/flush-for-invoicing", {
+  return new Request("https://example.com/v1/internal/billing-reservations/flush-for-invoicing", {
     method: "POST",
     headers: {
       authorization: "Bearer sk_test",

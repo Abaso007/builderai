@@ -4,7 +4,46 @@ import { IngestionFeatureVerifier } from "./feature-verification"
 
 const TEST_NOW = Date.UTC(2026, 2, 20, 12, 0, 0)
 
+function createIngestionGrant(
+  overrides: Partial<IngestionEntitlement["grants"][number]> = {}
+): IngestionEntitlement["grants"][number] {
+  return {
+    allowanceUnits: 100,
+    cadenceEffectiveAt: TEST_NOW - 1_000,
+    cadenceExpiresAt: null,
+    currencyCode: "USD",
+    effectiveAt: TEST_NOW - 1_000,
+    expiresAt: null,
+    grantId: "grant_123",
+    priority: 10,
+    resetConfig: null,
+    ...overrides,
+  }
+}
+
 describe("IngestionFeatureVerifier", () => {
+  it("requests the grant context without billing periods", async () => {
+    const prepareCustomerGrantContext = vi.fn().mockResolvedValue({
+      candidateEntitlements: [],
+    })
+    const verifier = new IngestionFeatureVerifier({
+      entitlementContext: { prepareCustomerGrantContext },
+      entitlementWindowClient: { getEntitlementWindowStub: vi.fn() },
+      logger: { error: vi.fn() },
+    } as never)
+
+    await verifier.verifyFeatureStatus({
+      customerId: "cus_123",
+      featureSlug: "api_calls",
+      projectId: "proj_123",
+      timestamp: TEST_NOW,
+    })
+
+    expect(prepareCustomerGrantContext).toHaveBeenCalledWith(
+      expect.objectContaining({ includeBillingPeriods: false })
+    )
+  })
+
   it("returns prepared context rejections that are not feature misses", async () => {
     const verifier = createVerifier({
       preparedContext: {
@@ -55,20 +94,20 @@ describe("IngestionFeatureVerifier", () => {
             featureSlug: "seats",
             featureType: "tier",
             grants: [
-              {
+              createIngestionGrant({
                 allowanceUnits: 7,
                 effectiveAt: TEST_NOW - 1_000,
                 expiresAt: null,
                 grantId: "grant_active",
                 priority: 10,
-              },
-              {
+              }),
+              createIngestionGrant({
                 allowanceUnits: 3,
                 effectiveAt: TEST_NOW - 2_000,
                 expiresAt: TEST_NOW - 1,
                 grantId: "grant_expired",
                 priority: 10,
-              },
+              }),
             ],
             meterConfig: null,
           }),
@@ -94,13 +133,13 @@ describe("IngestionFeatureVerifier", () => {
             featureSlug: "seats",
             featureType: "package",
             grants: [
-              {
+              createIngestionGrant({
                 allowanceUnits: null,
                 effectiveAt: TEST_NOW - 1_000,
                 expiresAt: null,
                 grantId: "grant_unlimited",
                 priority: 10,
-              },
+              }),
             ],
             meterConfig: null,
           }),

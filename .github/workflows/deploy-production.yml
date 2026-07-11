@@ -5,6 +5,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 env:
   SKIP_ENV_VALIDATION: 1
 
@@ -15,6 +18,10 @@ concurrency:
 jobs:
   build-lint:
     uses: ./.github/workflows/job_build.yaml
+    permissions:
+      contents: read
+      pull-requests: write
+      statuses: write
     with:
       run_integration_tests: true
 
@@ -31,9 +38,9 @@ jobs:
       - build-lint
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: Infisical/secrets-action@v1.0.7
+      - uses: Infisical/secrets-action@03d3fa38607956c493f53c6633f94006a13c47ae # v1.0.7
         name: Pull secrets from Infisical
         with:
           client-id: ${{ secrets.MACHINE_IDENTITY_CLIENT_ID }}
@@ -87,11 +94,11 @@ jobs:
       - deploy-production-tinybird
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - uses: Infisical/secrets-action@v1.0.7
+      - uses: Infisical/secrets-action@03d3fa38607956c493f53c6633f94006a13c47ae # v1.0.7
         name: Pull secrets from Infisical
         with:
           client-id: ${{ secrets.MACHINE_IDENTITY_CLIENT_ID }}
@@ -108,7 +115,7 @@ jobs:
           ts: "true"
           python: "false"
 
-      - uses: cardinalby/export-env-action@v2
+      - uses: cardinalby/export-env-action@4f48c4676cf6ed6f46e30899ee987ce695da7c80 # v2
         with:
           envFile: '.env'
           export: true
@@ -119,7 +126,7 @@ jobs:
         continue-on-error: true
         run: npx turbo-ignore -d apps/auth-proxy
 
-      - uses: amondnet/vercel-action@v42.3.0 #deploy
+      - uses: amondnet/vercel-action@de09aeac2ace6599ec9b11ef87558759a496bac4 # v42.3.0 deploy
         name: Deploy Unprice auth to Vercel
         id: deploy-auth
         # if turbo-ignore fails,that means there are no changes in the auth-proxy folder
@@ -143,11 +150,11 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - uses: Infisical/secrets-action@v1.0.7
+      - uses: Infisical/secrets-action@03d3fa38607956c493f53c6633f94006a13c47ae # v1.0.7
         name: Pull secrets from Infisical
         with:
           client-id: ${{ secrets.MACHINE_IDENTITY_CLIENT_ID }}
@@ -164,14 +171,14 @@ jobs:
           ts: "true"
           python: "false"
 
-      - uses: cardinalby/export-env-action@v2
+      - uses: cardinalby/export-env-action@4f48c4676cf6ed6f46e30899ee987ce695da7c80 # v2
         with:
           envFile: '.env'
           export: true
           mask: true
 
       # deploy unprice to vercel
-      - uses: amondnet/vercel-action@v42.3.0 #deploy
+      - uses: amondnet/vercel-action@de09aeac2ace6599ec9b11ef87558759a496bac4 # v42.3.0 deploy
         name: Deploy Unprice to Vercel
         id: deploy-unprice
         with:

@@ -2,9 +2,9 @@
 
 import type { ColumnDef } from "@tanstack/react-table"
 
+import { formatLedgerMoney } from "@unprice/money"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
-import { Checkbox } from "@unprice/ui/checkbox"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { Typography } from "@unprice/ui/typography"
 import { format } from "date-fns"
@@ -12,7 +12,6 @@ import { InfoIcon } from "lucide-react"
 import { useParams } from "next/navigation"
 import { DataTableColumnHeader } from "~/components/data-table/data-table-column-header"
 import { SuperLink } from "~/components/super-link"
-import { formatInvoiceMoney } from "../format-invoice-money"
 import { DataTableRowActions } from "./data-table-row-actions"
 
 type InvoiceCustomer = RouterOutputs["customers"]["getInvoices"]["invoices"][number]
@@ -20,7 +19,7 @@ type InvoiceCustomer = RouterOutputs["customers"]["getInvoices"]["invoices"][num
 function InvoiceIdCell({ row }: { row: { original: InvoiceCustomer } }) {
   const { workspaceSlug, projectSlug, customerId } = useParams()
   return (
-    <div className="whitespace-nowrap text-sm">
+    <div className="whitespace-nowrap font-mono text-xs">
       <SuperLink
         href={`/${workspaceSlug}/${projectSlug}/customers/${customerId}/invoices/${row.original.id}`}
         className="hover:underline"
@@ -32,33 +31,6 @@ function InvoiceIdCell({ row }: { row: { original: InvoiceCustomer } }) {
 }
 
 export const columns: ColumnDef<InvoiceCustomer>[] = [
-  {
-    id: "select",
-    size: 50,
-    accessorKey: "select",
-    header: ({ table }) => (
-      <Checkbox
-        checked={
-          table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && "indeterminate")
-        }
-        disabled={table.getRowModel().rows.length === 0}
-        onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-        aria-label="Select all"
-        className="translate-y-0.5"
-      />
-    ),
-    cell: ({ row }) => (
-      <Checkbox
-        checked={row.getIsSelected()}
-        onCheckedChange={(value) => row.toggleSelected(!!value)}
-        aria-label="Select row"
-        className="translate-y-0.5"
-      />
-    ),
-    enableSorting: false,
-    enableHiding: false,
-    enableResizing: false,
-  },
   {
     accessorKey: "id",
     enableResizing: true,
@@ -82,11 +54,14 @@ export const columns: ColumnDef<InvoiceCustomer>[] = [
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
     cell: ({ row }) => {
-      return (
-        <Badge variant={["void", "paid"].includes(row.original.status) ? "success" : "destructive"}>
-          {row.original.status}
-        </Badge>
-      )
+      const statusVariant =
+        row.original.status === "paid"
+          ? "success"
+          : row.original.status === "void"
+            ? "secondary"
+            : "destructive"
+
+      return <Badge variant={statusVariant}>{row.original.status}</Badge>
     },
     size: 20,
     filterFn: (row, _id, value) => {
@@ -99,15 +74,22 @@ export const columns: ColumnDef<InvoiceCustomer>[] = [
     accessorKey: "provider",
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Provider" />,
-    cell: ({ row }) => <Badge className="text-xs">{row.original.paymentProvider}</Badge>,
+    cell: ({ row }) => (
+      <span className="whitespace-nowrap font-mono text-muted-foreground text-xs">
+        {row.original.paymentProvider}
+      </span>
+    ),
     size: 20,
   },
   {
     accessorKey: "amountDue",
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Amount" />,
+    // money is tabular text, not a chip
     cell: ({ row }) => (
-      <Badge>{formatInvoiceMoney(row.original.amountDue, row.original.currency)}</Badge>
+      <span className="whitespace-nowrap font-mono text-xs tabular-nums">
+        {formatLedgerMoney(row.original.amountDue, row.original.currency)}
+      </span>
     ),
     size: 20,
   },
@@ -115,7 +97,11 @@ export const columns: ColumnDef<InvoiceCustomer>[] = [
     accessorKey: "startDate",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Start date" />,
     cell: ({ row }) => (
-      <Typography variant="p" affects="removePaddingMargin" className="whitespace-nowrap">
+      <Typography
+        variant="p"
+        affects="removePaddingMargin"
+        className="whitespace-nowrap font-mono text-xs tabular-nums"
+      >
         {format(new Date(row.original.statementStartAt), "PPpp")}
       </Typography>
     ),
@@ -125,7 +111,11 @@ export const columns: ColumnDef<InvoiceCustomer>[] = [
     accessorKey: "endDate",
     header: ({ column }) => <DataTableColumnHeader column={column} title="End date" />,
     cell: ({ row }) => (
-      <Typography variant="p" affects="removePaddingMargin" className="whitespace-nowrap">
+      <Typography
+        variant="p"
+        affects="removePaddingMargin"
+        className="whitespace-nowrap font-mono text-xs tabular-nums"
+      >
         {format(new Date(row.original.statementEndAt), "PPpp")}
       </Typography>
     ),
@@ -139,7 +129,11 @@ export const columns: ColumnDef<InvoiceCustomer>[] = [
       const metadata = row.original.metadata
       return (
         <div className="flex items-center space-x-1 whitespace-nowrap">
-          <Typography variant="p" affects="removePaddingMargin">
+          <Typography
+            variant="p"
+            affects="removePaddingMargin"
+            className="font-mono text-xs tabular-nums"
+          >
             {format(new Date(dueAt), "PPpp")}
           </Typography>
           {metadata && Object.keys(metadata).length > 0 && (

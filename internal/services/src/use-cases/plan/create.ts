@@ -6,13 +6,13 @@ import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { ServiceContext } from "../../context"
 
-type CreatePlanDeps = {
+export type CreatePlanDeps = {
   services: Pick<ServiceContext, "plans">
   db: Database
   logger: Logger
 }
 
-type CreatePlanInput = {
+export type CreatePlanInput = {
   input: InsertPlan
   projectId: string
 }

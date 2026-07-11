@@ -6,6 +6,7 @@ import { env as envObservability } from "@unprice/observability/env"
 import { env as envServices } from "@unprice/services/env"
 import { z } from "zod"
 import type { EntitlementWindowDO } from "~/ingestion/entitlements/EntitlementWindowDO"
+import type { RunBudgetDO } from "~/ingestion/run-budget/RunBudgetDO"
 import type { DurableObjectProject } from "./project/do"
 
 export const cloudflareRatelimiter = z.custom<{
@@ -31,6 +32,61 @@ function readOptionalStringBinding(workerEnv: Record<string, unknown>, key: stri
   return typeof value === "string" && value.length > 0 ? value : undefined
 }
 
+export function resolveRealtimeTicketSecret(env: {
+  APP_ENV: "development" | "preview" | "production"
+  AUTH_SECRET: string
+  REALTIME_TICKET_SECRET?: string | undefined
+}): string {
+  if (env.APP_ENV === "development") {
+    return env.REALTIME_TICKET_SECRET ?? env.AUTH_SECRET
+  }
+
+  if (!env.REALTIME_TICKET_SECRET) {
+    throw new Error("REALTIME_TICKET_SECRET binding is required outside development")
+  }
+
+  if (env.REALTIME_TICKET_SECRET === env.AUTH_SECRET) {
+    throw new Error("REALTIME_TICKET_SECRET must be distinct from AUTH_SECRET")
+  }
+
+  return env.REALTIME_TICKET_SECRET
+}
+
+type AxiomConfigurationEnv = {
+  APP_ENV: "development" | "preview" | "production"
+  AXIOM_API_TOKEN?: string | undefined
+  AXIOM_DATASET?: string | undefined
+}
+
+export function warnIfAxiomUnconfigured(
+  env: AxiomConfigurationEnv,
+  warn: (message: string) => void = (message) => console.error(message)
+): void {
+  if (env.APP_ENV === "development") return
+
+  const missingBindings = [
+    env.AXIOM_API_TOKEN ? undefined : "AXIOM_API_TOKEN",
+    env.AXIOM_DATASET ? undefined : "AXIOM_DATASET",
+  ].filter((binding): binding is string => binding !== undefined)
+
+  if (missingBindings.length === 0) return
+
+  warn(
+    `Axiom log drain is not configured for APP_ENV=${env.APP_ENV}; missing bindings: ${missingBindings.join(", ")}; wide events and DO diagnostics will not be exported`
+  )
+}
+
+let hasWarnedIfAxiomUnconfigured = false
+
+function warnIfAxiomUnconfiguredOnce(env: AxiomConfigurationEnv): void {
+  if (hasWarnedIfAxiomUnconfigured) return
+
+  warnIfAxiomUnconfigured(env, (message) => {
+    hasWarnedIfAxiomUnconfigured = true
+    console.error(message)
+  })
+}
+
 // This function should be called at the start of each request.
 export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
   const parsedEnv = createEnv({
@@ -39,7 +95,8 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       APP_ENV: z.enum(["development", "preview", "production"]).default("development"),
     },
     server: {
-      AUTH_SECRET: z.string(),
+      AUTH_SECRET: z.string().min(32),
+      REALTIME_TICKET_SECRET: z.string().min(32).optional(),
       VERSION: z.string().default("unknown"),
       projectdo: z.custom<DurableObjectNamespace<DurableObjectProject>>(
         (ns) => typeof ns === "object"
@@ -47,6 +104,7 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       entitlementwindow: z.custom<DurableObjectNamespace<EntitlementWindowDO>>(
         (ns) => typeof ns === "object"
       ),
+      runbudget: z.custom<DurableObjectNamespace<RunBudgetDO>>((ns) => typeof ns === "object"),
       RL_FREE_1000_60s: cloudflareRatelimiter,
       RL_FREE_6000_60s: cloudflareRatelimiter,
       CLOUDFLARE_ZONE_ID: z.string().optional(),
@@ -56,8 +114,13 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       LOCAL_PIPELINE_URL: z.string().url().optional(),
       PIPELINE_EVENTS: cloudflarePipeline.optional(),
       QUEUE_SHARD_0: cloudflareQueue,
-      QUEUE_SHARD_1: cloudflareQueue,
       INGESTION_REPORTING_QUEUE: cloudflareQueue,
+      // Fraction of typed metric emissions (cache/db/ratelimit) exported to
+      // the log drain. Wide events are sampled separately by evlog.
+      METRICS_SAMPLE_RATE: z.coerce.number().optional(),
+      // Fraction of happy-path Durable Object info/debug logs exported to the
+      // drain. Errors and business denials are never sampled away.
+      DO_LOG_SAMPLE_RATE: z.coerce.number().optional(),
 
       STRIPE_API_KEY: z.string().optional(),
       STRIPE_CONNECT_WEBHOOK_SECRET: z.string().optional(),
@@ -78,8 +141,11 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
     throw new Error("PIPELINE_EVENTS binding is required outside development")
   }
 
+  warnIfAxiomUnconfiguredOnce(parsedEnv)
+
   return {
     ...parsedEnv,
+    REALTIME_TICKET_SECRET: resolveRealtimeTicketSecret(parsedEnv),
     // The services env is created from process.env and is also extended into
     // this Worker env. Prefer Worker bindings here so `.dev.vars` and
     // Cloudflare secrets are not overwritten by an undefined process env.

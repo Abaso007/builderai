@@ -6,7 +6,7 @@ const MAIN_DOMAIN = "unprice.dev"
 const SITES_DOMAIN = "builderai.sh"
 
 // sometimes we need to use the vercel env from the client
-const APP_ENV = env.NEXT_PUBLIC_APP_ENV || env.APP_ENV
+const APP_ENV = env.APP_ENV || env.NEXT_PUBLIC_APP_ENV
 
 const DEV_APP_DOMAIN = env.NEXT_PUBLIC_APP_DOMAIN
 
@@ -75,7 +75,7 @@ export const DOCS_DOMAIN =
     ? `https://docs.${MAIN_DOMAIN}/`
     : APP_ENV === "preview"
       ? `https://docs.${MAIN_DOMAIN}/`
-      : "http://localhost:3333/docs"
+      : "http://localhost:3333/"
 
 export const PRICING_DOMAIN =
   APP_ENV === "production"

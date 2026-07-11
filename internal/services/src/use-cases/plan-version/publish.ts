@@ -6,37 +6,35 @@ import type { Logger } from "@unprice/logs"
 import type { ServiceContext } from "../../context"
 import { toErrorContext } from "../../utils/log-context"
 
-type PublishPlanVersionDeps = {
+export type PublishPlanVersionDeps = {
   services: Pick<ServiceContext, "customers">
   db: Database
   logger: Logger
   userId: string
 }
 
-type PublishPlanVersionInput = {
+export type PublishPlanVersionInput = {
   id: string
   projectId: string
   workspaceUnPriceCustomerId: string
 }
 
+export type PublishPlanVersionOutput =
+  | {
+      state:
+        | "version_not_found"
+        | "already_published"
+        | "no_features"
+        | "price_calculation_error"
+        | "payment_provider_error"
+        | "publish_error"
+    }
+  | { state: "ok"; planVersion: PlanVersion }
+
 export async function publishPlanVersion(
   deps: PublishPlanVersionDeps,
   input: PublishPlanVersionInput
-): Promise<
-  Result<
-    | {
-        state:
-          | "version_not_found"
-          | "already_published"
-          | "no_features"
-          | "price_calculation_error"
-          | "payment_provider_error"
-          | "publish_error"
-      }
-    | { state: "ok"; planVersion: PlanVersion },
-    FetchError
-  >
-> {
+): Promise<Result<PublishPlanVersionOutput, FetchError>> {
   const { id, projectId, workspaceUnPriceCustomerId } = input
 
   deps.logger.set({

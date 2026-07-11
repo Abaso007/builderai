@@ -1,9 +1,7 @@
 import { COOKIES_APP } from "@unprice/config"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
-import { UserIcon } from "lucide-react"
 import { cookies } from "next/headers"
 import { Suspense } from "react"
-import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import LayoutLoader from "~/components/layout/layout-loader"
 import { api } from "~/trpc/server"
@@ -12,17 +10,17 @@ import Redirect from "./_components/redirect"
 
 export default async function NewPage(props: {
   searchParams: {
-    customer_id?: string
+    workspace_id?: string
   }
 }) {
-  const { customer_id } = props.searchParams
+  const { workspace_id } = props.searchParams
   const cookieStore = cookies()
   const sessionId = cookieStore.get(COOKIES_APP.SESSION)?.value
 
   if (!sessionId) {
     return (
       <Suspense fallback={<LayoutLoader />}>
-        <Content customerId={customer_id} />
+        <Content workspaceId={workspace_id} />
       </Suspense>
     )
   }
@@ -37,39 +35,39 @@ export default async function NewPage(props: {
   return (
     <Suspense fallback={<LayoutLoader />}>
       <Content
-        customerId={customer_id}
+        workspaceId={workspace_id}
         planVersionId={session?.payload.plan_version_id}
-        sessionId={sessionId}
+        sessionId={session ? sessionId : undefined}
       />
     </Suspense>
   )
 }
 
 async function Content({
-  customerId,
+  workspaceId,
   planVersionId,
   sessionId,
 }: {
-  customerId?: string
+  workspaceId?: string
   planVersionId?: string
   sessionId?: string
 }) {
-  if (!customerId || customerId === "") {
+  if (!workspaceId || workspaceId === "") {
     return (
       <DashboardShell>
-        <div className="flex flex-col items-center justify-center">
-          <Card className="max-w-xl" variant="ghost">
-            <CardHeader>
+        <div className="flex min-h-[calc(100svh-10rem)] w-full flex-col items-center justify-start pt-[clamp(3rem,10svh,8rem)] pb-8">
+          <Card className="w-full max-w-xl" variant="ghost">
+            <CardHeader className="items-center text-center">
               <CardTitle>Create Workspace</CardTitle>
-              <CardDescription>Create a new workspace to get started.</CardDescription>
+              <CardDescription className="max-w-sm">
+                Create a new workspace to get started.
+              </CardDescription>
             </CardHeader>
             <CardContent className="py-4">
               <NewWorkspaceForm
                 defaultValues={{
                   name: "",
-                  // preselect the plan version if it exists
-                  planVersionId: planVersionId ?? "",
-                  config: [],
+                  planVersionId,
                   successUrl: "",
                   cancelUrl: "",
                   sessionId: sessionId,
@@ -82,32 +80,9 @@ async function Content({
     )
   }
 
-  const { customer } = await api.customers.getById({
-    id: customerId,
-  })
-
-  if (!customer) {
-    return (
-      <DashboardShell>
-        <div className="flex flex-col items-center justify-center">
-          <EmptyPlaceholder>
-            <EmptyPlaceholder.Icon>
-              <UserIcon className="size-8" />
-            </EmptyPlaceholder.Icon>
-            <EmptyPlaceholder.Title>Customer not found</EmptyPlaceholder.Title>
-            <EmptyPlaceholder.Description>
-              The customer with the id {customerId} was not found.
-            </EmptyPlaceholder.Description>
-          </EmptyPlaceholder>
-        </div>
-      </DashboardShell>
-    )
-  }
-
   // create the workspace
   const newWorkspace = await api.workspaces.create({
-    name: customer.name,
-    unPriceCustomerId: customer.id,
+    workspaceId,
   })
 
   return <Redirect url={newWorkspace.workspace.slug} />

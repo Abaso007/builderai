@@ -43,15 +43,15 @@ type SignUpContext = {
 function normalizePhaseCreditLine(
   input: {
     creditLinePolicy?: CustomerSignUp["creditLinePolicy"]
-    creditLineAmount?: CustomerSignUp["creditLineAmount"]
+    creditLineAmountMinor?: CustomerSignUp["creditLineAmountMinor"]
   },
   currency: string
 ) {
   const creditLinePolicy = input.creditLinePolicy ?? "uncapped"
   const creditLineAmount =
-    input.creditLineAmount === null || input.creditLineAmount === undefined
+    input.creditLineAmountMinor === null || input.creditLineAmountMinor === undefined
       ? null
-      : toLedgerMinor(fromCurrencyMinor(input.creditLineAmount, currency))
+      : toLedgerMinor(fromCurrencyMinor(input.creditLineAmountMinor, currency))
 
   return {
     creditLinePolicy,
@@ -101,6 +101,7 @@ async function resolvePlanVersion(
 
     const data = await deps.analytics.getPlanClickBySessionId({
       session_id: sessionId,
+      project_id: projectId,
       action: "plan_click",
     })
 

@@ -21,18 +21,29 @@ export default async function ApiKeysPage(props: {
   const isApiKeysEnabled = await entitlementFlag(FEATURE_SLUGS.API_KEYS.SLUG)
 
   if (!isApiKeysEnabled) {
-    return <UpgradePlanError />
+    return (
+      <UpgradePlanError
+        workspaceSlug={props.params.workspaceSlug}
+        blockedFeatureSlug={FEATURE_SLUGS.API_KEYS.SLUG}
+        returnTo={`/${props.params.workspaceSlug}/${props.params.projectSlug}/apikeys`}
+      />
+    )
   }
 
   const filters = dataTableParams(props.searchParams)
-  const { apikeys, pageCount } = await api.apikeys.listByActiveProject(filters)
+  const { workspaceSlug, projectSlug } = props.params
+  const { apikeys, pageCount } = await api.apikeys.listByActiveProject({
+    ...filters,
+    workspaceSlug,
+    projectSlug,
+  })
 
   return (
     <DashboardShell
       header={
         <HeaderTab
           title="API Keys"
-          description="All the apis of the system"
+          description="Create project API keys and bind a default customer for request-path calls."
           action={<NewApiKeyDialog />}
         />
       }
@@ -47,17 +58,26 @@ export default async function ApiKeysPage(props: {
           />
         }
       >
-        <DataTable
-          pageCount={pageCount}
-          columns={columns}
-          data={apikeys}
-          filterOptions={{
-            filterBy: "name",
-            filterColumns: true,
-            filterDateRange: true,
-            filterServerSide: false,
-          }}
-        />
+        <div className="flex flex-col gap-4">
+          <DataTable
+            pageCount={pageCount}
+            columns={columns}
+            data={apikeys}
+            emptyState={{
+              title: "No API keys",
+              description:
+                "Create an API key before your application checks access, records usage, consumes usage, or starts budgeted runs.",
+              action: <NewApiKeyDialog />,
+            }}
+            hidePaginationWhenEmpty
+            filterOptions={{
+              filterBy: "name",
+              filterColumns: true,
+              filterDateRange: true,
+              filterServerSide: false,
+            }}
+          />
+        </div>
       </Suspense>
     </DashboardShell>
   )

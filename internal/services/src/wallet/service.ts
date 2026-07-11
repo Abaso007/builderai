@@ -1,4 +1,4 @@
-import { type Database, and, asc, eq, gt, isNull, or, sql } from "@unprice/db"
+import { type Database, and, asc, desc, eq, gt, inArray, isNull, or, sql } from "@unprice/db"
 import {
   entitlementReservationFundingLegs,
   entitlementReservations,
@@ -63,12 +63,18 @@ export interface WalletTransferInput {
   idempotencyKey: string
 }
 
+export type ReservationOwner =
+  | { type: "entitlement_window"; id: string }
+  | { type: "agent_run"; id: string }
+
 export interface CreateReservationInput {
   projectId: string
   customerId: string
   currency: Currency
-  entitlementId: string
+  entitlementId: string | null
+  owner?: ReservationOwner
   requestedAmount: number
+  minimumAllocationAmount?: number
   refillThresholdBps: number
   refillChunkAmount: number
   periodStartAt: Date
@@ -212,6 +218,12 @@ export interface ExpireGrantInput {
 export interface GetWalletStateInput {
   projectId: string
   customerId: string
+  /**
+   * Include expired and fully consumed credits in the returned credit list.
+   * Public balance reads keep the default active-only view; admin/customer
+   * dashboards use this to reconcile historical wallet consumption.
+   */
+  includeInactiveCredits?: boolean
 }
 
 export interface GetWalletCreditBalanceInput {
@@ -225,11 +237,17 @@ export interface WalletBalances {
   granted: number
   reserved: number
   consumed: number
+  walletConsumed: number
+  subscriptionCharges: number
+}
+
+export type WalletCreditWithConsumption = WalletCredit & {
+  consumedAmount: number
 }
 
 export interface WalletStateOutput {
   balances: WalletBalances
-  credits: WalletCredit[]
+  credits: WalletCreditWithConsumption[]
 }
 
 const GRANT_SOURCE_TO_PLATFORM: Record<WalletCreditSource, PlatformFundingKind> = {
@@ -339,6 +357,16 @@ export class WalletService {
       return Err(new UnPriceWalletError({ message: "WALLET_INVALID_AMOUNT" }))
     }
 
+    const owner =
+      input.owner ??
+      (input.entitlementId
+        ? ({ type: "entitlement_window", id: input.entitlementId } as const)
+        : null)
+
+    if (!owner) {
+      return Err(new UnPriceWalletError({ message: "WALLET_INVALID_RESERVATION_OWNER" }))
+    }
+
     const keys = customerAccountKeys(input.customerId)
     const reservationMetadata = this.normalizeJsonMetadata(input.metadata)
 
@@ -364,7 +392,8 @@ export class WalletService {
       const existing = await (tx as Transaction).query.entitlementReservations.findFirst({
         where: and(
           eq(entitlementReservations.projectId, input.projectId),
-          eq(entitlementReservations.entitlementId, input.entitlementId),
+          eq(entitlementReservations.ownerType, owner.type),
+          eq(entitlementReservations.ownerId, owner.id),
           eq(entitlementReservations.periodStartAt, input.periodStartAt),
           isNull(entitlementReservations.reconciledAt)
         ),
@@ -392,6 +421,12 @@ export class WalletService {
       const purchasedDrained = Math.max(0, Math.min(stillNeeded, purchasedBalance))
 
       const allocationAmount = grantedDrained + purchasedDrained
+
+      const minimumAllocationAmount = input.minimumAllocationAmount ?? 0
+      if (minimumAllocationAmount > 0 && allocationAmount < minimumAllocationAmount) {
+        return Err(new UnPriceWalletError({ message: "WALLET_EMPTY" }))
+      }
+
       const reservationId = newId("entitlement_reservation")
       const reserveLedgerSourceId = `${input.idempotencyKey}:${reservationId}`
       const fundingAllocations: FundingAllocation[] = [
@@ -419,6 +454,8 @@ export class WalletService {
             drain_source: "granted",
             reservation_id: reservationId,
             entitlement_id: input.entitlementId,
+            reservation_owner_type: owner.type,
+            reservation_owner_id: owner.id,
             grant_ids: grantAllocations
               .map((allocation) => allocation.walletCreditId)
               .filter((id): id is string => !!id),
@@ -443,6 +480,8 @@ export class WalletService {
             drain_source: "purchased",
             reservation_id: reservationId,
             entitlement_id: input.entitlementId,
+            reservation_owner_type: owner.type,
+            reservation_owner_id: owner.id,
             idempotency_key: input.idempotencyKey,
           },
         })
@@ -457,6 +496,8 @@ export class WalletService {
         id: reservationId,
         projectId: input.projectId,
         customerId: input.customerId,
+        ownerType: owner.type,
+        ownerId: owner.id,
         entitlementId: input.entitlementId,
         allocationAmount,
         consumedAmount: 0,
@@ -496,6 +537,24 @@ export class WalletService {
   ): Promise<Result<CaptureReservationUsageOutput, UnPriceWalletError>> {
     if (input.amount < 0) {
       return Err(new UnPriceWalletError({ message: "WALLET_INVALID_AMOUNT" }))
+    }
+    const billingPeriodId = input.billingPeriodId?.trim()
+    const statementKey = input.statementKey.trim()
+    if (
+      input.amount > 0 &&
+      (!billingPeriodId || statementKey.length === 0 || statementKey.toLowerCase() === "unknown")
+    ) {
+      return Err(
+        new UnPriceWalletError({
+          message: "WALLET_MISSING_INVOICE_CONTEXT",
+          context: {
+            billingPeriodId: input.billingPeriodId ?? null,
+            projectId: input.projectId,
+            reservationId: input.reservationId,
+            statementKey: input.statementKey,
+          },
+        })
+      )
     }
 
     const keys = customerAccountKeys(input.customerId)
@@ -1317,41 +1376,66 @@ export class WalletService {
 
   /**
    * Read-only snapshot of the customer's wallet: the four sub-account
-   * balances and the list of active credits (not expired, not voided,
-   * `remaining_amount > 0`). Missing ledger accounts report zero — a
-   * customer who has never transacted is not an error, just an empty
-   * wallet. No advisory lock: balances are eventually consistent with
-   * in-flight writes, which is what a read endpoint wants.
+   * balances plus the credit rows used to explain them. By default the
+   * credit list is active-only (not expired, not voided, `remaining_amount > 0`);
+   * admin/dashboard reads can include inactive rows for historical reconciliation.
+   *
+   * Missing ledger accounts report zero — a customer who has never transacted is
+   * not an error, just an empty wallet. No advisory lock: balances are eventually
+   * consistent with in-flight writes, which is what a read endpoint wants.
    */
   public async getWalletState(
     input: GetWalletStateInput
   ): Promise<Result<WalletStateOutput, UnPriceWalletError>> {
     const keys = customerAccountKeys(input.customerId)
+    const creditWhere = input.includeInactiveCredits
+      ? and(
+          eq(walletCredits.customerId, input.customerId),
+          eq(walletCredits.projectId, input.projectId),
+          isNull(walletCredits.voidedAt)
+        )
+      : and(
+          eq(walletCredits.customerId, input.customerId),
+          eq(walletCredits.projectId, input.projectId),
+          isNull(walletCredits.expiredAt),
+          isNull(walletCredits.voidedAt),
+          gt(walletCredits.remainingAmount, 0)
+        )
+    const creditOrderBy = input.includeInactiveCredits
+      ? [desc(walletCredits.createdAt)]
+      : [
+          sql`COALESCE(${walletCredits.expiresAt}, 'infinity'::timestamptz) ASC`,
+          asc(walletCredits.createdAt),
+        ]
 
     try {
-      const [purchased, granted, reserved, consumed, credits] = await Promise.all([
+      const [purchased, granted, reserved, consumed, walletConsumed, credits] = await Promise.all([
         this.readBalance(this.db, keys.purchased),
         this.readBalance(this.db, keys.granted),
         this.readBalance(this.db, keys.reserved),
         this.readBalance(this.db, keys.consumed),
+        this.readWalletConsumedAmount(input),
         this.db.query.walletCredits.findMany({
-          where: and(
-            eq(walletCredits.customerId, input.customerId),
-            eq(walletCredits.projectId, input.projectId),
-            isNull(walletCredits.expiredAt),
-            isNull(walletCredits.voidedAt),
-            gt(walletCredits.remainingAmount, 0)
-          ),
-          orderBy: [
-            sql`COALESCE(${walletCredits.expiresAt}, 'infinity'::timestamptz) ASC`,
-            asc(walletCredits.createdAt),
-          ],
+          where: creditWhere,
+          orderBy: creditOrderBy,
         }),
       ])
 
-      return Ok({
-        balances: { purchased, granted, reserved, consumed },
+      const creditsWithConsumption = await this.withCreditConsumption({
         credits,
+        projectId: input.projectId,
+      })
+
+      return Ok({
+        balances: {
+          purchased,
+          granted,
+          reserved,
+          consumed,
+          walletConsumed,
+          subscriptionCharges: Math.max(0, consumed - walletConsumed),
+        },
+        credits: creditsWithConsumption,
       })
     } catch (error) {
       return this.handleUnexpected("wallet.get_state_failed", error, {
@@ -1381,6 +1465,61 @@ export class WalletService {
         walletId: input.walletId,
       })
     }
+  }
+
+  private async withCreditConsumption(input: {
+    credits: WalletCredit[]
+    projectId: string
+  }): Promise<WalletCreditWithConsumption[]> {
+    if (input.credits.length === 0) {
+      return []
+    }
+
+    const creditIds = input.credits.map((credit) => credit.id)
+    const fundingLegs = await this.db.query.entitlementReservationFundingLegs.findMany({
+      where: and(
+        eq(entitlementReservationFundingLegs.projectId, input.projectId),
+        inArray(entitlementReservationFundingLegs.walletCreditId, creditIds)
+      ),
+    })
+    const consumedByCredit = new Map<string, number>()
+
+    for (const leg of fundingLegs) {
+      if (!leg.walletCreditId) continue
+      consumedByCredit.set(
+        leg.walletCreditId,
+        (consumedByCredit.get(leg.walletCreditId) ?? 0) + leg.capturedAmount
+      )
+    }
+
+    return input.credits.map((credit) => ({
+      ...credit,
+      consumedAmount: consumedByCredit.get(credit.id) ?? 0,
+    }))
+  }
+
+  private async readWalletConsumedAmount(input: GetWalletStateInput): Promise<number> {
+    const rows = await this.db
+      .select({
+        walletConsumed: sql<number>`COALESCE(SUM(${entitlementReservationFundingLegs.capturedAmount}), 0)::bigint`,
+      })
+      .from(entitlementReservationFundingLegs)
+      .innerJoin(
+        entitlementReservations,
+        and(
+          eq(entitlementReservations.id, entitlementReservationFundingLegs.reservationId),
+          eq(entitlementReservations.projectId, entitlementReservationFundingLegs.projectId)
+        )
+      )
+      .where(
+        and(
+          eq(entitlementReservationFundingLegs.projectId, input.projectId),
+          eq(entitlementReservations.customerId, input.customerId)
+        )
+      )
+      .limit(1)
+
+    return Number(rows[0]?.walletConsumed ?? 0)
   }
 
   // -------------------------------------------------------------------------

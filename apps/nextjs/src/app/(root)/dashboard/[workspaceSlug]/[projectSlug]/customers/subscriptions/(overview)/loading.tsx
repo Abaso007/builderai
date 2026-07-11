@@ -3,10 +3,10 @@ import { Plus } from "lucide-react"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
+import { SectionIntro } from "~/components/layout/section-intro"
 import { CustomerDialog } from "../../_components/customers/customer-dialog"
 
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
-import { Typography } from "@unprice/ui/typography"
 
 import { SuperLink } from "~/components/super-link"
 
@@ -16,7 +16,7 @@ export default function Loading() {
       header={
         <HeaderTab
           title="Subscriptions"
-          description="Manage your subscriptions, add new subscriptions, update plans and more."
+          description="Connect customers to plan versions, billing periods, wallet policy, and invoice evidence."
           action={
             <CustomerDialog>
               <Button>
@@ -36,14 +36,16 @@ export default function Loading() {
           <TabNavigationLink asChild active>
             <SuperLink href={"#"}>Subscriptions</SuperLink>
           </TabNavigationLink>
+          <TabNavigationLink asChild>
+            <SuperLink href={"#"}>Budgeted Runs</SuperLink>
+          </TabNavigationLink>
         </div>
       </TabNavigation>
       <div className="mt-4">
-        <div className="flex flex-col px-1 py-4">
-          <Typography variant="p" affects="removePaddingMargin">
-            All subscriptions from this project
-          </Typography>
-        </div>
+        <SectionIntro
+          title="Subscription evidence across this project"
+          description="Subscriptions connect customers to plan versions, billing periods, wallet policy, and invoice evidence."
+        />
         <DataTableSkeleton
           columnCount={12}
           searchableColumnCount={1}

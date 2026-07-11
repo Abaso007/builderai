@@ -1,8 +1,7 @@
 import { FEATURE_SLUGS } from "@unprice/config"
 import { Button } from "@unprice/ui/button"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
-import { Typography } from "@unprice/ui/typography"
-import { Code, Plus } from "lucide-react"
+import { Code } from "lucide-react"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 import { columns } from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/customers/_components/customers/table/columns"
@@ -29,7 +28,13 @@ export default async function ProjectUsersPage(props: {
   const isCustomersEnabled = await entitlementFlag(FEATURE_SLUGS.CUSTOMERS.SLUG)
 
   if (!isCustomersEnabled) {
-    return <UpgradePlanError />
+    return (
+      <UpgradePlanError
+        workspaceSlug={workspaceSlug}
+        blockedFeatureSlug={FEATURE_SLUGS.CUSTOMERS.SLUG}
+        returnTo={baseUrl}
+      />
+    )
   }
 
   const { customers, pageCount } = await api.customers.listByActiveProject(filters)
@@ -39,20 +44,17 @@ export default async function ProjectUsersPage(props: {
       header={
         <HeaderTab
           title="Customers"
-          description="Manage your customers"
+          description="Customers hold the subscriptions, wallet credits, invoices, and budgeted runs in this project."
           action={
             <div className="flex items-center gap-2">
-              <CodeApiSheet defaultMethod="signUp">
-                <Button variant={"ghost"}>
+              <CodeApiSheet defaultMethod="signUpCustomer">
+                <Button variant={"link"}>
                   <Code className="mr-2 h-4 w-4" />
                   API
                 </Button>
               </CodeApiSheet>
               <CustomerDialog>
-                <Button>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Customer
-                </Button>
+                <Button>Create Customer</Button>
               </CustomerDialog>
             </div>
           }
@@ -67,15 +69,12 @@ export default async function ProjectUsersPage(props: {
           <TabNavigationLink asChild>
             <SuperLink href={`${baseUrl}/subscriptions`}>Subscriptions</SuperLink>
           </TabNavigationLink>
+          <TabNavigationLink asChild>
+            <SuperLink href={`${baseUrl}/runs`}>Budgeted Runs</SuperLink>
+          </TabNavigationLink>
         </div>
       </TabNavigation>
-      <div className="mt-4">
-        <div className="flex flex-col px-1 py-4">
-          <Typography variant="p" affects="removePaddingMargin">
-            All customers for this project
-          </Typography>
-        </div>
-
+      <div className="mt-4 flex flex-col gap-4">
         <Suspense
           fallback={
             <DataTableSkeleton
@@ -91,6 +90,21 @@ export default async function ProjectUsersPage(props: {
             pageCount={pageCount}
             columns={columns}
             data={customers}
+            initialColumnVisibility={{ defaultCurrency: false, timezone: false }}
+            emptyState={{
+              title: "No customers yet",
+              description:
+                "Customers appear after signup or API creation. Create a customer before recording usage, assigning subscriptions, issuing wallet credits, or starting budgeted runs.",
+              action: (
+                <CodeApiSheet defaultMethod="signUpCustomer">
+                  <Button size="sm" variant="outline">
+                    <Code className="mr-2 size-4" />
+                    API
+                  </Button>
+                </CodeApiSheet>
+              ),
+            }}
+            hidePaginationWhenEmpty
             filterOptions={{
               filterBy: "email",
               filterColumns: true,

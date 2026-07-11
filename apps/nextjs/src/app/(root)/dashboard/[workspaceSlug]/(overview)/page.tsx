@@ -22,9 +22,16 @@ export default async function WorkspaceOverviewPage(props: {
 
   const session = await getSession()
   const onboardingCompleted = session?.user?.onboardingCompleted ?? false
+  const isDevelopment = process.env.NODE_ENV === "development"
 
   if (!isProjectsEnabled) {
-    return <UpgradePlanError />
+    return (
+      <UpgradePlanError
+        workspaceSlug={props.params.workspaceSlug}
+        blockedFeatureSlug={FEATURE_SLUGS.PROJECTS.SLUG}
+        returnTo={`/${props.params.workspaceSlug}`}
+      />
+    )
   }
 
   const { projects } = await api.projects.listByWorkspace({
@@ -36,13 +43,13 @@ export default async function WorkspaceOverviewPage(props: {
       header={
         <HeaderTab
           title="Projects"
-          description="All your projects for this Workspace"
+          description="Projects group the plans, customers, events, wallets, and invoices in one money path."
           action={
-            !onboardingCompleted ? (
+            !onboardingCompleted || isDevelopment ? (
               <SuperLink href={`/${props.params.workspaceSlug}/onboarding`}>
                 <Button>
                   <Plus className="mr-2 h-4 w-4" />
-                  Project
+                  Create project
                 </Button>
               </SuperLink>
             ) : (
@@ -56,7 +63,7 @@ export default async function WorkspaceOverviewPage(props: {
               >
                 <Button>
                   <Plus className="mr-2 h-4 w-4" />
-                  Project
+                  Create project
                 </Button>
               </ProjectDialog>
             )
@@ -82,8 +89,10 @@ export default async function WorkspaceOverviewPage(props: {
             </ul>
             <div className="-translate-x-1/2 -translate-y-1/2 absolute top-1/2 left-1/2 w-full text-center">
               <Balancer>
-                <Typography variant="h2">This workspace has no projects yet</Typography>
-                <Typography variant="large">Create your first project to get started</Typography>
+                <Typography variant="h2">No projects yet.</Typography>
+                <Typography variant="large">
+                  Create a project to start collecting events, customers, and invoice evidence.
+                </Typography>
               </Balancer>
             </div>
           </div>

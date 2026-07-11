@@ -1,22 +1,18 @@
 import { createRoute } from "@hono/zod-openapi"
 import { LEDGER_SCALE } from "@unprice/money"
-import {
-  EventTimestampTooFarInFutureError,
-  EventTimestampTooOldError,
-  validateEventTimestamp,
-} from "@unprice/services/entitlements"
 import { INGESTION_REJECTION_REASONS } from "@unprice/services/ingestion"
 import { endTime } from "hono/timing"
 import { startTime } from "hono/timing"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
-import { keyAuth, resolveContextProjectId } from "~/auth/key"
-import { UnpriceApiError } from "~/errors"
+import { keyAuth, resolveContextProjectId, resolveCustomerIdForApiKeyOrThrow } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
+import { validateEventTimestampOrThrow } from "../events/validate-event-timestamp"
 
-const tags = ["entitlements"]
+const tags = ["access"]
 
 const verifyFeatureStatusSchema = z.object({
   allowed: z.boolean().openapi({
@@ -69,61 +65,75 @@ const verifyFeatureStatusSchema = z.object({
   }),
 })
 
-export const route = createRoute({
-  path: "/v1/entitlements/verify",
-  operationId: "entitlements.verify",
-  summary: "get current feature status",
-  description:
-    "Resolve whether a feature is usable for a customer. Usage features return current usage, limit, and priced spend; tier/package features return the subscribed quantity limit.",
-  method: "post",
-  tags,
-  request: {
-    body: jsonContentRequired(
-      z.object({
-        customerId: z.string().openapi({
-          description: "The unprice customer ID",
-          example: "cus_1H7KQFLr7RepUyQBKdnvY",
-        }),
-        // externalId: z
-        //   .string()
-        //   .openapi({
-        //     description: "The external customer ID provided at sign up",
-        //     example: "user_123",
-        //   })
-        //   .optional(),
-        featureSlug: z.string().openapi({
-          description: "The feature slug",
-          example: "tokens",
-        }),
-        timestamp: z
-          .number()
-          .openapi({
-            description:
-              "Optional timestamp to inspect a recent point-in-time state. Defaults to the request start time.",
-            example: Date.UTC(2026, 2, 21, 12, 0, 0),
-          })
-          .optional(),
-      }),
-      // .superRefine((data, ctx) => {
-      //   if (!data.customerId && !data.externalId) {
-      //     ctx.addIssue({
-      //       code: z.ZodIssueCode.custom,
-      //       message: "Either customerId or externalId is required",
-      //       path: ["customerId", "externalId"],
-      //     })
-      //   }
-      // }),
-      "Body of the request"
-    ),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(
-      verifyFeatureStatusSchema,
-      "The current feature verification status"
-    ),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/access/check",
+      operationId: "access.check",
+      summary: "get current feature status",
+      description:
+        "Resolve whether a feature is usable for a customer. Usage features return current usage, limit, and priced spend; tier/package features return the subscribed quantity limit.",
+      method: "post",
+      tags,
+      request: {
+        body: jsonContentRequired(
+          z.object({
+            customerId: z.string().openapi({
+              description: "The unprice customer ID",
+              example: "cus_1H7KQFLr7RepUyQBKdnvY",
+            }),
+            // externalId: z
+            //   .string()
+            //   .openapi({
+            //     description: "The external customer ID provided at sign up",
+            //     example: "user_123",
+            //   })
+            //   .optional(),
+            featureSlug: z.string().openapi({
+              description: "The feature slug",
+              example: "tokens",
+            }),
+            timestamp: z
+              .number()
+              .openapi({
+                description:
+                  "Optional timestamp to inspect a recent point-in-time state. Defaults to the request start time.",
+                example: Date.UTC(2026, 2, 21, 12, 0, 0),
+              })
+              .optional(),
+          }),
+          // .superRefine((data, ctx) => {
+          //   if (!data.customerId && !data.externalId) {
+          //     ctx.addIssue({
+          //       code: z.ZodIssueCode.custom,
+          //       message: "Either customerId or externalId is required",
+          //       path: ["customerId", "externalId"],
+          //     })
+          //   }
+          // }),
+          "Body of the request"
+        ),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(
+          verifyFeatureStatusSchema,
+          "The current feature verification status"
+        ),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "runtime",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["access", "check"],
+      },
+    }
+  )
+)
 
 export type VerifyRequest = z.infer<
   (typeof route.request.body)["content"]["application/json"]["schema"]
@@ -135,29 +145,19 @@ export type VerifyResponse = z.infer<
 export const registerVerifyV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const body = c.req.valid("json")
-    const { customerId, featureSlug } = body
+    const { customerId: inputCustomerId, featureSlug } = body
     const { ingestion } = c.get("services")
     const requestStartedAt = c.get("requestStartedAt")
     const timestamp = body.timestamp ?? requestStartedAt
 
     const key = await keyAuth(c)
+    const customerId = resolveCustomerIdForApiKeyOrThrow({
+      explicitCustomerId: inputCustomerId,
+      defaultCustomerId: key.defaultCustomerId,
+    })
     const projectId = await resolveContextProjectId(c, key.projectId, customerId)
 
-    try {
-      validateEventTimestamp(timestamp, requestStartedAt)
-    } catch (error) {
-      if (
-        error instanceof EventTimestampTooFarInFutureError ||
-        error instanceof EventTimestampTooOldError
-      ) {
-        throw new UnpriceApiError({
-          code: "BAD_REQUEST",
-          message: error.message,
-        })
-      }
-
-      throw error
-    }
+    validateEventTimestampOrThrow(timestamp, requestStartedAt)
 
     startTime(c, "verify")
 

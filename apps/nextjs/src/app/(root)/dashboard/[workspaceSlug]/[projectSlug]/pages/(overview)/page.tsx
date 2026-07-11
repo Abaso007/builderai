@@ -22,7 +22,13 @@ export default async function PageOverviewPage(props: {
   const isPagesEnabled = await entitlementFlag(FEATURE_SLUGS.PAGES.SLUG)
 
   if (!isPagesEnabled) {
-    return <UpgradePlanError />
+    return (
+      <UpgradePlanError
+        workspaceSlug={workspaceSlug}
+        blockedFeatureSlug={FEATURE_SLUGS.PAGES.SLUG}
+        returnTo={`/${workspaceSlug}/${projectSlug}/pages`}
+      />
+    )
   }
 
   const { pages } = await api.pages.listByActiveProject({})
@@ -32,12 +38,12 @@ export default async function PageOverviewPage(props: {
       header={
         <HeaderTab
           title="Pages"
-          description="Create and manage your pages"
+          description="Create hosted pricing or signup pages that point customers at the right published plan version."
           action={
             <PageDialog>
               <Button>
                 <Plus className="mr-2 h-4 w-4" />
-                Add Page
+                Add page
               </Button>
             </PageDialog>
           }
@@ -63,7 +69,9 @@ export default async function PageOverviewPage(props: {
             <div className="-translate-x-1/2 -translate-y-1/2 absolute top-1/2 left-1/2 w-full text-center">
               <Balancer>
                 <Typography variant="h2">This project has no pages yet</Typography>
-                <Typography variant="large">Create your first plan to get started</Typography>
+                <Typography variant="large">
+                  Create a page after you have a published plan version to route customers through.
+                </Typography>
               </Balancer>
             </div>
           </div>

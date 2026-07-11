@@ -1,5 +1,6 @@
 import type { Database } from "@unprice/db"
 import type {
+  BillingConfig,
   Customer,
   PlanVersion,
   Subscription,
@@ -84,7 +85,16 @@ export interface UpdatePhaseInput {
   data: Partial<
     Pick<
       SubscriptionPhase,
-      "startAt" | "endAt" | "paymentMethodId" | "creditLinePolicy" | "creditLineAmount"
+      | "startAt"
+      | "endAt"
+      | "planVersionId"
+      | "paymentProvider"
+      | "paymentMethodId"
+      | "creditLinePolicy"
+      | "creditLineAmount"
+      | "trialEndsAt"
+      | "trialUnits"
+      | "billingAnchor"
     >
   >
 }
@@ -110,6 +120,11 @@ export interface InsertItemsInput {
   }>
 }
 
+export interface ReplaceItemsForPhaseInput extends InsertItemsInput {
+  phaseId: string
+  projectId: string
+}
+
 export interface UpdateItemUnitsInput {
   projectId: string
   updates: Array<{ id: string; units: number | null }>
@@ -121,6 +136,7 @@ export interface ListSubscriptionsByProjectInput {
   pageSize: number
   from?: number | null
   to?: number | null
+  now?: number
 }
 
 export interface ListSubscriptionsByPlanVersionInput {
@@ -178,8 +194,13 @@ export type SubscriptionWithPhases = Subscription & {
   >
 }
 
+export type SubscriptionListRow = Subscription & {
+  billingConfig: BillingConfig | null
+  customer: Customer
+}
+
 export interface ListSubscriptionsResult {
-  subscriptions: Array<Subscription & { customer: Customer }>
+  subscriptions: SubscriptionListRow[]
   pageCount: number
 }
 
@@ -257,6 +278,8 @@ export interface SubscriptionRepository {
   // ── Items ──────────────────────────────────────────────────────────────
 
   insertItems(input: InsertItemsInput): Promise<SubscriptionItem[]>
+
+  replaceItemsForPhase(input: ReplaceItemsForPhaseInput): Promise<SubscriptionItem[]>
 
   /** Batch update item units using dynamic SQL CASE expression */
   updateItemUnits(input: UpdateItemUnitsInput): Promise<void>

@@ -28,8 +28,8 @@ export function DeleteWorkspace({ workspace }: { workspace: Workspace }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
 
-  const title = "Delete"
-  const description = "This will delete the workspace and all of its data."
+  const title = "Delete Workspace"
+  const description = "This will delete the workspace and all of its projects and data."
 
   const deleteWorkspace = useMutation(
     trpc.workspaces.delete.mutationOptions({
@@ -73,13 +73,13 @@ export function DeleteWorkspace({ workspace }: { workspace: Workspace }) {
           </DialogTrigger>
           {!!isPersonal && (
             <span className="mr-auto px-2 text-muted-foreground text-xs">
-              You can not delete your personal workspace. Contact support if you want to delete your
+              You cannot delete your personal workspace. Contact support if you want to delete your
               account.
             </span>
           )}
           {isMain && (
             <span className="mr-auto px-2 text-muted-foreground text-xs">
-              You can not delete your main workspace.
+              You cannot delete your main workspace.
             </span>
           )}
           <DialogContent>
@@ -89,7 +89,7 @@ export function DeleteWorkspace({ workspace }: { workspace: Workspace }) {
             </DialogHeader>
             <div className="flex items-center font-bold text-destructive">
               <Warning className="mr-2 h-6 w-6" />
-              <p>This action can not be reverted</p>
+              <p>This action cannot be undone.</p>
             </div>
             <DialogFooter>
               <DialogClose asChild>

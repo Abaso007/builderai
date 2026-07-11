@@ -10,14 +10,15 @@ export function WelcomeStep({ className }: React.ComponentProps<"div">) {
     <div className={cn("flex w-full flex-col gap-6", className)}>
       <div className="flex flex-col items-center gap-2 text-center">
         <Typography variant="h1" className="animate-content">
-          <Balancer>Welcome to Unprice</Balancer>
+          <Balancer>Prove one customer money path</Balancer>
         </Typography>
         <Typography variant="p" affects="removePaddingMargin" className="animate-content">
-          Manage, iterate, and find the best price for your product.
+          Create a Sandbox project, publish a workflow plan version, assign a test customer, and
+          send usage evidence through the request path.
         </Typography>
 
         <Button className="mt-8 animate-button" onClick={() => next()}>
-          Start pricing
+          Build the Sandbox money path
         </Button>
       </div>
     </div>

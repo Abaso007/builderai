@@ -2,7 +2,6 @@ import Balancer from "react-wrap-balancer"
 
 import { FEATURE_SLUGS } from "@unprice/config"
 import { Button } from "@unprice/ui/button"
-import { Plus } from "@unprice/ui/icons"
 import { Typography } from "@unprice/ui/typography"
 import { Fragment } from "react"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
@@ -21,7 +20,13 @@ export default async function PlansPage(props: {
   const isPlansEnabled = await entitlementFlag(FEATURE_SLUGS.PLANS.SLUG)
 
   if (!isPlansEnabled) {
-    return <UpgradePlanError />
+    return (
+      <UpgradePlanError
+        workspaceSlug={workspaceSlug}
+        blockedFeatureSlug={FEATURE_SLUGS.PLANS.SLUG}
+        returnTo={`/${workspaceSlug}/${projectSlug}/plans`}
+      />
+    )
   }
 
   const { plans } = await api.plans.listByActiveProject({})
@@ -31,13 +36,10 @@ export default async function PlansPage(props: {
       header={
         <HeaderTab
           title="Plans"
-          description="Design and iterate on your revenue architecture."
+          description="Define plans, features, meters, and limits without hardcoding the money path."
           action={
             <PlanDialog>
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                Create Plan
-              </Button>
+              <Button>Create plan</Button>
             </PlanDialog>
           }
         />
@@ -61,8 +63,10 @@ export default async function PlansPage(props: {
             </ul>
             <div className="-translate-x-1/2 -translate-y-1/2 absolute top-1/2 left-1/2 w-full text-center">
               <Balancer>
-                <Typography variant="h2">Your growth levers are waiting.</Typography>
-                <Typography variant="large">Launch your first adaptive model to begin.</Typography>
+                <Typography variant="h2">No plans yet.</Typography>
+                <Typography variant="large">
+                  Create a plan to define features, meters, limits, and billing behavior.
+                </Typography>
               </Balancer>
             </div>
           </div>
