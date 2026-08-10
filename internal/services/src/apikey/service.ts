@@ -1,6 +1,12 @@
 import type { Analytics } from "@unprice/analytics"
 import { hashStringSHA256, newApiKeySecret, newId } from "@unprice/db/utils"
-import type { ApiKey, ApiKeyExtended, SearchParamsDataTable } from "@unprice/db/validators"
+import type {
+  ApiKey,
+  ApiKeyExtended,
+  ApiKeyType,
+  SearchParamsDataTable,
+} from "@unprice/db/validators"
+import { DEFAULT_API_KEY_TYPE } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, type SchemaError, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { Cache } from "@unprice/services/cache"
@@ -11,6 +17,7 @@ import type { Database } from "@unprice/db"
 import { and, count, eq, getTableColumns, ilike, inArray, isNull } from "@unprice/db"
 import { apikeys } from "@unprice/db/schema"
 import { withDateFilters, withPagination } from "@unprice/db/utils"
+import type { ApiKeyCache } from "../cache/namespaces"
 import { cachedQuery } from "../utils/cached-query"
 import { toErrorContext } from "../utils/log-context"
 import { UnPriceApiKeyError } from "./errors"
@@ -138,12 +145,14 @@ export class ApiKeysService {
     name,
     expiresAt,
     defaultCustomerId,
+    type = DEFAULT_API_KEY_TYPE,
   }: {
     projectId: string
     isRoot: boolean
     name: string
     expiresAt?: number | null
     defaultCustomerId?: string | null
+    type?: ApiKeyType
   }): Promise<Result<ApiKey & { key: string }, FetchError>> {
     const apiKey = newApiKeySecret()
     const apiKeyId = newId("apikey")
@@ -160,6 +169,7 @@ export class ApiKeysService {
           projectId,
           isRoot,
           defaultCustomerId,
+          type,
         })
         .returning()
         .then((rows) => rows[0] ?? null),
@@ -210,27 +220,51 @@ export class ApiKeysService {
     >
   > {
     const expiresAt = endOfCurrentDayMs(timezone)
+    return this.createOrRollApiKey({
+      projectId,
+      isRoot,
+      name: SDK_EXAMPLE_API_KEY_NAME,
+      expiresAt,
+      defaultCustomerId: null,
+    })
+  }
+
+  public async createOrRollApiKey({
+    projectId,
+    isRoot,
+    name,
+    expiresAt,
+    defaultCustomerId,
+  }: {
+    projectId: string
+    isRoot: boolean
+    name: string
+    expiresAt?: number | null
+    defaultCustomerId?: string | null
+  }): Promise<
+    Result<
+      ApiKey & { key: string; state: "created" | "rolled" },
+      SchemaError | FetchError | UnPriceApiKeyError
+    >
+  > {
     const { val: existingKey, err: existingKeyErr } = await wrapResult(
       this.db.query.apikeys.findFirst({
         where: (apikey, { and, eq, isNull }) =>
-          and(
-            eq(apikey.projectId, projectId),
-            eq(apikey.name, SDK_EXAMPLE_API_KEY_NAME),
-            isNull(apikey.revokedAt)
-          ),
+          and(eq(apikey.projectId, projectId), eq(apikey.name, name), isNull(apikey.revokedAt)),
         orderBy: (apikey, { desc }) => [desc(apikey.updatedAtM)],
       }),
       (error) =>
         new FetchError({
-          message: `error finding default SDK example api key: ${error.message}`,
+          message: `error finding reusable api key: ${error.message}`,
           retry: false,
         })
     )
 
     if (existingKeyErr) {
       this.logger.error(existingKeyErr, {
-        context: "error finding default SDK example api key",
+        context: "error finding reusable api key",
         projectId,
+        apiKeyName: name,
       })
       return Err(existingKeyErr)
     }
@@ -239,9 +273,9 @@ export class ApiKeysService {
       const createdKey = await this.createApiKey({
         projectId,
         isRoot,
-        name: SDK_EXAMPLE_API_KEY_NAME,
+        name,
         expiresAt,
-        defaultCustomerId: null,
+        defaultCustomerId,
       })
 
       if (createdKey.err) {
@@ -254,10 +288,22 @@ export class ApiKeysService {
       })
     }
 
+    if (
+      existingKey.isRoot !== isRoot ||
+      (existingKey.defaultCustomerId ?? null) !== (defaultCustomerId ?? null)
+    ) {
+      return Err(
+        new FetchError({
+          message: "Reusable API key binding does not match the requested binding",
+          retry: false,
+        })
+      )
+    }
+
     const rolledKey = await this.rollApiKey({
       keyHash: existingKey.hash,
       projectId,
-      expiresAt,
+      ...(expiresAt !== undefined ? { expiresAt } : {}),
     })
 
     if (rolledKey.err) {
@@ -361,6 +407,7 @@ export class ApiKeysService {
             with: {
               workspace: {
                 columns: {
+                  slug: true,
                   enabled: true,
                   unPriceCustomerId: true,
                   isPersonal: true,
@@ -379,6 +426,7 @@ export class ApiKeysService {
           revokedAt: true,
           hash: true,
           defaultCustomerId: true,
+          type: true,
         },
         where: (apikey, { and, eq }) =>
           projectId
@@ -421,7 +469,8 @@ export class ApiKeysService {
     opts: {
       skipCache?: boolean
     }
-  ): Promise<Result<ApiKeyExtended, SchemaError | FetchError | UnPriceApiKeyError>> {
+    // ApiKeyCache, not ApiKeyExtended: a cache hit may predate the `type` column.
+  ): Promise<Result<ApiKeyCache, SchemaError | FetchError | UnPriceApiKeyError>> {
     const keyHash = await this.hash(req.key)
 
     if (opts?.skipCache) {
@@ -479,7 +528,7 @@ export class ApiKeysService {
 
   public async verifyApiKey(req: {
     key: string
-  }): Promise<Result<ApiKeyExtended, UnPriceApiKeyError | FetchError | SchemaError>> {
+  }): Promise<Result<ApiKeyCache, UnPriceApiKeyError | FetchError | SchemaError>> {
     try {
       const { key } = req
       let retriedWithoutCache = false

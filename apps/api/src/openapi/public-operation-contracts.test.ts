@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest"
 import { route as accessUpdateRoute } from "~/routes/access/updateACLV1"
 import { route as analyticsChargesExplainRoute } from "~/routes/analytics/explainChargeV1"
-import { route as analyticsUsageForecastRoute } from "~/routes/analytics/forecastUsageV1"
+import { route as analyticsCurrentBillingPeriodUsageRoute } from "~/routes/analytics/getCurrentBillingPeriodUsageV1"
 import { route as ingestionEventsStatusRoute } from "~/routes/analytics/getIngestionStatusV1"
 import { route as analyticsUsageRoute } from "~/routes/analytics/getUsageV1"
 import { route as billingReservationsFlushForInvoicingRoute } from "~/routes/billing/flushReservationsForInvoicingV1"
+import { route as customersChangePlanRoute } from "~/routes/customers/changePlanV1"
 import { route as customersSignUpRoute } from "~/routes/customers/signUpV1"
 import { route as entitlementWindowsStatusRoute } from "~/routes/entitlements/getEntitlementWindowStatusV1"
 import { route as accessEntitlementsListRoute } from "~/routes/entitlements/getEntitlementsV1"
@@ -14,6 +15,8 @@ import { route as usageRecordRoute } from "~/routes/events/ingestEventsV1"
 import { route as ingestionEventsReplayRoute } from "~/routes/events/replayIngestionEventsV1"
 import { route as featuresListRoute } from "~/routes/features/getFeaturesV1"
 import { route as invoicesGetRoute } from "~/routes/invoices/getInvoiceV1"
+import { route as monetizationApplyRoute } from "~/routes/monetization/applyMonetizationV1"
+import { route as monetizationGetRoute } from "~/routes/monetization/getMonetizationV1"
 import { route as paymentMethodsCreateRoute } from "~/routes/payments/methods/createPaymentMethodV1"
 import { route as paymentMethodsListRoute } from "~/routes/payments/methods/listPaymentMethodsV1"
 import { route as paymentProviderCallbacksSetupRoute } from "~/routes/payments/providers/providerSetupV1"
@@ -56,6 +59,7 @@ const routes = [
   runsEndRoute,
   runsGetRoute,
   customersSignUpRoute,
+  customersChangePlanRoute,
   featuresListRoute,
   planVersionsListRoute,
   planVersionsGetRoute,
@@ -66,9 +70,11 @@ const routes = [
   walletCreditBalanceRoute,
   walletRoute,
   invoicesGetRoute,
+  monetizationApplyRoute,
+  monetizationGetRoute,
   analyticsUsageRoute,
+  analyticsCurrentBillingPeriodUsageRoute,
   analyticsChargesExplainRoute,
-  analyticsUsageForecastRoute,
   ingestionEventsStatusRoute,
   ingestionEventsReplayRoute,
   entitlementWindowsStatusRoute,
@@ -90,6 +96,7 @@ const expectedRoutes = new Map<string, string>([
   ["runs.end", "POST /v1/runs/end/{runId}"],
   ["runs.get", "GET /v1/runs/get/{runId}"],
   ["customers.signUp", "POST /v1/customers/sign-up"],
+  ["customers.changePlan", "POST /v1/customers/change-plan"],
   ["features.list", "GET /v1/features/list"],
   ["planVersions.list", "POST /v1/plan-versions/list"],
   ["planVersions.get", "GET /v1/plan-versions/get/{planVersionId}"],
@@ -100,9 +107,11 @@ const expectedRoutes = new Map<string, string>([
   ["walletCredits.balance", "GET /v1/wallet-credits/balance/{walletId}"],
   ["wallet.internalGet", "GET /v1/internal/wallet/get"],
   ["invoices.get", "GET /v1/invoices/get/{invoiceId}"],
+  ["monetization.apply", "POST /v1/monetization/apply"],
+  ["monetization.get", "GET /v1/monetization/get"],
   ["analytics.usage.get", "POST /v1/analytics/usage/get"],
+  ["analytics.usage.currentBillingPeriod", "POST /v1/analytics/usage/current-billing-period"],
   ["analytics.charges.explain", "POST /v1/analytics/charges/explain"],
-  ["analytics.usage.forecast", "POST /v1/analytics/usage/forecast"],
   ["ingestionEvents.status", "POST /v1/ingestion-events/status"],
   ["ingestionEvents.replay", "POST /v1/ingestion-events/replay"],
   ["entitlementWindows.status", "GET /v1/internal/entitlement-windows/status"],
@@ -139,6 +148,7 @@ const expectedSdkPublicOperations = [
   "runs.end",
   "runs.get",
   "customers.signUp",
+  "customers.changePlan",
   "features.list",
   "planVersions.list",
   "planVersions.get",
@@ -148,9 +158,11 @@ const expectedSdkPublicOperations = [
   "wallet.balance",
   "walletCredits.balance",
   "invoices.get",
+  "monetization.apply",
+  "monetization.get",
   "analytics.usage.get",
+  "analytics.usage.currentBillingPeriod",
   "analytics.charges.explain",
-  "analytics.usage.forecast",
   "ingestionEvents.status",
   "ingestionEvents.replay",
 ].sort()

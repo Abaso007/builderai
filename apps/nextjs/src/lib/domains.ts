@@ -11,11 +11,13 @@ import { isIpInRange } from "./is-ip-in-range"
 // if the subdomain is restricted or invalid, return null
 // TODO: replace this with https://github.com/vercel/platforms/blob/main/middleware.ts#L4
 export const getValidSubdomain = (host?: string | null) => {
+  if (!host || host === "vercel.app" || host.endsWith(".vercel.app")) {
+    return null
+  }
+
   let subdomain: string | null = null
 
-  // we should improve here for custom vercel deploy page price.vercel.app
-  // TODO: we have to handle this with /subdomain
-  if (host?.includes(".") && !host.includes(".vercel.app")) {
+  if (host.includes(".")) {
     const candidate = host.split(".")[0]
     if (candidate && !RESTRICTED_SUBDOMAINS.has(candidate)) {
       // Valid candidate
@@ -41,7 +43,12 @@ export const parse = (req: NextAuthRequest | NextRequest) => {
   // }
 
   const subdomain = domain.split(".")[0] === domain ? null : domain.split(".")[0]
-  const ip = req.ip ?? "127.0.0.1"
+  const forwardedFor = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+  const ip =
+    req.headers.get("x-real-ip")?.trim() ||
+    req.headers.get("cf-connecting-ip")?.trim() ||
+    forwardedFor ||
+    "127.0.0.1"
   const path = req.nextUrl.pathname
 
   // fullPath is the full URL path (along with search params)

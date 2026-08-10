@@ -2,6 +2,7 @@ import type { Database } from "@unprice/db"
 import { slugify } from "@unprice/db/utils"
 import type {
   AggregationMethod,
+  BillingInterval,
   ConfigFeatureVersionType,
   Currency,
   Event,
@@ -24,7 +25,6 @@ import {
   ONBOARDING_USAGE_EVENT_NAME,
   ONBOARDING_USAGE_EVENT_SLUG,
   SEAT_FEATURE,
-  type TemplateFeature,
   type TemplatePlan,
 } from "./template-data"
 
@@ -42,10 +42,21 @@ export type PlanTemplateMaterializeCaches = {
   planVersionFeatureSlugs: Map<string, Set<string>>
 }
 
-type MaterializeContext = {
+export type MaterializeContext = {
   deps: PlanTemplateMaterializeDeps
   projectId: string
   caches: PlanTemplateMaterializeCaches
+}
+
+/**
+ * The minimum a feature has to describe for `getOrCreateFeature` to resolve it.
+ * `TemplateFeature` and the monetization document's feature both satisfy it.
+ */
+type MaterializableFeature = {
+  slug: string
+  title: string
+  description?: Feature["description"]
+  unitOfMeasure?: Feature["unitOfMeasure"]
 }
 
 type TemplatePlanVersion = PlanVersion & {
@@ -63,7 +74,7 @@ type MaterializePlanVersionFeaturesOutput =
   | { state: "ok" }
   | { state: PlanVersionFeatureFailureState }
 
-function toDineroPrice(amount: string, currency: Currency) {
+export function toDineroPrice(amount: string, currency: Currency) {
   const currencyConfig = currencies[currency]
   const precision = amount.split(".")[1]?.length ?? currencyConfig.exponent
   const amountNum = Math.round(Number(amount) * 10 ** precision)
@@ -194,13 +205,28 @@ export async function createTemplatePlanVersion(
     template,
     currency,
     paymentProvider,
+    paymentMethodRequired = true,
     tags,
+    configHash,
   }: {
     planId: string
-    template: TemplatePlan
+    // Widened from `TemplatePlan` so the monetization document can supply the
+    // same three fields. Everything else on a plan version is server policy and
+    // stays hardcoded below, which is what makes the content hash meaningful:
+    // two documents that hash the same describe the same version.
+    template: {
+      plan: Pick<TemplatePlan["plan"], "title" | "description">
+      billingConfig: {
+        name: string
+        interval: BillingInterval
+        intervalCount: number
+      }
+    }
     currency: Currency
     paymentProvider: PlanVersion["paymentProvider"]
+    paymentMethodRequired?: boolean
     tags: string[]
+    configHash?: string
   }
 ) {
   return deps.services.plans.createPlanVersionRecord({
@@ -210,7 +236,7 @@ export async function createTemplatePlanVersion(
     description: template.plan.description,
     currency,
     paymentProvider,
-    paymentMethodRequired: true,
+    paymentMethodRequired,
     whenToBill: "pay_in_advance",
     autoRenew: true,
     trialUnits: 0,
@@ -227,12 +253,13 @@ export async function createTemplatePlanVersion(
       planType: "recurring",
     },
     status: "draft",
+    configHash,
   })
 }
 
 export async function getOrCreateFeature(
   { deps, projectId, caches }: MaterializeContext,
-  feature: TemplateFeature
+  feature: MaterializableFeature
 ): Promise<Result<Feature, FetchError>> {
   const cached = caches.features.get(feature.slug)
   if (cached) return Ok(cached)
@@ -323,14 +350,24 @@ export async function getOrCreateEvent(
 
 async function buildMeterConfig(
   context: MaterializeContext,
-  { featureSlug, aggregationMethod }: { featureSlug: string; aggregationMethod: AggregationMethod }
+  {
+    featureSlug,
+    aggregationMethod,
+    eventSlug = ONBOARDING_USAGE_EVENT_SLUG,
+    eventName = ONBOARDING_USAGE_EVENT_NAME,
+  }: {
+    featureSlug: string
+    aggregationMethod: AggregationMethod
+    eventSlug?: string
+    eventName?: string
+  }
 ): Promise<Result<MeterConfig, FetchError>> {
   const aggregationField = AGGREGATION_METHODS_WITHOUT_FIELD.has(aggregationMethod)
     ? undefined
     : slugify(featureSlug).replace(/-/g, "_")
   const event = await getOrCreateEvent(context, {
-    slug: ONBOARDING_USAGE_EVENT_SLUG,
-    name: ONBOARDING_USAGE_EVENT_NAME,
+    slug: eventSlug,
+    name: eventName,
     availableProperties: aggregationField ? [aggregationField] : [],
   })
   if (event.err) return Err(event.err)
@@ -343,7 +380,7 @@ async function buildMeterConfig(
   })
 }
 
-async function getOrCreatePlanVersionFeature(
+export async function getOrCreatePlanVersionFeature(
   { deps, projectId, caches }: MaterializeContext,
   {
     planVersion,
@@ -359,7 +396,7 @@ async function getOrCreatePlanVersionFeature(
   }: {
     planVersion: PlanVersion
     feature: Feature
-    featureType: "flat" | "package" | "usage"
+    featureType: PlanVersionFeature["featureType"]
     config: ConfigFeatureVersionType
     order: number
     defaultQuantity?: number
@@ -472,6 +509,8 @@ export async function materializeTemplatePlanFeatures(
   const usageMeterConfig = await buildMeterConfig(context, {
     featureSlug: usageFeature.val.slug,
     aggregationMethod: usageAggregationMethod,
+    eventSlug: template.usage.eventSlug,
+    eventName: template.usage.eventName,
   })
   if (usageMeterConfig.err) return Err(usageMeterConfig.err)
 

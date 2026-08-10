@@ -29,7 +29,7 @@ const ownershipFacts = [
 
 export default function ManifestoOwnership() {
   return (
-    <SectionShell labelledBy="ownership-title" className="bg-surface-panel">
+    <SectionShell labelledBy="ownership-title" surface="panel">
       <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] lg:gap-16">
         <div className="flex flex-col items-start">
           <StationHeader index="03" label="Ownership" fact="forkable · runs in your account" />
@@ -94,7 +94,13 @@ export default function ManifestoOwnership() {
               ))}
             </div>
             <div className="mt-4 border-background-border border-t pt-3">
-              <LedgerRow label="independent metering-first vendors" fact="none remaining" />
+              {/* "none remaining" was false and falsifiable in one click —
+                  Lago is independent, open-source and metering-first, and an
+                  evaluator with it open in another tab discards the whole
+                  timeline over the one absolute it can disprove. The precise
+                  claim is the one that survives: the vendors that took venture
+                  money to own this layer were bought. */}
+              <LedgerRow label="venture-backed metering vendors" fact="acquired or pivoted" />
               <LedgerRow
                 label="your money path"
                 fact="yours · AGPL-3.0"

@@ -1,20 +1,44 @@
-import { APP_DOMAIN } from "@unprice/config"
 import { buttonVariants } from "@unprice/ui/button"
+import { cn, focusRing } from "@unprice/ui/utils"
 import { ArrowRight } from "lucide-react"
 import { Link } from "next-view-transitions"
 import Balancer from "react-wrap-balancer"
+import { AcquisitionLink } from "./acquisition-link"
 import { Reveal } from "./reveal"
 import { SectionShell } from "./station"
 import { StationHeader } from "./station-header"
 
-// The close is the offer, and it ends the page in one arc: the deal in prose,
-// the one decision inside the bracket corners, the receipt of what the
-// afternoon actually is (one plan version, one customer signup, one shadow
-// check — the signup step is stated, not hidden), the walk-away terms as a
-// ruled strip, and a personal letter from the founder. Two grammars on
-// purpose — terms read institutional, the letter reads human — so nothing on
-// the page repeats as twin panels. Every fact true today: AGPL-3.0 core, free
-// early access, no card at signup, funds settle to the builder's own Stripe.
+// The close is one decision and one signature. Nothing else.
+//
+// It used to argue the integration three times inside one viewport — the
+// subhead narrated signUp → check, the guarantee narrated it again, and the
+// strip's fact line repeated station 04's shadow ledger verbatim — then
+// stacked seven micro-facts under the button and put a second button beside
+// the primary one (distill pass 2026-07-27). Station 04 owns the integration
+// and station 05 owns the objections. By the time a reader is here the
+// argument is over; the close only has to name the prerequisite, hold the
+// decision, and be signed.
+//
+// So every fact is stated exactly once, in the one place it decides
+// something: the terms of entry in the header, the afternoon on the receipt
+// under the button, and what makes leaving free in the signed strip. AGPL-3.0
+// is the hero's fact and the footer's license row, not a third echo here.
+//
+// The one mailto is the only other way out of this section, and it is inside
+// the founder's own sentence — a person to answer, not a competing CTA.
+
+// The logo's containment motif marks the decision moment.
+const BRACKET_CORNERS = [
+  "top-0 left-0 border-t-2 border-l-2",
+  "top-0 right-0 border-t-2 border-r-2",
+  "bottom-0 left-0 border-b-2 border-l-2",
+  "right-0 bottom-0 border-r-2 border-b-2",
+]
+
+const inlineLink = cn(
+  "rounded-sm font-medium text-background-textContrast underline decoration-background-borderHover underline-offset-4 transition-colors duration-quick ease-out-quad hover:decoration-background-textContrast",
+  focusRing
+)
 
 export default function Cta() {
   return (
@@ -24,29 +48,21 @@ export default function Cta() {
       innerClassName="flex flex-col items-center py-24 text-center sm:py-32"
     >
       <>
-        <StationHeader index="05" label="The offer" fact="free to prove · yours to keep" />
+        <StationHeader index="06" label="The offer" fact="free during early access · no card" />
 
+        {/* The close sells the outcome and the time-box, not the price. */}
         <h2
           id="cta-title"
           className="mt-6 max-w-3xl font-primary text-background-textContrast text-display-2"
         >
-          <Balancer>The pricing is as explainable as yours will be.</Balancer>
+          <Balancer>Start with one paid action in one afternoon.</Balancer>
         </h2>
+        {/* One prerequisite, one exit to the long argument. */}
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
           <Balancer>
-            The core is AGPL-3.0 and free to run in your own Cloudflare account. The hosted cloud is
-            free during early access, with no card at signup. Payments settle to your own Stripe
-            account either way — Unprice never sits in your funds flow.
-          </Balancer>
-        </p>
-        <p className="mt-4 max-w-2xl text-background-text text-sm leading-6">
-          <Balancer>
-            The money path is yours to read, fork, and run — it cannot be acquired out from under
-            you. The full argument is in{" "}
-            <Link
-              href="/manifesto"
-              className="font-medium text-background-textContrast underline decoration-background-borderHover underline-offset-4 hover:decoration-background-textContrast"
-            >
+            Bring the one action in your product that burns margin when a customer runs it. That is
+            the whole prerequisite — the argument behind it is in{" "}
+            <Link href="/manifesto" className={inlineLink}>
               the manifesto
             </Link>
             .
@@ -54,89 +70,63 @@ export default function Cta() {
         </p>
 
         <div className="relative mt-12 px-6 py-5">
-          <span
-            aria-hidden
-            className="absolute top-0 left-0 size-3 border-background-textContrast border-t-2 border-l-2"
-          />
-          <span
-            aria-hidden
-            className="absolute top-0 right-0 size-3 border-background-textContrast border-t-2 border-r-2"
-          />
-          <span
-            aria-hidden
-            className="absolute bottom-0 left-0 size-3 border-background-textContrast border-b-2 border-l-2"
-          />
-          <span
-            aria-hidden
-            className="absolute right-0 bottom-0 size-3 border-background-textContrast border-r-2 border-b-2"
-          />
-          <Link
-            href={`${APP_DOMAIN}`}
+          {BRACKET_CORNERS.map((corner) => (
+            <span
+              key={corner}
+              aria-hidden
+              className={cn("absolute size-3 border-background-textContrast", corner)}
+            />
+          ))}
+          <AcquisitionLink
+            source="closing_cta"
+            pendingLabel="Opening signup…"
             className={buttonVariants({ variant: "primary", className: "gap-1.5" })}
           >
             Start with one paid action
             <ArrowRight aria-hidden className="size-3.5" />
-          </Link>
+          </AcquisitionLink>
         </div>
 
-        {/* The afternoon, itemized honestly: the signup step is part of the
-            deal, so it is part of the receipt. */}
+        {/* The afternoon, itemized honestly: the customer-signup step is part
+            of the deal, so it stays on the receipt. */}
         <p className="mt-5 font-mono text-[11px] text-background-text leading-5">
           <span className="whitespace-nowrap">one plan version</span> ·{" "}
           <span className="whitespace-nowrap">one customer signup</span> ·{" "}
           <span className="whitespace-nowrap">one shadow check</span>
         </p>
-        <p className="mt-1 font-mono text-[11px] text-background-text leading-5">
-          <span className="whitespace-nowrap">one afternoon</span> ·{" "}
-          <span className="whitespace-nowrap">free during early access</span> ·{" "}
-          <span className="whitespace-nowrap">no card</span>
-        </p>
 
-        <Reveal className="mt-16 w-full max-w-2xl border-background-border border-y py-5 text-left">
+        {/* The guarantee and the founder letter are one block: the walk-away
+            terms are Seb's promise, so they carry his signature and his
+            inbox — mono strip header, human prose, signed. */}
+        <Reveal className="mt-16 w-full max-w-2xl border-background-border border-y py-6 text-left">
           <div className="flex items-baseline justify-between gap-4">
             <span className="font-mono text-background-text text-xs uppercase tracking-widest">
               The walk-away guarantee
             </span>
             <span className="hidden font-mono text-[10px] text-background-text sm:inline">
-              shadow · read-only · nothing blocked
+              delete one line · nothing changed
             </span>
           </div>
           <p className="mt-3 text-background-text text-sm leading-6">
-            Adopt in shadow: sign up one test customer, then run one read-only{" "}
-            <code className="font-mono text-[12px]">access.check</code> beside the logic you already
-            trust, blocking nothing. If the decisions never match your reality, delete that line and
-            walk away — nothing in your stack changed, no card on file, no contract to exit. The
-            only trace left is the one test customer inside Unprice. Enforce only when the evidence
-            convinces you.
+            If the decisions don&apos;t match your reality, delete the{" "}
+            <code className="font-mono text-[12px]">access.check</code> line and walk away. Nothing
+            in your stack changed, and there is no contract to exit.
           </p>
-        </Reveal>
-
-        {/* The founder letter: open prose, not a panel — the one human voice
-            on the page, and the design-partner pipeline. */}
-        <Reveal className="mt-16 w-full max-w-2xl text-left sm:mt-20">
-          <h3 className="font-medium font-primary text-background-textContrast text-xl">
-            Not sure where to start?
-          </h3>
-          <p className="mt-3 text-background-text text-sm leading-6">
-            Tell me the action that burns margin when a customer runs it — an LLM call, a workflow,
-            an API job — and what stops it today, if anything. I&apos;ll reply personally with a
-            concrete first step: where to put the check, what to run in shadow beside what you
-            already have, and whether to block each request or cap the whole job.
-          </p>
-          <p className="mt-4 font-medium text-background-textContrast text-sm leading-6">
-            — Seb, founder of Unprice
-          </p>
-          <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-3">
+          {/* Honest scarcity: a real constraint on my own time, stated as a
+              number. No countdown, no fake stock (marketing-framework.md). */}
+          <p className="mt-4 text-background-text text-sm leading-6">
+            I am taking ten design partners and I onboard each one myself.{" "}
             <a
               href="mailto:seb@unprice.dev?subject=What%20runs%20when%20customers%20overspend%3F"
-              className={buttonVariants({ variant: "outline", className: "gap-1.5" })}
+              className={inlineLink}
             >
-              Email what runs
-            </a>
-            <span className="font-mono text-[11px] text-background-text">
-              seb@unprice.dev · replies personally
-            </span>
-          </div>
+              Email me your action
+            </a>{" "}
+            and I&apos;ll reply with the first step — whether or not a slot is left.
+          </p>
+          <p className="mt-4 font-medium text-background-textContrast text-sm leading-6">
+            — Seb, founder of Unprice · <span className="font-mono text-xs">seb@unprice.dev</span>
+          </p>
         </Reveal>
       </>
     </SectionShell>

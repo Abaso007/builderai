@@ -1,5 +1,8 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
+import { version } from "../package.json"
 import { Unprice } from "./client"
+import type { ApiError, ErrorResponse } from "./errors"
+import { sdkOperationIds } from "./generated/sdk-resources"
 import type { OperationInput, OperationResponse } from "./operation-types"
 
 const createJsonResponse = (body: unknown, init?: ResponseInit) =>
@@ -27,9 +30,6 @@ describe("Unprice client", () => {
     expectTypeOf(client.analytics.charges.explain)
       .parameter(0)
       .toEqualTypeOf<OperationInput<"analytics.charges.explain">>()
-    expectTypeOf(client.analytics.usage.forecast)
-      .parameter(0)
-      .toEqualTypeOf<OperationInput<"analytics.usage.forecast">>()
     expectTypeOf(client.analytics.usage.get)
       .parameter(0)
       .toEqualTypeOf<OperationInput<"analytics.usage.get">>()
@@ -46,15 +46,6 @@ describe("Unprice client", () => {
       invoice_id: string
       entry_id: string
     }>().toMatchTypeOf<OperationInput<"analytics.charges.explain">>()
-    expectTypeOf<{
-      customer_id: string
-      feature_slug: string
-      horizon_days: number
-    }>().toMatchTypeOf<OperationInput<"analytics.usage.forecast">>()
-    expectTypeOf<{
-      customer_id: string
-      feature_slug: string
-    }>().toMatchTypeOf<OperationInput<"analytics.usage.forecast">>()
     expectTypeOf<{
       from_ts: number
       to_ts: number
@@ -81,7 +72,6 @@ describe("Unprice client", () => {
     expect(typeof client.paymentMethods.create).toBe("function")
     expect(typeof client.paymentMethods.list).toBe("function")
     expect(typeof client.analytics.charges.explain).toBe("function")
-    expect(typeof client.analytics.usage.forecast).toBe("function")
     expect(typeof client.analytics.usage.get).toBe("function")
     expect(typeof client.ingestionEvents.status).toBe("function")
     expect(typeof client.ingestionEvents.replay).toBe("function")
@@ -89,6 +79,8 @@ describe("Unprice client", () => {
     expect(typeof client.wallet.balance).toBe("function")
     expect(typeof client.walletCredits.balance).toBe("function")
     expect(typeof client.invoices.get).toBe("function")
+    expect(typeof client.monetization.apply).toBe("function")
+    expect(typeof client.monetization.get).toBe("function")
 
     expect("entitlements" in clientRecord).toBe(false)
     expect("events" in clientRecord).toBe(false)
@@ -145,6 +137,116 @@ describe("Unprice client", () => {
     >()
   })
 
+  it("exposes exactly the two generated monetization configuration operations", () => {
+    const client = createClient()
+    const monetization = client.monetization as unknown as Record<string, unknown>
+
+    expect(sdkOperationIds).toContain("monetization.apply")
+    expect(sdkOperationIds).toContain("monetization.get")
+    expect(typeof client.monetization.apply).toBe("function")
+    expect(typeof client.monetization.get).toBe("function")
+    // Publishing a draft is a human decision made in the dashboard. If a publish
+    // or preview method ever reaches the SDK, this test is where it gets caught.
+    expect(Object.keys(monetization).sort()).toEqual(["apply", "get"])
+
+    expectTypeOf(client.monetization.apply)
+      .parameter(0)
+      .toEqualTypeOf<OperationInput<"monetization.apply">>()
+    // `monetization.get` takes the project from the key, so it has no input at all.
+    expectTypeOf(client.monetization.get).parameters.toEqualTypeOf<[]>()
+
+    expectTypeOf<{
+      config: {
+        plans: [
+          {
+            slug: string
+            title: string
+            version: {
+              currency: "USD"
+              paymentProvider: "stripe"
+              billingConfig: { name: string; interval: "month"; intervalCount: number }
+              features: [{ featureSlug: string; featureType: "flat"; config: { price: string } }]
+            }
+          },
+        ]
+      }
+    }>().toMatchTypeOf<OperationInput<"monetization.apply">>()
+
+    expectTypeOf<OperationResponse<"monetization.apply">["reviewUrl"]>().toEqualTypeOf<
+      string | null
+    >()
+    expectTypeOf<OperationResponse<"monetization.get">["warnings"][number]["code"]>().toEqualTypeOf<
+      | "enforcement_settings_dropped"
+      | "version_settings_dropped"
+      | "feature_settings_dropped"
+      | "meter_fields_dropped"
+    >()
+  })
+
+  it("sends monetization configuration over the typed OpenAPI transport", async () => {
+    const requests: Request[] = []
+    const client = createClient(async (request) => {
+      requests.push(request.clone())
+
+      if (request.method === "GET") {
+        return createJsonResponse({
+          config: { events: [], features: [], plans: [] },
+          plans: [],
+          unrepresentablePlans: [],
+          warnings: [],
+          integrationContract: null,
+        })
+      }
+
+      return createJsonResponse({
+        plans: [
+          {
+            slug: "pro",
+            status: "created",
+            planId: "plan_123",
+            planVersionId: "pv_123",
+            version: 1,
+          },
+        ],
+        staleDrafts: [],
+        integrationContract: null,
+        reviewUrl: "https://app.unprice.dev/acme/acme-api/plans/pro/pv_123",
+      })
+    })
+
+    const config: OperationInput<"monetization.apply">["config"] = {
+      plans: [
+        {
+          slug: "pro",
+          title: "Pro",
+          version: {
+            currency: "USD",
+            paymentProvider: "stripe",
+            paymentMethodRequired: false,
+            billingConfig: { name: "monthly", interval: "month", intervalCount: 1 },
+            features: [{ featureSlug: "tokens", featureType: "flat", config: { price: "10.00" } }],
+          },
+        },
+      ],
+    }
+
+    const applied = await client.monetization.apply({ config })
+
+    expect(applied.error).toBeUndefined()
+    expect(applied.result?.reviewUrl).toBe("https://app.unprice.dev/acme/acme-api/plans/pro/pv_123")
+    expect(requests[0]?.method).toBe("POST")
+    expect(requests[0]?.url).toBe("https://example.com/v1/monetization/apply")
+    expect(requests[0]?.headers.get("authorization")).toBe("Bearer test-token")
+    await expect(requests[0]?.json()).resolves.toEqual({ config })
+
+    const read = await client.monetization.get()
+
+    expect(read.error).toBeUndefined()
+    expect(read.result?.warnings).toEqual([])
+    expect(requests[1]?.method).toBe("GET")
+    expect(requests[1]?.url).toBe("https://example.com/v1/monetization/get")
+  })
+
   it("uses openapi-fetch path params, query params, body, and auth headers", async () => {
     const requests: Request[] = []
     const client = createClient(async (request) => {
@@ -187,6 +289,26 @@ describe("Unprice client", () => {
     expect(requests[0]?.url).toBe("https://example.com/v1/invoices/get/inv_123")
     expect(requests[0]?.headers.get("authorization")).toBe("Bearer test-token")
     expect(requests[0]?.headers.get("unprice-request-source")).toMatch(/^sdk@/)
+  })
+
+  it("reports the package version in SDK headers", async () => {
+    const requests: Request[] = []
+    const client = new Unprice({
+      token: "test-token",
+      baseUrl: "https://example.com",
+      retry: { attempts: 0 },
+      fetch: async (request) => {
+        requests.push(request.clone())
+        return createJsonResponse({ features: [] })
+      },
+    })
+
+    const { error } = await client.features.list()
+
+    expect(error).toBeUndefined()
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.headers.get("unprice-request-source")).toBe(`sdk@${version}`)
+    expect(requests[0]?.headers.get("unprice-telemetry-sdk")).toBe(`@unprice/api@${version}`)
   })
 
   it("serializes wallet credit balance paths and query params", async () => {
@@ -412,6 +534,76 @@ describe("Unprice client", () => {
       message: "Invoice not found",
       requestId: "req_123",
     })
+  })
+
+  it("covers every documented error status in the error response union", async () => {
+    // The union is derived from the generated components, so a status added to the
+    // API's shared error responses lands here on the next regeneration. It was
+    // previously hand-listed and missed 413 entirely.
+    expectTypeOf<ApiError["code"]>().toEqualTypeOf<
+      | "BAD_REQUEST"
+      | "UNAUTHORIZED"
+      | "FORBIDDEN"
+      | "NOT_FOUND"
+      | "CONFLICT"
+      | "PRECONDITION_FAILED"
+      | "PAYLOAD_TOO_LARGE"
+      | "TOO_MANY_REQUESTS"
+      | "INTERNAL_SERVER_ERROR"
+      | "FETCH_ERROR"
+    >()
+    expectTypeOf<{
+      error: {
+        code: "PAYLOAD_TOO_LARGE"
+        message: string
+        docs: string
+        requestId: string
+      }
+    }>().toMatchTypeOf<ErrorResponse>()
+
+    const client = createClient(async () =>
+      createJsonResponse(
+        {
+          error: {
+            code: "PAYLOAD_TOO_LARGE",
+            message: "Request payload is too large",
+            docs: "https://docs.unprice.dev/api-reference/errors/code/PAYLOAD_TOO_LARGE",
+            requestId: "req_413",
+          },
+        },
+        { status: 413 }
+      )
+    )
+
+    const { result, error } = await client.invoices.get({ invoiceId: "inv_123" })
+
+    expect(result).toBeUndefined()
+    expect(error).toMatchObject({ code: "PAYLOAD_TOO_LARGE", requestId: "req_413" })
+  })
+
+  it("carries the optional details field on error responses", () => {
+    // `details` is spliced into the shared error factory, so it is optional on every
+    // error component; `kind` is the only required member when it is present.
+    expectTypeOf<{
+      error: {
+        code: "BAD_REQUEST"
+        message: string
+        docs: string
+        requestId: string
+        details: {
+          kind: "invalid_config"
+          issues: { path: string; message: string }[]
+        }
+      }
+    }>().toMatchTypeOf<ErrorResponse>()
+    expectTypeOf<{
+      error: {
+        code: "BAD_REQUEST"
+        message: string
+        docs: string
+        requestId: string
+      }
+    }>().toMatchTypeOf<ErrorResponse>()
   })
 
   it("retries server errors inside the OpenAPI transport", async () => {

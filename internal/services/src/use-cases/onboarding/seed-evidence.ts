@@ -10,16 +10,17 @@ import {
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
+import { fromZonedTime, toZonedTime } from "date-fns-tz"
 import { z } from "zod"
 import type { ServiceContext } from "../../context"
+import { paidActionSchema } from "../plan-template/template-data"
 import { createSubscription } from "../subscription/create"
 
-const usageSeedValues = [2, 3, 5]
-const onboardingRunBudgetAmountMinor = 5000
-const onboardingCreditLineAmountMinor = 10000
+const onboardingCreditLineAmountMinor = 10_000
 
 export const seedOnboardingEvidenceRequestSchema = z.object({
   planVersionId: z.string().min(1),
+  paidAction: paidActionSchema,
 })
 
 export const seedOnboardingEvidenceInputSchema = seedOnboardingEvidenceRequestSchema.extend({
@@ -27,6 +28,22 @@ export const seedOnboardingEvidenceInputSchema = seedOnboardingEvidenceRequestSc
   projectTimezone: z.string().min(1).default("UTC"),
   projectDefaultCurrency: currencySchema.optional(),
   workspaceIsMain: z.boolean().default(false),
+})
+
+const allowedDecisionSchema = z.object({
+  sequence: z.literal(1),
+  accepted: z.literal(true),
+  reason: z.enum(["accepted", "duplicate"]),
+  consumedAmountMinor: z.number().int().nonnegative(),
+  remainingAmountMinor: z.number().int().nonnegative(),
+})
+
+const deniedDecisionSchema = z.object({
+  sequence: z.literal(2),
+  accepted: z.literal(false),
+  reason: z.literal("insufficient_budget"),
+  consumedAmountMinor: z.number().int().nonnegative(),
+  remainingAmountMinor: z.number().int().nonnegative(),
 })
 
 export const seedOnboardingEvidenceOutputSchema = z.object({
@@ -42,16 +59,14 @@ export const seedOnboardingEvidenceOutputSchema = z.object({
   subscription: z.object({
     id: z.string(),
   }),
-  usage: z.object({
-    state: z.enum(["done", "skipped"]),
-    eventsRecorded: z.number().int().min(0),
-    targetCount: z.number().int().min(0),
+  action: z.object({
+    title: z.string(),
+    featureSlug: z.string(),
+    eventSlug: z.string(),
+    unitPriceMinor: z.number().int().positive(),
+    currency: z.literal("USD"),
   }),
-  verification: z.object({
-    state: z.enum(["done", "skipped"]),
-    allowed: z.boolean().optional(),
-    featureSlug: z.string().optional(),
-  }),
+  decisions: z.tuple([allowedDecisionSchema, deniedDecisionSchema]),
 })
 
 export type SeedOnboardingEvidenceRequest = z.input<typeof seedOnboardingEvidenceRequestSchema>
@@ -60,7 +75,6 @@ export type SeedOnboardingEvidenceOutput = z.infer<typeof seedOnboardingEvidence
 
 type EvidenceApiClient = {
   runs: Pick<Unprice["runs"], "start" | "consume" | "end">
-  access: Pick<Unprice["access"], "check">
 }
 
 type SeedOnboardingEvidenceDeps = {
@@ -74,11 +88,27 @@ type DetailedPlanFeature = PlanVersionFeature & {
   feature?: Feature | null
 }
 
-type UsageSeedTarget = {
+type PaidActionTarget = {
   featureSlug: string
   eventSlug: string
-  aggregationField?: string
 }
+
+type OnboardingCustomer = {
+  id: string
+  name?: string | null
+  email: string
+}
+
+type OnboardingSubscription = {
+  id: string
+}
+
+const unitPriceConfigSchema = z.object({
+  usageMode: z.literal("unit"),
+  price: z.object({
+    displayAmount: z.string(),
+  }),
+})
 
 function seedError(message: string, context?: Record<string, unknown>) {
   return new FetchError({
@@ -95,41 +125,195 @@ function apiErrorMessage(prefix: string, error: { message: string; code?: string
   return `${prefix}${code}: ${error.message}`
 }
 
-function getUsageSeedTargets(planFeatures: DetailedPlanFeature[]): UsageSeedTarget[] {
-  const targets = new Map<string, UsageSeedTarget>()
-
-  for (const planFeature of planFeatures) {
-    if (planFeature.featureType !== "usage") {
-      continue
-    }
-
-    const meterConfig = planFeature.meterConfig as MeterConfig | null | undefined
-    if (!meterConfig?.eventSlug) {
-      continue
-    }
-
-    const featureSlug = planFeature.feature?.slug ?? meterConfig.eventSlug
-    const key = `${featureSlug}:${meterConfig.aggregationField ?? "count"}`
-
-    targets.set(key, {
-      featureSlug,
-      eventSlug: meterConfig.eventSlug,
-      aggregationField: meterConfig.aggregationField,
-    })
-  }
-
-  return Array.from(targets.values())
+function toCurrencyMinorAmount(amount: string) {
+  return Math.round(Number(amount) * 100)
 }
 
-function getVerificationFeatureSlug(planFeatures: DetailedPlanFeature[]) {
-  return (
-    planFeatures.find((planFeature) => planFeature.feature && !planFeature.metadata?.hidden)
-      ?.feature?.slug ?? planFeatures.find((planFeature) => planFeature.feature)?.feature?.slug
-  )
+function getPaidActionTarget(
+  planFeatures: DetailedPlanFeature[],
+  paidAction: z.infer<typeof paidActionSchema>
+): PaidActionTarget | null {
+  const target = planFeatures.find((planFeature) => {
+    const meterConfig = planFeature.meterConfig as MeterConfig | null | undefined
+    return (
+      planFeature.featureType === "usage" &&
+      planFeature.feature?.slug === paidAction.featureSlug &&
+      meterConfig?.eventSlug === paidAction.eventSlug &&
+      meterConfig.aggregationMethod === "count"
+    )
+  })
+
+  if (!target) {
+    return null
+  }
+
+  const priceConfig = unitPriceConfigSchema.safeParse(target.config)
+  if (
+    !priceConfig.success ||
+    Number(priceConfig.data.price.displayAmount) !== Number(paidAction.unitPrice)
+  ) {
+    return null
+  }
+
+  return {
+    featureSlug: paidAction.featureSlug,
+    eventSlug: paidAction.eventSlug,
+  }
 }
 
 function normalizeCurrency(currency?: Currency) {
   return currency === "EUR" || currency === "USD" ? currency : undefined
+}
+
+function endOfCurrentDayMs(date: Date, timezone = "UTC") {
+  try {
+    const endOfDay = toZonedTime(date, timezone)
+    endOfDay.setHours(23, 59, 59, 999)
+    return fromZonedTime(endOfDay, timezone).getTime()
+  } catch {
+    const endOfDay = new Date(date)
+    endOfDay.setUTCHours(23, 59, 59, 999)
+    return endOfDay.getTime()
+  }
+}
+
+function onboardingExternalId(planVersionId: string) {
+  return `unprice-onboarding:${planVersionId}`
+}
+
+function isMissingActiveSubscription(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error)) return false
+  return error.code === "SUBSCRIPTION_NOT_FOUND" || error.code === "SUBSCRIPTION_NOT_ACTIVE"
+}
+
+async function getOrCreateOnboardingCustomer(
+  deps: SeedOnboardingEvidenceDeps,
+  input: z.infer<typeof seedOnboardingEvidenceInputSchema>
+): Promise<Result<OnboardingCustomer, FetchError>> {
+  const externalId = onboardingExternalId(input.planVersionId)
+  const existingResult = await deps.services.customers.getCustomerByExternalId(
+    input.projectId,
+    externalId,
+    { skipCache: true }
+  )
+
+  if (existingResult.err) {
+    return Err(seedError(`Customer lookup failed: ${existingResult.err.message}`))
+  }
+
+  if (existingResult.val) {
+    if (!existingResult.val.active) {
+      return Err(seedError("The onboarding customer exists but is inactive."))
+    }
+    return Ok(existingResult.val)
+  }
+
+  const createdResult = await deps.services.customers.createCustomerRecord({
+    projectId: input.projectId,
+    name: "Onboarding Customer",
+    email: `onboarding+${input.planVersionId}@example.com`,
+    externalId,
+    defaultCurrency: normalizeCurrency(input.projectDefaultCurrency),
+    timezone: input.projectTimezone,
+  })
+
+  if (!createdResult.err) {
+    return Ok(createdResult.val)
+  }
+
+  const racedResult = await deps.services.customers.getCustomerByExternalId(
+    input.projectId,
+    externalId,
+    { skipCache: true }
+  )
+  if (!racedResult.err && racedResult.val?.active) {
+    return Ok(racedResult.val)
+  }
+
+  return Err(createdResult.err)
+}
+
+async function getOrCreateOnboardingSubscription({
+  creditLineAmountMinor,
+  customerId,
+  deps,
+  input,
+  now,
+  planVersion,
+}: {
+  creditLineAmountMinor: number
+  customerId: string
+  deps: SeedOnboardingEvidenceDeps
+  input: z.infer<typeof seedOnboardingEvidenceInputSchema>
+  now: number
+  planVersion: { currency: Currency; trialUnits?: number | null }
+}): Promise<Result<OnboardingSubscription, FetchError>> {
+  const getActiveSubscription = () =>
+    deps.services.customers.getActiveSubscription({
+      customerId,
+      projectId: input.projectId,
+      now,
+      opts: { skipCache: true },
+    })
+  const activeResult = await getActiveSubscription()
+
+  if (!activeResult.err) {
+    if (activeResult.val.activePhase?.planVersion?.id !== input.planVersionId) {
+      return Err(
+        seedError("The onboarding customer already has a different active plan version.", {
+          customerId,
+          planVersionId: input.planVersionId,
+        })
+      )
+    }
+    return Ok({ id: activeResult.val.id })
+  }
+
+  if (!isMissingActiveSubscription(activeResult.err)) {
+    return Err(seedError(`Subscription lookup failed: ${activeResult.err.message}`))
+  }
+
+  const createdResult = await createSubscription(
+    {
+      services: deps.services,
+      db: deps.db,
+      logger: deps.logger,
+    },
+    {
+      projectId: input.projectId,
+      input: {
+        customerId,
+        timezone: input.projectTimezone,
+        phases: [
+          {
+            planVersionId: input.planVersionId,
+            startAt: now - 5 * 60 * 1000,
+            trialUnits: planVersion.trialUnits ?? 0,
+            creditLinePolicy: "capped",
+            creditLineAmount: toLedgerMinor(
+              fromCurrencyMinor(creditLineAmountMinor, planVersion.currency)
+            ),
+          },
+        ],
+      },
+    }
+  )
+
+  if (!createdResult.err) {
+    return Ok({ id: createdResult.val.id })
+  }
+
+  const racedResult = await getActiveSubscription()
+  if (!racedResult.err && racedResult.val.activePhase?.planVersion?.id === input.planVersionId) {
+    return Ok({ id: racedResult.val.id })
+  }
+
+  return Err(
+    seedError(`Subscription setup failed: ${createdResult.err.message}`, {
+      customerId,
+      planVersionId: input.planVersionId,
+    })
+  )
 }
 
 async function closeStartedRunAfterFailure({
@@ -152,7 +336,7 @@ async function closeStartedRunAfterFailure({
     })
 
     if (endResult.error) {
-      logger.warn("failed to close onboarding budgeted run after evidence error", {
+      logger.warn("failed to close onboarding budgeted run after proof error", {
         customerId,
         planVersionId,
         runId,
@@ -161,7 +345,7 @@ async function closeStartedRunAfterFailure({
       })
     }
   } catch (error) {
-    logger.warn("failed to close onboarding budgeted run after evidence error", {
+    logger.warn("failed to close onboarding budgeted run after proof error", {
       customerId,
       planVersionId,
       runId,
@@ -195,171 +379,229 @@ export async function seedOnboardingEvidence(
 
   const planVersion = planVersionResult.val
   if (!planVersion) {
-    return Err(seedError("Plan version not found. Please return to the previous step."))
+    return Err(seedError("Plan version not found. Please retry the Sandbox setup."))
+  }
+  if (planVersion.currency !== "USD") {
+    return Err(seedError("The onboarding proof requires a USD Sandbox project."))
   }
 
+  const paidAction = input.paidAction
+  const unitPriceMinor = toCurrencyMinorAmount(paidAction.unitPrice)
   const planFeatures = planVersion.planFeatures as DetailedPlanFeature[]
-  if (planFeatures.length === 0) {
-    return Err(seedError("Your plan needs at least one feature before we can seed evidence."))
+  const target = getPaidActionTarget(planFeatures, paidAction)
+  if (!target) {
+    return Err(
+      seedError("The saved paid action does not match the published plan version.", {
+        eventSlug: paidAction.eventSlug,
+        featureSlug: paidAction.featureSlug,
+        planVersionId: input.planVersionId,
+      })
+    )
   }
 
   const now = Date.now()
-  const customerResult = await deps.services.customers.createCustomerRecord({
-    projectId: input.projectId,
-    name: "Onboarding Customer",
-    email: `onboarding+${now}@example.com`,
-    defaultCurrency: normalizeCurrency(input.projectDefaultCurrency),
-    timezone: input.projectTimezone,
-  })
+  const apiExpiresAt = endOfCurrentDayMs(new Date(now), input.projectTimezone)
+  const customerResult = await getOrCreateOnboardingCustomer(deps, input)
 
   if (customerResult.err) {
     return Err(customerResult.err)
   }
 
   const customer = customerResult.val
-  const apiKeyResult = await deps.services.apikeys.createApiKey({
+  const apiKeyResult = await deps.services.apikeys.createOrRollApiKey({
     projectId: input.projectId,
-    name: `onboarding-${now}`,
+    name: `onboarding-${input.planVersionId}`,
     isRoot: input.workspaceIsMain,
     defaultCustomerId: customer.id,
+    expiresAt: apiExpiresAt,
   })
 
   if (apiKeyResult.err) {
-    return Err(apiKeyResult.err)
+    return Err(seedError(`API key setup failed: ${apiKeyResult.err.message}`))
   }
 
   const apiKey = apiKeyResult.val
-  const subscriptionResult = await createSubscription(
-    {
-      services: deps.services,
-      db: deps.db,
-      logger: deps.logger,
-    },
-    {
-      projectId: input.projectId,
-      input: {
-        customerId: customer.id,
-        timezone: input.projectTimezone,
-        phases: [
-          {
-            planVersionId: input.planVersionId,
-            startAt: now - 5 * 60 * 1000,
-            trialUnits: planVersion.trialUnits ?? 0,
-            creditLinePolicy: "capped",
-            creditLineAmount: toLedgerMinor(
-              fromCurrencyMinor(onboardingCreditLineAmountMinor, planVersion.currency)
-            ),
-          },
-        ],
-      },
-    }
-  )
+  const subscriptionResult = await getOrCreateOnboardingSubscription({
+    creditLineAmountMinor: Math.max(onboardingCreditLineAmountMinor, unitPriceMinor),
+    customerId: customer.id,
+    deps,
+    input,
+    now,
+    planVersion,
+  })
 
   if (subscriptionResult.err) {
+    return Err(subscriptionResult.err)
+  }
+
+  const apiClient = deps.createApiClient(apiKey.key)
+  const runIdempotencyKey = `onboarding_${customer.id}_${paidAction.featureSlug}_proof`
+  const startRun = (idempotencyKey: string) =>
+    apiClient.runs.start({
+      customerId: customer.id,
+      budgetAmountMinor: unitPriceMinor,
+      idempotencyKey,
+      workloadType: "workflow",
+      workloadId: "onboarding-paid-action",
+      traceId: `onboarding_${customer.id}`,
+      metadata: {
+        onboarding: true,
+        planVersionId: input.planVersionId,
+        paidAction: paidAction.featureSlug,
+      },
+    })
+
+  let runResult = await startRun(runIdempotencyKey)
+  if (
+    !runResult.error &&
+    runResult.result.status !== "running" &&
+    runResult.result.status !== "completed"
+  ) {
+    runResult = await startRun(`${runIdempotencyKey}_retry_${apiKey.updatedAtM ?? now}`)
+  }
+
+  if (runResult.error) {
     return Err(
-      seedError(`Subscription setup failed: ${subscriptionResult.err.message}`, {
+      seedError(apiErrorMessage("Paid-action proof failed to start", runResult.error), {
         customerId: customer.id,
         planVersionId: input.planVersionId,
       })
     )
   }
 
-  const apiClient = deps.createApiClient(apiKey.key)
-  const usageTargets = getUsageSeedTargets(planFeatures)
-  let eventsRecorded = 0
+  if (runResult.result.status !== "running" && runResult.result.status !== "completed") {
+    return Err(
+      seedError(`Paid-action proof did not start: ${runResult.result.status}`, {
+        customerId: customer.id,
+        runId: runResult.result.runId,
+      })
+    )
+  }
 
-  if (usageTargets.length > 0) {
-    const runResult = await apiClient.runs.start({
+  const runId = runResult.result.runId
+  const runWasRunning = runResult.result.status === "running"
+  const closeAfterFailure = async () => {
+    if (!runWasRunning) return
+    await closeStartedRunAfterFailure({
+      apiClient,
       customerId: customer.id,
-      budgetAmountMinor: onboardingRunBudgetAmountMinor,
-      idempotencyKey: `onboarding_${customer.id}_budgeted_run`,
-      workloadType: "workflow",
-      workloadId: "onboarding-workflow",
-      traceId: `onboarding_${customer.id}`,
-      metadata: {
-        onboarding: true,
-        planVersionId: input.planVersionId,
-      },
+      logger: deps.logger,
+      planVersionId: input.planVersionId,
+      runId,
     })
+  }
 
-    if (runResult.error) {
-      return Err(
-        seedError(apiErrorMessage("Budgeted workflow run failed to start", runResult.error), {
-          customerId: customer.id,
-          planVersionId: input.planVersionId,
-        })
-      )
-    }
+  const firstResult = await apiClient.runs.consume({
+    runId,
+    featureSlug: target.featureSlug,
+    eventSlug: target.eventSlug,
+    idempotencyKey: `onboarding_${runId}_${target.featureSlug}_decision_1`,
+    properties: {},
+  })
 
-    if (runResult.result.status !== "running") {
-      return Err(
-        seedError(`Budgeted workflow run did not start: ${runResult.result.status}`, {
-          customerId: customer.id,
-          runId: runResult.result.runId,
-        })
-      )
-    }
+  if (firstResult.error) {
+    await closeAfterFailure()
+    return Err(
+      seedError(apiErrorMessage("The paid action could not run", firstResult.error), {
+        customerId: customer.id,
+        runId,
+      })
+    )
+  }
 
-    const runId = runResult.result.runId
+  if (!firstResult.result.accepted) {
+    await closeAfterFailure()
+    return Err(
+      seedError(`The first paid action was denied: ${firstResult.result.reason}`, {
+        customerId: customer.id,
+        runId,
+      })
+    )
+  }
 
-    for (const target of usageTargets) {
-      for (const [index, usage] of usageSeedValues.entries()) {
-        const consumeResult = await apiClient.runs.consume({
-          runId,
-          featureSlug: target.featureSlug,
-          eventSlug: target.eventSlug,
-          idempotencyKey: `onboarding_${customer.id}_${target.featureSlug}_${index}`,
-          properties: target.aggregationField ? { [target.aggregationField]: usage } : {},
-        })
+  const firstReason =
+    firstResult.result.reason === "duplicate" ? ("duplicate" as const) : ("accepted" as const)
+  const firstDecision = {
+    sequence: 1 as const,
+    accepted: true as const,
+    reason: firstReason,
+    consumedAmountMinor: firstResult.result.run.consumedAmountMinor,
+    remainingAmountMinor: firstResult.result.run.remainingAmountMinor,
+  }
 
-        if (consumeResult.error) {
-          const error = seedError(
-            apiErrorMessage(`Budgeted usage failed for ${target.featureSlug}`, consumeResult.error),
-            {
-              customerId: customer.id,
-              eventSlug: target.eventSlug,
-              featureSlug: target.featureSlug,
-              runId,
-            }
-          )
+  if (
+    firstDecision.consumedAmountMinor !== unitPriceMinor ||
+    firstDecision.remainingAmountMinor !== 0
+  ) {
+    await closeAfterFailure()
+    return Err(
+      seedError("The paid action did not consume exactly the configured one-action budget.", {
+        consumedAmountMinor: firstDecision.consumedAmountMinor,
+        expectedAmountMinor: unitPriceMinor,
+        remainingAmountMinor: firstDecision.remainingAmountMinor,
+        runId,
+      })
+    )
+  }
 
-          await closeStartedRunAfterFailure({
-            apiClient,
-            customerId: customer.id,
-            logger: deps.logger,
-            planVersionId: input.planVersionId,
-            runId,
-          })
+  const secondResult = await apiClient.runs.consume({
+    runId,
+    featureSlug: target.featureSlug,
+    eventSlug: target.eventSlug,
+    idempotencyKey: `onboarding_${runId}_${target.featureSlug}_decision_2`,
+    properties: {},
+  })
 
-          return Err(error)
-        }
+  if (secondResult.error) {
+    await closeAfterFailure()
+    return Err(
+      seedError(apiErrorMessage("The guardrail request could not run", secondResult.error), {
+        customerId: customer.id,
+        runId,
+      })
+    )
+  }
 
-        if (!consumeResult.result.accepted) {
-          const error = seedError(
-            `Budgeted usage denied for ${target.featureSlug}: ${consumeResult.result.reason}`,
-            {
-              customerId: customer.id,
-              eventSlug: target.eventSlug,
-              featureSlug: target.featureSlug,
-              runId,
-            }
-          )
+  if (secondResult.result.accepted) {
+    await closeAfterFailure()
+    return Err(
+      seedError("The guardrail failed: the over-budget paid action was accepted.", {
+        customerId: customer.id,
+        runId,
+      })
+    )
+  }
 
-          await closeStartedRunAfterFailure({
-            apiClient,
-            customerId: customer.id,
-            logger: deps.logger,
-            planVersionId: input.planVersionId,
-            runId,
-          })
+  if (secondResult.result.reason !== "insufficient_budget") {
+    await closeAfterFailure()
+    return Err(
+      seedError(`The guardrail denied for an unexpected reason: ${secondResult.result.reason}`, {
+        customerId: customer.id,
+        runId,
+      })
+    )
+  }
 
-          return Err(error)
-        }
+  const secondDecision = {
+    sequence: 2 as const,
+    accepted: false as const,
+    reason: secondResult.result.reason,
+    consumedAmountMinor: secondResult.result.run.consumedAmountMinor,
+    remainingAmountMinor: secondResult.result.run.remainingAmountMinor,
+  }
 
-        eventsRecorded += 1
-      }
-    }
+  if (secondDecision.consumedAmountMinor !== firstDecision.consumedAmountMinor) {
+    await closeAfterFailure()
+    return Err(
+      seedError("The denied request changed the run spend.", {
+        afterDeniedAmountMinor: secondDecision.consumedAmountMinor,
+        beforeDeniedAmountMinor: firstDecision.consumedAmountMinor,
+        runId,
+      })
+    )
+  }
 
+  if (runWasRunning) {
     const endResult = await apiClient.runs.end({
       runId,
       status: "completed",
@@ -367,7 +609,7 @@ export async function seedOnboardingEvidence(
 
     if (endResult.error) {
       return Err(
-        seedError(apiErrorMessage("Budgeted workflow run failed to close", endResult.error), {
+        seedError(apiErrorMessage("Paid-action proof failed to close", endResult.error), {
           customerId: customer.id,
           runId,
         })
@@ -375,65 +617,28 @@ export async function seedOnboardingEvidence(
     }
   }
 
-  const verificationFeatureSlug = getVerificationFeatureSlug(planFeatures)
-  let verification: SeedOnboardingEvidenceOutput["verification"] = {
-    state: "skipped",
-  }
-
-  if (verificationFeatureSlug) {
-    const { result, error } = await apiClient.access.check({
-      customerId: customer.id,
-      featureSlug: verificationFeatureSlug,
+  return Ok(
+    seedOnboardingEvidenceOutputSchema.parse({
+      state: "ok",
+      apiKey: {
+        id: apiKey.id,
+      },
+      customer: {
+        id: customer.id,
+        name: customer.name,
+        email: customer.email,
+      },
+      subscription: {
+        id: subscriptionResult.val.id,
+      },
+      action: {
+        title: paidAction.title,
+        featureSlug: paidAction.featureSlug,
+        eventSlug: paidAction.eventSlug,
+        unitPriceMinor,
+        currency: "USD",
+      },
+      decisions: [firstDecision, secondDecision],
     })
-
-    if (error) {
-      return Err(
-        seedError(apiErrorMessage("Access check failed", error), {
-          customerId: customer.id,
-          featureSlug: verificationFeatureSlug,
-        })
-      )
-    }
-
-    if (!result.allowed) {
-      return Err(
-        seedError(
-          `Access check denied ${verificationFeatureSlug}${
-            result.rejectionReason ? `: ${result.rejectionReason}` : ""
-          }`,
-          {
-            customerId: customer.id,
-            featureSlug: verificationFeatureSlug,
-          }
-        )
-      )
-    }
-
-    verification = {
-      state: "done",
-      allowed: result.allowed,
-      featureSlug: result.featureSlug,
-    }
-  }
-
-  return Ok({
-    state: "ok",
-    apiKey: {
-      id: apiKey.id,
-    },
-    customer: {
-      id: customer.id,
-      name: customer.name,
-      email: customer.email,
-    },
-    subscription: {
-      id: subscriptionResult.val.id,
-    },
-    usage: {
-      state: usageTargets.length > 0 ? "done" : "skipped",
-      eventsRecorded,
-      targetCount: usageTargets.length,
-    },
-    verification,
-  })
+  )
 }

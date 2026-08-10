@@ -14,10 +14,11 @@ export { RunBudgetDO } from "~/ingestion/run-budget/RunBudgetDO"
 
 import { registerUpdateACLV1 } from "./routes/access/updateACLV1"
 import { registerExplainChargeV1 } from "./routes/analytics/explainChargeV1"
-import { registerForecastUsageV1 } from "./routes/analytics/forecastUsageV1"
+import { registerGetCurrentBillingPeriodUsageV1 } from "./routes/analytics/getCurrentBillingPeriodUsageV1"
 import { registerGetIngestionStatusV1 } from "./routes/analytics/getIngestionStatusV1"
 import { registerGetAnalyticsUsageV1 } from "./routes/analytics/getUsageV1"
 import { registerFlushReservationsForInvoicingV1 } from "./routes/billing/flushReservationsForInvoicingV1"
+import { registerChangePlanV1 } from "./routes/customers/changePlanV1"
 import { registerSignUpV1 } from "./routes/customers/signUpV1"
 import { registerGetEntitlementWindowStatusV1 } from "./routes/entitlements/getEntitlementWindowStatusV1"
 import { registerGetEntitlementsV1 } from "./routes/entitlements/getEntitlementsV1"
@@ -26,6 +27,8 @@ import { registerIngestEventsSyncV1 } from "./routes/events/ingestEventsSyncV1"
 import { registerIngestEventsV1 } from "./routes/events/ingestEventsV1"
 import { registerReplayIngestionEventsV1 } from "./routes/events/replayIngestionEventsV1"
 import { registerGetFeaturesV1 } from "./routes/features/getFeaturesV1"
+import { registerApplyMonetizationV1 } from "./routes/monetization/applyMonetizationV1"
+import { registerGetMonetizationV1 } from "./routes/monetization/getMonetizationV1"
 import { registerCreatePaymentMethodV1 } from "./routes/payments/methods/createPaymentMethodV1"
 import { registerListPaymentMethodsV1 } from "./routes/payments/methods/listPaymentMethodsV1"
 import { registerProviderSetupV1 } from "./routes/payments/providers/providerSetupV1"
@@ -170,6 +173,7 @@ registerFlushReservationsForInvoicingV1(app)
 
 // Customer routes
 registerSignUpV1(app)
+registerChangePlanV1(app)
 
 // Entitlement routes
 registerGetEntitlementsV1(app)
@@ -186,6 +190,10 @@ registerGetFeaturesV1(app)
 
 // Invoice routes
 registerGetInvoiceV1(app)
+
+// Monetization configuration routes
+registerApplyMonetizationV1(app)
+registerGetMonetizationV1(app)
 
 // Payment routes
 registerListPaymentMethodsV1(app)
@@ -204,9 +212,9 @@ registerGetSubscriptionV1(app)
 
 // Usage routes
 registerExplainChargeV1(app)
-registerForecastUsageV1(app)
 registerGetIngestionStatusV1(app)
 registerGetAnalyticsUsageV1(app)
+registerGetCurrentBillingPeriodUsageV1(app)
 
 // Wallet routes
 registerGetWalletV1(app)

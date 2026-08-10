@@ -51,9 +51,9 @@ and platform engineers** who own metering, entitlements, and request-path usage 
 
 Unprice is dual-licensed under **AGPL-3.0** and a **Commercial License**.
 
-The published client packages **@unprice/api** and **@unprice/react** are
-licensed separately under **MIT**. They are intended to be embedded in customer
-applications without applying the AGPL-3.0 core license to the host app.
+The published client package **@unprice/api** is licensed separately under **MIT**. It is intended
+to be embedded in customer applications without applying the AGPL-3.0 core license to the host
+app.
 
 ### Why AGPL? Transparency & Fairness.
 We believe the infrastructure that handles your money should be **fully transparent and auditable.**
@@ -93,6 +93,21 @@ Unprice runs on:
 ## Getting Started
 
 [Visit our documentation](https://docs.unprice.dev) for a 5-minute quickstart guide.
+
+## Agent Skill
+
+Install the Unprice SDK integration playbook in Codex, Claude Code, Cursor, and other
+skills-compatible agents:
+
+```bash
+npx skills add https://github.com/jhonsfran/unprice --skill integrate-unprice-sdk
+```
+
+The same skill is available through the documentation site:
+
+```bash
+npx skills add https://docs.unprice.dev --skill integrate-unprice-sdk
+```
 
 ---
 

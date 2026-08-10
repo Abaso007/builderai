@@ -2,7 +2,7 @@
   "name": "@unprice/api",
   "description": "Unprice TypeScript SDK — open-source customer money path for usage-based SaaS. Authorize customer spend before paid work runs.",
   "private": false,
-  "version": "0.1.5",
+  "version": "0.1.7",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
@@ -22,6 +22,11 @@
   "bugs": {
     "url": "https://github.com/jhonsfran1165/unprice/issues"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jhonsfran1165/unprice.git",
+    "directory": "packages/api"
+  },
   "homepage": "https://github.com/jhonsfran1165/unprice#readme",
   "scripts": {
     "clean": "rm -rf .turbo node_modules dist",
@@ -40,7 +45,7 @@
     "openapi-typescript": "7.0.0-next.7",
     "tsup": "^8.4.0",
     "typescript": "^5.3.3",
-    "vitest": "^2.1.9"
+    "vitest": "^4.1.10"
   },
   "dependencies": {
     "openapi-fetch": "0.17.0"

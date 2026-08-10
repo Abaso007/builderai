@@ -9,7 +9,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 jiti.import("./src/env")
 
 // import MillionLint from "@million/lint"
-import createMDX from "@next/mdx"
 
 /**
  * @type {import('next').NextConfig}
@@ -27,21 +26,19 @@ const nextConfig = {
     "@unprice/tailwind-config",
   ],
   output: process.env.NEXT_OUTPUT_STANDALONE === "1" ? "standalone" : undefined,
-  pageExtensions: ["ts", "tsx", "mdx"],
+  outputFileTracingRoot: path.join(__dirname, "../../"),
   images: {
     domains: ["images.unsplash.com"],
   },
-  swcMinify: true,
   allowedDevOrigins: ["localhost", "app.localhost", "*.localhost"],
+  turbopack: {},
   // Optimize CSS loading
   compiler: {
     removeConsole: process.env.NODE_ENV === "production" ? { exclude: ["error", "warn"] } : false,
   },
   experimental: {
-    turbo: {},
-    outputFileTracingRoot: path.join(__dirname, "../../"),
     // ppr: true, // TODO: activate later
-    mdxRs: true,
+    webpackMemoryOptimizations: true,
     optimizePackageImports: [
       "@unprice/ui",
       "@unprice/trpc",
@@ -57,10 +54,7 @@ const nextConfig = {
   typescript: { ignoreBuildErrors: true },
 }
 
-const withMDX = createMDX()
-
-// Export the combined config
-export default withVercelToolbar()(withMDX(nextConfig))
+export default withVercelToolbar()(nextConfig)
 
 // TODO: try to use million
 // export default MillionLint.next({
@@ -68,6 +62,6 @@ export default withVercelToolbar()(withMDX(nextConfig))
 //   filter: {
 //     include: "**.{mtsx,mjsx,tsx,jsx}",
 //   },
-// })(withMDX()(nextConfig))
+// })(nextConfig)
 
 // TODO: https://www.flavienbonvin.com/reduce-next-js-bundle/

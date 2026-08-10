@@ -8,7 +8,7 @@ import type {
 import type { budgetRuns } from "@unprice/db/schema"
 import type {
   ApiKeyExtended,
-  CurrentUsage,
+  ApiKeyType,
   Customer,
   CustomerPaymentMethod,
   Feature,
@@ -45,8 +45,30 @@ export type CustomersProjectCache = Pick<Customer, "id" | "name" | "email" | "pr
 
 export type BudgetRunCache = typeof budgetRuns.$inferSelect
 
+/**
+ * What the api key cache actually holds, which is not what the table holds.
+ *
+ * `apikeys.type` is NOT NULL in the database, but cache entries are stored as plain JSON and
+ * are never re-parsed on read, so entries serialized before the column shipped come back with
+ * no `type` at all. `type` is optional here on purpose: it forces every reader to resolve the
+ * missing value (`keyAuth` does, to `runtime`) instead of trusting a field the deploy window
+ * cannot guarantee. Do not "simplify" this to `ApiKeyExtended` — the compiler would stop
+ * catching the omission and every cached runtime key would start failing authorization until
+ * its TTL expired.
+ *
+ * `project.workspace.slug` has the same property and is NOT expressed in this type. It was
+ * added to the api key query later than the entries already in the cache, so for the full
+ * stale window (24h, see CACHE_STALENESS_TIME_MS) a served key can carry `undefined` there
+ * while the compiler insists it is a `string`. Any reader building a URL or a lookup key from
+ * it must treat it as possibly absent — `monetization.apply` does, and returns a null review
+ * link rather than emitting `/undefined/…`. Widening it here would ripple into every
+ * `ApiKeyExtended` consumer, so the obligation is documented rather than typed; if a second
+ * reader appears, prefer typing it over repeating the check.
+ */
+export type ApiKeyCache = Omit<ApiKeyExtended, "type"> & { type?: ApiKeyType }
+
 export type CacheNamespaces = {
-  apiKeyByHash: ApiKeyExtended | null
+  apiKeyByHash: ApiKeyCache | null
   budgetRun: BudgetRunCache | null
   customersProject: CustomersProjectCache[] | null
   customerSubscription: SubscriptionCache | null
@@ -69,7 +91,6 @@ export type CacheNamespaces = {
   getOverviewStats: Stats | null
   getUsage: Usage | null
   getUsageDashboard: GetUsageDashboardOutput | null
-  getCurrentUsage: CurrentUsage | null
   ingestionPreparedGrantContext: PreparedCustomerGrantContext
 }
 

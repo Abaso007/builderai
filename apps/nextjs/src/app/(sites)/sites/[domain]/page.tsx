@@ -19,19 +19,11 @@ import type { MarketingPricingPlan } from "../_components/marketing-pricing-card
 import { MarketingPricingTable } from "../_components/marketing-pricing-table"
 import { FeatureComparison } from "../_components/pricing-comparision"
 
-// check shadcn landing page for inspiration
-export const revalidate = 3600 // 1 hour
-
-export async function generateStaticParams() {
-  return []
-}
-
 // Metadata generation improved to include page/project name fallback
-export async function generateMetadata({
-  params: { domain },
-}: {
-  params: { domain: string }
+export async function generateMetadata(props: {
+  params: Promise<{ domain: string }>
 }) {
+  const { domain } = await props.params
   const page = await getPageData(domain)
 
   if (!page) {
@@ -77,17 +69,17 @@ export async function generateMetadata({
   }
 }
 
-export default async function DomainPage({
-  params: { domain },
-  searchParams: { revalidate },
-}: {
-  params: {
+export default async function DomainPage(props: {
+  params: Promise<{
     domain: string
-  }
-  searchParams: {
+  }>
+  searchParams: Promise<{
     revalidate?: string
-  }
+  }>
 }) {
+  const [params, searchParams] = await Promise.all([props.params, props.searchParams])
+  const { domain } = params
+  const { revalidate } = searchParams
   // Skip cache when in preview mode (when revalidate param is present)
   // This ensures preview mode always shows fresh data and doesn't pollute the cache
   const skipCache = !!revalidate

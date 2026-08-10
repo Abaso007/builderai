@@ -1,102 +1,43 @@
 import { cn } from "@unprice/ui/utils"
 import type { ReactNode } from "react"
 
-// The page-scale motif vocabulary, lifted from money-path.tsx so the whole
-// home page reads as one annotated trace: station headers instead of badge
-// eyebrows, ledger rows instead of feature cards, dotted leaders between a
-// label and its monospace fact. Every fact rendered through these primitives
+// The page-scale motif vocabulary: station headers instead of badge eyebrows,
+// ledger rows instead of feature cards, dotted leaders between a label and its
+// monospace fact. The atoms (StationDot, Leader, LedgerRow) are shared with
+// app surfaces via @unprice/ui/station and re-exported here so landing
+// sections keep one import path. Every fact rendered through these primitives
 // is real product state — never decoration.
 
-export function Leader({ className }: { className?: string }) {
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        "mx-1 min-w-4 flex-1 self-center border-background-border border-b border-dotted",
-        className
-      )}
-    />
-  )
-}
-
-export function StationDot({
-  variant = "default",
-  className,
-}: {
-  variant?: "default" | "ghost" | "live" | "terminal"
-  className?: string
-}) {
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        "size-[9px] shrink-0 rounded-full",
-        variant === "default" && "border border-background-borderHover bg-background-base",
-        variant === "ghost" && "border border-background-borderHover border-dashed",
-        variant === "live" && "bg-info ring-2 ring-info-bg",
-        variant === "terminal" && "bg-success-solid",
-        className
-      )}
-    />
-  )
-}
-
-// label · dotted leader · mono fact. The receipt row.
-export function LedgerRow({
-  label,
-  fact,
-  variant = "default",
-  labelClassName,
-  factClassName,
-}: {
-  label: ReactNode
-  fact: ReactNode
-  variant?: "default" | "ghost"
-  labelClassName?: string
-  factClassName?: string
-}) {
-  return (
-    <div className="flex items-baseline gap-2 py-[5px]">
-      <span
-        className={cn(
-          "text-sm",
-          variant === "ghost" ? "text-background-text" : "font-medium text-background-textContrast",
-          labelClassName
-        )}
-      >
-        {label}
-      </span>
-      <Leader />
-      <span
-        className={cn(
-          "text-right font-mono text-[11px] text-background-text leading-5",
-          factClassName
-        )}
-      >
-        {fact}
-      </span>
-    </div>
-  )
-}
+export { Leader, LedgerRow, StationDot } from "@unprice/ui/station"
 
 export function SectionShell({
   id,
   labelledBy,
   className,
   innerClassName,
+  surface = "page",
   children,
 }: {
   id?: string
   labelledBy: string
   className?: string
   innerClassName?: string
+  /** Banded sections sit on the panel surface (the manifesto's alternating
+   * band). The registration ticks must match the section surface or they
+   * read as patches where they mask the rail crossing. */
+  surface?: "page" | "panel"
   children: ReactNode
 }) {
+  const tickBg = surface === "panel" ? "bg-surface-panel" : "bg-surface-page"
   return (
     <section
       id={id}
       aria-labelledby={labelledBy}
-      className={cn("w-full border-background-border border-t", className)}
+      className={cn(
+        "w-full border-background-border border-t",
+        surface === "panel" && "bg-surface-panel",
+        className
+      )}
     >
       {/* The content column carries hairline rails, so stacked sections read
           as cells of one continuous ledger sheet. The + ticks are
@@ -109,13 +50,19 @@ export function SectionShell({
       >
         <span
           aria-hidden
-          className="-top-[7px] -left-[4.5px] absolute hidden select-none bg-surface-page font-mono text-[11px] text-background-border leading-none lg:block"
+          className={cn(
+            "-top-[7px] -left-[4.5px] absolute hidden select-none font-mono text-[11px] text-background-border leading-none lg:block",
+            tickBg
+          )}
         >
           +
         </span>
         <span
           aria-hidden
-          className="-top-[7px] -right-[4.5px] absolute hidden select-none bg-surface-page font-mono text-[11px] text-background-border leading-none lg:block"
+          className={cn(
+            "-top-[7px] -right-[4.5px] absolute hidden select-none font-mono text-[11px] text-background-border leading-none lg:block",
+            tickBg
+          )}
         >
           +
         </span>

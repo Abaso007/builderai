@@ -1,5 +1,6 @@
 export { createPlan } from "./plan/create"
 export { signUp } from "./customer/sign-up"
+export { signOutCustomer } from "./customer/sign-out"
 export {
   getCustomerEconomicSummary,
   getCustomerEconomicSummaryInputSchema,
@@ -44,15 +45,16 @@ export type {
   GetIngestionStatusOutput,
 } from "./analytics/get-ingestion-status"
 export {
-  forecastUsage,
-  forecastUsageInputSchema,
-  forecastUsageOutputSchema,
-} from "./analytics/forecast-usage"
+  BillingPeriodUsageCoverageError,
+  getCurrentBillingPeriodUsage,
+  getCurrentBillingPeriodUsageInputSchema,
+  getCurrentBillingPeriodUsageOutputSchema,
+} from "./analytics/get-current-billing-period-usage"
 export type {
-  ForecastUsageDeps,
-  ForecastUsageInput,
-  ForecastUsageOutput,
-} from "./analytics/forecast-usage"
+  GetCurrentBillingPeriodUsageDeps,
+  GetCurrentBillingPeriodUsageInput,
+  GetCurrentBillingPeriodUsageOutput,
+} from "./analytics/get-current-billing-period-usage"
 export { aiAnswerEnvelopeSchema, aiEvidenceSchema } from "./analytics/ai-contracts"
 export type { AiAnswerEnvelope, AiEvidence } from "./analytics/ai-contracts"
 export {
@@ -117,13 +119,54 @@ export {
   applyPlanTemplateInputSchema,
   applyPlanTemplateOutputSchema,
   applyPlanTemplateRequestSchema,
+  paidActionSchema,
   planTemplateKeySchema,
 } from "./plan-template/apply"
 export type {
   ApplyPlanTemplateInput,
   ApplyPlanTemplateOutput,
   ApplyPlanTemplateRequest,
+  PaidAction,
 } from "./plan-template/apply"
+export {
+  applyMonetizationConfig,
+  applyMonetizationConfigFailureStateSchema,
+  applyMonetizationConfigInputSchema,
+  applyMonetizationConfigOutputSchema,
+  monetizationPlanOutcomeSchema,
+  monetizationStaleDraftSchema,
+} from "./monetization/apply"
+export type {
+  ApplyMonetizationConfigDeps,
+  ApplyMonetizationConfigInput,
+  ApplyMonetizationConfigOutput,
+  MonetizationPlanOutcome,
+  MonetizationStaleDraft,
+} from "./monetization/apply"
+export {
+  MONETIZATION_BLOCKING_WARNING_CODES,
+  getMonetizationConfig,
+  getMonetizationConfigFailureStateSchema,
+  getMonetizationConfigInputSchema,
+  getMonetizationConfigOutputSchema,
+  monetizationConfigDocumentSchema,
+  monetizationPlanStateSchema,
+  monetizationWarningCodeSchema,
+  monetizationWarningSchema,
+  unrepresentablePlanReasonSchema,
+  unrepresentablePlanSchema,
+} from "./monetization/get"
+export type {
+  GetMonetizationConfigDeps,
+  GetMonetizationConfigInput,
+  GetMonetizationConfigOutput,
+  MonetizationConfigDocument,
+  MonetizationPlanState,
+  MonetizationWarning,
+  MonetizationWarningCode,
+  UnrepresentablePlan,
+  UnrepresentablePlanReason,
+} from "./monetization/get"
 export {
   seedOnboardingEvidence,
   seedOnboardingEvidenceInputSchema,
@@ -135,6 +178,16 @@ export type {
   SeedOnboardingEvidenceOutput,
   SeedOnboardingEvidenceRequest,
 } from "./onboarding/seed-evidence"
+export {
+  runPaidActionProof,
+  runPaidActionProofOutputSchema,
+  runPaidActionProofRequestSchema,
+} from "./onboarding/prove-paid-action"
+export type {
+  RunPaidActionProofInput,
+  RunPaidActionProofOutput,
+  RunPaidActionProofRequest,
+} from "./onboarding/prove-paid-action"
 export * from "./workspace"
 export { transferToWorkspace } from "./project/transfer-to-workspace"
 export { transferToPersonal } from "./project/transfer-to-personal"

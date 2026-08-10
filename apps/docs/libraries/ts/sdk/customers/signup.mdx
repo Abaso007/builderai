@@ -7,7 +7,7 @@ Use `customers.signUp` to create a customer and provision their subscription, en
 periods, and wallet from a published plan version.
 
 <Frame>
-    <img src="/images/signup-flow.png"/>
+    <img src="/images/signup-flow.png" alt="Your application creates a customer. Unprice provisions the subscription and entitlements, then returns the customer ID or checkout URL." />
 </Frame>
 
 <RequestExample>
@@ -112,7 +112,10 @@ console.log(result);
 </ParamField>
 
 <ParamField body="externalId" type="string">
-    An external ID to associate with the customer, such as an account ID from your database
+    A project-scoped external ID to associate with the customer, such as an
+    account ID from your database. Repeating sign-up with the same external ID
+    and email replays the existing customer; using that ID with another email
+    returns a conflict.
 </ParamField>
 
 <ParamField body="successUrl" type="string" required>

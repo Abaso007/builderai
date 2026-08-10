@@ -5,7 +5,7 @@ import {
   LATE_EVENT_GRACE_MS,
   MAX_FUTURE_EVENT_SKEW_MS,
 } from "@unprice/services/entitlements"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { createDeferred } from "../test-fixtures/race"
 import type { ApplyInput } from "./contracts"
 import type { WalletReservationSnapshot } from "./contracts"
@@ -187,7 +187,11 @@ describe("in-memory store internals", () => {
     const first = await harness.processor.apply(input)
     expect(first.allowed).toBe(true)
     expect(first.meterFacts).toHaveLength(1)
-    expect(first.meterFacts?.[0]).toMatchObject({ delta: 3, value_after: 3 })
+    expect(first.meterFacts?.[0]).toMatchObject({
+      billing_period_id: "bp_123",
+      delta: 3,
+      value_after: 3,
+    })
 
     const replay = await harness.processor.apply(input)
     expect(replay).toMatchObject({ allowed: true, idempotencyStatus: "already_reported" })
@@ -301,67 +305,74 @@ describe("EntitlementWindowProcessor apply behavior", () => {
   })
 
   it("resets period usage, assigns boundary events, and isolates late prior-period usage", async () => {
-    const nowDate = new Date(BASE_NOW)
-    const periodBStart = Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth(), 1)
-    const periodAStart = Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth() - 1, 1)
-    const harness = createHarness({
-      now: periodBStart,
-      store: new InMemoryEntitlementWindowStore(),
-    })
-    await harness.processor.initialize()
-    const base = createApplyInput({
-      creditLinePolicy: "uncapped",
-      enforceLimit: true,
-      limit: 4,
-      periodStartAt: periodAStart,
-      periodEndAt: Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth() + 1, 1),
-      resetConfig: { resetInterval: "month", resetIntervalCount: 1 },
-    })
+    vi.useFakeTimers()
+    vi.setSystemTime(Date.UTC(2026, 6, 15))
 
-    const previous = await harness.processor.apply({
-      ...base,
-      idempotencyKey: "idem_period_previous",
-      now: periodBStart - 1,
-      event: {
-        ...base.event,
-        id: "evt_period_previous",
-        properties: { amount: 3 },
-        timestamp: periodBStart - 1,
-      },
-    })
-    const current = await harness.processor.apply({
-      ...base,
-      idempotencyKey: "idem_period_current",
-      now: periodBStart,
-      event: {
-        ...base.event,
-        id: "evt_period_current",
-        properties: { amount: 1 },
-        timestamp: periodBStart,
-      },
-    })
-    const replay = await harness.processor.apply({
-      ...base,
-      idempotencyKey: "idem_period_previous",
-      now: periodBStart,
-      event: {
-        ...base.event,
-        id: "evt_period_previous",
-        properties: { amount: 3 },
-        timestamp: periodBStart - 1,
-      },
-    })
-
-    expect(previous.meterFacts?.[0]?.period_key).toBe(`month:${periodAStart}`)
-    expect(current.meterFacts?.[0]?.period_key).toBe(`month:${periodBStart}`)
-    expect(replay).toMatchObject({ allowed: true, idempotencyStatus: "already_reported" })
-    await expect(
-      harness.processor.getEnforcementState({
-        entitlement: base.entitlement,
-        grants: base.grants,
+    try {
+      const nowDate = new Date()
+      const periodBStart = Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth(), 1)
+      const periodAStart = Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth() - 1, 1)
+      const harness = createHarness({
         now: periodBStart,
+        store: new InMemoryEntitlementWindowStore(),
       })
-    ).resolves.toMatchObject({ usage: 1, limit: 4, isLimitReached: false })
+      await harness.processor.initialize()
+      const base = createApplyInput({
+        creditLinePolicy: "uncapped",
+        enforceLimit: true,
+        limit: 4,
+        periodStartAt: periodAStart,
+        periodEndAt: Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth() + 1, 1),
+        resetConfig: { resetInterval: "month", resetIntervalCount: 1 },
+      })
+
+      const previous = await harness.processor.apply({
+        ...base,
+        idempotencyKey: "idem_period_previous",
+        now: periodBStart - 1,
+        event: {
+          ...base.event,
+          id: "evt_period_previous",
+          properties: { amount: 3 },
+          timestamp: periodBStart - 1,
+        },
+      })
+      const current = await harness.processor.apply({
+        ...base,
+        idempotencyKey: "idem_period_current",
+        now: periodBStart,
+        event: {
+          ...base.event,
+          id: "evt_period_current",
+          properties: { amount: 1 },
+          timestamp: periodBStart,
+        },
+      })
+      const replay = await harness.processor.apply({
+        ...base,
+        idempotencyKey: "idem_period_previous",
+        now: periodBStart,
+        event: {
+          ...base.event,
+          id: "evt_period_previous",
+          properties: { amount: 3 },
+          timestamp: periodBStart - 1,
+        },
+      })
+
+      expect(previous.meterFacts?.[0]?.period_key).toBe(`month:${periodAStart}`)
+      expect(current.meterFacts?.[0]?.period_key).toBe(`month:${periodBStart}`)
+      expect(replay).toMatchObject({ allowed: true, idempotencyStatus: "already_reported" })
+      await expect(
+        harness.processor.getEnforcementState({
+          entitlement: base.entitlement,
+          grants: base.grants,
+          now: periodBStart,
+        })
+      ).resolves.toMatchObject({ usage: 1, limit: 4, isLimitReached: false })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("preserves sub-cent pricing across repeated events", async () => {
@@ -1228,7 +1239,16 @@ describe("EntitlementWindowProcessor reads and lifecycle", () => {
         grants: input.grants,
         now,
       })
-    ).resolves.toMatchObject({ usage: 0, limit: 5, isLimitReached: false })
+    ).resolves.toMatchObject({
+      usage: 0,
+      limit: 5,
+      isLimitReached: false,
+      quotaWindow: {
+        periodKey: `onetime:${now - 60_000}`,
+        startAt: now - 60_000,
+        endAt: now + 60_000,
+      },
+    })
 
     await harness.processor.apply({
       ...input,
@@ -1240,7 +1260,84 @@ describe("EntitlementWindowProcessor reads and lifecycle", () => {
         grants: input.grants,
         now,
       })
-    ).resolves.toMatchObject({ usage: 3, limit: 5, isLimitReached: false })
+    ).resolves.toMatchObject({
+      usage: 3,
+      limit: 5,
+      isLimitReached: false,
+      quotaWindow: {
+        periodKey: `onetime:${now - 60_000}`,
+        startAt: now - 60_000,
+        endAt: now + 60_000,
+      },
+    })
+  })
+
+  it("represents an open-ended quota window without an internal infinity sentinel", async () => {
+    const now = BASE_NOW
+    const harness = createHarness({ now })
+    await harness.processor.initialize()
+    const input = createApplyInput({
+      grants: [
+        createGrantSnapshot({
+          cadenceExpiresAt: null,
+          expiresAt: null,
+        }),
+      ],
+      limit: 5,
+    })
+
+    const state = await harness.processor.getEnforcementState({
+      entitlement: input.entitlement,
+      grants: input.grants,
+      now,
+    })
+
+    expect(state.quotaWindow).toEqual({
+      periodKey: `onetime:${now - 60_000}`,
+      startAt: now - 60_000,
+      endAt: null,
+    })
+  })
+
+  it("omits a singular quota window when active grants reset at different boundaries", async () => {
+    const now = BASE_NOW
+    const harness = createHarness({ now })
+    await harness.processor.initialize()
+    const input = createApplyInput({
+      grants: [
+        createGrantSnapshot({
+          allowanceUnits: 2,
+          grantId: "grant_first",
+        }),
+        createGrantSnapshot({
+          allowanceUnits: 3,
+          cadenceEffectiveAt: now - 30_000,
+          effectiveAt: now - 30_000,
+          grantId: "grant_second",
+        }),
+      ],
+      limit: 5,
+    })
+
+    await expect(
+      harness.processor.getEnforcementState({
+        entitlement: input.entitlement,
+        grants: input.grants,
+        now,
+      })
+    ).resolves.toMatchObject({ quotaWindow: null })
+  })
+
+  it("keeps non-subscription meter facts valid without a billing period", async () => {
+    const now = BASE_NOW
+    const harness = createHarness({ now })
+    await harness.processor.initialize()
+    const input = createApplyInput({ now })
+    input.entitlement.billingPeriods = []
+
+    const result = await harness.processor.apply(input)
+
+    expect(result.meterFacts?.[0]).toMatchObject({ billing_period_id: null })
   })
 
   it("reports operational status without mutating state", async () => {

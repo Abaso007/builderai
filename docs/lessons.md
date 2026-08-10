@@ -8,6 +8,7 @@ patterns. Keep it cheap to load and useful.
 - Read before non-trivial code, test, docs, migration, billing, or architecture work.
 - If you need to run the project, always use bin/startup dev
 - use ripgrep when available instead of grep. rg
+- Do not start process without specific permissions, if you need the app running ask me again.
 - New lessons must be dated, repo-specific, and short: 1-3 bullets per entry.
 - Use "When X, do Y; watch Z". Include files or commands only when they prevent repeats.
 - Update an existing section instead of adding duplicate narrative.
@@ -33,6 +34,17 @@ patterns. Keep it cheap to load and useful.
 
 ## CI And GitHub Actions
 
+- 2026-08-10: When one advisory affects multiple `nanoid` major lines, use version-qualified
+  `pnpm-workspace.yaml` overrides and regenerate the lockfile offline; do not baseline a patch
+  release that can be safely forced within each major line.
+- 2026-07-31: `tooling/scripts/audit-high.mjs` must give `spawnSync` enough output buffer for
+  the full npm audit report; `GHSA-mh99-v99m-4gvg` falsely flags patched
+  `brace-expansion` v1/v2 lines because its vulnerable range has no lower bound.
+- 2026-07-31: Vitest 4 supports `maxWorkers` but removed `minWorkers`; remove that option from
+  integration scripts and configs or the CI command exits before loading tests.
+- 2026-07-28: Changesets uses the root `package.json` workspace list before
+  `pnpm-workspace.yaml`; mark every non-published app/package in that list as `private: true` and
+  fail release unless `@unprice/api` is the only publishable workspace.
 - 2026-07-11: Node 24 GitHub Actions workflows should use `actions/checkout@v5`,
   `actions/setup-node@v5`, `actions/cache@v5`, and `pnpm/action-setup@v4.4.0`; older action
   majors trigger GitHub's forced Node 24 compatibility warning.
@@ -45,6 +57,7 @@ patterns. Keep it cheap to load and useful.
 
 ## Cloudflare, API, And Ingestion
 
+- 2026-08-01: When replacing a synchronous runtime usage or run route, preserve the cached bouncer at the work-authorizing boundary; `access.check` and async `usage.record` are not enforcement gates.
 - 2026-07-08: `EntitlementWindowDO` is a thin Cloudflare adapter; entitlement window business logic
   lives in `apps/api/src/ingestion/entitlements/processor.ts` behind the backend-neutral ports in
   `ports.ts` (state store + `atomically` boundary, scheduler, runtime, wallet provider, clock).
@@ -90,6 +103,12 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-30: When Tinybird endpoints, datasources, materializations, or fixtures change, add or
   update the matching `internal/analytics/tests/*.yaml` coverage and run `tb build` plus
   `tb test run` so existing endpoint expectations still pass.
+- 2026-08-02: When a raw datasource migration backfills unchanged materialized descendants,
+  their temporary `FORWARD_QUERY` must be `SELECT *`; replace stale type-migration projections
+  and remove all temporary forward queries after promotion.
+- 2026-08-07: Tinybird Cloud rejects stale `FORWARD_QUERY` projections even when local
+  `tb build` passes; remove them after promotion so nullable-column additions use `ALTER` and
+  unchanged rollups are not backfilled.
 - 2026-07-01: Tinybird endpoints that `UNION ALL` per-group buckets need a final outer
   `ORDER BY`; subquery order only limits each bucket and does not make the combined output stable.
 - 2026-05-08: `entitlement_meter_facts` needs no synthetic `id`; use `amount` for event spend
@@ -233,6 +252,22 @@ patterns. Keep it cheap to load and useful.
 
 ## Next.js And Dashboard
 
+- 2026-08-01: Auth middleware that enriches sessions from Postgres must declare
+  `config.runtime = "nodejs"`; leaving it on Edge can surface the database failure as a misleading
+  Auth.js `JWTSessionError`.
+- 2026-08-01: Keep Turbopack opt-in on Next 15 for this dashboard until its large workspace graph
+  no longer exhausts the dev-server heap; use Webpack memory optimizations for the default dev path.
+- 2026-08-01: Never enable Auth.js `debug` logging against real OAuth credentials, even locally;
+  provider config, access tokens, refresh tokens, and encrypted cookies are included in metadata.
+
+- 2026-08-01: Before enabling Turbopack in `apps/nextjs`, remove unused Next compiler plugins and
+  version-mismatched wrappers; `@next/mdx` 14 can inject a legacy webpack config beside Next 15.
+- 2026-08-01: Auth.js sessions are host-only; redirect base-host `/auth/*` entries to `APP_DOMAIN`
+  before sign-in and allow final auth redirects only on that canonical origin instead of sharing the
+  session cookie with the marketing host.
+- 2026-08-01: When middleware derives dashboard scope from the URL, set the corresponding
+  `NextRequest` cookies before `NextResponse.rewrite` and forward its request headers; the
+  private response-header copying workaround can leave the first Next 15 RSC render on stale scope.
 - 2026-07-11: Keep an explicit `/dashboard/page.tsx` terminal route because the root dashboard layout
   has parallel slots but no content page; its parent layout already supplies `force-dynamic`, so do
   not duplicate the segment flag on the page.
@@ -304,9 +339,19 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-13: Public `generateStaticParams` paths must not call session helpers or live database
   queries; return `[]` for dynamic ISR routes so `next build` does not depend on request scope or
   preview database reachability.
+- 2026-08-10: Do not use `generateStaticParams` for a public page that reads `searchParams` for
+  preview access; the static ISR path can fail at runtime with `DYNAMIC_SERVER_USAGE`. Let the
+  request-time API make that route dynamic and retain explicit `unstable_cache` data caching.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-07-19: Plan-included credits are configured on `plan_versions.metadata.includedCreditAmount`
+  (ledger scale) and derived into a `plan_included` activation grant in
+  `derive-provision-inputs.ts`; phases on such plans must use the `capped` policy
+  (`CREDIT_POLICY_CONFLICT` otherwise) because uncapped phases never open wallet reservations.
+- 2026-07-19: `drainGrantedFIFO` ranks `credit_line` last among granted credits (free money first),
+  then expiry, then `createdAt`; same-transaction grants share `created_at`, so never rely on
+  insertion order for drain priority.
 - 2026-07-04: `dayOfCreation` is a plan/reset config shorthand; subscription phases store the
   numeric anchor resolved with `getAnchor`, and subscription period windows must preserve
   `subscription_phases.start_at_m`.
@@ -425,6 +470,8 @@ patterns. Keep it cheap to load and useful.
   history.
 - 2026-05-06: Wallet bigint amounts are ledger-scale minor units; pgledger views are decimals.
 - 2026-05-06: `creditLineAmount` is period usage allowance, not plan fee or creditworthiness.
+- 2026-07-19: Billing activation grant derivation must receive the machine's current phase ID;
+  never select an unordered subscription phase when renewals or plan changes can retain old phases.
 - 2026-05-17: Public signup `creditLineAmountMinor` is currency minor units; convert to
   ledger-scale before saving subscription phases or customer sessions.
 - 2026-05-06: Arrears plans can derive allowance from finite priced usage limits; unlimited paid
@@ -570,6 +617,11 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## UI And Dashboard
 - Tailwind v3 + Radix var tokens: opacity modifiers like bg-success-bg/40 don't reliably apply alpha (tokens are var(--…) strings). For emphasis ramps use Radix steps: bg → bgHover → bgActive.
+- 2026-07-15: When WAAPI choreography must react to layout that differs per state (MoneyPath's
+  stacked one-outcome column), stamp the state as a data attribute on the stage synchronously in
+  the same tick before measuring waypoints — React state set in the same function re-renders too
+  late for `getBoundingClientRect`. Keep both branches in the DOM (globals.css hides the inactive
+  one below `sm`) so no-JS and reduced-motion still render the full fork.
 - 2026-06-13: `@unprice/ui/checkbox` wraps Radix Checkbox and renders a button; do not nest it
   inside another button in filter rows or table actions, because React/Next will hydration-fail on
   invalid button descendants.
@@ -598,10 +650,15 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   `.filter().map()` chains into `for...of` loops (js-combine-iterations), destructure
   `useQuery`/`useInfiniteQuery` results (query-destructure-result), and split 300+ line components
   (no-giant-component).
-- 2026-06-13: Every `next/dynamic` or `React.lazy()` component must include a `loading` fallback
-  that matches the component's layout dimensions (e.g., a `<Skeleton>` with the same height/width).
-  Without it, the page content shifts when the chunk arrives, causing visible flicker. Follow the
-  same pattern as `ThemeToggle` in `src/components/layout/footer.tsx`.
+- 2026-06-13: Every client-side `next/dynamic` or `React.lazy()` component must include a `loading`
+  fallback that matches the component's layout dimensions (e.g., a `<Skeleton>` with the same
+  height/width). Without it, the page content shifts when the chunk arrives, causing visible flicker.
+- 2026-08-01: Server Components can render a `"use client"` component directly; do not wrap it in
+  `next/dynamic({ ssr: false })`, which Next 15 rejects during the build.
+- 2026-08-01: In Next 15 App Router pages, `params` and `searchParams` are promises; await them
+  before reading route fields or passing query state into `nuqs` loaders.
+- 2026-08-01: Let `src/app/icon.svg` own `/icon.svg`; a matching `public/icon.svg` makes normal
+  page loads fail with Next's conflicting-public-file 500.
 - 2026-06-15: Use `EmptyPlaceholder` with `isLoading` prop for loading states instead of inline
   spinners; use `EmptyPlaceholder` with Icon/Title/Description for empty states. This keeps the UI
   consistent across tables, charts, and panels. The component lives in
@@ -612,6 +669,8 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## Tests, Tooling, And Docs
 
+- 2026-07-31: The audit override upgrades `tar@^6` to v7; keep `apps/docs` on
+  Mint `^4.2.770` or newer, because Mint 4.2.354 default-imports `tar` and crashes on Node 24.
 - 2026-06-22: `millionco/react-doctor@v2` passes `--scope` during PR scans; keep its
   `version` input on `react-doctor` 0.5.x or newer. The repo now pins Node 24.17.0, so keep the
   root `doctor` script and the action on the same Node 24 toolchain. Keep the root script on the
@@ -713,6 +772,8 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   evidence and `POST /v1/usage/consume` for synchronous checks; `/v1/events/ingest*` is stale.
 - 2026-07-04: Onboarding evidence setup should call the generated API SDK from a backend
   use case exposed through tRPC; do not hardcode public API `fetch` URLs in onboarding UI.
+- 2026-07-19: Onboarding evidence retries must reuse deterministic customer, API-key, and
+  subscription identities; resume completed runs and start a fresh run only after a failed run.
 - 2026-07-04: For scheduled future subscription phases, pass request `now` into
   `subscriptions.createPhase`; passing the future `startAt` makes the service activate the phase
   immediately and can update subscription state before the effective boundary.
@@ -722,3 +783,40 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-07-05: Before starting any frontend/dev server, check whether the app is already running
   on its normal port; if a server is running, use it instead of starting another one, and ask the
   user before launching an additional server.
+- 2026-07-12: Run biome via `./node_modules/.bin/biome` — `npx biome` fetches a mismatched
+  version that dies OOM. The repo pin lives in node_modules.
+- 2026-07-13: Landing "Reveal"-wrapped content renders opacity-0 in Playwright fullPage
+  screenshots (IO never fires in stitched captures) and very tall fullPage shots can duplicate
+  the first viewport at the bottom; verify with stepped real scrolling + per-section viewport
+  shots instead.
+- 2026-07-13: A `curl --max-time 5` timeout against :3000 does not mean the port is free — the
+  user's dev server may be cold-compiling. If `next dev` reports "Port 3000 in use, trying
+  3001", the :3000 owner is another server; verify against the one serving the working tree.
+- 2026-07-31: Period-boundary entitlement tests must freeze `Date.now()`; single-event metering
+  validates event age against ambient time rather than the request's `now` field.
+- 2026-07-31: Vitest 4 mocks used with `new` must be classes or regular-function implementations;
+  arrow-function `vi.fn()` implementations are not constructible.
+- 2026-07-31: `@cloudflare/vitest-pool-workers` v0.20 uses an ESM `.mts` Vitest config and the
+  `cloudflareTest` plugin; the old `/config` helper is no longer exported.
+- 2026-08-02: Use a zero-priced first graduated usage tier for included units and a later paid
+  tier for overage; `customers.signUp.creditLineAmountMinor` is the separate per-period customer
+  spend cap, expressed in currency minor units.
+- 2026-08-02: A nonzero budgeted run reserves wallet funds at `runs.start`; an active subscription
+  without a wallet grant, capped credit line, or top-up fails before work begins. Size the credit
+  line for concurrent reservation holds as well as eventual metered spend.
+- 2026-08-03: Billing-period reporting must retain `customer_entitlement_id` and fail closed when
+  facts inside the active reporting envelope lack a `billing_period_id`; that identifier is the
+  reporting attribution boundary.
+- 2026-08-03: SDK `workloadType` is a closed enum (`agent`, `workflow`, `job`, `tool`, `custom`);
+  place product-specific categories in metadata rather than inventing enum members.
+- 2026-08-03: Direct signup replay succeeds only after billing periods plus activation/invoice
+  side effects complete; reconcile partial state or surface a failure rather than reporting
+  semantic success early.
+- 2026-08-10: Treat `*.vercel.app` deployment hostnames as application hosts, never customer
+  site domains; otherwise site middleware can rewrite a preview request into a customer-site page.
+- 2026-08-10: When a preview uses the shared `auth.unprice.dev` redirect proxy, its
+  `AUTH_SECRET` must equal the proxy's `AUTH_SECRET`; an OAuth callback otherwise cannot decode
+  the state cookie.
+- 2026-08-10: Preview Vercel builds must pass `APP_ENV=preview` and
+  `NEXT_PUBLIC_APP_ENV=preview` explicitly; an inherited development value makes `APP_DOMAIN`
+  generate `http://app.<preview-domain>` instead of the `app-<preview-domain>` alias.

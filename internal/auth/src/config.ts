@@ -2,6 +2,7 @@ import Credentials from "@auth/core/providers/credentials"
 import GitHub from "@auth/core/providers/github"
 import Google from "@auth/core/providers/google"
 import { DrizzleAdapter } from "@auth/drizzle-adapter"
+import { APP_DOMAIN } from "@unprice/config"
 import { createWorkspacesByUserQuery } from "@unprice/db/queries"
 import * as schema from "@unprice/db/schema"
 import type { NextAuthConfig } from "next-auth"
@@ -10,6 +11,7 @@ import { toCredentialsAuthUser, verifyCredentialsPassword } from "./credentials"
 import { db } from "./db"
 import { env } from "./env"
 import { authLogger } from "./logger"
+import { getCanonicalAuthRedirectUrl } from "./redirect-policy"
 import { shouldTrustAuthHost, shouldUseSecureAuthCookies } from "./runtime"
 import { createUserFromProvider } from "./utils"
 
@@ -52,7 +54,8 @@ export const authConfig: NextAuthConfig = {
     //   // send email to user
     // },
   },
-  debug: process.env.NODE_ENV === "development",
+  // Auth.js debug metadata includes provider credentials and OAuth tokens.
+  debug: false,
   adapter: {
     // @ts-expect-error - Type mismatch between DrizzleAdapter and the database connection
     ...DrizzleAdapter(db.$primary, {
@@ -121,9 +124,11 @@ export const authConfig: NextAuthConfig = {
     }),
   ],
   callbacks: {
+    redirect: ({ url }) => getCanonicalAuthRedirectUrl(url, APP_DOMAIN),
     signIn: async ({ account }) => {
       if (account?.provider) {
-        cookies().set("last-login-method", account.provider, {
+        const cookieStore = await cookies()
+        cookieStore.set("last-login-method", account.provider, {
           path: "/",
           maxAge: 31536000, // 1 year
           sameSite: "lax",

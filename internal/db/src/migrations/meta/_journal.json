@@ -120,6 +120,20 @@
       "when": 1783689025063,
       "tag": "0016_foamy_speed",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1785551015621,
+      "tag": "0017_regular_doctor_faustus",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785552402702,
+      "tag": "0018_plain_bill_hollister",
+      "breakpoints": true
     }
   ]
 }
