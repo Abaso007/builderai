@@ -669,6 +669,10 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## Tests, Tooling, And Docs
 
+- 2026-08-11: Before publishing a repository skill with `gh skill publish`, remove tracked
+  `.agents/skills` installs from Git and give each `SKILL.md` a license; discovery otherwise
+  includes foreign skills and emits source-hygiene warnings.
+
 - 2026-07-31: The audit override upgrades `tar@^6` to v7; keep `apps/docs` on
   Mint `^4.2.770` or newer, because Mint 4.2.354 default-imports `tar` and crashes on Node 24.
 - 2026-06-22: `millionco/react-doctor@v2` passes `--scope` during PR scans; keep its
