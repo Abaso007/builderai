@@ -20,14 +20,14 @@
   },
   "keywords": ["unprice", "pricing", "saas", "subscription", "billing", "payments"],
   "bugs": {
-    "url": "https://github.com/jhonsfran1165/unprice/issues"
+    "url": "https://github.com/jhonsfran/unprice/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jhonsfran1165/unprice.git",
+    "url": "git+https://github.com/jhonsfran/unprice.git",
     "directory": "packages/api"
   },
-  "homepage": "https://github.com/jhonsfran1165/unprice#readme",
+  "homepage": "https://github.com/jhonsfran/unprice#readme",
   "scripts": {
     "clean": "rm -rf .turbo node_modules dist",
     "typecheck": "tsc --noEmit",

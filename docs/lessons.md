@@ -34,6 +34,8 @@ patterns. Keep it cheap to load and useful.
 
 ## CI And GitHub Actions
 
+- 2026-08-24: npm trusted publishing requires `packages/api/package.json#repository.url` to
+  match the GitHub Actions repository exactly; keep the release guard aligned after repo transfers.
 - 2026-08-24: Changesets release PRs can expand short arrays in package JSON; run Biome on the
   generated package files before publishing the release commit.
 - 2026-08-24: When an audit batch mixes patched and unpatched advisories, update package overrides

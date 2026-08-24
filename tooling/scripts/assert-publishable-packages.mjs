@@ -37,6 +37,10 @@ for (const pattern of workspacePatterns) {
         name: manifest.name,
         path: path.relative(repoRoot, manifestPath),
         private: manifest.private === true,
+        repositoryUrl:
+          typeof manifest.repository === "object" && manifest.repository !== null
+            ? manifest.repository.url
+            : manifest.repository,
       })
     } catch (error) {
       if (error instanceof Error && "code" in error && error.code === "ENOENT") {
@@ -53,6 +57,7 @@ const publishablePackages = workspacePackages
   .sort((left, right) => left.name.localeCompare(right.name))
 const publishableNames = publishablePackages.map((workspacePackage) => workspacePackage.name)
 const expectedPublishableNames = ["@unprice/api"]
+const expectedRepositoryUrl = "git+https://github.com/jhonsfran/unprice.git"
 
 if (JSON.stringify(publishableNames) !== JSON.stringify(expectedPublishableNames)) {
   const packageList =
@@ -72,6 +77,21 @@ if (JSON.stringify(publishableNames) !== JSON.stringify(expectedPublishableNames
     ].join("\n")
   )
   process.exit(1)
+}
+
+for (const workspacePackage of publishablePackages) {
+  if (workspacePackage.repositoryUrl !== expectedRepositoryUrl) {
+    process.stderr.write(
+      [
+        `Refusing to publish: ${workspacePackage.name} has an incorrect repository URL.`,
+        `Expected: ${expectedRepositoryUrl}`,
+        `Found: ${workspacePackage.repositoryUrl ?? "none"}`,
+        "npm trusted publishing requires this URL to match the GitHub repository exactly.",
+        "",
+      ].join("\n")
+    )
+    process.exit(1)
+  }
 }
 
 process.stdout.write(`Publishable package guard passed: ${publishableNames.join(", ")}\n`)
