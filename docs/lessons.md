@@ -63,6 +63,10 @@ patterns. Keep it cheap to load and useful.
 
 ## Cloudflare, API, And Ingestion
 
+- 2026-08-25: Entitlement reset buckets must pass the raw cadence start and configured reset
+  anchor to `calculateCycleWindow`; cover monthly `dayOfCreation` behavior with a non-midnight
+  timestamp or usage can reset at UTC midnight before subscription renewal. In reset tests, match
+  expected period keys to the explicit numeric anchor; daily anchor `0` means UTC midnight.
 - 2026-08-24: SDK reservation facades may release only on a known non-billable path; when provider
   usage can already exist, keep settlement retryable and never turn a settlement error into a
   release.
@@ -629,6 +633,8 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   posting a zero-amount ledger transfer.
 
 ## UI And Dashboard
+- 2026-08-25: AI-first landing examples should lead with `reservations.reserve` before provider
+  work and `reservation.settle` after usage; keep `access.check` labeled as read-only shadow mode.
 - Tailwind v3 + Radix var tokens: opacity modifiers like bg-success-bg/40 don't reliably apply alpha (tokens are var(--…) strings). For emphasis ramps use Radix steps: bg → bgHover → bgActive.
 - 2026-07-15: When WAAPI choreography must react to layout that differs per state (MoneyPath's
   stacked one-outcome column), stamp the state as a data attribute on the stage synchronously in
@@ -682,6 +688,9 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## Tests, Tooling, And Docs
 
+- 2026-08-26: License project-owned files under `packages/**` as MIT and all other project-owned
+  files as AGPL-3.0-only; keep the release guard checking each package's MIT metadata and local
+  `LICENSE` file.
 - 2026-08-11: Before publishing a repository skill with `gh skill publish`, remove tracked
   `.agents/skills` installs from Git and give each `SKILL.md` a license; discovery otherwise
   includes foreign skills and emits source-hygiene warnings.
