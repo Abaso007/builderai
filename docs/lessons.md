@@ -66,6 +66,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Cloudflare, API, And Ingestion
 
+- 2026-08-28: Customer “Active entitlements” reads current metered state from
+  `EntitlementWindowDO`; keep Tinybird for historical dashboard evidence. An empty usage-dashboard
+  cache loader must return `undefined` because removing the key can race the cache's deferred set.
 - 2026-08-25: Entitlement reset buckets must pass the raw cadence start and configured reset
   anchor to `calculateCycleWindow`; cover monthly `dayOfCreation` behavior with a non-midnight
   timestamp or usage can reset at UTC midnight before subscription renewal. In reset tests, match
@@ -690,6 +693,21 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   The superlink component disables the auto fetch of next.js, allowing to reduce unnecesary load.
 
 ## Tests, Tooling, And Docs
+
+- 2026-08-31: Before launch, remove retired endpoint docs; do not add compatibility redirects
+  or deprecation pages for API operations that users have not used.
+
+- 2026-08-31: When retiring empty `getUsageDashboard` cache entries, version the key;
+  deleting after `swr` can remove a concurrent refresh. Cover stale refresh and zero-usage
+  evidence with the real `@unkey/cache` memory store.
+
+- 2026-08-31: Keep internal ingestion rollout guides out of `apps/docs`; verify public MDX
+  examples against `apps/docs/openapi.json` and the owning implementation. Link full SDK schemas
+  to the generated API reference instead of maintaining parallel field catalogs.
+
+- 2026-08-31: Keep docs money-path SVGs aligned with the full landing graph: `usage.consume`,
+  `LIMIT_EXCEEDED`, and the invoice arithmetic. Use native SVG without filters or `foreignObject`,
+  and select light/dark assets with Mintlify theme classes rather than the OS color preference.
 
 - 2026-08-26: License project-owned files under `packages/**` as MIT and all other project-owned
   files as AGPL-3.0-only; keep the release guard checking each package's MIT metadata and local
