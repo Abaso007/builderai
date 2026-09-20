@@ -26,6 +26,8 @@ patterns. Keep it cheap to load and useful.
   `ProjectService.deleteProjectRecord` can fail after child rows exist.
 - Before adding a helper, utility, or repeated row shape, search the repo for an established
   pattern first; reuse or extract the canonical path instead of duplicating logic.
+- 2026-09-19: Tooling packages that support local configuration should load an optional package-local
+  `.env` with Node's `--env-file-if-exists`; keep `.env.example` tracked and let shell variables override it.
 - Before running the app, always check if it's already running on locahost:3000 for landing or app.locaholst:300 for dashboard.
 - Whenever you are gonna work with the front end, please load the shadcn skill. And keep and follow the patterns for empty states, components, etc.
 - 2026-07-06: Mintlify dev can throw `No docs config` after hot-adding or editing docs pages even
@@ -66,6 +68,14 @@ patterns. Keep it cheap to load and useful.
 
 ## Cloudflare, API, And Ingestion
 
+- 2026-09-20: Default authenticated SDK requests to `cache: "no-store"`; Cloudflare Workers reject
+  an explicitly supplied `cache: "default"` before the request reaches the API.
+- 2026-09-20: Treat a missing or disabled payment provider during paid plan publication as an
+  expected precondition failure; `INTERNAL_SERVER_ERROR` is masked by the tRPC formatter and hides
+  the payment-settings action from the user.
+- 2026-09-02: Pricing automation needs separate credentials: configuration keys own
+  `monetization.get`/`monetization.apply`, while runtime keys own signup, usage, and ingestion
+  status operations.
 - 2026-08-28: Customer “Active entitlements” reads current metered state from
   `EntitlementWindowDO`; keep Tinybird for historical dashboard evidence. An empty usage-dashboard
   cache loader must return `undefined` because removing the key can race the cache's deferred set.
@@ -169,6 +179,12 @@ patterns. Keep it cheap to load and useful.
   `.nextjs.<timestamp>.raw.log`. Also you can use openlogs tail -n 100 to get the latest logs.
 - 2026-05-18: API Axiom drain flushes should be batched through scheduled `waitUntil`;
   reserve immediate flushes for errors, thrown DO operations, and slow requests.
+- 2026-09-19: Deployed Cloudflare Worker timers only advance after I/O; `Date.now()` and
+  `performance.now()` can both report `0` for synchronous Durable Object CPU/SQLite work. Use
+  caller-side RPC timing, native CPU/wall traces, and separate timers around awaited wallet calls.
+- 2026-09-19: `EntitlementWindowDO` awaits `ready` before `runDoOperation`, so operation duration
+  excludes migration/initialization cold-start time; measure readiness separately and keep the DO
+  id distinct from a per-invocation request id.
 - 2026-06-08: EntitlementWindowDO batch diagnostics that must be queried in Axiom need a
   first-class drain event; constructor-scoped DO logger entries can be absent from top-level
   Axiom rows, leaving only the outer `runDoOperation` wrapper fields.
@@ -211,6 +227,10 @@ patterns. Keep it cheap to load and useful.
   `CUSTOMER_ID`, and `EVENTS=1000`; it discovers meters through `entitlements.get`, sends async
   usage grouped by event slug, samples verification with `VERIFY_EVERY`, and runs one final
   verification without signup/payment flows.
+- 2026-09-19: Production k6 latency and baseline phases must use separate customers; customer-scoped
+  ingestion totals can otherwise let latency traffic hide missing baseline events.
+- 2026-09-19: Entitlement reservation lifecycle methods return domain outcomes only; measure
+  bootstrap duration in `EntitlementWindowProcessor`, which owns apply telemetry.
 - 2026-05-17: Async raw ingestion supports one event fanning out to multiple active usage
   entitlements with the same `eventSlug`; keep same-slug meter tests at the service layer so
   payload-compatible meters stay processed together.
@@ -272,6 +292,15 @@ patterns. Keep it cheap to load and useful.
 - 2026-07-11: Subscription phase scheduling must normalize stale `currentCycleEndAt` values to a future boundary; otherwise `updatePhase` clamps the old end to `now` and `createPhase` reports a false overlap.
 - 2026-07-11: Subscription creation must return a conflict when a customer already has an active subscription; explain the one-subscription invariant and direct callers to update the existing subscription.
 - 2026-07-11: Subscription creation checks customer activity before duplicate-subscription handling; map inactive customers to a visible precondition instead of `SUBSCRIPTION_OPERATION_FAILED`, which becomes a generic internal error.
+
+- 2026-09-19: Address every Durable Object through `apps/api/src/ingestion/do-placement.ts`.
+  Jurisdiction is part of a DO's identity, so a single unscoped call site silently creates a
+  second object holding half the money state; `do-placement.test.ts` fails the build on a raw
+  binding access or an addressing call outside that module.
+- 2026-09-19: `namespace.jurisdiction()` throws "Jurisdiction restrictions are not implemented in
+  workerd", which breaks `wrangler dev` and the workers test pool, so `do-placement.ts` skips it
+  when `APP_ENV === "development"` and applies it everywhere else. Test mocks of a DO namespace
+  need `jurisdiction()` too — use `ingestion/testing/durable-object-namespace-mock.ts`.
 
 ## Next.js And Dashboard
 
@@ -368,6 +397,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-09-20: Customer ledger statements must use `COALESCE(event_at, created_at)` for both date
+  filters and pagination order; ordering by insert time moves late or backfilled transfers to the
+  wrong visible date and page.
 - 2026-07-19: Plan-included credits are configured on `plan_versions.metadata.includedCreditAmount`
   (ledger scale) and derived into a `plan_included` activation grant in
   `derive-provision-inputs.ts`; phases on such plans must use the `capped` policy
@@ -575,6 +607,11 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## API SDK And Public Contracts
 
+- 2026-09-01: Public API adapters must map expected service errors through
+  `resolveDomainErrorKind`; never use a catch-all `BaseError -> BAD_REQUEST` rule, which turns
+  disabled, conflict, precondition, and internal failures into the same client error.
+- 2026-09-19: Service errors exposed through HTTP or tRPC must extend `DomainError` and own their
+  `kind`; keep `resolveDomainErrorKind` independent of concrete service and use-case errors.
 - 2026-06-21: Tooling that calls `unprice.analytics.usage.get` should consume the public SDK row
   shape (`usage` plus formatted `spending`), not raw analytics/lake fields such as `value_after`
   or `amount_after`.
@@ -874,3 +911,15 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-08-10: Preview Vercel builds must pass `APP_ENV=preview` and
   `NEXT_PUBLIC_APP_ENV=preview` explicitly; an inherited development value makes `APP_DOMAIN`
   generate `http://app.<preview-domain>` instead of the `app-<preview-domain>` alias.
+- 2026-09-19: Shared URL constants must prefer `NEXT_PUBLIC_APP_ENV` when it is set; `APP_ENV`
+  has a development default and can otherwise override preview configuration. Keep
+  `APP_BASE_DOMAIN` hyphenated for preview aliases.
+- 2026-09-19: Never apply the Vercel preview alias to a localhost app, even when preview variables
+  are inherited; local auth must use `http://app.localhost:<port>`.
+- 2026-09-19: A Durable Object must always hold an alarm — the alarm is the only thing that can
+  ever call `deleteAll()` on itself, so an object that goes quiet without one keeps its SQLite
+  storage billed forever. `EntitlementWindowDO` and `RunBudgetDO` arm a prompt lifecycle alarm
+  during bootstrap; row-level `DELETE`s are not a substitute.
+- 2026-09-19: Contract tests that assert exact alarm timestamps must clear the alarm the DO's own
+  bootstrap arms (`RunBudgetDO.workers.test.ts`), or a lifecycle alarm that happens to fall
+  earlier silently swallows the `setAlarm` the test is asserting on.

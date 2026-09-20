@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers"
 import { eq } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/durable-sqlite"
 import { afterEach, describe, expect, it } from "vitest"
+import { runBudgetNamespace } from "~/ingestion/do-placement"
 import type { RunBudgetDO } from "./RunBudgetDO"
 import * as schema from "./db/schema"
 import type { RunSpendBucketDelta, RunState } from "./ports"
@@ -117,7 +118,7 @@ afterEach(async () => {
 
 describe("RunBudgetStore real SQLite transactions", () => {
   it("rolls back intent and bucket updates when capture success fails after the bucket write", async () => {
-    const stub = env.runbudget.getByName(`test:run-budget-store:${crypto.randomUUID()}`)
+    const stub = runBudgetNamespace(env).getByName(`test:run-budget-store:${crypto.randomUUID()}`)
     await runInDurableObject(stub, async (instance: RunBudgetDO, state) => {
       await instance
         .getRunStatus({ runId: "__bootstrap__", customerId: "cus_1", projectId: "proj_1" })
@@ -175,7 +176,9 @@ describe("RunBudgetStore real SQLite transactions", () => {
   })
 
   it("allocates the run sequence and capture range in one transaction", async () => {
-    const stub = env.runbudget.getByName(`test:run-budget-allocation:${crypto.randomUUID()}`)
+    const stub = runBudgetNamespace(env).getByName(
+      `test:run-budget-allocation:${crypto.randomUUID()}`
+    )
     await runInDurableObject(stub, async (instance: RunBudgetDO, state) => {
       await instance
         .getRunStatus({ runId: "__bootstrap__", customerId: "cus_1", projectId: "proj_1" })
@@ -229,7 +232,9 @@ describe("RunBudgetStore real SQLite transactions", () => {
   })
 
   it("derives range and sequence values for capture intents created before the migration", async () => {
-    const stub = env.runbudget.getByName(`test:run-budget-legacy-range:${crypto.randomUUID()}`)
+    const stub = runBudgetNamespace(env).getByName(
+      `test:run-budget-legacy-range:${crypto.randomUUID()}`
+    )
     await runInDurableObject(stub, async (instance: RunBudgetDO, state) => {
       await instance
         .getRunStatus({ runId: "__bootstrap__", customerId: "cus_1", projectId: "proj_1" })
@@ -280,7 +285,9 @@ describe("RunBudgetStore real SQLite transactions", () => {
   })
 
   it("seals a legacy retry quantity before later spend increments the bucket", async () => {
-    const stub = env.runbudget.getByName(`test:run-budget-legacy-quantity:${crypto.randomUUID()}`)
+    const stub = runBudgetNamespace(env).getByName(
+      `test:run-budget-legacy-quantity:${crypto.randomUUID()}`
+    )
     await runInDurableObject(stub, async (instance: RunBudgetDO, state) => {
       await instance
         .getRunStatus({ runId: "__bootstrap__", customerId: "cus_1", projectId: "proj_1" })
@@ -348,6 +355,38 @@ describe("RunBudgetStore real SQLite transactions", () => {
         rangeStartQuantity: 2,
         targetAmount: 9_000,
         targetQuantity: 9,
+      })
+    })
+  })
+
+  it("reports retention state across open and closed runs", async () => {
+    const stub = runBudgetNamespace(env).getByName(`test:run-budget-store:${crypto.randomUUID()}`)
+    await runInDurableObject(stub, async (instance: RunBudgetDO, state) => {
+      await instance
+        .getRunStatus({ runId: "__bootstrap__", customerId: "cus_1", projectId: "proj_1" })
+        .catch(() => undefined)
+      const db = drizzle(state.storage, { schema, logger: false })
+      const store = new RunBudgetStore(db)
+
+      await expect(store.readRetentionState()).resolves.toEqual({
+        openRunCount: 0,
+        latestEndedAt: null,
+        reconciliationNeeded: false,
+      })
+
+      await store.createRun(createRun("run_open"))
+      await store.createRun(createRun("run_closed"))
+      await store.closeRun({
+        runId: "run_closed",
+        status: "completed",
+        endedAt: RUN_BUDGET_TEST_NOW + 1_000,
+        reconciliationNeeded: true,
+      })
+
+      await expect(store.readRetentionState()).resolves.toEqual({
+        openRunCount: 1,
+        latestEndedAt: RUN_BUDGET_TEST_NOW + 1_000,
+        reconciliationNeeded: true,
       })
     })
   })

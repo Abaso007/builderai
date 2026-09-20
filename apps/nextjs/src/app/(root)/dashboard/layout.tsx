@@ -10,6 +10,12 @@ import { TRPCReactProvider } from "~/trpc/client"
 
 export const dynamic = "force-dynamic"
 
+const USERJOT_OPTIONS = {
+  widget: true,
+  theme: "auto",
+  position: process.env.NODE_ENV === "development" ? "left" : "right",
+} as const
+
 export default async function DashboardLayout({
   breadcrumbs,
   sidebar,
@@ -21,15 +27,13 @@ export default async function DashboardLayout({
   sidebar: ReactNode
   header: ReactNode
 }) {
-  const userJotOptions = {
-    widget: true,
-    theme: "auto",
-    position: process.env.NODE_ENV === "development" ? "left" : "right",
-  }
   const userJotId = env.USERJOT_ID?.trim()
 
   return (
-    <div className="min-h-screen overflow-hidden ">
+    // data-app-shell: the dashboard is a fixed-viewport shell — h-screen (not
+    // min-h-screen, which lets it grow) plus the body rule in globals.css keep the
+    // document itself from ever scrolling, so the content well is the only scroller
+    <div data-app-shell className="h-screen overflow-hidden">
       {userJotId ? (
         <Script id="userjot-init" strategy="afterInteractive">
           {`
@@ -45,7 +49,7 @@ export default async function DashboardLayout({
               }
             });
             document.head.appendChild(s);
-            window.uj.init("${userJotId}", ${JSON.stringify(userJotOptions)});
+            window.uj.init("${userJotId}", ${JSON.stringify(USERJOT_OPTIONS)});
           `}
         </Script>
       ) : null}
@@ -59,8 +63,11 @@ export default async function DashboardLayout({
                   {header}
                   {breadcrumbs}
                   {/* Content well sits one surface tier below the sidebar/header
-                      chrome, so cards read as panels lying on the ground. */}
-                  <div className="hide-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain bg-surface-page pb-[max(5rem,env(safe-area-inset-bottom))]">
+                      chrome, so cards read as panels lying on the ground.
+                      The bottom padding is scroll breathing room; a full-height page
+                      (DashboardShell `fullHeight`) is bounded to the well and never
+                      scrolls it, so on lg that padding is dead height and is dropped. */}
+                  <div className="hide-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain bg-surface-page pb-[max(5rem,env(safe-area-inset-bottom))] lg:has-[[data-full-height]]:pb-0">
                     {children}
                   </div>
                 </main>

@@ -2,8 +2,9 @@ import { reset, runInDurableObject } from "cloudflare:test"
 import { env } from "cloudflare:workers"
 import { drizzle } from "drizzle-orm/durable-sqlite"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { entitlementWindowNamespace } from "~/ingestion/do-placement"
 import type { EntitlementWindowDO } from "./EntitlementWindowDO"
-import { entitlementPeriodUsageTable, schema } from "./db/schema"
+import { entitlementPeriodUsageTable, idempotencyKeyBatchesTable, schema } from "./db/schema"
 import { EntitlementWindowStore } from "./entitlement-window-store"
 import { createGrantSnapshot } from "./entitlement-window-test-fixtures"
 
@@ -13,7 +14,7 @@ afterEach(async () => {
 
 describe("EntitlementWindowStore SQLite reads", () => {
   it("reads only active period buckets when broad retained history exists", async () => {
-    const stub = env.entitlementwindow.getByName("test:store:bounded-active-buckets")
+    const stub = entitlementWindowNamespace(env).getByName("test:store:bounded-active-buckets")
 
     await runInDurableObject(stub, async (instance: EntitlementWindowDO, state) => {
       // Await constructor migrations before opening a second store over the same SQLite handle.
@@ -59,6 +60,50 @@ describe("EntitlementWindowStore SQLite reads", () => {
 
       expect(store.readGrantStatesForActiveGrants([grant], timestamp)).toEqual([activeState])
       expect(logger.warn).not.toHaveBeenCalled()
+    })
+  })
+
+  it("reads the newest write as the retention anchor", async () => {
+    const stub = entitlementWindowNamespace(env).getByName("test:store:last-activity")
+
+    await runInDurableObject(stub, async (instance: EntitlementWindowDO, state) => {
+      await instance.getStatus()
+
+      const db = drizzle(state.storage, { schema, logger: false })
+      const store = new EntitlementWindowStore(db, { warn: vi.fn() }, () => {})
+
+      expect(store.readRetentionState()).toEqual({
+        lifecycleEndAt: null,
+        lastActivityAt: null,
+        retentionAnchorAt: null,
+      })
+
+      const createdAt = Date.now()
+      store.ensureMeterState({ meterKey: "meter_1", createdAt })
+      expect(store.readRetentionState()).toEqual({
+        lifecycleEndAt: null,
+        lastActivityAt: createdAt,
+        retentionAnchorAt: createdAt,
+      })
+
+      db.insert(entitlementPeriodUsageTable)
+        .values({
+          periodKey: "period_1",
+          periodStartAt: createdAt - 5_000,
+          periodEndAt: createdAt + 1_000,
+          grantStatesJson: "[]",
+          updatedAt: createdAt,
+        })
+        .run()
+
+      db.insert(idempotencyKeyBatchesTable)
+        .values({ createdAt: createdAt + 5_000, entries: "[]" })
+        .run()
+      expect(store.readRetentionState()).toEqual({
+        lifecycleEndAt: createdAt + 1_000,
+        lastActivityAt: createdAt + 5_000,
+        retentionAnchorAt: createdAt + 5_000,
+      })
     })
   })
 })

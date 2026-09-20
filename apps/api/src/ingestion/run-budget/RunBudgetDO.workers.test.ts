@@ -2,6 +2,7 @@ import { evictDurableObject, reset, runInDurableObject } from "cloudflare:test"
 import { env } from "cloudflare:workers"
 import { drizzle } from "drizzle-orm/durable-sqlite"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { runBudgetNamespace } from "~/ingestion/do-placement"
 import type { RunBudgetDO } from "./RunBudgetDO"
 import type {
   ApplyRunSyncEventInput,
@@ -41,16 +42,23 @@ describeRunBudgetProcessorContract(
       schedulerFailures: 0,
     }
     const createTarget = (): RunBudgetProcessorContractTarget => {
-      const stub = env.runbudget.getByName(name)
+      const stub = runBudgetNamespace(env).getByName(name)
+      let bootstrapped = false
       const invoke = async <T>(fn: (processor: RunBudgetProcessor) => Promise<T>): Promise<T> =>
         runInDurableObject(stub, async (instance: RunBudgetDO, state) => {
-          await instance
-            .getRunStatus({
-              runId: "__contract_bootstrap__",
-              customerId: "cus_1",
-              projectId: "proj_1",
-            })
-            .catch(() => undefined)
+          if (!bootstrapped) {
+            bootstrapped = true
+            await instance
+              .getRunStatus({
+                runId: "__contract_bootstrap__",
+                customerId: "cus_1",
+                projectId: "proj_1",
+              })
+              .catch(() => undefined)
+            // Bootstrapping arms the DO's own retention alarm. This contract
+            // asserts the alarms the processor schedules, so start from none.
+            await state.storage.deleteAlarm()
+          }
 
           const wallet = {
             createReservation: vi.fn(
@@ -90,6 +98,12 @@ describeRunBudgetProcessorContract(
                       meterFacts: [],
                     }
                   : { allowed: true, meterFacts: [fact] }
+              },
+            },
+            runtime: {
+              destroy: async () => {
+                await state.storage.deleteAlarm()
+                await state.storage.deleteAll()
               },
             },
             scheduler: {
@@ -161,7 +175,7 @@ describeRunBudgetProcessorContract(
     return {
       target: createTarget(),
       revive: async () => {
-        await evictDurableObject(env.runbudget.getByName(name))
+        await evictDurableObject(runBudgetNamespace(env).getByName(name))
         return createTarget()
       },
     }
@@ -170,7 +184,7 @@ describeRunBudgetProcessorContract(
 
 describe("RunBudgetProcessor (Durable Object shared run concurrency)", () => {
   it("does not overspend a shared run when concurrent consumes arrive", async () => {
-    const stub = env.runbudget.getByName(`test:run-budget-shared:${crypto.randomUUID()}`)
+    const stub = runBudgetNamespace(env).getByName(`test:run-budget-shared:${crypto.randomUUID()}`)
     const wallet = {
       createReservation: vi.fn(
         async (_input: Parameters<RunBudgetWalletOps["createReservation"]>[0]) => ({
@@ -216,6 +230,12 @@ describe("RunBudgetProcessor (Durable Object shared run concurrency)", () => {
                       meterFacts: [],
                     }
                   : { allowed: true, meterFacts: [fact] }
+              },
+            },
+            runtime: {
+              destroy: async () => {
+                await state.storage.deleteAlarm()
+                await state.storage.deleteAll()
               },
             },
             scheduler: {

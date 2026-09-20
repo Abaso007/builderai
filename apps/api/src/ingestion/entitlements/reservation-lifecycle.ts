@@ -1229,9 +1229,8 @@ export class ReservationLifecycle {
   }
 
   // Opens the per-(stream, period) reservation lazily on first priced apply().
-  // Returns a denial result when the wallet has no available
-  // balance to back the reservation; returns `null` on success (or when the
-  // feature is free, in which case no reservation is needed).
+  // Returns a denial result when the wallet has no available balance to back
+  // the reservation; returns `null` on success or when no reservation is needed.
   //
   // The reservation row is durable: even an allocation of 0 is persisted so
   // subsequent events on this window short-circuit through the in-tx reservation

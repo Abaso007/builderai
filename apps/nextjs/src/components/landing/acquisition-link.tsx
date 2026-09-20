@@ -1,16 +1,18 @@
 "use client"
 
 import { APP_DOMAIN, AUTH_ROUTES } from "@unprice/config"
+import { Spinner } from "@unprice/ui/icons"
+import { cn } from "@unprice/ui/utils"
 import { track } from "@vercel/analytics"
+import { ArrowRight } from "lucide-react"
 import { Link } from "next-view-transitions"
-import { type ComponentProps, type MouseEvent, useEffect, useState } from "react"
+import { type ComponentProps, type MouseEvent, useEffect, useState, useTransition } from "react"
 import { getOrCreateConversionId, persistConversionId } from "~/lib/conversion-session"
 import { ACQUISITION_SIGNUP_URL, buildAuthHref } from "~/lib/signup-funnel"
 
 type AcquisitionSource = "header" | "hero" | "closing_cta" | "manifesto"
 
 type AcquisitionLinkProps = Omit<ComponentProps<typeof Link>, "href"> & {
-  pendingLabel: string
   source: AcquisitionSource
 }
 
@@ -36,21 +38,15 @@ function isPrimaryUnmodifiedClick(event: MouseEvent<HTMLAnchorElement>): boolean
   )
 }
 
-export function AcquisitionLink({
-  children,
-  onClick,
-  pendingLabel,
-  source,
-  ...props
-}: AcquisitionLinkProps) {
+export function AcquisitionLink({ children, onClick, source, ...props }: AcquisitionLinkProps) {
   const [href, setHref] = useState(ACQUISITION_SIGNUP_URL)
-  const [isPending, setIsPending] = useState(false)
+  const [isPending, startTransition] = useTransition()
 
   useEffect(() => {
-    const sessionId = getOrCreateConversionId()
-    persistConversionId(sessionId)
-    setHref(getAcquisitionHref(sessionId))
-  }, [])
+    if (href !== ACQUISITION_SIGNUP_URL) {
+      window.location.assign(href)
+    }
+  }, [href])
 
   return (
     <Link
@@ -59,25 +55,29 @@ export function AcquisitionLink({
       href={href}
       aria-busy={isPending || undefined}
       aria-disabled={isPending || undefined}
-      className={isPending ? `${props.className ?? ""} pointer-events-none` : props.className}
+      className={cn(props.className, isPending && "pointer-events-none")}
       onClick={(event) => {
         onClick?.(event)
 
-        if (!isPrimaryUnmodifiedClick(event)) return
+        if (!isPrimaryUnmodifiedClick(event) || isPending) return
 
         event.preventDefault()
-        setIsPending(true)
 
         const sessionId = getOrCreateConversionId()
         persistConversionId(sessionId)
         track("funnel_acquisition_cta_selected", { source })
 
-        window.requestAnimationFrame(() => {
-          window.location.assign(getAcquisitionHref(sessionId))
+        startTransition(() => {
+          setHref(getAcquisitionHref(sessionId))
         })
       }}
     >
-      {isPending ? pendingLabel : children}
+      {children}
+      {isPending ? (
+        <Spinner aria-hidden data-icon="inline-end" className="size-3.5 animate-spin" />
+      ) : (
+        <ArrowRight aria-hidden data-icon="inline-end" className="size-3.5" />
+      )}
     </Link>
   )
 }
