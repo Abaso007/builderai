@@ -423,6 +423,74 @@ describe("ApiKeysService customer binding", () => {
     expect(result.val?.type).toBe("config")
   })
 
+  it("returns a fetch error when the api key database query fails", async () => {
+    const db = {
+      query: {
+        apikeys: {
+          findFirst: vi.fn().mockRejectedValue(new Error("database unavailable")),
+        },
+      },
+    } as unknown as Database
+    const service = new ApiKeysService({
+      cache,
+      metrics,
+      analytics,
+      logger,
+      db,
+      waitUntil,
+      hashCache,
+    })
+
+    const result = await service.getApiKey({ key: "unprice_live_123" }, { skipCache: true })
+
+    expect(result.err).toBeInstanceOf(FetchError)
+    expect(result.err?.message).toContain("database unavailable")
+  })
+
+  it("does not report a database failure as a missing key during verification", async () => {
+    vi.mocked(cache.apiKeyByHash.swr).mockImplementationOnce(async (_key, load) => ({
+      val: await load("hash_123"),
+    }))
+    const findFirst = vi.fn().mockRejectedValue(new Error("database unavailable"))
+    const service = new ApiKeysService({
+      cache,
+      metrics,
+      analytics,
+      logger,
+      db: {
+        query: {
+          apikeys: { findFirst },
+        },
+      } as unknown as Database,
+      waitUntil,
+      hashCache,
+    })
+
+    const result = await service.verifyApiKey({ key: "unprice_live_123" })
+
+    expect(result.err).toBeInstanceOf(FetchError)
+    expect(result.err?.message).toContain("database unavailable")
+    expect(findFirst).toHaveBeenCalledTimes(2)
+  })
+
+  it("removes a cached api key miss so the next request checks the database", async () => {
+    vi.mocked(cache.apiKeyByHash.swr).mockResolvedValueOnce({ val: null })
+    const service = new ApiKeysService({
+      cache,
+      metrics,
+      analytics,
+      logger,
+      db: {} as Database,
+      waitUntil,
+      hashCache,
+    })
+
+    const result = await service.getApiKey({ key: "unprice_live_123" }, { skipCache: false })
+
+    expect(result.err?.message).toBe("apikey not found")
+    expect(cache.apiKeyByHash.remove).toHaveBeenCalledOnce()
+  })
+
   it("createOrRollApiKey rolls the active key with the same project and name", async () => {
     const db = {
       query: {
@@ -682,6 +750,32 @@ describe("ApiKeysService customer binding", () => {
     expect(eq).toHaveBeenCalledWith("project_id_column", "proj_123")
     expect(and).toHaveBeenCalledTimes(1)
     expect(updateWhere).toHaveBeenCalledTimes(2)
+  })
+
+  it("rollApiKey returns a fetch error when the key lookup fails", async () => {
+    const service = new ApiKeysService({
+      cache,
+      metrics,
+      analytics,
+      logger,
+      db: {
+        query: {
+          apikeys: {
+            findFirst: vi.fn().mockRejectedValue(new Error("database unavailable")),
+          },
+        },
+      } as unknown as Database,
+      waitUntil,
+      hashCache,
+    })
+
+    const result = await service.rollApiKey({
+      keyHash: "old_hash",
+      projectId: "proj_123",
+    })
+
+    expect(result.err).toBeInstanceOf(FetchError)
+    expect(result.err?.message).toContain("database unavailable")
   })
 
   it("rollApiKey keeps the key type when the secret is rotated", async () => {
